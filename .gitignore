@@ -13,3 +13,6 @@ deploy/.env
 .cache/
 TestResults/
 coverage/
+appsettings*.Local.json
+*.log
+.DS_Store
