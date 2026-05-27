@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+option csharp_namespace = "Clawbot.Agents.Contracts.Chat";
+
+package clawbot.agents.chat;
+
+service ChatAgent {
+  rpc Reply (ChatRequest) returns (stream ChatToken);
+}
+
+message ChatRequest {
+  string tenant_id = 1;
+  string conversation_id = 2;
+  string user_text = 3;
+  repeated string history = 4;
+}
+
+message ChatToken {
+  string text = 1;
+  bool final = 2;
+}

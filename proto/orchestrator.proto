@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+option csharp_namespace = "Clawbot.Agents.Contracts.Orchestrator";
+
+package clawbot.agents.orchestrator;
+
+import "google/protobuf/timestamp.proto";
+
+service Orchestrator {
+  rpc Plan (PlanRequest) returns (PlanResponse);
+  rpc Trace (TraceRequest) returns (stream TraceEvent);
+}
+
+message PlanRequest {
+  string tenant_id = 1;
+  string goal = 2;
+  google.protobuf.Timestamp requested_at = 3;
+}
+
+message PlanResponse {
+  string session_id = 1;
+  repeated PlannedTask tasks = 2;
+}
+
+message PlannedTask {
+  string id = 1;
+  string agent = 2;
+  string description = 3;
+  repeated string depends_on = 4;
+}
+
+message TraceRequest {
+  string session_id = 1;
+}
+
+message TraceEvent {
+  string task_id = 1;
+  string phase = 2;
+  string message = 3;
+  google.protobuf.Timestamp at = 4;
+}

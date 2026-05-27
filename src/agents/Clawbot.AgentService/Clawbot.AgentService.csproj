@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Clawbot.Agents.Core\Clawbot.Agents.Core.csproj" />
+    <ProjectReference Include="..\Clawbot.Agents.Contracts\Clawbot.Agents.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

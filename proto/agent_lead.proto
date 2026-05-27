@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+option csharp_namespace = "Clawbot.Agents.Contracts.Lead";
+
+package clawbot.agents.lead;
+
+service LeadAgent {
+  rpc Score (LeadScoreRequest) returns (LeadScoreResponse);
+}
+
+message LeadScoreRequest {
+  string tenant_id = 1;
+  string lead_id = 2;
+  map<string, string> features = 3;
+}
+
+message LeadScoreResponse {
+  int32 score = 1;
+  string reason = 2;
+}
