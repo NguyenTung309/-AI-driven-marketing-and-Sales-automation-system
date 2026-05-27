@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+option csharp_namespace = "Clawbot.Agents.Contracts.Content";
+
+package clawbot.agents.content;
+
+service ContentAgent {
+  rpc Generate (ContentRequest) returns (ContentResponse);
+}
+
+message ContentRequest {
+  string tenant_id = 1;
+  string brief = 2;
+  string channel = 3;
+}
+
+message ContentResponse {
+  string content_id = 1;
+  string title = 2;
+  string body = 3;
+}

@@ -1,0 +1,55 @@
+docs/
+│
+├── architecture/
+│   ├── system-overview.md
+│   ├── microservices.md
+│   ├── multi-tenant.md
+│   ├── ai-agents.md
+│   ├── event-driven.md
+│   └── diagrams/
+│
+├── api/
+│   ├── auth-service.md
+│   ├── campaign-service.md
+│   ├── analytics-service.md
+│   └── gateway.md
+│
+├── database/
+│   ├── erd.png
+│   ├── tenant-strategy.md
+│   ├── schemas/
+│   └── migrations/
+│
+├── deployment/
+│   ├── docker.md
+│   ├── kubernetes.md
+│   ├── environments.md
+│   └── ci-cd.md
+│
+├── security/
+│   ├── jwt-auth.md
+│   ├── tenant-isolation.md
+│   └── secrets-management.md
+│
+├── messaging/
+│   ├── rabbitmq.md
+│   ├── kafka.md
+│   └── event-flow.md
+│
+├── ai/
+│   ├── prompt-engineering.md
+│   ├── agent-workflow.md
+│   ├── memory-system.md
+│   ├── rag.md
+│   └── llm-providers.md
+│
+├── frontend/
+│   ├── ui-flow.md
+│   └── pages.md
+│
+├── screenshots/
+│
+└── roadmap/
+    ├── mvp.md
+    ├── phase-1.md
+    └── scaling.md
