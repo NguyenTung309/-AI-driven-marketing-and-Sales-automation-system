@@ -90,17 +90,22 @@
 - [ ] Full-text search `GET /api/conversations/search?q=`
 - [ ] Export conversation log `GET /api/conversations/{id}/export.csv`
 
-### M09 — Semantic Kernel + RAG (Qdrant) · Imp 5 · Diff 5 · T3–T4 · **SPIKE FIRST**
-- [ ] Spike: SK 1.x vs direct Anthropic SDK decision RFC trong `.sdd/rfcs/`
-- [ ] `Kernel` builder DI in `Clawbot.Agents.Core/SemanticKernelModule.cs`
-- [ ] `Anthropic` chat completion connector (community pkg or custom)
-- [ ] Embedding generator (e.g., OpenAI `text-embedding-3-small` or local)
-- [ ] `IRagRetriever` interface + `SemanticKernelRagRetriever` impl
-- [ ] Pipeline: query → embed → Qdrant top-K → re-rank → context window
-- [ ] Citation: response includes `kb_version_id` source
-- [ ] Caching key `(tenant, kb_versions_hash, query_hash)` Redis TTL 1h
-- [ ] Cost ledger emit per call (wire vào M11 `IClaudeCostTracker`)
-- [ ] Test: 20-câu KB test set returns ≥85% correct
+### M09 — Semantic Kernel + RAG (Qdrant) · Imp 5 · Diff 5 · T3–T4 · **SPIKE LANDED 2026-05-28**
+- [x] Spike RFC: SK plugin-host only + Anthropic SDK direct chosen — [.sdd/rfcs/001-semantic-kernel-vs-direct-anthropic.md](../.sdd/rfcs/001-semantic-kernel-vs-direct-anthropic.md)
+- [x] `QdrantVectorStore` real impl (auto-create collection + cosine, upsert/search/delete) — [QdrantVectorStore.cs](../src/shared/Clawbot.Infrastructure/Vectors/QdrantVectorStore.cs)
+- [x] `IEmbeddingProvider` + `HashEmbeddingProvider` (384-dim deterministic stub) — [HashEmbeddingProvider.cs](../src/agents/Clawbot.Agents.Core/Rag/HashEmbeddingProvider.cs)
+- [x] `IRagRetriever` + `QdrantRagRetriever` (tenant + module_code payload filter, top-K) — [QdrantRagRetriever.cs](../src/agents/Clawbot.Agents.Core/Rag/QdrantRagRetriever.cs)
+- [x] `RagModule.AddClawbotRag()` DI extension, wired in `AgentService/Program.cs`
+- [x] Pipeline shape proven: query → embed → Qdrant top-K → metadata filter → snippets
+- [x] Citation surfaces via `RagChunk.KbVersionId`
+- [x] Build xanh 12 projects, 0/0
+- [ ] Real embedding model (Voyage AI / OpenAI / local SBERT) → defer per RFC open question
+- [ ] Anthropic SDK chat completion + streaming → **M10**
+- [ ] Redis cache `(tenant, kb_versions_hash, query_hash)` TTL 1h → **M10**
+- [ ] `IClaudeCostTracker` per-call emission → **M11 P0 skill**
+- [ ] Wire `KbVersion.Deploy` → embed `content_md` chunks → Qdrant upsert → **M04→M09 follow-up after embedder decision**
+- [ ] Wire `KbEndpoints.RunTestAsync` to call `IRagRetriever` + LLM → **after M10**
+- [ ] Accuracy ≥85% on 20-câu test set → **after content seed + real embedder + LLM**
 
 ### M10 — Agent-Chat (gRPC) — reply 5 kênh · Imp 5 · Diff 4 · T4–T6
 - [ ] Impl `ChatAgentGrpcService.Reply` (replace stub)
@@ -288,7 +293,8 @@
 | Tuần | Modules in-flight | Modules done | Notes |
 |:-:|---|---|---|
 | T0 | — | (skeleton only) | Domain entities + proto + grpc stubs |
-| T1 | M03 | **M01** (EF wire), **M02** (RBAC stack), **M04** (KB endpoints) | Build xanh 0/0. Content seed + RAG-backed test exec defer M09. |
+| T1 | M03 | **M01**, **M02**, **M04** | Build xanh 0/0. |
+| T3 (early) | — | **M09 spike** (Qdrant real + RAG wire + RFC-001) | SK plugin-host only / Anthropic direct chosen. Real embedder defer. |
 | T2 | | | |
 | T3 | | | |
 | T4 | | | |
