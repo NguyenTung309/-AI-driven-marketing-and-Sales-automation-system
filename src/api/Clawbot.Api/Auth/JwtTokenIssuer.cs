@@ -12,7 +12,8 @@ public sealed class JwtTokenIssuer(IOptions<JwtOptions> options)
         Guid userId,
         Guid tenantId,
         string tenantSlug,
-        IEnumerable<string> roles)
+        IEnumerable<string> roles,
+        IEnumerable<string>? permissions = null)
     {
         var opt = options.Value;
         var expires = DateTimeOffset.UtcNow.AddMinutes(opt.AccessTokenMinutes);
@@ -23,6 +24,8 @@ public sealed class JwtTokenIssuer(IOptions<JwtOptions> options)
             new("tenant_slug", tenantSlug),
         };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
+        if (permissions is not null)
+            claims.AddRange(permissions.Select(p => new Claim("perm", p)));
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(opt.SigningKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);

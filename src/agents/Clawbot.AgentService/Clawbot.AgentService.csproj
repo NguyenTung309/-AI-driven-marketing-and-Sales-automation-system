@@ -7,6 +7,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Clawbot.Agents.Core\Clawbot.Agents.Core.csproj" />
     <ProjectReference Include="..\Clawbot.Agents.Contracts\Clawbot.Agents.Contracts.csproj" />
+    <ProjectReference Include="..\..\shared\Clawbot.Application\Clawbot.Application.csproj" />
+    <ProjectReference Include="..\..\shared\Clawbot.Infrastructure\Clawbot.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

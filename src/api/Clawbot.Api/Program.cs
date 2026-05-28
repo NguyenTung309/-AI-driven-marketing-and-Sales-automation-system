@@ -5,6 +5,7 @@ using Clawbot.Api.Endpoints;
 using Clawbot.Api.Hubs;
 using Clawbot.Application;
 using Clawbot.Infrastructure;
+using Clawbot.Infrastructure.Identity;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
@@ -62,9 +63,14 @@ app.UseAuthorization();
 
 app.MapHealth();
 app.MapAuth();
+app.MapRoles();
+app.MapApiKeys();
+app.MapKb();
 app.MapWebhooks();
 app.MapBoundedContexts();
 app.MapHub<DashboardHub>("/hubs/dashboard");
+
+await RbacSeeder.SeedAsync(app.Services).ConfigureAwait(false);
 
 app.Run();
 
