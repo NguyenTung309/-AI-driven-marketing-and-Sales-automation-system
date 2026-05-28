@@ -5,10 +5,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Protobuf Include="..\..\..\proto\orchestrator.proto"   GrpcServices="Both" Link="proto\orchestrator.proto" />
-    <Protobuf Include="..\..\..\proto\agent_chat.proto"     GrpcServices="Both" Link="proto\agent_chat.proto" />
-    <Protobuf Include="..\..\..\proto\agent_content.proto"  GrpcServices="Both" Link="proto\agent_content.proto" />
-    <Protobuf Include="..\..\..\proto\agent_lead.proto"     GrpcServices="Both" Link="proto\agent_lead.proto" />
+    <Protobuf Include="..\..\..\proto\orchestrator.proto"        GrpcServices="Both" Link="proto\orchestrator.proto" />
+    <Protobuf Include="..\..\..\proto\agent_chat.proto"          GrpcServices="Both" Link="proto\agent_chat.proto" />
+    <Protobuf Include="..\..\..\proto\agent_content.proto"       GrpcServices="Both" Link="proto\agent_content.proto" />
+    <Protobuf Include="..\..\..\proto\agent_lead.proto"          GrpcServices="Both" Link="proto\agent_lead.proto" />
+    <Protobuf Include="..\..\..\proto\agent_sale_assist.proto"   GrpcServices="Both" Link="proto\agent_sale_assist.proto" />
+    <Protobuf Include="..\..\..\proto\agent_docs.proto"          GrpcServices="Both" Link="proto\agent_docs.proto" />
+    <Protobuf Include="..\..\..\proto\agent_ads.proto"           GrpcServices="Both" Link="proto\agent_ads.proto" />
+    <Protobuf Include="..\..\..\proto\agent_report.proto"        GrpcServices="Both" Link="proto\agent_report.proto" />
+    <Protobuf Include="..\..\..\proto\agent_research.proto"      GrpcServices="Both" Link="proto\agent_research.proto" />
   </ItemGroup>
 
   <ItemGroup>

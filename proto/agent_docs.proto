@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+option csharp_namespace = "Clawbot.Agents.Contracts.Docs";
+
+package clawbot.agents.docs;
+
+service DocsAgent {
+  rpc Generate (DocGenerateRequest) returns (DocGenerateResponse);
+}
+
+message DocGenerateRequest {
+  string tenant_id = 1;
+  string contact_id = 2;
+  string template_code = 3;
+  map<string, string> vars = 4;
+  string sent_via = 5;
+}
+
+message DocGenerateResponse {
+  string document_id = 1;
+  string file_url = 2;
+}

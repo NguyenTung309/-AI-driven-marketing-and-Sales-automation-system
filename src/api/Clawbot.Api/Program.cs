@@ -63,6 +63,7 @@ app.UseAuthorization();
 app.MapHealth();
 app.MapAuth();
 app.MapWebhooks();
+app.MapBoundedContexts();
 app.MapHub<DashboardHub>("/hubs/dashboard");
 
 app.Run();

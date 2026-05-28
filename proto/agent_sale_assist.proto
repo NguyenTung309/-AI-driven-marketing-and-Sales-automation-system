@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+option csharp_namespace = "Clawbot.Agents.Contracts.SaleAssist";
+
+package clawbot.agents.sale_assist;
+
+service SaleAssistAgent {
+  rpc Draft (DraftRequest) returns (DraftResponse);
+  rpc Summarize (SummarizeRequest) returns (SummarizeResponse);
+}
+
+message DraftRequest {
+  string tenant_id = 1;
+  string conversation_id = 2;
+  string sale_user_id = 3;
+}
+
+message DraftResponse {
+  string draft_text = 1;
+  string suggested_action = 2;
+  int32 lead_score = 3;
+}
+
+message SummarizeRequest {
+  string tenant_id = 1;
+  string conversation_id = 2;
+}
+
+message SummarizeResponse {
+  string summary = 1;
+}

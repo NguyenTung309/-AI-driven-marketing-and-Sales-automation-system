@@ -1,19 +1,19 @@
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: clawbot-postgres
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: clawbot-sqlserver
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-clawbot}
-      POSTGRES_USER: ${POSTGRES_USER:-clawbot}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-clawbot}
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Clawbot!2026}
+      MSSQL_PID: Developer
     ports:
-      - "5432:5432"
+      - "1433:1433"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - sqlserver_data:/var/opt/mssql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-clawbot}"]
-      interval: 5s
-      timeout: 3s
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"${MSSQL_SA_PASSWORD:-Clawbot!2026}\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
       retries: 10
 
   redis:
@@ -65,6 +65,6 @@ services:
       - minio_data:/data
 
 volumes:
-  postgres_data:
+  sqlserver_data:
   qdrant_data:
   minio_data:

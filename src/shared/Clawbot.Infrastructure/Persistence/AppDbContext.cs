@@ -1,7 +1,19 @@
 using System.Reflection;
 using Clawbot.Application.Abstractions;
+using Clawbot.Domain.Ads;
+using Clawbot.Domain.Agents;
+using Clawbot.Domain.Analytics;
+using Clawbot.Domain.ChatScenarios;
 using Clawbot.Domain.Common;
+using Clawbot.Domain.Contacts;
+using Clawbot.Domain.Content;
 using Clawbot.Domain.Conversations;
+using Clawbot.Domain.Documents;
+using Clawbot.Domain.KnowledgeBase;
+using Clawbot.Domain.Leads;
+using Clawbot.Domain.SaleAssist;
+using Clawbot.Domain.Security;
+using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.SharedKernel.Multitenancy;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -14,7 +26,60 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 {
     private readonly ITenantAccessor _tenants = tenants;
 
-    IConversationSet IAppDbContext.Conversations => new EfConversationSet(Set<Conversation>());
+    // Tenants & Security
+    public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<Role> RbacRoles => Set<Role>();
+    public DbSet<Permission> Permissions => Set<Permission>();
+    public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+
+    // Contacts
+    public DbSet<Contact> Contacts => Set<Contact>();
+    public DbSet<ContactExternalId> ContactExternalIds => Set<ContactExternalId>();
+
+    // Conversations
+    public DbSet<Conversation> Conversations => Set<Conversation>();
+    public DbSet<Message> Messages => Set<Message>();
+
+    // Leads
+    public DbSet<Lead> Leads => Set<Lead>();
+    public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
+    public DbSet<LeadScoringRule> LeadScoringRules => Set<LeadScoringRule>();
+
+    // Knowledge Base
+    public DbSet<KbModule> KbModules => Set<KbModule>();
+    public DbSet<KbVersion> KbVersions => Set<KbVersion>();
+    public DbSet<KbTestCase> KbTestCases => Set<KbTestCase>();
+
+    // Chat scenarios
+    public DbSet<ChatScenario> ChatScenarios => Set<ChatScenario>();
+
+    // Agents
+    public DbSet<AgentConfig> AgentConfigs => Set<AgentConfig>();
+    public DbSet<AgentSession> AgentSessions => Set<AgentSession>();
+    public DbSet<AgentTrace> AgentTraces => Set<AgentTrace>();
+
+    // Sale Assist
+    public DbSet<QuickReplyTemplate> QuickReplyTemplates => Set<QuickReplyTemplate>();
+
+    // Documents
+    public DbSet<DocumentTemplate> DocumentTemplates => Set<DocumentTemplate>();
+    public DbSet<GeneratedDocument> GeneratedDocuments => Set<GeneratedDocument>();
+
+    // Content
+    public DbSet<ContentBrief> ContentBriefs => Set<ContentBrief>();
+    public DbSet<ContentItem> ContentItems => Set<ContentItem>();
+    public DbSet<ContentSchedule> ContentSchedules => Set<ContentSchedule>();
+
+    // Ads
+    public DbSet<AdsCampaign> AdsCampaigns => Set<AdsCampaign>();
+    public DbSet<AdsRule> AdsRules => Set<AdsRule>();
+    public DbSet<AdsAction> AdsActions => Set<AdsAction>();
+
+    // Analytics
+    public DbSet<KpiDaily> KpiDailies => Set<KpiDaily>();
+
+    IConversationSet IAppDbContext.Conversations => new EfConversationSet(Conversations);
 
     Task<int> IAppDbContext.SaveChangesAsync(CancellationToken ct) => base.SaveChangesAsync(ct);
 
@@ -27,6 +92,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     {
         base.OnModelCreating(builder);
         builder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+
+        builder.ApplySnakeCase();
 
         foreach (var entity in builder.Model.GetEntityTypes())
         {

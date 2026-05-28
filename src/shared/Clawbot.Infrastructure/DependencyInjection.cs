@@ -29,7 +29,7 @@ public static class DependencyInjection
         services.AddHttpContextAccessor();
 
         services.AddDbContext<AppDbContext>(opt =>
-            opt.UseNpgsql(cfg.GetConnectionString("Postgres"), npg => npg.UseVector()));
+            opt.UseSqlServer(cfg.GetConnectionString("SqlServer")));
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
         services.AddIdentityCore<AppUser>()
@@ -59,16 +59,9 @@ public static class DependencyInjection
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
 
-        var vectorBackend = cfg["Vector:Backend"] ?? "pgvector";
-        if (vectorBackend.Equals("qdrant", StringComparison.OrdinalIgnoreCase))
-        {
-            services.AddSingleton(_ => new QdrantClient(cfg["Vector:Qdrant:Host"] ?? "localhost"));
-            services.AddScoped<IVectorStore, QdrantVectorStore>();
-        }
-        else
-        {
-            services.AddScoped<IVectorStore, PgVectorStore>();
-        }
+        // Vector store: Qdrant is the only supported backend now SQL Server doesn't carry pgvector.
+        services.AddSingleton(_ => new QdrantClient(cfg["Vector:Qdrant:Host"] ?? "localhost"));
+        services.AddScoped<IVectorStore, QdrantVectorStore>();
 
         return services;
     }

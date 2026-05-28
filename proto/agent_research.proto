@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+option csharp_namespace = "Clawbot.Agents.Contracts.Research";
+
+package clawbot.agents.research;
+
+service ResearchAgent {
+  rpc WeeklyTrends (TrendRequest) returns (TrendResponse);
+}
+
+message TrendRequest {
+  string tenant_id = 1;
+  string week_of = 2;              // ISO week, e.g. 2026-W22
+}
+
+message TrendResponse {
+  repeated TrendItem trends = 1;
+}
+
+message TrendItem {
+  string topic = 1;
+  string source = 2;               // tiktok|youtube|baidu|google_trends
+  string metric = 3;
+  double relevance_score = 4;
+  repeated string content_ideas = 5;
+}

@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+option csharp_namespace = "Clawbot.Agents.Contracts.Report";
+
+package clawbot.agents.report;
+
+service ReportAgent {
+  rpc DailySnapshot (DailySnapshotRequest) returns (DailySnapshotResponse);
+}
+
+message DailySnapshotRequest {
+  string tenant_id = 1;
+  string date = 2;                 // YYYY-MM-DD GMT+7
+}
+
+message DailySnapshotResponse {
+  repeated PlatformKpi rows = 1;
+}
+
+message PlatformKpi {
+  string platform = 1;
+  int32 leads = 2;
+  int32 dms = 3;
+  int32 replies = 4;
+  int32 conversions = 5;
+  double avg_response_time_sec = 6;
+  double ad_spend = 7;
+}

@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+option csharp_namespace = "Clawbot.Agents.Contracts.Ads";
+
+package clawbot.agents.ads;
+
+service AdsAgent {
+  rpc Evaluate (AdsEvaluateRequest) returns (AdsEvaluateResponse);
+}
+
+message AdsEvaluateRequest {
+  string tenant_id = 1;
+  string platform = 2;            // meta|tiktok
+  string campaign_id = 3;
+}
+
+message AdsEvaluateResponse {
+  repeated AdsActionExecuted actions = 1;
+}
+
+message AdsActionExecuted {
+  string rule_id = 1;
+  string action_taken = 2;        // pause|scale_up|scale_down|alert
+  string note = 3;
+}
