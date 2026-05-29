@@ -1,8 +1,11 @@
 using Clawbot.Agents.Core.Lead;
+using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Application.Abstractions;
+using Clawbot.Infrastructure.Audit;
 using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Channels.Pancake;
 using Clawbot.Infrastructure.Leads;
+using Clawbot.SharedKernel.Audit;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Multitenancy;
 using Clawbot.Infrastructure.Persistence;
@@ -31,8 +34,14 @@ public static class DependencyInjection
     {
         services.AddHttpContextAccessor();
 
-        services.AddDbContext<AppDbContext>(opt =>
-            opt.UseSqlServer(cfg.GetConnectionString("SqlServer")));
+        services.AddScoped<IAuditContext, HttpAuditContext>();
+        services.AddScoped<AuditSaveChangesInterceptor>();
+
+        services.AddDbContext<AppDbContext>((sp, opt) =>
+        {
+            opt.UseSqlServer(cfg.GetConnectionString("SqlServer"));
+            opt.AddInterceptors(sp.GetRequiredService<AuditSaveChangesInterceptor>());
+        });
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
         services.AddIdentityCore<AppUser>(opt =>

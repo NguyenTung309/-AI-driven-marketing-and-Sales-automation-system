@@ -199,12 +199,19 @@
 
 ## P1 — High (8 module)
 
-### M03 — Audit log + PII redaction + retention · Imp 4 · Diff 2 · T1–T2
-- [ ] `AuditSaveChangesInterceptor` ghi `audit_logs` mỗi mutation
-- [ ] `AuditBehavior` MediatR pipeline (command/who/diff)
-- [ ] PII redact via Presidio sidecar (M11) trước insert `messages.content`
-- [ ] Retention job: purge `messages.content` >30 days (replace với redacted snapshot)
-- [ ] Audit viewer endpoint `GET /api/admin/audit-logs?filter=`
+### M03 — Audit log + PII redaction + retention · Imp 4 · Diff 2 · T1–T2 · **DONE 2026-05-29**
+- [x] `AuditSaveChangesInterceptor` writes `audit_logs` per Add/Modify/Delete (skips AuditLog itself to avoid recursion) — [AuditSaveChangesInterceptor.cs](../src/shared/Clawbot.Infrastructure/Audit/AuditSaveChangesInterceptor.cs)
+- [x] Diff JSON: Add → snapshot, Delete → from=value/to=null, Modify → {from, to} per changed property
+- [x] Sensitive-name blocklist drops PasswordHash/SecurityStamp/AccessToken/RefreshToken/ApiKey/Secret/Token from diff
+- [x] PII redact via `IPiiRedactor` (M11) on every string field before serialize
+- [x] `IAuditContext` + `HttpAuditContext` (resolves `sub` claim + RemoteIp + UA) — [HttpAuditContext.cs](../src/shared/Clawbot.Infrastructure/Audit/HttpAuditContext.cs)
+- [x] `AuditBehavior` MediatR pipeline (timing + success/fail event ids 6001/6002) — [AuditBehavior.cs](../src/shared/Clawbot.Application/Common/Behaviors/AuditBehavior.cs)
+- [x] EF interceptor registered in `AddDbContext` via service-provider overload
+- [x] 30-day retention: `RetentionPurgeJob` (M12) purges `audit_logs` daily 02:00
+- [x] Build xanh 12 projects, 0/0
+- [ ] PII redact on `messages.content` insert path (separate from audit diff) → after M16 frontend confirms display tolerance
+- [ ] Audit viewer endpoint `GET /api/admin/audit-logs?filter=` → P2 admin UI
+- [ ] Retention job for `messages.content` >30d → schema needs `original_content` vs `redacted_content` split
 
 ### M05 — 50 chat scenarios seed · Imp 4 · Diff 2 · T2–T3
 - [ ] `deploy/seed/chat-scenarios.sql` 50 row (KB-001..KB-050)
