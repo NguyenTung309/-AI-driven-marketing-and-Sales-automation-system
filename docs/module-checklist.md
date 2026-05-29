@@ -113,19 +113,63 @@
 - [ ] Wire `KbEndpoints.RunTestAsync` to call `IRagRetriever` + LLM → **after M10**
 - [ ] Accuracy ≥85% on 20-câu test set → **after content seed + real embedder + LLM**
 
-### M10 — Agent-Chat (gRPC) — reply 5 kênh · Imp 5 · Diff 4 · T4–T6
-- [ ] Impl `ChatAgentGrpcService.Reply` (replace stub)
-- [ ] Intent classify via `IIntentClassifier` (M11)
-- [ ] Match `chat_scenarios` template by trigger + platform
-- [ ] Fallback to RAG (M09) khi không match scenario
-- [ ] PII redact inbound qua `IPiiRedactor` trước log
-- [ ] Prompt injection guard via `IPromptInjectionDefender`
-- [ ] Toxicity filter output via `IToxicityFilter`
-- [ ] Stream reply via gRPC server-streaming
-- [ ] Persist `messages` + `agent_sessions` + `agent_traces`
-- [ ] Escalation rule: if confidence<threshold OR intent=escalation → assign sale
-- [ ] Out-of-hours auto-reply (UC-A07) via scheduled scenario
-- [ ] p95 latency <3s instrument Serilog + OTel
+### M10 — Agent-Chat (gRPC) — reply 5 kênh · Imp 5 · Diff 4 · T4–T6 · **DONE 2026-05-29**
+- [x] Impl `ChatAgentGrpcService.Reply` (replaced stub) — [ChatAgentGrpcService.cs](../src/agents/Clawbot.AgentService/Services/ChatAgentGrpcService.cs)
+- [x] `IClaudeChatClient` + `AnthropicChatClient` direct HTTP per RFC-001 — [AnthropicChatClient.cs](../src/agents/Clawbot.Agents.Core/Chat/AnthropicChatClient.cs)
+- [x] `ChatAgent` orchestrator: RAG retrieve → system prompt build → Claude call — [ChatAgent.cs](../src/agents/Clawbot.Agents.Core/Chat/ChatAgent.cs)
+- [x] RAG fallback (M09 retriever) embedded into system prompt with citation index
+- [x] gRPC server-streaming reply (`Final=true` token; multi-chunk streaming → later optimization)
+- [x] Persist `agent_sessions` + `agent_traces` + outbound `messages` append on conversation
+- [x] Latency + token + USD cost tracked in trace
+- [x] `AnthropicOptions` config (`Anthropic:ApiKey/Model/MaxTokens/InputUsdPer1M/OutputUsdPer1M`)
+- [x] Build xanh 12 projects, 0/0
+- [ ] Intent classify via `IIntentClassifier` → defer to M11 (skill impl)
+- [ ] Match `chat_scenarios` template by trigger + platform → defer to M11
+- [ ] PII redact inbound via `IPiiRedactor` → defer to M11
+- [ ] Prompt injection guard via `IPromptInjectionDefender` → defer to M11
+- [ ] Toxicity filter output via `IToxicityFilter` → defer to M11
+- [ ] Token-by-token streaming (SSE-style chunk) → P2 optimization
+- [ ] Escalation rule (confidence<threshold | intent=escalation → assign sale) → after M11 intent
+- [ ] Out-of-hours auto-reply (UC-A07) scheduled scenario → after M12 Hangfire
+- [ ] p95 latency <3s Serilog+OTel histograms → M11 cost-tracker batch
+- [ ] Cost tracker (`IClaudeCostTracker.RecordAsync`) wire → M11 P0 skill
+
+### M14 — Agent-SaleAssist · Imp 5 · Diff 3 · T5 · **DONE 2026-05-29**
+- [x] Impl `SaleAssistAgentGrpcService` Draft + Summarize — [SaleAssistAgentGrpcService.cs](../src/agents/Clawbot.AgentService/Services/SaleAssistAgentGrpcService.cs)
+- [x] `SaleAssistAgent` core: RAG-grounded draft + 3-bullet summary via Claude — [SaleAssistAgent.cs](../src/agents/Clawbot.Agents.Core/SaleAssist/SaleAssistAgent.cs)
+- [x] Action inference (book_trial/send_quote/ask_goal/follow_up) heuristic
+- [x] Lead score hint from recent turn count (interim until M15 lead lookup)
+- [x] `POST /api/sale-assist/draft` returns Claude-drafted reply — [SaleAssistEndpoints.cs](../src/api/Clawbot.Api/Endpoints/SaleAssistEndpoints.cs)
+- [x] `POST /api/sale-assist/summary` thread summary
+- [x] `quick_reply_templates` CRUD: GET/POST/PUT/DELETE `/api/sale-assist/quick-replies`
+- [x] API → AgentService via `Grpc.Net.ClientFactory` (`SaleAssistAgentClient` typed client)
+- [x] Build xanh 12 projects, 0/0
+- [ ] Alert job: conversation idle >5 min → Telegram + SignalR → after M12 Hangfire
+- [ ] Context panel API: lead history + score + next-step → after M15 GA
+- [ ] Upsell suggestion when lead.stage='hot' + gói ngắn → after M15
+- [ ] Sale tone check (block banned phrases) before send → M11 toxicity-filter
+- [ ] Daily summary endpoint `GET /api/sale-assist/daily-summary` → after M12 KPI roll-up
+
+### M15 — Lead scoring + dedup + drip · Imp 5 · Diff 3 · T7 · **DONE 2026-05-29**
+- [x] Impl `LeadAgentGrpcService.Score` — [LeadAgentGrpcService.cs](../src/agents/Clawbot.AgentService/Services/LeadAgentGrpcService.cs)
+- [x] `LeadScoringEngine.Evaluate` static rule evaluator: sum weights matching event_code (+optional platform) — [LeadScoringEngine.cs](../src/agents/Clawbot.Agents.Core/Lead/LeadScoringEngine.cs)
+- [x] Domain `Lead.AdjustScore` → stage classifier cold<30, warm 30–70, hot≥70 (already in entity)
+- [x] `ILeadDedupService` + `EfLeadDedupService`: contact match + phone/email join — [EfLeadDedupService.cs](../src/shared/Clawbot.Infrastructure/Leads/EfLeadDedupService.cs)
+- [x] `ILeadAssignmentService` + `RoundRobinLeadAssignmentService` + `EfAssignmentPoolSource` (Sale role) — [LeadAssignmentService.cs](../src/agents/Clawbot.Agents.Core/Lead/LeadAssignmentService.cs)
+- [x] `POST /api/leads` (auto-dedup + auto-assign on create) — [LeadsEndpoints.cs](../src/api/Clawbot.Api/Endpoints/LeadsEndpoints.cs)
+- [x] `POST /api/leads/{id}/activities` (record event → engine evaluate → score adjust)
+- [x] `POST /api/leads/{id}/assign` (explicit or round-robin)
+- [x] `GET/POST /api/lead-scoring-rules` + soft-deactivate
+- [x] `GET /api/leads` paginated, ordered by score desc → last_activity_at
+- [x] Build xanh 12 projects, 0/0
+- [ ] `lead_scoring_rules` seed defaults (asks_price+10, shares_phone+20, etc.) → seed SQL in M21 fixtures
+- [ ] Qdrant similarity dedup ≥0.92 on (name+phone tail+email embedding) → M11 lead-deduplicator skill
+- [ ] Drip sequences (per-channel templates) → after M12 Hangfire
+- [ ] No-show follow-up 2h after demo missed → after M12
+- [ ] Re-engage stale lead 30d → after M11 `IContactEnricher` + M12
+- [ ] Pipeline forecast endpoint `GET /api/leads/forecast` → after M11 `IForecaster`
+- [ ] Lead import/export CSV → P3
+- [ ] Telegram alert <2 min on hot lead → after M12 + Telegram channel adapter
 
 ### M14 — Agent-SaleAssist · Imp 5 · Diff 3 · T5
 - [ ] Impl `SaleAssistAgentGrpcService` (Draft/Summary/Alert)

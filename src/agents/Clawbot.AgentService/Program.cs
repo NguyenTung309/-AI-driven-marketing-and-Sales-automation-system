@@ -1,6 +1,9 @@
 using Clawbot.Agents.Core;
+using Clawbot.Agents.Core.Chat;
+using Clawbot.Agents.Core.Lead;
 using Clawbot.Agents.Core.Orchestrator;
 using Clawbot.Agents.Core.Rag;
+using Clawbot.Agents.Core.SaleAssist;
 using Clawbot.Agents.Core.Skills;
 using Clawbot.AgentService.Services;
 using Clawbot.Application;
@@ -15,6 +18,9 @@ builder.Services.AddSingleton<AgentRegistry>(_ => new AgentRegistry(Array.Empty<
 builder.Services.AddSingleton<PlanningOrchestrator>();
 builder.Services.AddClawbotSkills();
 builder.Services.AddClawbotRag();
+builder.Services.AddClawbotChat(builder.Configuration);
+builder.Services.AddClawbotSaleAssist();
+builder.Services.AddClawbotLead();
 
 var app = builder.Build();
 

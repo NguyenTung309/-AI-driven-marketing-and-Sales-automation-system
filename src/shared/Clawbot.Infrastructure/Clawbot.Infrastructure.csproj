@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Clawbot.Application\Clawbot.Application.csproj" />
     <ProjectReference Include="..\Clawbot.Domain\Clawbot.Domain.csproj" />
     <ProjectReference Include="..\Clawbot.SharedKernel\Clawbot.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\agents\Clawbot.Agents.Core\Clawbot.Agents.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

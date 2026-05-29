@@ -41,6 +41,12 @@ builder.Services
 builder.Services.AddAuthorization();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IInboxNotifier, SignalRInboxNotifier>();
+
+var agentServiceUrl = builder.Configuration["AgentService:Url"] ?? "http://localhost:5050";
+builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.SaleAssist.SaleAssistAgent.SaleAssistAgentClient>(o =>
+{
+    o.Address = new Uri(agentServiceUrl);
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddCors(c =>
@@ -69,6 +75,8 @@ app.MapRoles();
 app.MapApiKeys();
 app.MapKb();
 app.MapInbox();
+app.MapSaleAssist();
+app.MapLeads();
 app.MapWebhooks();
 app.MapBoundedContexts();
 app.MapHub<DashboardHub>("/hubs/dashboard");
