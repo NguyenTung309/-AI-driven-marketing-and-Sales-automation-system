@@ -19,6 +19,9 @@
     <PackageReference Include="Polly" />
     <PackageReference Include="Qdrant.Client" />
     <PackageReference Include="StackExchange.Redis" />
+    <PackageReference Include="Hangfire.Core" />
+    <PackageReference Include="Hangfire.AspNetCore" />
+    <PackageReference Include="Hangfire.SqlServer" />
   </ItemGroup>
 
   <PropertyGroup>

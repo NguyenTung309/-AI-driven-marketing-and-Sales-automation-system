@@ -3,10 +3,13 @@ using System.Text;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Endpoints;
 using Clawbot.Api.Hubs;
+using Clawbot.Api.Middleware;
 using Clawbot.Application;
 using Clawbot.Infrastructure;
 using Clawbot.Infrastructure.Identity;
+using Clawbot.Infrastructure.Jobs;
 using Clawbot.SharedKernel.Inbox;
+using Hangfire;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
@@ -17,6 +20,7 @@ builder.Host.UseSerilog((ctx, lc) => lc.ReadFrom.Configuration(ctx.Configuration
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddClawbotJobs(builder.Configuration);
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 builder.Services.AddSingleton<JwtTokenIssuer>();
@@ -39,6 +43,7 @@ builder.Services
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddClawbotRateLimiting();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IInboxNotifier, SignalRInboxNotifier>();
 
@@ -68,6 +73,7 @@ app.UseSerilogRequestLogging();
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapHealth();
 app.MapAuth();
@@ -81,7 +87,12 @@ app.MapWebhooks();
 app.MapBoundedContexts();
 app.MapHub<DashboardHub>("/hubs/dashboard");
 app.MapHub<InboxHub>("/hubs/inbox");
+app.MapHangfireDashboard("/hangfire", new DashboardOptions
+{
+    Authorization = Array.Empty<Hangfire.Dashboard.IDashboardAuthorizationFilter>(),
+});
 
+HangfireModule.ScheduleClawbotJobs(app.Services);
 await RbacSeeder.SeedAsync(app.Services).ConfigureAwait(false);
 
 app.Run();
