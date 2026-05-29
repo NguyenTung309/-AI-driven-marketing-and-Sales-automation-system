@@ -65,18 +65,28 @@
 - [ ] kb_test_cases seed 20 câu / module → **defer cùng KB seed**
 - [ ] Alert when accuracy drop <85% (NFR-05) → **defer M12 (Hangfire job)**
 
-### M06 — Channel adapter Zalo + Facebook · Imp 5 · Diff 4 · T2–T4
-- [ ] `ZaloChannelAdapter : IChannelAdapter` (OA send + webhook parse)
-- [ ] `FacebookChannelAdapter : IChannelAdapter` (Graph API send + page webhook)
-- [ ] HMAC verify: `ZaloWebhookSignatureVerifier` (sha256 over body + secret)
-- [ ] HMAC verify: `FacebookWebhookSignatureVerifier` (`X-Hub-Signature-256`)
-- [ ] Inbound parser → `ChannelMessage` → MediatR `IngestMessageCommand`
-- [ ] Outbound send với Polly retry + circuit breaker
-- [ ] Idempotency key `(platform, external_message_id)` dedup
-- [ ] `pancake_configs` rename / extend → `channel_configs` per-tenant per-channel
-- [ ] AES encrypt `access_token` + `webhook_secret` qua `IEncryptor`
-- [ ] Health check `/health/channels/zalo`, `/health/channels/facebook`
-- [ ] Integration test mock vendor: send+receive round-trip
+### M06 — Pancake unified channel adapter (replaces Zalo/FB/IG/TikTok/YT native) · Imp 5 · Diff 3 · T2–T4 · **DONE 2026-05-29**
+**Strategy pivot (2026-05-29):** Drop native per-platform adapters. Use Pancake (pancake.vn / pages.fm) as unified omnichannel proxy. All 5 channels (Facebook Page/Messenger/Comments, Instagram, Zalo OA, TikTok Shop, WhatsApp, Google Business) routed through a single Pancake account. Reason: Pancake already handles vendor SDK churn, OAuth refresh, comment-vs-DM routing, rate limit. We integrate once.
+- [x] `PancakeConfig` domain entity tenant-scoped (BaseUrl, AccessTokenEncrypted, WebhookSecretEncrypted, SignatureHeader/Algo/Encoding, SendPathTemplate, AuthMode) — [PancakeConfig.cs](../src/shared/Clawbot.Domain/Channels/PancakeConfig.cs)
+- [x] `pancake_configs` table UNIQUE(tenant_id), max 2048-char encrypted secrets
+- [x] `IPancakeConfigResolver` + `PancakeConfigResolver` resolves: tenant DB row → appsettings `Channels:Pancake:*` → defaults — [PancakeConfigResolver.cs](../src/shared/Clawbot.Infrastructure/Channels/Pancake/PancakeConfigResolver.cs)
+- [x] `PancakeChannelAdapter` rewritten to consume runtime config (no hard-coded URL/secret) — [PancakeChannelAdapter.cs](../src/shared/Clawbot.Infrastructure/Channels/Pancake/PancakeChannelAdapter.cs)
+- [x] Webhook signature: header name + algo (`hmac-sha256`) + encoding (`hex`/`base64`) all configurable per-tenant; uses `HmacSignatureVerifier.FixedTimeEquals`
+- [x] Outbound send: `POST {BaseUrl}{SendPathTemplate}` with placeholder substitution `{page_id}` + `{thread_id}` from composite `external_thread_id`
+- [x] Auth modes: `query` (`?access_token=`) or `bearer` (`Authorization: Bearer`)
+- [x] AES encrypt `access_token` + `webhook_secret` via `IEncryptor` (existing `AesEncryptor`)
+- [x] Inbound parser maps Pancake webhook JSON → `ChannelMessage[]` with `external_message_id` + `display_name` + `page_id` metadata
+- [x] Webhook → ingestor pipeline already wired in M08: `POST /webhooks/pancake/{tenantSlug}` → verify → parse → ingest loop → SignalR push
+- [x] Polly retry + circuit breaker + 10s timeout via existing `HttpResiliencePolicies` (M01)
+- [x] CRUD endpoint `/api/channels/pancake/config` GET/PUT/DELETE + `/webhook-url` (returns the tenant-specific webhook URL to copy into Pancake dashboard) — [ChannelsEndpoints.cs](../src/api/Clawbot.Api/Endpoints/ChannelsEndpoints.cs)
+- [x] `PancakeConfigDto` returns `HasAccessToken` + `HasWebhookSecret` boolean only — never echoes plaintext or ciphertext back to client
+- [x] Build xanh 12 projects, 0/0
+- [ ] EF migration to add `pancake_configs` table → batched with M21 schema apply
+- [ ] Real Pancake account + access_token + webhook_secret → ops setup (not code)
+- [ ] First webhook empirical test → may need to adjust `SignatureHeader` / `SignatureEncoding` / payload field names; all swappable via PUT `/api/channels/pancake/config` without redeploy
+- [ ] Health check `/health/channels/pancake` → after first successful round-trip
+- [ ] Per-tenant outbound rate limit (Pancake quotas) → after empirical measurement
+- [ ] Integration test mock Pancake vendor → M21
 
 ### M08 — Omnichannel Inbox API + unified conversation merge · Imp 5 · Diff 3 · T4 · **DONE 2026-05-29**
 - [x] `InboxEndpoints.cs` (`GET /api/inbox/conversations` paged + filter status/platform) — [InboxEndpoints.cs](../src/api/Clawbot.Api/Endpoints/InboxEndpoints.cs)
@@ -220,13 +230,13 @@
 - [ ] Group: First / Lộ trình / Objection / Action / Platform / Follow-up
 - [ ] Success rate tracker: update `chat_scenarios.success_rate` từ conversions
 
-### M07 — Channel adapter TikTok + Instagram + YouTube · Imp 4 · Diff 4 · T6
-- [ ] `TiktokChannelAdapter` (Business API DM + comment)
-- [ ] `InstagramChannelAdapter` (Graph API DM + comment + Reels)
-- [ ] `YoutubeChannelAdapter` (Data API v3 comment only — DM N/A)
-- [ ] OAuth refresh token rotation
-- [ ] Comment-vs-DM routing logic
-- [ ] Rate limit handle per vendor quotas
+### M07 — ~~TikTok/IG/YT native adapters~~ → SUPERSEDED by M06 Pancake unified · 2026-05-29
+**No longer planned.** All 5 channels (Facebook, Instagram, TikTok Shop, WhatsApp, Google Business, Zalo OA) routed via Pancake per M06 strategy pivot. Reasons:
+- Vendor SDK churn (TikTok Business API breaks q/q, IG Graph deprecates fields, YT comment quota draconian)
+- OAuth refresh complexity × 3 vendors = 3 refresh failure modes
+- Comment-vs-DM routing already solved by Pancake unified inbox
+- Single billing relationship vs 3 vendor accounts
+- If Pancake outage / disagreement: re-evaluate. Migration path: implement individual adapters under same `IChannelAdapter` interface — schema + ingestor pipeline (M08) unchanged.
 - [ ] Webhook subscription setup script trong `deploy/`
 - [ ] Polly retry với exponential backoff
 - [ ] Health checks 3 channel

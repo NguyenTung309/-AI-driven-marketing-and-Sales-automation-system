@@ -83,6 +83,7 @@ app.MapKb();
 app.MapInbox();
 app.MapSaleAssist();
 app.MapLeads();
+app.MapChannels();
 app.MapWebhooks();
 app.MapBoundedContexts();
 app.MapHub<DashboardHub>("/hubs/dashboard");
