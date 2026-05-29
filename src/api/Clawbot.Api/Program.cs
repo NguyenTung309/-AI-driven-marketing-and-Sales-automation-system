@@ -6,6 +6,7 @@ using Clawbot.Api.Hubs;
 using Clawbot.Application;
 using Clawbot.Infrastructure;
 using Clawbot.Infrastructure.Identity;
+using Clawbot.SharedKernel.Inbox;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
@@ -39,6 +40,7 @@ builder.Services
 
 builder.Services.AddAuthorization();
 builder.Services.AddSignalR();
+builder.Services.AddScoped<IInboxNotifier, SignalRInboxNotifier>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddCors(c =>
@@ -66,9 +68,11 @@ app.MapAuth();
 app.MapRoles();
 app.MapApiKeys();
 app.MapKb();
+app.MapInbox();
 app.MapWebhooks();
 app.MapBoundedContexts();
 app.MapHub<DashboardHub>("/hubs/dashboard");
+app.MapHub<InboxHub>("/hubs/inbox");
 
 await RbacSeeder.SeedAsync(app.Services).ConfigureAwait(false);
 

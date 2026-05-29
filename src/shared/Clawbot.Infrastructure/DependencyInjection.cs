@@ -1,4 +1,5 @@
 using Clawbot.Application.Abstractions;
+using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Channels.Pancake;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Multitenancy;
@@ -61,6 +62,8 @@ public static class DependencyInjection
         services.AddScoped<ITenantAccessor, HttpTenantAccessor>();
         services.Configure<EncryptionOptions>(cfg.GetSection("Encryption"));
         services.AddSingleton<IEncryptor, AesEncryptor>();
+
+        services.AddScoped<IChannelMessageIngestor, ChannelMessageIngestor>();
 
         services.AddHttpClient<IChannelAdapter, PancakeChannelAdapter>()
             .AddPolicyHandler(HttpResiliencePolicies.Retry())

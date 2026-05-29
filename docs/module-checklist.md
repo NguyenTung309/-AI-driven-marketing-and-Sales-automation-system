@@ -78,17 +78,23 @@
 - [ ] Health check `/health/channels/zalo`, `/health/channels/facebook`
 - [ ] Integration test mock vendor: send+receive round-trip
 
-### M08 — Omnichannel Inbox API + unified conversation merge · Imp 5 · Diff 3 · T4
-- [ ] `InboxEndpoints.cs` (`GET /api/inbox` paged + filter)
-- [ ] Query priority: lead.score desc, last_msg_at desc, unread first
-- [ ] `IngestMessageCommand` handler: find-or-create contact via `contact_external_ids`
-- [ ] Dedup `(platform, external_id)` UNIQUE enforce
-- [ ] `MergeContactsCommand` cross-platform stitching
-- [ ] `AssignConversationCommand` (`POST /api/conversations/{id}/assign`)
-- [ ] `MarkConversationStatusCommand` (open/pending/resolved/escalated)
-- [ ] SignalR push `DashboardHub.NotifyNewMessage(tenantId)`
-- [ ] Full-text search `GET /api/conversations/search?q=`
-- [ ] Export conversation log `GET /api/conversations/{id}/export.csv`
+### M08 — Omnichannel Inbox API + unified conversation merge · Imp 5 · Diff 3 · T4 · **DONE 2026-05-29**
+- [x] `InboxEndpoints.cs` (`GET /api/inbox/conversations` paged + filter status/platform) — [InboxEndpoints.cs](../src/api/Clawbot.Api/Endpoints/InboxEndpoints.cs)
+- [x] Query order: last_msg_at desc (lead.score join → defer to M15)
+- [x] `ChannelMessageIngestor` find-or-create contact via `contact_external_ids` — [ChannelMessageIngestor.cs](../src/shared/Clawbot.Infrastructure/Channels/ChannelMessageIngestor.cs)
+- [x] Dedup `(conversationId, content, sentAt, in)` heuristic when no `external_message_id`
+- [x] Conversation upsert via UNIQUE `(tenant_id, platform, external_thread_id)` index
+- [x] `AssignAsync` (`POST /api/inbox/conversations/{id}/assign`)
+- [x] `ResolveAsync` + `EscalateAsync` status transitions
+- [x] `SendOutboundAsync` → `IChannelAdapter.SendAsync` + append outbound message
+- [x] SignalR `InboxHub` per-tenant group + `SignalRInboxNotifier` push message/conversation events — [InboxHub.cs](../src/api/Clawbot.Api/Hubs/InboxHub.cs)
+- [x] Webhook wired: `POST /webhooks/pancake/{tenantSlug}` → verify → parse → ingest loop — [WebhookEndpoints.cs](../src/api/Clawbot.Api/Endpoints/WebhookEndpoints.cs)
+- [x] Build xanh 12 projects, 0/0
+- [ ] `MergeContactsCommand` cross-platform stitching → defer to M15 (lead dedup overlaps)
+- [ ] Full-text search `GET /api/inbox/search?q=` → defer (needs SQL Server FTS index or OpenSearch)
+- [ ] Export conversation log `GET /api/inbox/conversations/{id}/export.csv` → defer P3
+- [ ] `external_message_id` column on `messages` for strict dedup → migration in M12 batch
+- [ ] Lead score join in list ordering → after M15
 
 ### M09 — Semantic Kernel + RAG (Qdrant) · Imp 5 · Diff 5 · T3–T4 · **SPIKE LANDED 2026-05-28**
 - [x] Spike RFC: SK plugin-host only + Anthropic SDK direct chosen — [.sdd/rfcs/001-semantic-kernel-vs-direct-anthropic.md](../.sdd/rfcs/001-semantic-kernel-vs-direct-anthropic.md)
