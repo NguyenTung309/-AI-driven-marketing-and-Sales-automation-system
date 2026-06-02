@@ -77,6 +77,7 @@ public static class DependencyInjection
         services.AddScoped<IChannelMessageIngestor, ChannelMessageIngestor>();
         services.AddScoped<ILeadDedupService, EfLeadDedupService>();
         services.AddScoped<IAssignmentPoolSource, EfAssignmentPoolSource>();
+        services.AddScoped<IPancakeConfigResolver, PancakeConfigResolver>();
 
         services.AddHttpClient<IChannelAdapter, PancakeChannelAdapter>()
             .AddPolicyHandler(HttpResiliencePolicies.Retry())

@@ -1,8 +1,20 @@
 ﻿CLAWBOT SALEMKT
 Tài liệu Kiến trúc & Triển khai
 Omnichannel Sales Automation cho trung tâm tiếng Trung
-Phiên bản 2.0  |  Tháng 5/2026
-Cập nhật: SQL Server 2022 · 33 tables · 12 bounded contexts · 8 AI agents · 31 skills · SDD artifacts
+Phiên bản 2.1  |  Tháng 5/2026
+Cập nhật: SQL Server 2022 · 34 tables · 12 bounded contexts · 8 AI agents · 31 skills · SDD artifacts
+
+## ⚠ Strategy update 2026-05-29 — Pancake unified channel
+
+Toàn bộ tích hợp 5 kênh (Facebook Page/Messenger/Comments, Instagram, Zalo OA, TikTok Shop, WhatsApp, Google Business) chuyển sang dùng **Pancake (pancake.vn / pages.fm)** làm omnichannel proxy.
+
+- M06 = tích hợp 1 lần với Pancake API; M07 (TikTok/IG/YT native) bị superseded.
+- Mọi tham số runtime (BaseUrl, AccessToken, WebhookSecret, SignatureHeader, SignatureAlgo, SignatureEncoding, SendPathTemplate, AuthMode) cấu hình per-tenant qua `PUT /api/channels/pancake/config` — không hard-code, không redeploy khi đổi.
+- Secret AES-encrypted trong `pancake_configs` (existing entity reused).
+- Lý do: tránh vendor SDK churn × 5, OAuth refresh × 5, comment-vs-DM routing × 5. Pancake giải xong rồi.
+- Fallback path: nếu Pancake outage / disagreement, mỗi native adapter implement riêng theo `IChannelAdapter` — schema (`conversations`, `messages`, `contact_external_ids`) + ingestor pipeline M08 không đổi.
+
+
 1. Tổng quan Hệ thống
 ClawBot SaleMkt là nền tảng tự động hoá bán hàng đa nền tảng (Zalo, Facebook, TikTok, Instagram, YouTube) cho trung tâm dạy tiếng Trung. 5 nhân sự thật + 8 AI agent + Knowledge Base tiếng Trung chuyên sâu → tư vấn 24/7, một sale chăm gấp 3× khách hàng.
 1.1 Mục tiêu thiết kế

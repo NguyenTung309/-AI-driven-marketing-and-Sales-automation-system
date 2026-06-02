@@ -3,6 +3,7 @@ using Clawbot.Application.Abstractions;
 using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
 using Clawbot.Domain.Analytics;
+using Clawbot.Domain.Channels;
 using Clawbot.Domain.ChatScenarios;
 using Clawbot.Domain.Common;
 using Clawbot.Domain.Contacts;
@@ -79,6 +80,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
     // Analytics
     public DbSet<KpiDaily> KpiDailies => Set<KpiDaily>();
+
+    // Channels
+    public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();
 
     IConversationSet IAppDbContext.Conversations => new EfConversationSet(Conversations);
 
