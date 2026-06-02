@@ -1,0 +1,6 @@
+@Clawbot.Gateway_HostAddress = http://localhost:5151
+
+GET {{Clawbot.Gateway_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

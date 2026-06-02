@@ -17,6 +17,8 @@
     <PackageVersion Include="Microsoft.Extensions.Http.Polly" Version="8.0.10" />
     <PackageVersion Include="MassTransit" Version="8.3.1" />
     <PackageVersion Include="MassTransit.RabbitMQ" Version="8.3.1" />
+    <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
     <PackageVersion Include="StackExchange.Redis" Version="2.8.16" />
     <PackageVersion Include="Serilog.AspNetCore" Version="8.0.3" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="6.8.1" />
@@ -40,5 +42,6 @@
     <PackageVersion Include="Hangfire.Core" Version="1.8.14" />
     <PackageVersion Include="Hangfire.AspNetCore" Version="1.8.14" />
     <PackageVersion Include="Hangfire.SqlServer" Version="1.8.14" />
+    <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
   </ItemGroup>
 </Project>

@@ -64,6 +64,50 @@ services:
     volumes:
       - minio_data:/data
 
+  clawbot-api:
+    build:
+      context: ..
+      dockerfile: src/Clawbot.Api/Dockerfile
+    container_name: clawbot-api
+    ports:
+      - "5051:5051"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://0.0.0.0:5051
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5051/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  clawbot-gateway:
+    build:
+      context: ..
+      dockerfile: src/Clawbot.Gateway/Dockerfile
+    container_name: clawbot-gateway
+    ports:
+      - "5050:5050"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://0.0.0.0:5050
+      - Gateway__Pancake__WebhookSecret=${PANCAKE_WEBHOOK_SECRET:-dev-secret-replace-before-staging}
+    depends_on:
+      - clawbot-api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 volumes:
   sqlserver_data:
   qdrant_data:
