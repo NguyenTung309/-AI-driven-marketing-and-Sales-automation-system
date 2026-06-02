@@ -15,4 +15,8 @@
     <ProjectReference Include="..\..\agents\Clawbot.Agents.Contracts\Clawbot.Agents.Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Clawbot.Api.Tests" />
+  </ItemGroup>
+
 </Project>

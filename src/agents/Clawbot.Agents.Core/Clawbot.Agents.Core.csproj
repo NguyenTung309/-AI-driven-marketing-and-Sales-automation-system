@@ -10,6 +10,10 @@
     <PackageReference Include="Microsoft.SemanticKernel" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Clawbot.Agents.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
