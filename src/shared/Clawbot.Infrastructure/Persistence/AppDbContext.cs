@@ -19,6 +19,7 @@ using Clawbot.Infrastructure.Identity;
 using Clawbot.SharedKernel.Multitenancy;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace Clawbot.Infrastructure.Persistence;
 
@@ -97,6 +98,24 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     {
         base.OnModelCreating(builder);
         builder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+
+        // Domain aggregates assign their own Guid identifiers in factory methods, so keys are
+        // not store-generated. Without this, EF marks navigation-appended children (e.g.
+        // Conversation.AppendMessage) as Modified instead of Added on a follow-up SaveChanges,
+        // emitting an UPDATE that affects 0 rows (DbUpdateConcurrencyException).
+        foreach (var entity in builder.Model.GetEntityTypes())
+        {
+            foreach (var key in entity.GetKeys())
+            {
+                foreach (var property in key.Properties)
+                {
+                    if (property.ClrType == typeof(Guid))
+                    {
+                        property.ValueGenerated = ValueGenerated.Never;
+                    }
+                }
+            }
+        }
 
         builder.ApplySnakeCase();
 
