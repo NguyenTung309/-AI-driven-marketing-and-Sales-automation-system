@@ -30,6 +30,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Role> RbacRoles => Set<Role>();
     public DbSet<Permission> Permissions => Set<Permission>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 

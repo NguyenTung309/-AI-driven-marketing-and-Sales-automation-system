@@ -1,14 +1,20 @@
 using Clawbot.Agents.Core;
 using Clawbot.Agents.Core.Orchestrator;
+using Clawbot.Agents.Core.Rag;
 using Clawbot.Agents.Core.Skills;
 using Clawbot.AgentService.Services;
+using Clawbot.Application;
+using Clawbot.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddGrpc();
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddSingleton<AgentRegistry>(_ => new AgentRegistry(Array.Empty<IAgent>()));
 builder.Services.AddSingleton<PlanningOrchestrator>();
 builder.Services.AddClawbotSkills();
+builder.Services.AddClawbotRag();
 
 var app = builder.Build();
 
