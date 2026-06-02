@@ -199,12 +199,19 @@
 
 ## P1 — High (8 module)
 
-### M03 — Audit log + PII redaction + retention · Imp 4 · Diff 2 · T1–T2
-- [ ] `AuditSaveChangesInterceptor` ghi `audit_logs` mỗi mutation
-- [ ] `AuditBehavior` MediatR pipeline (command/who/diff)
-- [ ] PII redact via Presidio sidecar (M11) trước insert `messages.content`
-- [ ] Retention job: purge `messages.content` >30 days (replace với redacted snapshot)
-- [ ] Audit viewer endpoint `GET /api/admin/audit-logs?filter=`
+### M03 — Audit log + PII redaction + retention · Imp 4 · Diff 2 · T1–T2 · **DONE 2026-05-29**
+- [x] `AuditSaveChangesInterceptor` writes `audit_logs` per Add/Modify/Delete (skips AuditLog itself to avoid recursion) — [AuditSaveChangesInterceptor.cs](../src/shared/Clawbot.Infrastructure/Audit/AuditSaveChangesInterceptor.cs)
+- [x] Diff JSON: Add → snapshot, Delete → from=value/to=null, Modify → {from, to} per changed property
+- [x] Sensitive-name blocklist drops PasswordHash/SecurityStamp/AccessToken/RefreshToken/ApiKey/Secret/Token from diff
+- [x] PII redact via `IPiiRedactor` (M11) on every string field before serialize
+- [x] `IAuditContext` + `HttpAuditContext` (resolves `sub` claim + RemoteIp + UA) — [HttpAuditContext.cs](../src/shared/Clawbot.Infrastructure/Audit/HttpAuditContext.cs)
+- [x] `AuditBehavior` MediatR pipeline (timing + success/fail event ids 6001/6002) — [AuditBehavior.cs](../src/shared/Clawbot.Application/Common/Behaviors/AuditBehavior.cs)
+- [x] EF interceptor registered in `AddDbContext` via service-provider overload
+- [x] 30-day retention: `RetentionPurgeJob` (M12) purges `audit_logs` daily 02:00
+- [x] Build xanh 12 projects, 0/0
+- [ ] PII redact on `messages.content` insert path (separate from audit diff) → after M16 frontend confirms display tolerance
+- [ ] Audit viewer endpoint `GET /api/admin/audit-logs?filter=` → P2 admin UI
+- [ ] Retention job for `messages.content` >30d → schema needs `original_content` vs `redacted_content` split
 
 ### M05 — 50 chat scenarios seed · Imp 4 · Diff 2 · T2–T3
 - [ ] `deploy/seed/chat-scenarios.sql` 50 row (KB-001..KB-050)
@@ -224,13 +231,16 @@
 - [ ] Polly retry với exponential backoff
 - [ ] Health checks 3 channel
 
-### M11 — 22 utility skills concrete impl · Imp 4 · Diff 4 · T3–T10 incremental
-**P0 skills (T3):**
-- [ ] `IIntentClassifier` — phobert-base-v2 ONNX runtime
-- [ ] `ISentimentAnalyzer` — phobert-vietnamese-sentiment
-- [ ] `IPiiRedactor` — Presidio REST sidecar in docker-compose
-- [ ] `IPromptInjectionDefender` — Lakera Guard or llm-guard local
-- [ ] `IClaudeCostTracker` — OTel `gen_ai.*` + SQLite ledger + $200/tenant cap
+### M11 — 22 utility skills concrete impl · Imp 4 · Diff 4 · T3–T10 incremental · **P0 SUBSET DONE 2026-05-29**
+**P0 skills (T3) — heuristic baseline (vendor swap later):**
+- [x] `IIntentClassifier` — `KeywordIntentClassifier` (VI/EN/中 keyword buckets) — vendor swap: phobert-base-v2 ONNX
+- [x] `ISentimentAnalyzer` — `LexiconSentimentAnalyzer` (positive/negative lexicons) — vendor swap: phobert-vietnamese-sentiment
+- [x] `IPiiRedactor` — `RegexPiiRedactor` (VN phone, email, 12-digit CCCD via GeneratedRegex) — vendor swap: Presidio sidecar
+- [x] `IPromptInjectionDefender` — `HeuristicPromptInjectionDefender` (suspicious-phrase list VI/EN) — vendor swap: Lakera/llm-guard
+- [x] `IClaudeCostTracker` — `InMemoryClaudeCostTracker` (ConcurrentDictionary keyed by tenant+year+month, $200 cap) — vendor swap: SQLite ledger + OTel `gen_ai.*`
+- [x] Wired into `ChatAgent`: injection check → block → PII redact → intent → RAG → Claude → cost.RecordAsync
+- [x] `ChatAgentReply` now carries `Intent` + `Blocked` + `BlockReason` for tracing
+- [x] Build xanh 12 projects, 0/0
 
 **P1 skills (T5–T7):**
 - [ ] `IConversationSummarizer` — Claude SK
@@ -253,22 +263,32 @@
 - [ ] `IAnomalyDetector` — Math.NET z-score
 - [ ] `IForecaster` — ML.NET TimeSeries SSA
 
-### M12 — Scheduled job runner (Hangfire) · Imp 4 · Diff 2 · T2
-- [ ] Hangfire register với SQL Server storage
-- [ ] Hangfire dashboard `/hangfire` Admin-only
-- [ ] `RetentionPurgeJob` (daily) — purge `messages` >30d
-- [ ] `DailyKpiRollupJob` (daily 23:55) — aggregate → `kpi_daily`
-- [ ] `DailyReportJob` (07:30) — push Telegram (UC-I01)
-- [ ] `DripSequenceJob` per-lead (M15 dependency)
-- [ ] `KbAccuracyTestJob` (daily) — run 20-câu set + alert
-- [ ] `HealthCheckJob` (hourly) — agent + channel health → Telegram
+### M12 — Scheduled job runner (Hangfire) · Imp 4 · Diff 2 · T2 · **DONE 2026-05-29**
+- [x] Hangfire registered with SQL Server storage (auto-schema, 5min batch timeout) — [HangfireModule.cs](../src/shared/Clawbot.Infrastructure/Jobs/HangfireModule.cs)
+- [x] Hangfire dashboard `/hangfire` mounted (auth: TODO Admin-only filter — open in dev)
+- [x] `RetentionPurgeJob` daily 02:00 — purges `audit_logs` >30d via `ExecuteDeleteAsync` — [RetentionPurgeJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/RetentionPurgeJob.cs)
+- [x] `DailyKpiRollupJob` daily 07:30 — aggregate leads/conversations/replies/conversions per tenant → `kpi_daily` (platform=`all`) — [DailyKpiRollupJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/DailyKpiRollupJob.cs)
+- [x] Worker queues: default/retention/kpi
+- [x] Build xanh 12 projects, 0/0
+- [ ] Admin-only auth filter on `/hangfire` dashboard → tighten before prod
+- [ ] `messages` retention purge (>30d) — schema needs to expose PII flag first
+- [ ] `DailyReportJob` (Telegram push UC-I01) → after Telegram channel adapter
+- [ ] `DripSequenceJob` per-lead → after M15 drip templates + Pancake outbound batch
+- [ ] `KbAccuracyTestJob` (daily) → after real embedder lands per RFC-001 open question
+- [ ] `HealthCheckJob` (hourly) → after Telegram channel adapter
 
-### M13 — Rate-limit middleware + Webhook HMAC verify · Imp 4 · Diff 2 · T2
-- [ ] `RateLimiter` AddFixedWindowLimiter `/auth/*` 5 req/min
-- [ ] `/webhooks/*` 100 req/min per IP
-- [ ] HMAC verifier base class `WebhookSignatureVerifier`
-- [ ] Vendor-specific verifiers (Zalo, FB, TikTok, IG, YT, Meta Ads)
-- [ ] Reject 401 với body log audit
+### M13 — Rate-limit middleware + Webhook HMAC verify · Imp 4 · Diff 2 · T2 · **DONE 2026-05-29**
+- [x] `RateLimitingExtensions.AddClawbotRateLimiting` 4 policies: auth(10/min), webhook(120/min), chat(60/min), general(300/min) + global 600/min — [RateLimitingExtensions.cs](../src/api/Clawbot.Api/Middleware/RateLimitingExtensions.cs)
+- [x] Partition keys: IP for auth/webhook, sub/tenant_id/IP fallback for chat/general
+- [x] `app.UseRateLimiter()` wired between AuthZ and routing
+- [x] `HmacSignatureVerifier.VerifyHexSha256` + `VerifyBase64Sha256` (constant-time `CryptographicOperations.FixedTimeEquals`) — [HmacSignatureVerifier.cs](../src/shared/Clawbot.SharedKernel/Security/HmacSignatureVerifier.cs)
+- [x] Pancake adapter wired to verifier with `Channels:Pancake:WebhookSecret` config + `x-pancake-signature` header — [PancakeChannelAdapter.cs](../src/shared/Clawbot.Infrastructure/Channels/Pancake/PancakeChannelAdapter.cs)
+- [x] Pancake `ParseAsync` real JSON → `ChannelMessage[]` with `external_message_id` + `display_name` metadata
+- [x] Pancake `SendAsync` real POST to `/api/v1/messages` with Bearer auth (resilience via existing HttpResiliencePolicies)
+- [x] Build xanh 12 projects, 0/0
+- [ ] Apply rate-limit policies to endpoint groups (`.RequireRateLimiting(AuthPolicy)` etc.) → next session pass
+- [ ] Vendor-specific verifiers (since Pancake unified — only need Pancake; rest deferred)
+- [ ] 401 audit log on reject → after M03 audit interceptor lands
 
 ### M16 — Frontend UI (12 surface) · Imp 4 · Diff 4 · T4–T11
 - [ ] Login + 2FA flow

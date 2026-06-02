@@ -14,10 +14,10 @@ public static class SkillsModule
     public static IServiceCollection AddClawbotSkills(this IServiceCollection services)
     {
         // NLP
-        services.AddSingleton<IIntentClassifier, PhoBertIntentClassifier>();
-        services.AddSingleton<ISentimentAnalyzer, PhoBertSentimentAnalyzer>();
+        services.AddSingleton<IIntentClassifier, KeywordIntentClassifier>();
+        services.AddSingleton<ISentimentAnalyzer, LexiconSentimentAnalyzer>();
         services.AddSingleton<ILanguageDetector, FastTextLanguageDetector>();
-        services.AddSingleton<IPiiRedactor, PresidioPiiRedactor>();
+        services.AddSingleton<IPiiRedactor, RegexPiiRedactor>();
         services.AddSingleton<IToxicityFilter, DetoxifyToxicityFilter>();
         services.AddSingleton<IConversationSummarizer, ClaudeConversationSummarizer>();
 
@@ -40,8 +40,8 @@ public static class SkillsModule
         services.AddSingleton<IQrGenerator, QRCoderGenerator>();
         services.AddSingleton<IAnomalyDetector, ZScoreAnomalyDetector>();
         services.AddSingleton<IForecaster, MlNetForecaster>();
-        services.AddSingleton<IPromptInjectionDefender, LakeraPromptInjectionDefender>();
-        services.AddSingleton<IClaudeCostTracker, SqliteClaudeCostTracker>();
+        services.AddSingleton<IPromptInjectionDefender, HeuristicPromptInjectionDefender>();
+        services.AddSingleton<IClaudeCostTracker, InMemoryClaudeCostTracker>();
 
         return services;
     }
