@@ -223,12 +223,14 @@
 - [ ] Audit viewer endpoint `GET /api/admin/audit-logs?filter=` → P2 admin UI
 - [ ] Retention job for `messages.content` >30d → schema needs `original_content` vs `redacted_content` split
 
-### M05 — 50 chat scenarios seed · Imp 4 · Diff 2 · T2–T3
-- [ ] `deploy/seed/chat-scenarios.sql` 50 row (KB-001..KB-050)
-- [ ] `MatchScenarioQuery` handler (trigger regex + platform filter)
-- [ ] CRUD endpoint `GET/POST/PUT/DELETE /api/chat-scenarios`
-- [ ] Group: First / Lộ trình / Objection / Action / Platform / Follow-up
-- [ ] Success rate tracker: update `chat_scenarios.success_rate` từ conversions
+### M05 — 50 chat scenarios seed · Imp 4 · Diff 2 · T2–T3 · **DONE 2026-06-03**
+- [x] `deploy/seed/chat-scenarios.sql` 50 row (KB-001..KB-050) — idempotent MERGE on `(tenant_id, code)`, parameterized `@tenant_slug` — [chat-scenarios.sql](../deploy/seed/chat-scenarios.sql)
+- [x] `MatchScenarioQuery` handler (trigger regex + platform filter) — pure `ChatScenarioMatcher` (regex→substring fallback, longest-match specificity, success-rate tiebreak) + `POST /api/chat-scenarios/match` — [ChatScenarioMatcher.cs](../src/shared/Clawbot.Domain/ChatScenarios/ChatScenarioMatcher.cs)
+- [x] CRUD endpoint `GET/POST/PUT/DELETE /api/chat-scenarios` (+ `GET /{id}`, filter `?group=&platform=`) — [ChatScenariosEndpoints.cs](../src/api/Clawbot.Api/Endpoints/ChatScenariosEndpoints.cs); replaced `/api/scenarios` 501 stub
+- [x] Group: First / Lộ trình / Objection / Action / Platform / Follow-up (50 rows distributed 8/10/12/9/6/5)
+- [x] Success rate tracker: `POST /api/chat-scenarios/{id}/outcome` → `ChatScenario.RecordOutcome(converted)` EMA (α=0.1) into `success_rate`
+- [x] Unit tests: 10 cases in [ChatScenarioMatcherTests.cs](../tests/Clawbot.Domain.Tests/ChatScenarios/ChatScenarioMatcherTests.cs) (regex/substring/platform/tiebreak/EMA/Update) — Domain.Tests 20/20 green
+- [ ] EF migration to add chat_scenarios rows is data-seed only (DDL already in `0001_init.sql`); KB-tone refinement after real conversion data lands
 
 ### M07 — ~~TikTok/IG/YT native adapters~~ → SUPERSEDED by M06 Pancake unified · 2026-05-29
 **No longer planned.** All 5 channels (Facebook, Instagram, TikTok Shop, WhatsApp, Google Business, Zalo OA) routed via Pancake per M06 strategy pivot. Reasons:
