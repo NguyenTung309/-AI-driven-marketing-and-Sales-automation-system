@@ -83,6 +83,7 @@ app.MapKb();
 app.MapInbox();
 app.MapSaleAssist();
 app.MapLeads();
+app.MapChatScenarios();
 app.MapChannels();
 app.MapWebhooks();
 app.MapBoundedContexts();
