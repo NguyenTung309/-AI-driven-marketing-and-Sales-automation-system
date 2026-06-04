@@ -1,6 +1,7 @@
 using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
 using Clawbot.Domain.Analytics;
+using Clawbot.Domain.Channels;
 using Clawbot.Domain.ChatScenarios;
 using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Content;
@@ -8,6 +9,7 @@ using Clawbot.Domain.Conversations;
 using Clawbot.Domain.Documents;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
+using Clawbot.Domain.Llm;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
@@ -51,6 +53,17 @@ public sealed class PermissionConfiguration : IEntityTypeConfiguration<Permissio
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Code).HasMaxLength(128).IsRequired();
         builder.HasIndex(x => x.Code).IsUnique();
+    }
+}
+
+public sealed class RolePermissionConfiguration : IEntityTypeConfiguration<RolePermission>
+{
+    public void Configure(EntityTypeBuilder<RolePermission> builder)
+    {
+        builder.ToTable("role_permissions");
+        builder.HasKey(x => new { x.RoleId, x.PermissionId });
+        builder.HasOne<Role>().WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<Permission>().WithMany().HasForeignKey(x => x.PermissionId).OnDelete(DeleteBehavior.Cascade);
     }
 }
 
@@ -363,5 +376,34 @@ public sealed class KpiDailyConfiguration : IEntityTypeConfiguration<KpiDaily>
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
         builder.HasIndex(x => new { x.TenantId, x.Date, x.Platform }).IsUnique();
+    }
+}
+
+public sealed class PancakeConfigConfiguration : IEntityTypeConfiguration<PancakeConfig>
+{
+    public void Configure(EntityTypeBuilder<PancakeConfig> builder)
+    {
+        builder.ToTable("pancake_configs");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Channel).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.PageId).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.AccessTokenEncrypted).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.WebhookSecretEncrypted).HasColumnType("nvarchar(max)").IsRequired();
+        builder.HasIndex(x => new { x.TenantId, x.Channel, x.PageId }).IsUnique();
+    }
+}
+
+public sealed class LlmConfigConfiguration : IEntityTypeConfiguration<LlmConfig>
+{
+    public void Configure(EntityTypeBuilder<LlmConfig> builder)
+    {
+        builder.ToTable("llm_configs");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Provider).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.ModelId).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.ApiKeyEncrypted).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.BaseUrl).HasMaxLength(512);
+        builder.Property(x => x.Temperature).HasColumnType("decimal(3,2)");
+        builder.HasIndex(x => new { x.TenantId, x.IsActive });
     }
 }

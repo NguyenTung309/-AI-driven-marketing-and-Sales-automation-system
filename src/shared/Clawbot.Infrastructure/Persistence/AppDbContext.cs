@@ -3,6 +3,7 @@ using Clawbot.Application.Abstractions;
 using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
 using Clawbot.Domain.Analytics;
+using Clawbot.Domain.Channels;
 using Clawbot.Domain.ChatScenarios;
 using Clawbot.Domain.Common;
 using Clawbot.Domain.Contacts;
@@ -11,6 +12,7 @@ using Clawbot.Domain.Conversations;
 using Clawbot.Domain.Documents;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
+using Clawbot.Domain.Llm;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
@@ -30,6 +32,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Role> RbacRoles => Set<Role>();
     public DbSet<Permission> Permissions => Set<Permission>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
@@ -79,6 +82,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     // Analytics
     public DbSet<KpiDaily> KpiDailies => Set<KpiDaily>();
 
+    // Channel & LLM configs
+    public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();
+    public DbSet<LlmConfig> LlmConfigs => Set<LlmConfig>();
+
     IConversationSet IAppDbContext.Conversations => new EfConversationSet(Conversations);
 
     Task<int> IAppDbContext.SaveChangesAsync(CancellationToken ct) => base.SaveChangesAsync(ct);
@@ -86,6 +93,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     private sealed class EfConversationSet(DbSet<Conversation> set) : IConversationSet
     {
         public void Add(Conversation conversation) => set.Add(conversation);
+
+        // Global query filters (tenant isolation + soft delete) apply automatically — no manual tenant_id filter.
+        public Task<Conversation?> FindByThreadAsync(string platform, string externalThreadId, CancellationToken ct = default) =>
+            set.FirstOrDefaultAsync(c => c.Platform == platform && c.ExternalThreadId == externalThreadId, ct);
     }
 
     protected override void OnModelCreating(ModelBuilder builder)

@@ -35,6 +35,7 @@ public static class DependencyInjection
         services.AddIdentityCore<AppUser>()
             .AddRoles<AppRole>()
             .AddEntityFrameworkStores<AppDbContext>()
+            .AddSignInManager()
             .AddDefaultTokenProviders();
 
         services.AddSingleton<IConnectionMultiplexer>(_ =>

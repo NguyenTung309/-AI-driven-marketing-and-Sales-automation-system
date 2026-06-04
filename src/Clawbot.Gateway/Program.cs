@@ -1,5 +1,7 @@
+using System.Threading.RateLimiting;
 using Clawbot.Gateway.Configuration;
 using Clawbot.Gateway.Middleware;
+using Microsoft.AspNetCore.RateLimiting;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -57,7 +59,10 @@ app.UseMiddleware<PancakeHmacMiddleware>();
 // 3. Rate limiting
 app.UseRateLimiter();
 
-// 4. Map reverse proxy
+// 4. Gateway-local health endpoint (not proxied)
+app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
+
+// 5. Map reverse proxy
 app.MapReverseProxy();
 
 app.Run();

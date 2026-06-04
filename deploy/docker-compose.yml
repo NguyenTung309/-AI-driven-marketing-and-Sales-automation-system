@@ -67,13 +67,17 @@ services:
   clawbot-api:
     build:
       context: ..
-      dockerfile: src/Clawbot.Api/Dockerfile
+      dockerfile: src/api/Clawbot.Api/Dockerfile
     container_name: clawbot-api
     ports:
       - "5051:5051"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://0.0.0.0:5051
+      - ConnectionStrings__SqlServer=Server=sqlserver,1433;Database=clawbot;User Id=sa;Password=${MSSQL_SA_PASSWORD:-Clawbot!2026};TrustServerCertificate=True
+      - ConnectionStrings__Redis=redis:6379
+      - ConnectionStrings__RabbitMq=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672
+      - Vector__Qdrant__Host=qdrant
     depends_on:
       sqlserver:
         condition: service_healthy
@@ -83,7 +87,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5051/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5051/health/live"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -103,7 +107,7 @@ services:
       - clawbot-api
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5050/health/live"]
       interval: 30s
       timeout: 10s
       retries: 3
