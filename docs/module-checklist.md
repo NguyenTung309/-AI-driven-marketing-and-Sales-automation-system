@@ -316,16 +316,24 @@
 - [ ] Admin (users/roles/api-keys/integrations)
 - [ ] Notification center + Telegram link
 
-### M17 — Document Generation (QuestPDF) · Imp 4 · Diff 3 · T9
-- [ ] Impl `DocsAgentGrpcService` (Generate)
-- [ ] `QuestPdfRenderer` service
-- [ ] Template engine (Scriban) cho dynamic fields
-- [ ] Templates: QUOTE-V1, BROCHURE-HSK, SLIDE-DEMO-5, ONBOARDING-KIT
-- [ ] `POST /api/docs/generate` returns file URL (MinIO signed URL 7d)
-- [ ] Branded header/footer/logo từ tenant settings
-- [ ] QR code footer via `IQrGenerator`
-- [ ] Read receipt tracker (open beacon)
-- [ ] p95 <30s instrument
+### M17 — Document Generation (QuestPDF) · Imp 4 · Diff 3 · T9 · **DONE 2026-06-04**
+- [x] Impl `DocsAgentGrpcService.Generate` (load template by code → render → store → persist `generated_documents`) — [DocsAgentGrpcService.cs](../src/agents/Clawbot.AgentService/Services/DocsAgentGrpcService.cs)
+- [x] `QuestPdfDocumentRenderer` (A4, branded header/footer, page numbers, doc-type label) — [DocsServices.cs](../src/agents/Clawbot.Agents.Core/Docs/DocsServices.cs)
+- [x] Template engine: `SimpleTemplateEngine` `{{ key }}` substitution (GeneratedRegex). **Scriban dropped** — 5.12.0 flagged critical/high CVEs (GHSA-5wr9-m6jw-xx44 et al.) and repo gates `NuGetAudit` as errors; doc use-case is field substitution only — same file
+- [x] `DocsAgent` pure orchestrator (resolve → render → sha256) + `IDocumentStorage`/`LocalDocumentStorage` + `DocsModule.AddClawbotDocs()` — [DocsAgent.cs](../src/agents/Clawbot.Agents.Core/Docs/DocsAgent.cs)
+- [x] proto `agent_docs.proto` `DocGenerateResponse` extended additively (`file_hash`, `size_bytes`, `latency_ms`)
+- [x] `POST /api/docs/generate` → `{documentId, fileUrl, fileHash, sizeBytes, latencyMs}` + template CRUD `/api/docs/templates` (GET/POST/PUT/DELETE soft-delete) + `GET /api/docs/generated` — [DocumentsEndpoints.cs](../src/api/Clawbot.Api/Endpoints/DocumentsEndpoints.cs)
+- [x] Branded header/footer/logo từ tenant `DisplayName`
+- [x] Templates seed QUOTE-V1 + ONBOARDING-KIT (idempotent MERGE on `(tenant_id, code)`, Scriban-style `{{ var }}` body) — [document-templates.sql](../deploy/seed/document-templates.sql)
+- [x] API → AgentService via `DocsAgent.DocsAgentClient` gRPC typed client (registered in `Program.cs`)
+- [x] Unit tests 12/12 green (template/renderer/agent/storage incl. real QuestPDF render) — [DocsRenderingTests.cs](../tests/Clawbot.Agents.Tests/Docs/DocsRenderingTests.cs); Agents.Tests + AgentService + Api build 0/0 on .NET 8
+- [ ] MinIO signed URL (7d) — `LocalDocumentStorage` is the baseline; swap `IDocumentStorage` impl later (Minio pkg already referenced)
+- [ ] QR code footer via `IQrGenerator` (M11 P2) → defer
+- [ ] Read receipt tracker (open beacon) → defer (`generated_documents.opened_at` column + `MarkOpened` ready)
+- [ ] BROCHURE-HSK, SLIDE-DEMO-5 templates → defer (renderer already handles any `doc_type`)
+- [ ] Real send via `sent_via` channel → defer (delivery separated from generation)
+- [ ] p95 <30s instrument → after OTel histograms
+- [ ] EF migration for new rows is data-seed only (DDL `document_templates`/`generated_documents` already in `0001_init.sql`)
 
 ### M20 — Analytics KPI daily + Metabase · Imp 4 · Diff 3 · T11
 - [ ] `KpiAggregator` service — daily roll-up vào `kpi_daily`
