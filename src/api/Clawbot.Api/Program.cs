@@ -52,6 +52,10 @@ builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.SaleAssist.SaleAssistAge
 {
     o.Address = new Uri(agentServiceUrl);
 });
+builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Docs.DocsAgent.DocsAgentClient>(o =>
+{
+    o.Address = new Uri(agentServiceUrl);
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddCors(c =>
@@ -82,6 +86,7 @@ app.MapApiKeys();
 app.MapKb();
 app.MapInbox();
 app.MapSaleAssist();
+app.MapDocuments();
 app.MapLeads();
 app.MapChatScenarios();
 app.MapChannels();

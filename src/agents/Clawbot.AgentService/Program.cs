@@ -1,5 +1,6 @@
 using Clawbot.Agents.Core;
 using Clawbot.Agents.Core.Chat;
+using Clawbot.Agents.Core.Docs;
 using Clawbot.Agents.Core.Lead;
 using Clawbot.Agents.Core.Orchestrator;
 using Clawbot.Agents.Core.Rag;
@@ -21,6 +22,7 @@ builder.Services.AddClawbotRag();
 builder.Services.AddClawbotChat(builder.Configuration);
 builder.Services.AddClawbotSaleAssist();
 builder.Services.AddClawbotLead();
+builder.Services.AddClawbotDocs(builder.Configuration);
 
 var app = builder.Build();
 
