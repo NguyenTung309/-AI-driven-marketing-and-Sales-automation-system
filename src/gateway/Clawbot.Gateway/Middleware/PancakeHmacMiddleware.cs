@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
+using Clawbot.Gateway.Configuration;
 using Microsoft.Extensions.Options;
 using Yarp.ReverseProxy.Model;
-using Clawbot.Gateway.Configuration;
 
 namespace Clawbot.Gateway.Middleware;
 
@@ -28,12 +28,13 @@ public partial class PancakeHmacMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // Check if this route requires HMAC validation (flag set in YARP route Metadata)
-        var endpoint = context.GetEndpoint();
-        var routeMetadata = endpoint?.Metadata.GetMetadata<RouteModel>()?.Config.Metadata;
-        var requiresHmac = routeMetadata is not null
-                           && routeMetadata.TryGetValue("RequiresHmac", out var flag)
-                           && string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase);
+        ArgumentNullException.ThrowIfNull(context);
+
+        // RequiresHmac is declared as YARP route metadata (appsettings ReverseProxy.Routes.*.Metadata).
+        var routeConfig = context.GetEndpoint()?.Metadata.GetMetadata<RouteModel>()?.Config;
+        var requiresHmac = routeConfig?.Metadata is { } metadata
+            && metadata.TryGetValue("RequiresHmac", out var flag)
+            && string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase);
 
         if (!requiresHmac)
         {
@@ -42,11 +43,13 @@ public partial class PancakeHmacMiddleware
         }
 
         // EARS[WHEN webhook request arrives THE SYSTEM SHALL validate HMAC-SHA256 signature before processing]
-        
+
         // Read raw body for signature validation
         context.Request.EnableBuffering();
         var bodyBytes = await ReadRequestBodyAsync(context.Request);
         context.Request.Body.Position = 0;
+
+        var traceId = context.Request.Headers["X-Trace-Id"].FirstOrDefault();
 
         // Extract signature from header
         var signatureHeader = context.Request.Headers["X-Pancake-Signature"].FirstOrDefault()
@@ -54,7 +57,7 @@ public partial class PancakeHmacMiddleware
 
         if (string.IsNullOrEmpty(signatureHeader))
         {
-            LogMissingSignature(context.Request.Headers["X-Trace-Id"].FirstOrDefault());
+            LogMissingSignature(traceId);
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await context.Response.WriteAsync("Unauthorized: missing signature");
             return;
@@ -69,7 +72,7 @@ public partial class PancakeHmacMiddleware
             Encoding.ASCII.GetBytes(expectedSignature),
             Encoding.ASCII.GetBytes(signatureHeader)))
         {
-            LogSignatureMismatch(context.Request.Headers["X-Trace-Id"].FirstOrDefault());
+            LogSignatureMismatch(traceId);
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await context.Response.WriteAsync("Unauthorized: invalid signature");
             return;
@@ -93,11 +96,9 @@ public partial class PancakeHmacMiddleware
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
-    [LoggerMessage(Level = LogLevel.Warning,
-        Message = "HMAC validation failed: missing signature header. TraceId={TraceId}")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "HMAC validation failed: missing signature header. TraceId={TraceId}")]
     private partial void LogMissingSignature(string? traceId);
 
-    [LoggerMessage(Level = LogLevel.Warning,
-        Message = "HMAC validation failed: signature mismatch. TraceId={TraceId}")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "HMAC validation failed: signature mismatch. TraceId={TraceId}")]
     private partial void LogSignatureMismatch(string? traceId);
 }

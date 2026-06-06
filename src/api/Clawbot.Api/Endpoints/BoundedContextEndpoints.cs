@@ -14,7 +14,7 @@ public static class BoundedContextEndpoints
         Stub(app, "/api/inbox",          "SPEC-01 / SW-011..022");
         Stub(app, "/api/kb",             "SPEC-02 / SW-023..034");
         Stub(app, "/api/kb/accuracy",    "SPEC-02 / SW-115..120");
-        Stub(app, "/api/scenarios",      "SPEC-01 / chat_scenarios");
+        // /api/chat-scenarios now implemented in ChatScenariosEndpoints (M05).
         Stub(app, "/api/agents",         "SPEC-03 / SW-035..046");
         Stub(app, "/api/sale-assist",    "SPEC-04 / SW-047..056");
         Stub(app, "/api/leads",          "SPEC-05 / SW-057..068");

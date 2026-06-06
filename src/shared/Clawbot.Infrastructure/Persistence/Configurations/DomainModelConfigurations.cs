@@ -63,7 +63,7 @@ public sealed class RolePermissionConfiguration : IEntityTypeConfiguration<RoleP
         builder.ToTable("role_permissions");
         builder.HasKey(x => new { x.RoleId, x.PermissionId });
         builder.HasOne<Role>().WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasOne<Permission>().WithMany().HasForeignKey(x => x.PermissionId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<Permission>().WithMany().HasForeignKey(x => x.PermissionId).OnDelete(DeleteBehavior.NoAction);
     }
 }
 
@@ -203,6 +203,24 @@ public sealed class KbTestCaseConfiguration : IEntityTypeConfiguration<KbTestCas
     {
         builder.ToTable("kb_test_cases");
         builder.HasKey(x => x.Id);
+    }
+}
+
+public sealed class PancakeConfigConfiguration : IEntityTypeConfiguration<PancakeConfig>
+{
+    public void Configure(EntityTypeBuilder<PancakeConfig> builder)
+    {
+        builder.ToTable("pancake_configs");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.BaseUrl).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.AccessTokenEncrypted).HasColumnName("access_token_encrypted").HasMaxLength(2048).IsRequired();
+        builder.Property(x => x.WebhookSecretEncrypted).HasColumnName("webhook_secret_encrypted").HasMaxLength(2048).IsRequired();
+        builder.Property(x => x.SignatureHeader).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.SignatureAlgo).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.SignatureEncoding).HasMaxLength(16).IsRequired();
+        builder.Property(x => x.SendPathTemplate).HasMaxLength(512).IsRequired();
+        builder.Property(x => x.AuthMode).HasMaxLength(16).IsRequired();
+        builder.HasIndex(x => x.TenantId).IsUnique();
     }
 }
 
@@ -376,20 +394,6 @@ public sealed class KpiDailyConfiguration : IEntityTypeConfiguration<KpiDaily>
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
         builder.HasIndex(x => new { x.TenantId, x.Date, x.Platform }).IsUnique();
-    }
-}
-
-public sealed class PancakeConfigConfiguration : IEntityTypeConfiguration<PancakeConfig>
-{
-    public void Configure(EntityTypeBuilder<PancakeConfig> builder)
-    {
-        builder.ToTable("pancake_configs");
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Channel).HasMaxLength(32).IsRequired();
-        builder.Property(x => x.PageId).HasMaxLength(128).IsRequired();
-        builder.Property(x => x.AccessTokenEncrypted).HasColumnType("nvarchar(max)").IsRequired();
-        builder.Property(x => x.WebhookSecretEncrypted).HasColumnType("nvarchar(max)").IsRequired();
-        builder.HasIndex(x => new { x.TenantId, x.Channel, x.PageId }).IsUnique();
     }
 }
 

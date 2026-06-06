@@ -19,4 +19,7 @@ message DocGenerateRequest {
 message DocGenerateResponse {
   string document_id = 1;
   string file_url = 2;
+  string file_hash = 3;
+  int32 size_bytes = 4;
+  int64 latency_ms = 5;
 }

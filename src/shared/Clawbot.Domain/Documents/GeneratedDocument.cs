@@ -23,7 +23,8 @@ public sealed class GeneratedDocument : AggregateRoot<Guid>, ITenantOwned
         string fileUrl,
         DateTimeOffset createdAt,
         Guid? contactId = null,
-        Guid? generatedBy = null) =>
+        Guid? generatedBy = null,
+        string? fileHash = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -32,6 +33,7 @@ public sealed class GeneratedDocument : AggregateRoot<Guid>, ITenantOwned
             FileUrl = fileUrl,
             ContactId = contactId,
             GeneratedBy = generatedBy,
+            FileHash = fileHash,
             CreatedAt = createdAt,
         };
 

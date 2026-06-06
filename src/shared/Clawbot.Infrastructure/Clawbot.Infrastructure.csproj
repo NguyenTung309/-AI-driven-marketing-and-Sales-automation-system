@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Clawbot.Application\Clawbot.Application.csproj" />
     <ProjectReference Include="..\Clawbot.Domain\Clawbot.Domain.csproj" />
     <ProjectReference Include="..\Clawbot.SharedKernel\Clawbot.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\agents\Clawbot.Agents.Core\Clawbot.Agents.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -18,6 +19,9 @@
     <PackageReference Include="Polly" />
     <PackageReference Include="Qdrant.Client" />
     <PackageReference Include="StackExchange.Redis" />
+    <PackageReference Include="Hangfire.Core" />
+    <PackageReference Include="Hangfire.AspNetCore" />
+    <PackageReference Include="Hangfire.SqlServer" />
   </ItemGroup>
 
   <PropertyGroup>

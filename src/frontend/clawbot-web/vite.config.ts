@@ -13,8 +13,14 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://localhost:5000",
-      "/hubs": { target: "http://localhost:5000", ws: true },
+      // API serves routes at root (/auth, /roles, ...) with no /api prefix,
+      // so strip the prefix the frontend adds via its axios baseURL.
+      "/api": {
+        target: "http://localhost:5051",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ""),
+      },
+      "/hubs": { target: "http://localhost:5051", ws: true },
     },
   },
 });

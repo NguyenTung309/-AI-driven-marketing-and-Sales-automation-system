@@ -3,10 +3,16 @@
   <ItemGroup>
     <ProjectReference Include="..\Clawbot.Agents.Contracts\Clawbot.Agents.Contracts.csproj" />
     <ProjectReference Include="..\..\shared\Clawbot.SharedKernel\Clawbot.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\shared\Clawbot.Domain\Clawbot.Domain.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.SemanticKernel" />
+    <PackageReference Include="QuestPDF" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Clawbot.Agents.Tests" />
   </ItemGroup>
 
   <PropertyGroup>

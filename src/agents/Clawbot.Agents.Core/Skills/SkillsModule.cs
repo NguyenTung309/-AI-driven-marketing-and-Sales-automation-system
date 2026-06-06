@@ -14,10 +14,10 @@ public static class SkillsModule
     public static IServiceCollection AddClawbotSkills(this IServiceCollection services)
     {
         // NLP
-        services.AddSingleton<IIntentClassifier, PhoBertIntentClassifier>();
-        services.AddSingleton<ISentimentAnalyzer, PhoBertSentimentAnalyzer>();
+        services.AddSingleton<IIntentClassifier, KeywordIntentClassifier>();
+        services.AddSingleton<ISentimentAnalyzer, LexiconSentimentAnalyzer>();
         services.AddSingleton<ILanguageDetector, FastTextLanguageDetector>();
-        services.AddSingleton<IPiiRedactor, PresidioPiiRedactor>();
+        services.AddSingleton<IPiiRedactor, RegexPiiRedactor>();
         services.AddSingleton<IToxicityFilter, DetoxifyToxicityFilter>();
         services.AddSingleton<IConversationSummarizer, ClaudeConversationSummarizer>();
 
@@ -40,9 +40,21 @@ public static class SkillsModule
         services.AddSingleton<IQrGenerator, QRCoderGenerator>();
         services.AddSingleton<IAnomalyDetector, ZScoreAnomalyDetector>();
         services.AddSingleton<IForecaster, MlNetForecaster>();
-        services.AddSingleton<IPromptInjectionDefender, LakeraPromptInjectionDefender>();
-        services.AddSingleton<IClaudeCostTracker, SqliteClaudeCostTracker>();
+        services.AddSingleton<IPromptInjectionDefender, HeuristicPromptInjectionDefender>();
+        services.AddSingleton<IClaudeCostTracker, InMemoryClaudeCostTracker>();
 
+        return services;
+    }
+
+    /// <summary>
+    /// Registers only the PII redactor. Hosts that need PII redaction (e.g. the API's
+    /// audit interceptor) but not the full agent skill catalog can call this instead of
+    /// <see cref="AddClawbotSkills"/>. <c>RegexPiiRedactor</c> is internal, so this is the
+    /// only way for other assemblies to wire it.
+    /// </summary>
+    public static IServiceCollection AddClawbotPiiRedactor(this IServiceCollection services)
+    {
+        services.AddSingleton<IPiiRedactor, RegexPiiRedactor>();
         return services;
     }
 }

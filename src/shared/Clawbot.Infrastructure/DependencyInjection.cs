@@ -1,5 +1,12 @@
+using Clawbot.Agents.Core.Lead;
+using Clawbot.Agents.Core.Skills;
+using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Application.Abstractions;
+using Clawbot.Infrastructure.Audit;
+using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Channels.Pancake;
+using Clawbot.Infrastructure.Leads;
+using Clawbot.SharedKernel.Audit;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Multitenancy;
 using Clawbot.Infrastructure.Persistence;
@@ -28,15 +35,31 @@ public static class DependencyInjection
     {
         services.AddHttpContextAccessor();
 
-        services.AddDbContext<AppDbContext>(opt =>
-            opt.UseSqlServer(cfg.GetConnectionString("SqlServer")));
+        services.AddScoped<IAuditContext, HttpAuditContext>();
+        services.AddScoped<AuditSaveChangesInterceptor>();
+        services.AddClawbotPiiRedactor(); // AuditSaveChangesInterceptor depends on IPiiRedactor.
+
+        services.AddDbContext<AppDbContext>((sp, opt) =>
+        {
+            opt.UseSqlServer(cfg.GetConnectionString("SqlServer"));
+            opt.AddInterceptors(sp.GetRequiredService<AuditSaveChangesInterceptor>());
+        });
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
-        services.AddIdentityCore<AppUser>()
+
+         // Identity and Auth    
+        services.AddIdentityCore<AppUser>(opt =>
+            {
+                opt.User.RequireUniqueEmail = true;
+                opt.Password.RequiredLength = 8;
+                opt.Lockout.MaxFailedAccessAttempts = 5;
+                opt.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+            })
             .AddRoles<AppRole>()
             .AddEntityFrameworkStores<AppDbContext>()
             .AddSignInManager()
             .AddDefaultTokenProviders();
+        services.AddAuthentication();
 
         services.AddSingleton<IConnectionMultiplexer>(_ =>
             ConnectionMultiplexer.Connect(cfg.GetConnectionString("Redis") ?? "localhost:6379"));
@@ -54,6 +77,12 @@ public static class DependencyInjection
         services.AddScoped<ITenantAccessor, HttpTenantAccessor>();
         services.Configure<EncryptionOptions>(cfg.GetSection("Encryption"));
         services.AddSingleton<IEncryptor, AesEncryptor>();
+
+        services.AddScoped<IChannelMessageIngestor, ChannelMessageIngestor>();
+        services.AddScoped<ILeadDedupService, EfLeadDedupService>();
+        services.AddScoped<IAssignmentPoolSource, EfAssignmentPoolSource>();
+        services.AddClawbotLead(); // ILeadAssignmentService, consumed by LeadsEndpoints.
+        services.AddScoped<IPancakeConfigResolver, PancakeConfigResolver>();
 
         services.AddHttpClient<IChannelAdapter, PancakeChannelAdapter>()
             .AddPolicyHandler(HttpResiliencePolicies.Retry())

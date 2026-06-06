@@ -7,3 +7,5 @@ public sealed class JwtOptions
     public string SigningKey { get; set; } = string.Empty;
     public int AccessTokenMinutes { get; set; } = 60;
 }
+
+

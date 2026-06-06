@@ -95,7 +95,7 @@ services:
   clawbot-gateway:
     build:
       context: ..
-      dockerfile: src/Clawbot.Gateway/Dockerfile
+      dockerfile: src/gateway/Clawbot.Gateway/Dockerfile
     container_name: clawbot-gateway
     ports:
       - "5050:5050"

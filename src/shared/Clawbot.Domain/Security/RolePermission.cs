@@ -5,7 +5,7 @@ namespace Clawbot.Domain.Security;
 // role_permissions — many-to-many join between roles and permissions.
 // Composite PK (role_id, permission_id); not an aggregate root.
 [SuppressMessage("Naming", "CA1711:Identifiers should not have incorrect suffix",
-    Justification = "Domain term — RBAC role↔permission join entity.")]
+    Justification = "Domain term — link table between RBAC Role and Permission.")]
 public sealed class RolePermission
 {
     public Guid RoleId { get; private set; }
