@@ -7,7 +7,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.SemanticKernel" />
+    <PackageReference Include="OpenAI" />
+    <PackageReference Include="AngleSharp" />
+    <PackageReference Include="MathNet.Numerics" />
+    <PackageReference Include="Microsoft.ML" />
+    <PackageReference Include="Microsoft.ML.TimeSeries" />
     <PackageReference Include="QuestPDF" />
   </ItemGroup>
 

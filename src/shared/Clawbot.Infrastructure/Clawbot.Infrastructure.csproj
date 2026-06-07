@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Clawbot.Application\Clawbot.Application.csproj" />
     <ProjectReference Include="..\Clawbot.Domain\Clawbot.Domain.csproj" />
     <ProjectReference Include="..\Clawbot.SharedKernel\Clawbot.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\agents\Clawbot.Agents.Contracts\Clawbot.Agents.Contracts.csproj" />
     <ProjectReference Include="..\..\agents\Clawbot.Agents.Core\Clawbot.Agents.Core.csproj" />
   </ItemGroup>
 
@@ -22,6 +23,10 @@
     <PackageReference Include="Hangfire.Core" />
     <PackageReference Include="Hangfire.AspNetCore" />
     <PackageReference Include="Hangfire.SqlServer" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Clawbot.Infrastructure.Tests" />
   </ItemGroup>
 
   <PropertyGroup>

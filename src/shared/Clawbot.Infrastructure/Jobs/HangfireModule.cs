@@ -7,7 +7,7 @@ namespace Clawbot.Infrastructure.Jobs;
 
 public static class HangfireModule
 {
-    private static readonly string[] QueueNames = { "default", "retention", "kpi" };
+    private static readonly string[] QueueNames = { "default", "retention", "kpi", "content", "ads" };
 
     public static IServiceCollection AddClawbotJobs(this IServiceCollection services, IConfiguration cfg)
     {
@@ -35,6 +35,18 @@ public static class HangfireModule
 
         services.AddScoped<RetentionPurgeJob>();
         services.AddScoped<DailyKpiRollupJob>();
+        services.AddScoped<AnomalyAlertJob>();
+        services.AddScoped<ForecastPrecomputeJob>();
+        services.AddScoped<IWeeklyTrendScanner, GrpcWeeklyTrendScanner>();
+        services.AddScoped<WeeklyTrendScanJob>();
+        services.AddScoped<ContentPublishJob>();
+        services.AddScoped<AdsRuleEvaluationJob>();
+        services.AddScoped<AdsCreativeRotationJob>();
+        services.AddScoped<AdsRemarketingJob>();
+        services.AddScoped<AdsLookalikeRefreshJob>();
+        services.AddScoped<AdsDaypartPauseJob>();
+        services.AddScoped<AdsDaypartResumeJob>();
+        services.AddScoped<WeeklyAdsReportJob>();
         return services;
     }
 
@@ -51,6 +63,61 @@ public static class HangfireModule
             "kpi-daily-rollup",
             "kpi",
             j => j.RunAsync(CancellationToken.None),
-            Cron.Daily(7, 30));
+            Cron.Daily(0, 30));
+        recurring.AddOrUpdate<AnomalyAlertJob>(
+            "kpi-anomaly-alert",
+            "kpi",
+            j => j.RunAsync(CancellationToken.None),
+            "0 * * * *");
+        recurring.AddOrUpdate<ForecastPrecomputeJob>(
+            "kpi-forecast-precompute",
+            "kpi",
+            j => j.RunAsync(CancellationToken.None),
+            "45 0 * * *");
+        recurring.AddOrUpdate<WeeklyTrendScanJob>(
+            "content-weekly-trend-scan",
+            "content",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Weekly(DayOfWeek.Monday, 0, 0));
+        recurring.AddOrUpdate<ContentPublishJob>(
+            "content-publish-due",
+            "content",
+            j => j.RunAsync(CancellationToken.None),
+            "*/5 * * * *");
+        recurring.AddOrUpdate<AdsRuleEvaluationJob>(
+            "ads-rule-evaluation",
+            "ads",
+            j => j.RunAsync(CancellationToken.None),
+            "0 */4 * * *");
+        recurring.AddOrUpdate<AdsCreativeRotationJob>(
+            "ads-creative-rotation",
+            "ads",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Daily(3));
+        recurring.AddOrUpdate<AdsRemarketingJob>(
+            "ads-remarketing",
+            "ads",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Daily(4));
+        recurring.AddOrUpdate<AdsLookalikeRefreshJob>(
+            "ads-lookalike-refresh",
+            "ads",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Weekly(DayOfWeek.Monday, 1, 0));
+        recurring.AddOrUpdate<AdsDaypartPauseJob>(
+            "ads-daypart-pause",
+            "ads",
+            j => j.RunAsync(CancellationToken.None),
+            "0 19 * * *");
+        recurring.AddOrUpdate<AdsDaypartResumeJob>(
+            "ads-daypart-resume",
+            "ads",
+            j => j.RunAsync(CancellationToken.None),
+            "0 22 * * *");
+        recurring.AddOrUpdate<WeeklyAdsReportJob>(
+            "ads-weekly-report",
+            "ads",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Weekly(DayOfWeek.Monday, 2, 0));
     }
 }

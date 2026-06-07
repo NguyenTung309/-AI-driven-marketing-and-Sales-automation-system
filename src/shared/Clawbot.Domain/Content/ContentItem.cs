@@ -19,11 +19,18 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
 
     private ContentItem() { }
 
-    public static ContentItem Create(Guid tenantId, string platform, string body, Guid? createdBy, DateTimeOffset createdAt) =>
+    public static ContentItem Create(
+        Guid tenantId,
+        string platform,
+        string body,
+        Guid? createdBy,
+        DateTimeOffset createdAt,
+        Guid? briefId = null) =>
         new()
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
+            BriefId = briefId,
             Platform = platform,
             Body = body,
             CreatedBy = createdBy,
@@ -36,7 +43,48 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
         Status = "approved";
         ApprovedBy = approverUserId;
         ApprovedAt = at;
+        UpdatedAt = at;
     }
 
-    public void Reject() => Status = "rejected";
+    public void Reject(DateTimeOffset at)
+    {
+        Status = "rejected";
+        UpdatedAt = at;
+    }
+
+    public void UpdateBody(string body, DateTimeOffset at)
+    {
+        Body = body;
+        UpdatedAt = at;
+    }
+
+    public void MarkScheduled(DateTimeOffset at)
+    {
+        Status = "scheduled";
+        UpdatedAt = at;
+    }
+
+    public void MarkPublished(DateTimeOffset at)
+    {
+        Status = "published";
+        UpdatedAt = at;
+    }
+
+    public void SoftDelete(DateTimeOffset at)
+    {
+        DeletedAt = at;
+        UpdatedAt = at;
+    }
+
+    public void SetAssets(string json, DateTimeOffset at)
+    {
+        AssetsJson = json;
+        UpdatedAt = at;
+    }
+
+    public void RevertToApproved(DateTimeOffset at)
+    {
+        Status = "approved";
+        UpdatedAt = at;
+    }
 }

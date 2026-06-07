@@ -6,6 +6,8 @@ package clawbot.agents.report;
 
 service ReportAgent {
   rpc DailySnapshot (DailySnapshotRequest) returns (DailySnapshotResponse);
+  rpc Forecast (ForecastRequest) returns (ForecastResponse);
+  rpc DetectAnomaly (DetectAnomalyRequest) returns (DetectAnomalyResponse);
 }
 
 message DailySnapshotRequest {
@@ -25,4 +27,41 @@ message PlatformKpi {
   int32 conversions = 5;
   double avg_response_time_sec = 6;
   double ad_spend = 7;
+}
+
+message ForecastRequest {
+  string tenant_id = 1;
+  string platform = 2;
+  string metric = 3;
+  int32 horizon_days = 4;
+}
+
+message ForecastResponse {
+  repeated ForecastPointDto points = 1;
+}
+
+message ForecastPointDto {
+  string date = 1;                 // YYYY-MM-DD
+  double value = 2;
+  double lower_bound = 3;
+  double upper_bound = 4;
+}
+
+message DetectAnomalyRequest {
+  string tenant_id = 1;
+  string platform = 2;
+  string metric = 3;
+  double z_threshold = 4;
+  int32 lookback_days = 5;
+}
+
+message DetectAnomalyResponse {
+  repeated AnomalyPointDto points = 1;
+}
+
+message AnomalyPointDto {
+  string date = 1;                 // YYYY-MM-DD
+  double value = 2;
+  double z_score = 3;
+  bool is_anomaly = 4;
 }

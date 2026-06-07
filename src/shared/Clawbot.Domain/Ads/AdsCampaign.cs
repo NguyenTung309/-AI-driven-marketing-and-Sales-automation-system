@@ -10,6 +10,8 @@ public sealed class AdsCampaign : AggregateRoot<Guid>, ITenantOwned
     public string? Objective { get; private set; }
     public decimal? DailyBudget { get; private set; }
     public string? Status { get; private set; }
+    public decimal? TargetCpl { get; private set; }
+    public bool DaypartPaused { get; private set; }
     public DateTimeOffset? SyncedAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -26,4 +28,44 @@ public sealed class AdsCampaign : AggregateRoot<Guid>, ITenantOwned
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         };
+
+    public void MarkSynced(string? objective, decimal? dailyBudget, string? status, decimal? targetCpl, DateTimeOffset at)
+    {
+        Objective = objective;
+        DailyBudget = dailyBudget;
+        Status = status;
+        TargetCpl = targetCpl;
+        SyncedAt = at;
+        UpdatedAt = at;
+    }
+
+    public void Pause(DateTimeOffset at)
+    {
+        Status = "PAUSED";
+        UpdatedAt = at;
+    }
+
+    public void Resume(DateTimeOffset at)
+    {
+        Status = "ACTIVE";
+        UpdatedAt = at;
+    }
+
+    public void ScaleBudget(decimal newDailyBudget, DateTimeOffset at)
+    {
+        DailyBudget = newDailyBudget;
+        UpdatedAt = at;
+    }
+
+    public void UpdateStatus(string status, DateTimeOffset at)
+    {
+        Status = status;
+        UpdatedAt = at;
+    }
+
+    public void MarkDaypartPaused(bool paused, DateTimeOffset at)
+    {
+        DaypartPaused = paused;
+        UpdatedAt = at;
+    }
 }

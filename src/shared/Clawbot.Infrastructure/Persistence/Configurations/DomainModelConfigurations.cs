@@ -385,6 +385,28 @@ public sealed class AdsActionConfiguration : IEntityTypeConfiguration<AdsAction>
     }
 }
 
+public sealed class AdsCreativeConfiguration : IEntityTypeConfiguration<AdsCreative>
+{
+    public void Configure(EntityTypeBuilder<AdsCreative> builder)
+    {
+        builder.ToTable("ads_creatives");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.ExternalCreativeId).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.Status).HasMaxLength(16).IsRequired();
+        builder.HasIndex(x => new { x.CampaignId, x.Status });
+    }
+}
+
+public sealed class AdsMetricsDailyConfiguration : IEntityTypeConfiguration<AdsMetricsDaily>
+{
+    public void Configure(EntityTypeBuilder<AdsMetricsDaily> builder)
+    {
+        builder.ToTable("ads_metrics_daily");
+        builder.HasKey(x => x.Id);
+        builder.HasIndex(x => new { x.CampaignId, x.MetricDate }).IsUnique();
+    }
+}
+
 public sealed class KpiDailyConfiguration : IEntityTypeConfiguration<KpiDaily>
 {
     public void Configure(EntityTypeBuilder<KpiDaily> builder)
@@ -393,5 +415,18 @@ public sealed class KpiDailyConfiguration : IEntityTypeConfiguration<KpiDaily>
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
         builder.HasIndex(x => new { x.TenantId, x.Date, x.Platform }).IsUnique();
+    }
+}
+
+public sealed class KpiForecastConfiguration : IEntityTypeConfiguration<KpiForecast>
+{
+    public void Configure(EntityTypeBuilder<KpiForecast> builder)
+    {
+        builder.ToTable("kpi_forecast");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.Metric).HasMaxLength(64).IsRequired();
+        builder.HasIndex(x => new { x.TenantId, x.Platform, x.Metric, x.ForecastDate }).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.Metric, x.ForecastDate });
     }
 }
