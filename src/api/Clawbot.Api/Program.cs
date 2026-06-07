@@ -4,10 +4,12 @@ using Clawbot.Api.Auth;
 using Clawbot.Api.Endpoints;
 using Clawbot.Api.Hubs;
 using Clawbot.Api.Middleware;
+using Clawbot.Api.Services;
 using Clawbot.Application;
 using Clawbot.Infrastructure;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Jobs;
+using Clawbot.SharedKernel.Content;
 using Clawbot.SharedKernel.Inbox;
 using Hangfire;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -46,6 +48,9 @@ builder.Services.AddAuthorization();
 builder.Services.AddClawbotRateLimiting();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IInboxNotifier, SignalRInboxNotifier>();
+builder.Services.AddScoped<IContentNotifier, SignalRContentNotifier>();
+builder.Services.AddScoped<AnalyticsAggregationService>();
+builder.Services.AddScoped<AnalyticsExportService>();
 
 var agentServiceUrl = builder.Configuration["AgentService:Url"] ?? "http://localhost:5050";
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.SaleAssist.SaleAssistAgent.SaleAssistAgentClient>(o =>
@@ -53,6 +58,22 @@ builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.SaleAssist.SaleAssistAge
     o.Address = new Uri(agentServiceUrl);
 });
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Docs.DocsAgent.DocsAgentClient>(o =>
+{
+    o.Address = new Uri(agentServiceUrl);
+});
+builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Content.ContentAgent.ContentAgentClient>(o =>
+{
+    o.Address = new Uri(agentServiceUrl);
+});
+builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Research.ResearchAgent.ResearchAgentClient>(o =>
+{
+    o.Address = new Uri(agentServiceUrl);
+});
+builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Ads.AdsAgent.AdsAgentClient>(o =>
+{
+    o.Address = new Uri(agentServiceUrl);
+});
+builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Report.ReportAgent.ReportAgentClient>(o =>
 {
     o.Address = new Uri(agentServiceUrl);
 });
@@ -86,6 +107,9 @@ app.MapApiKeys();
 app.MapKb();
 app.MapInbox();
 app.MapSaleAssist();
+app.MapContent();
+app.MapAds();
+app.MapAnalytics();
 app.MapDocuments();
 app.MapLeads();
 app.MapChatScenarios();

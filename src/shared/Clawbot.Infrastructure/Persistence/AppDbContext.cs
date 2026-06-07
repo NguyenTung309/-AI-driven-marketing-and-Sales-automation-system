@@ -78,9 +78,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<AdsCampaign> AdsCampaigns => Set<AdsCampaign>();
     public DbSet<AdsRule> AdsRules => Set<AdsRule>();
     public DbSet<AdsAction> AdsActions => Set<AdsAction>();
+    public DbSet<AdsCreative> AdsCreatives => Set<AdsCreative>();
+    public DbSet<AdsMetricsDaily> AdsMetricsDailies => Set<AdsMetricsDaily>();
 
     // Analytics
     public DbSet<KpiDaily> KpiDailies => Set<KpiDaily>();
+    public DbSet<KpiForecast> KpiForecasts => Set<KpiForecast>();
 
     // Channels
     public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();

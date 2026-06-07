@@ -4,6 +4,8 @@ namespace Clawbot.Domain.Content;
 
 public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
 {
+    public const int MaxRetries = 3;
+
     public Guid TenantId { get; private set; }
     public Guid ContentItemId { get; private set; }
     public string Platform { get; private set; } = string.Empty;
@@ -13,6 +15,7 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
     public string? PostUrl { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
+    public int RetryCount { get; private set; }
 
     private ContentSchedule() { }
 
@@ -38,7 +41,31 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
         Status = "posted";
         PostedAt = at;
         PostUrl = postUrl;
+        UpdatedAt = at;
     }
 
-    public void MarkFailed() => Status = "failed";
+    public void MarkFailed(DateTimeOffset at)
+    {
+        Status = "failed";
+        UpdatedAt = at;
+    }
+
+    public bool RecordRetry(DateTimeOffset at)
+    {
+        RetryCount++;
+        UpdatedAt = at;
+        if (RetryCount >= MaxRetries)
+        {
+            Status = "failed";
+            return false;
+        }
+
+        return true;
+    }
+
+    public void Cancel(DateTimeOffset at)
+    {
+        Status = "canceled";
+        UpdatedAt = at;
+    }
 }

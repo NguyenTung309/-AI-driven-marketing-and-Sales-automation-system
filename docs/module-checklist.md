@@ -335,18 +335,19 @@
 - [ ] p95 <30s instrument → after OTel histograms
 - [ ] EF migration for new rows is data-seed only (DDL `document_templates`/`generated_documents` already in `0001_init.sql`)
 
-### M20 — Analytics KPI daily + Metabase · Imp 4 · Diff 3 · T11
-- [ ] `KpiAggregator` service — daily roll-up vào `kpi_daily`
-- [ ] Metabase docker service trong compose
-- [ ] Metabase dashboard JSON checked-in `deploy/metabase/`
-- [ ] `AnalyticsEndpoints.cs` (5 channel + funnel + agent perf)
-- [ ] Anomaly alert qua `IAnomalyDetector` (CPL spike)
-- [ ] 7-day forecast via `IForecaster`
-- [ ] CSV/PDF export
+### M20 — Analytics KPI daily + Metabase · Imp 4 · Diff 3 · T11 · **DONE 2026-06-07**
+- [x] `KpiAggregator` service — daily roll-up vào `kpi_daily`
+- [x] Metabase docker service trong compose
+- [x] Metabase dashboard JSON checked-in `deploy/metabase/`
+- [x] `AnalyticsEndpoints.cs` (5 channel + funnel + agent perf)
+- [x] Anomaly alert qua `IAnomalyDetector` (CPL spike)
+- [x] 7-day forecast via `IForecaster`
+- [x] CSV/PDF export
 
 ### M21 — Test infra · Imp 4 · Diff 2 · T1 ongoing
 - [ ] Add `Clawbot.Integration.Tests` project với Testcontainers.MsSql
 - [ ] Add `Clawbot.Agents.Tests` project
+- [ ] M18 full HTTP endpoint tests for `/api/content`
 - [ ] CI workflow `.github/workflows/test.yml` (build + test + coverage report)
 - [ ] Coverage gate ≥80% in CI fail build dưới ngưỡng
 - [ ] xUnit + FluentAssertions + NSubstitute conventions
@@ -356,25 +357,42 @@
 
 ## P2 — Medium (2 module)
 
-### M18 — Content + Research pipeline · Imp 3 · Diff 3 · T8
-- [ ] Impl `ContentAgentGrpcService` + `ResearchAgentGrpcService`
-- [ ] Brief CRUD endpoint
-- [ ] Content gen per-platform (TikTok/IG/FB/YT/Zalo)
-- [ ] Approve workflow (approved_by + approved_at)
-- [ ] Schedule integration (Buffer/Later API)
-- [ ] Weekly trend scan job (Monday 7am)
-- [ ] Repurpose flow (TikTok → Reels + Shorts)
+### M18 — Content + Research pipeline · Imp 3 · Diff 3 · T8 · **DONE 2026-06-07**
+- [x] Impl `ContentAgentGrpcService` + `ResearchAgentGrpcService`
+- [x] Brief CRUD endpoint
+- [x] Content gen per-platform (TikTok/IG/FB/YT/Zalo)
+- [x] Approve workflow (approved_by + approved_at)
+- [x] Schedule integration (Buffer/Later API)
+- [x] Weekly trend scan job (Monday 7am)
+- [x] Repurpose flow (TikTok → Reels + Shorts)
+- [x] Schedule API (`POST /items/{id}/schedule`, `GET /calendar`, `DELETE /schedule/{id}`)
+- [x] `IGoldenHourResolver` + `IContentNotifier` + `SignalRContentNotifier`
+- [x] `ContentPublishJob` with retry (3 attempts before terminal failure)
+- [x] Content prompt templates seeded in appsettings (5 platforms)
+- [x] OpenAI 2.11.0 GA (removed unused SemanticKernel dependency)
+- [x] Domain methods: `SoftDelete`, `SetAssets`, `RevertToApproved` (replaced EF property-bag mutation)
+- [x] Seed `deploy/seed/content-briefs.sql` + migration `0002_content_schedule_retry_count.sql`
+- [x] AgentService gRPC service tests (`ContentAgentGrpcService`, `ResearchAgentGrpcService`) with SQLite fixture + NSubstitute
+- [x] Deployment + monitoring feature docs filled
+- [x] Full HTTP endpoint tests deferred to M21 (repo integration-test pattern)
+- [x] Build 0/0, 168 tests green
 
-### M19 — Ads automation (Meta + TikTok) · Imp 3 · Diff 4 · T10
-- [ ] Impl `AdsAgentGrpcService`
-- [ ] Meta Marketing API connector
-- [ ] TikTok Business API connector
-- [ ] `ads_rules` CRUD endpoint
-- [ ] Rule engine: pause when CPL>threshold, scale +20% when good
-- [ ] Frequency rotation when freq>2
-- [ ] Budget 90% alert
-- [ ] Lookalike audience builder
-- [ ] Weekly ads report job
+### M19 — Ads automation (Meta + TikTok) · Imp 3 · Diff 4 · T10 · **DONE 2026-06-07**
+- [x] Impl `AdsAgentGrpcService` (Evaluate, BuildLookalike, Remarket, HandleSignal)
+- [x] Meta Marketing API connector (`MetaAdsConnector`, config-gated, graceful)
+- [x] TikTok Business API connector (`TikTokAdsConnector`, config-gated, graceful)
+- [x] `ads_rules` CRUD endpoint (`/api/ads/rules`)
+- [x] Rule engine: relative CPL (target×multiplier), absolute freq/ctr/spend, 3-day streak gate, 24h cooldown
+- [x] Frequency rotation (creative inventory `ads_creatives`, active↔standby)
+- [x] Budget 90% alert (webhook + SignalR)
+- [x] Lookalike audience builder (leads stage∈{hot,won} → contacts → seed, skip <100)
+- [x] Weekly ads report job (`WeeklyAdsReportJob`, Mon GMT+7)
+- [x] Dayparting pause/resume (02:00–05:00 GMT+7, `DaypartPaused` flag)
+- [x] 7 Hangfire jobs registered (rule eval, rotation, remarketing, lookalike, daypart pause/resume, weekly report)
+- [x] Migrations: `0003` (target_cpl + daypart_paused), `0004` (ads_creatives), `0005` (ads_metrics_daily)
+- [x] Seed `deploy/seed/ads-rules.sql` (idempotent MERGE, 5 rules per platform)
+- [x] Config: `Ads:Meta` + `Ads:TikTok` in both appsettings + `.env.example`
+- [x] Build 0/0, 192 tests green (+24 new ads tests)
 
 ---
 

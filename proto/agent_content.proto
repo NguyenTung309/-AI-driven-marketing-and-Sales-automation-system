@@ -6,16 +6,33 @@ package clawbot.agents.content;
 
 service ContentAgent {
   rpc Generate (ContentRequest) returns (ContentResponse);
+  rpc Repurpose (RepurposeRequest) returns (ContentResponse);
 }
 
 message ContentRequest {
   string tenant_id = 1;
   string brief = 2;
   string channel = 3;
+  string brief_id = 4;
 }
 
 message ContentResponse {
   string content_id = 1;
   string title = 2;
   string body = 3;
+  repeated ContentVariant variants = 4;
+}
+
+message ContentVariant {
+  string platform = 1;
+  string title = 2;
+  string body = 3;
+  string content_id = 4;
+}
+
+message RepurposeRequest {
+  string tenant_id = 1;
+  string content_id = 2;
+  repeated string target_channels = 3;
+  string source_body = 4;
 }
