@@ -3,7 +3,7 @@
 > Persistent tracking. Tick `[x]` khi xong. Nguồn plan: [../C:/Users/AdminDatVo/.claude/plans/wiggly-wandering-blum.md] + [spec-audit.md](spec-audit.md).
 > Convention: `[ ]` chưa làm · `[~]` đang làm · `[x]` xong · `[!]` blocked.
 >
-> Last updated: 2026-05-28
+> Last updated: 2026-06-07
 
 ---
 
@@ -180,30 +180,6 @@
 - [ ] Pipeline forecast endpoint `GET /api/leads/forecast` → after M11 `IForecaster`
 - [ ] Lead import/export CSV → P3
 - [ ] Telegram alert <2 min on hot lead → after M12 + Telegram channel adapter
-
-### M14 — Agent-SaleAssist · Imp 5 · Diff 3 · T5
-- [ ] Impl `SaleAssistAgentGrpcService` (Draft/Summary/Alert)
-- [ ] `GET /api/sale-assist/draft?conversationId=` returns Claude-drafted reply
-- [ ] `GET /api/sale-assist/summary?conversationId=` thread summary
-- [ ] `quick_reply_templates` CRUD + endpoint `GET /api/quick-replies`
-- [ ] Alert job: conversation idle >5 min → Telegram + SignalR
-- [ ] Context panel API: lead history + score + next-step suggestion
-- [ ] Upsell suggestion when lead.stage='hot' + gói ngắn
-- [ ] Sale tone check (block banned phrases) before send
-- [ ] Daily summary endpoint `GET /api/sale-assist/daily-summary`
-
-### M15 — Lead scoring + dedup + drip · Imp 5 · Diff 3 · T7
-- [ ] Impl `LeadAgentGrpcService` (Score/Dedup/Drip/Assign)
-- [ ] `LeadScoringEngine`: read `lead_scoring_rules` → weighted sum events
-- [ ] `lead_scoring_rules` seed defaults (asks_price+10, shares_phone+20, etc.)
-- [ ] Stage classifier: cold<30, warm 30–70, hot≥70
-- [ ] Auto-assign hot lead + Telegram alert <2 min
-- [ ] Dedup via Qdrant similarity ≥0.92 on (name+phone tail+email embedding)
-- [ ] Drip sequences (Hangfire jobs) — per-channel templates
-- [ ] No-show follow-up 2h after demo missed
-- [ ] Re-engage stale lead 30d via `IContactEnricher` (M11)
-- [ ] Pipeline forecast endpoint `GET /api/leads/forecast`
-- [ ] Lead import/export CSV
 
 ---
 
@@ -401,20 +377,19 @@
 | Tuần | Modules in-flight | Modules done | Notes |
 |:-:|---|---|---|
 | T0 | — | (skeleton only) | Domain entities + proto + grpc stubs |
-| T1 | M03 | **M01**, **M02**, **M04** | Build xanh 0/0. |
-| T3 (early) | — | **M09 spike** (Qdrant real + RAG wire + RFC-001) | SK plugin-host only / Anthropic direct chosen. Real embedder defer. |
-| T2 | | | |
-| T3 | | | |
-| T4 | | | |
-| T5 | | | |
-| T6 | | | |
-| T7 | | | |
-| T8 | | | |
-| T9 | | | |
-| T10 | | | |
-| T11 | | | |
-| T12 | | | |
-| T13 | | | |
+| T1 | — | **M01**, **M02**, **M04**, **M09 spike** | Build xanh 0/0. SK plugin-host / Anthropic direct (RFC-001). |
+| T2 | — | **M03**, **M05**, **M12**, **M13** | Audit/PII, chat scenarios seed, Hangfire, rate-limit + webhook HMAC. |
+| T3 | — | **M11** (P0 subset) | Intent/sentiment/PII/injection/cost heuristics wired into ChatAgent. |
+| T4 | — | **M06**, **M08**, **M10** | Pancake unified adapter, omnichannel inbox, Agent-Chat (gRPC). |
+| T5 | — | **M14** | Agent-SaleAssist (draft + summary + quick replies). |
+| T6 | — | — | (M10 token-streaming / latency opt deferred) |
+| T7 | — | **M15** | Lead scoring + dedup + round-robin assign. |
+| T8 | — | **M18** | Content + Research pipeline (commit cf553a0). |
+| T9 | — | **M17** | Document generation — QuestPDF (commit 9eb8e6d). |
+| T10 | — | **M19** | Ads automation Meta+TikTok (commit fcddfbe). |
+| T11 | — | **M20** | Analytics KPI + Metabase + anomaly/forecast (commit cf553a0). |
+| T12 | **M16** | — | Frontend UI (12 surfaces) — pending. |
+| T13 | **M21** | — | Test infra: integration (Testcontainers) + CI + coverage gate — pending. |
 
 ---
 
