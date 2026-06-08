@@ -1,6 +1,7 @@
 using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Conversations;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.Infrastructure.Vectors;
 using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Inbox;
 using Clawbot.SharedKernel.Time;
@@ -20,11 +21,13 @@ public sealed partial class ChannelMessageIngestor(
     AppDbContext db,
     IInboxNotifier notifier,
     IClock clock,
+    IContactEmbeddingSync embeddingSync,
     ILogger<ChannelMessageIngestor> logger) : IChannelMessageIngestor
 {
     private readonly AppDbContext _db = db;
     private readonly IInboxNotifier _notifier = notifier;
     private readonly IClock _clock = clock;
+    private readonly IContactEmbeddingSync _embeddingSync = embeddingSync;
     private readonly ILogger<ChannelMessageIngestor> _logger = logger;
 
     public async Task<IngestResult> IngestAsync(Guid tenantId, ChannelMessage message, CancellationToken ct = default)
@@ -92,6 +95,17 @@ public sealed partial class ChannelMessageIngestor(
         var contact = Contact.Create(tenantId, displayName, _clock.UtcNow);
         contact.LinkExternalId(message.Channel, message.ExternalUserId, _clock.UtcNow);
         _db.Contacts.Add(contact);
+
+        // C6: Upsert contact embedding to Qdrant "contacts" collection for fuzzy dedup
+        try
+        {
+            await _embeddingSync.UpsertContactAsync(contact, tenantId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            LogEmbeddingUpsertFailed(_logger, ex, contact.Id);
+        }
+
         return contact;
     }
 
@@ -110,4 +124,7 @@ public sealed partial class ChannelMessageIngestor(
 
     [LoggerMessage(EventId = 3001, Level = LogLevel.Information, Message = "Duplicate inbound message ignored for conv {ConversationId} thread {ThreadId}")]
     private static partial void LogDuplicate(ILogger logger, Guid conversationId, string threadId);
+
+    [LoggerMessage(EventId = 3002, Level = LogLevel.Warning, Message = "Contact embedding upsert failed for {ContactId}")]
+    private static partial void LogEmbeddingUpsertFailed(ILogger logger, Exception ex, Guid contactId);
 }

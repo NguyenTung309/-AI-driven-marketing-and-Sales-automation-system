@@ -231,13 +231,20 @@
 - [x] Build xanh 12 projects, 0/0
 
 **P1 skills (T5–T7):**
-- [ ] `IConversationSummarizer` — Claude SK
-- [ ] `ILanguageDetector` — fasttext lid.176
-- [ ] `ISpamDetector` — Akismet + heuristic fallback
-- [ ] `IToxicityFilter` — detoxify sidecar
-- [ ] `ILeadDeduplicator` — Qdrant cosine
-- [ ] `IContactEnricher` — Hunter.io + Apollo.io
-- [ ] `ITimezoneDetector` — NodaTime + libphonenumber
+- [x] `IConversationSummarizer` — Claude SK (config-externalized prompt via IClaudeChatClient)
+- [x] `ILanguageDetector` — heuristic Unicode/diacritic + optional fasttext sidecar
+- [x] `ISpamDetector` — heuristic URL/emoji/scam-keyword + optional Akismet HTTP
+- [x] `IToxicityFilter` — heuristic VI/EN profanity lexicon + optional detoxify sidecar
+- [x] `ILeadDeduplicator` — Qdrant cosine via IEmbeddingProvider + IVectorStore
+- [x] `IContactEnricher` — config-gated Hunter/Apollo HTTP + heuristic email-domain fallback
+- [x] `ITimezoneDetector` — heuristic E.164 country-code → IANA map (VN default)
+- [x] ChatAgent wired: language→system prompt, toxicity→inbound/outbound block, spam→flag
+- [x] Lead create wired: dedup + enrich + timezone + spam via gRPC CreateWithSkills
+- [x] SaleAssist wired: auto-summary via IConversationSummarizer + tone check via IToxicityFilter
+- [x] Contacts→Qdrant: upsert on contact create via ContactEmbeddingSync + backfill script
+- [x] Config: Skills:* in appsettings.json (×2) + deploy/.env.example
+- [x] Tests: 7 skills + ChatAgent wiring (P1NlpSkillTests + P1LeadSkillTests + ChatAgentWiringTests)
+- [x] Build xanh 12 projects, 0/0
 
 **P2 skills (T8–T10):**
 - [ ] `IHashtagResearcher` — TikTok CC + Google Trends VN

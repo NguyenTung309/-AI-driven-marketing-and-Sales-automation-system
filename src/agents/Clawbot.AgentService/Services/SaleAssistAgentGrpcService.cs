@@ -1,19 +1,29 @@
 using Clawbot.Agents.Contracts.SaleAssist;
+using Clawbot.Agents.Core.Skills.Nlp;
+using Clawbot.Domain.Agents;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Time;
 using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using CoreSale = Clawbot.Agents.Core.SaleAssist;
 
 namespace Clawbot.AgentService.Services;
 
-public sealed class SaleAssistAgentGrpcService(
+public sealed partial class SaleAssistAgentGrpcService(
     CoreSale.SaleAssistAgent agent,
-    AppDbContext db) : SaleAssistAgent.SaleAssistAgentBase
+    IPiiRedactor pii,
+    AppDbContext db,
+    IClock clock,
+    ILogger<SaleAssistAgentGrpcService> logger) : SaleAssistAgent.SaleAssistAgentBase
 {
     private const int RecentTurnsLimit = 12;
 
     private readonly CoreSale.SaleAssistAgent _agent = agent;
+    private readonly IPiiRedactor _pii = pii;
     private readonly AppDbContext _db = db;
+    private readonly IClock _clock = clock;
+    private readonly ILogger<SaleAssistAgentGrpcService> _logger = logger;
 
     public override async Task<DraftResponse> Draft(DraftRequest request, ServerCallContext context)
     {
@@ -41,6 +51,58 @@ public sealed class SaleAssistAgentGrpcService(
 
         return new SummarizeResponse { Summary = result.Summary };
     }
+
+    public override async Task<AutoSummaryResponse> AutoSummaryOnResolve(AutoSummaryRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var ctx = await LoadContextAsync(request.TenantId, request.ConversationId, context.CancellationToken).ConfigureAwait(false);
+        var result = await _agent.AutoSummaryAsync(ctx, context.CancellationToken).ConfigureAwait(false);
+
+        // Persist auto-summary to agent_sessions trace (no schema change)
+        // Redact PII from summary before persisting — derived from raw customer messages
+        if (Guid.TryParse(request.TenantId, out var tenantId) && Guid.TryParse(request.ConversationId, out var convId))
+        {
+            var redactedSummary = await _pii.RedactAsync(result.Summary, context.CancellationToken).ConfigureAwait(false);
+            var redactedKeyPoints = new List<string>();
+            foreach (var kp in result.KeyPoints)
+            {
+                var redacted = await _pii.RedactAsync(kp, context.CancellationToken).ConfigureAwait(false);
+                redactedKeyPoints.Add(redacted.RedactedText);
+            }
+
+            var traceContent = $"summary={redactedSummary.RedactedText} key_points={redactedKeyPoints.Count}";
+            var session = AgentSession.Start(tenantId, agentId: null, conversationId: convId,
+                goal: "auto-summary-on-resolve", startedAt: _clock.UtcNow);
+            session.AppendTrace("sale-assist", "auto-summary", "completed", traceContent, _clock.UtcNow);
+            session.Finish(_clock.UtcNow);
+            _db.AgentSessions.Add(session);
+            await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
+            LogAutoSummaryPersisted(_logger, convId, redactedKeyPoints.Count);
+
+            // Return redacted summary to caller
+            var redactedResponse = new AutoSummaryResponse
+            {
+                Summary = redactedSummary.RedactedText,
+                Persisted = true
+            };
+            redactedResponse.KeyPoints.AddRange(redactedKeyPoints);
+            return redactedResponse;
+        }
+
+        // Fallback: GUID parse failed, return unredacted (shouldn't happen in practice)
+        var response = new AutoSummaryResponse
+        {
+            Summary = result.Summary,
+            Persisted = false
+        };
+        response.KeyPoints.AddRange(result.KeyPoints);
+        return response;
+    }
+
+    [LoggerMessage(EventId = 8001, Level = LogLevel.Information, Message = "Auto-summary persisted for conversation {ConversationId} with {KeyPointCount} key points")]
+    private static partial void LogAutoSummaryPersisted(ILogger logger, Guid conversationId, int keyPointCount);
 
     private async Task<CoreSale.ConversationContext> LoadContextAsync(string tenantId, string conversationId, CancellationToken ct)
     {
