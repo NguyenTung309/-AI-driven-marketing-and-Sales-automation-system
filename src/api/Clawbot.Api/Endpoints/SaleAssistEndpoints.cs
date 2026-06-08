@@ -1,4 +1,5 @@
 using Clawbot.Agents.Contracts.SaleAssist;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.SaleAssist;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Infrastructure.Persistence;
@@ -12,7 +13,8 @@ public static class SaleAssistEndpoints
 {
     public static IEndpointRouteBuilder MapSaleAssist(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/sale-assist").RequireAuthorization();
+        // SPEC-11 §6a: entire sale-assist surface requires sale-assist:use.
+        var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use");
 
         grp.MapPost("/draft", DraftAsync);
         grp.MapPost("/summary", SummarizeAsync);

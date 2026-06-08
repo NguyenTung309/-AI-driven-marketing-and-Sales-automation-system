@@ -1,5 +1,8 @@
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Security;
 using Clawbot.Domain.Security;
+using Clawbot.Infrastructure.Auth;
+using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
@@ -11,7 +14,8 @@ public static class RolesEndpoints
 {
     public static IEndpointRouteBuilder MapRoles(this IEndpointRouteBuilder app)
     {
-        var roles = app.MapGroup("/api/rbac/roles").RequireAuthorization();
+        // SPEC-11 §6a: the whole RBAC editor requires rbac:manage (Admin only).
+        var roles = app.MapGroup("/api/rbac/roles").RequirePermission("rbac:manage");
 
         roles.MapGet("/", ListRolesAsync);
         roles.MapPost("/", CreateRoleAsync);
@@ -20,7 +24,7 @@ public static class RolesEndpoints
         roles.MapGet("/{id:guid}/permissions", ListRolePermissionsAsync);
         roles.MapPut("/{id:guid}/permissions", SetRolePermissionsAsync);
 
-        var perms = app.MapGroup("/api/rbac/permissions").RequireAuthorization();
+        var perms = app.MapGroup("/api/rbac/permissions").RequirePermission("rbac:manage");
         perms.MapGet("/", ListPermissionsAsync);
 
         return app;
@@ -92,15 +96,14 @@ public static class RolesEndpoints
         return Results.NoContent();
     }
 
+    // SPEC-11 D7: read/write role_permissions keyed on the fixed Identity AppRole.Id (the
+    // same store the backend resolves permissions from) — not the domain RbacRoles + tenant.
     private static async Task<IResult> ListRolePermissionsAsync(
         Guid id,
         AppDbContext db,
-        ITenantAccessor tenants,
         CancellationToken ct)
     {
-        var tenantId = tenants.Require().TenantId;
-        var owns = await db.RbacRoles.AnyAsync(r => r.Id == id && r.TenantId == tenantId, ct);
-        if (!owns) return Results.NotFound();
+        if (!RbacSeeder.RoleIds.Values.Contains(id)) return Results.NotFound();
 
         var perms = await (
             from rp in db.RolePermissions
@@ -114,12 +117,10 @@ public static class RolesEndpoints
         Guid id,
         SetRolePermissionsRequest req,
         AppDbContext db,
-        ITenantAccessor tenants,
+        IPermissionResolver permissions,
         CancellationToken ct)
     {
-        var tenantId = tenants.Require().TenantId;
-        var role = await db.RbacRoles.FirstOrDefaultAsync(r => r.Id == id && r.TenantId == tenantId, ct);
-        if (role is null) return Results.NotFound();
+        if (!RbacSeeder.RoleIds.Values.Contains(id)) return Results.NotFound();
 
         var existing = db.RolePermissions.Where(rp => rp.RoleId == id);
         db.RolePermissions.RemoveRange(existing);
@@ -133,6 +134,8 @@ public static class RolesEndpoints
             db.RolePermissions.Add(RolePermission.Create(id, permissionId));
 
         await db.SaveChangesAsync(ct);
+        // SPEC-11 D7: invalidate the cache so the permission change takes effect immediately.
+        await permissions.InvalidateAsync(id, ct);
         return Results.NoContent();
     }
 

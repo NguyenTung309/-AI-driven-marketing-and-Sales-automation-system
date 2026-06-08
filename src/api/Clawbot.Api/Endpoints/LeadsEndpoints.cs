@@ -1,4 +1,5 @@
 using Clawbot.Agents.Core.Lead;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Leads;
 using Clawbot.Domain.Leads;
 using Clawbot.Infrastructure.Persistence;
@@ -13,15 +14,17 @@ public static class LeadsEndpoints
 {
     public static IEndpointRouteBuilder MapLeads(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/leads").RequireAuthorization();
+        // SPEC-11 §6a: reads need leads:read, mutations leads:write.
+        var grp = app.MapGroup("/api/leads");
 
-        grp.MapGet("/", ListAsync);
-        grp.MapGet("/{id:guid}", GetAsync);
-        grp.MapPost("/", CreateAsync);
-        grp.MapPost("/{id:guid}/activities", RecordActivityAsync);
-        grp.MapPost("/{id:guid}/assign", AssignAsync);
+        grp.MapGet("/", ListAsync).RequirePermission("leads:read");
+        grp.MapGet("/{id:guid}", GetAsync).RequirePermission("leads:read");
+        grp.MapPost("/", CreateAsync).RequirePermission("leads:write");
+        grp.MapPost("/{id:guid}/activities", RecordActivityAsync).RequirePermission("leads:write");
+        grp.MapPost("/{id:guid}/assign", AssignAsync).RequirePermission("leads:write");
 
-        var rules = app.MapGroup("/api/lead-scoring-rules").RequireAuthorization();
+        // §6a: lead-scoring-rules is leads:write across the board.
+        var rules = app.MapGroup("/api/lead-scoring-rules").RequirePermission("leads:write");
         rules.MapGet("/", ListRulesAsync);
         rules.MapPost("/", CreateRuleAsync);
         rules.MapDelete("/{id:guid}", DeactivateRuleAsync);

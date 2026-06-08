@@ -2,7 +2,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 import LoginPage from "@/features/auth/LoginPage";
 import DashboardPage from "@/features/dashboard/DashboardPage";
 import ConversationsPage from "@/features/conversations/ConversationsPage";
-import { useAuth } from "@/shared/auth/AuthContext";
+import { useAuth } from "@/shared/auth/authStore";
 import type { ReactElement } from "react";
 
 function RequireAuth({ children }: { children: ReactElement }) {

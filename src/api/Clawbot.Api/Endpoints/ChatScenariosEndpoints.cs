@@ -1,3 +1,4 @@
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.ChatScenarios;
 using Clawbot.Domain.ChatScenarios;
 using Clawbot.Infrastructure.Persistence;
@@ -14,15 +15,16 @@ public static class ChatScenariosEndpoints
 {
     public static IEndpointRouteBuilder MapChatScenarios(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/chat-scenarios").RequireAuthorization();
+        // SPEC-11 §6a: reads (incl. read-only match) need chat-scenarios:read; mutations write.
+        var grp = app.MapGroup("/api/chat-scenarios");
 
-        grp.MapGet("/", ListAsync);
-        grp.MapGet("/{id:guid}", GetAsync);
-        grp.MapPost("/", CreateAsync);
-        grp.MapPut("/{id:guid}", UpdateAsync);
-        grp.MapDelete("/{id:guid}", DeleteAsync);
-        grp.MapPost("/match", MatchAsync);
-        grp.MapPost("/{id:guid}/outcome", RecordOutcomeAsync);
+        grp.MapGet("/", ListAsync).RequirePermission("chat-scenarios:read");
+        grp.MapGet("/{id:guid}", GetAsync).RequirePermission("chat-scenarios:read");
+        grp.MapPost("/", CreateAsync).RequirePermission("chat-scenarios:write");
+        grp.MapPut("/{id:guid}", UpdateAsync).RequirePermission("chat-scenarios:write");
+        grp.MapDelete("/{id:guid}", DeleteAsync).RequirePermission("chat-scenarios:write");
+        grp.MapPost("/match", MatchAsync).RequirePermission("chat-scenarios:read");
+        grp.MapPost("/{id:guid}/outcome", RecordOutcomeAsync).RequirePermission("chat-scenarios:write");
 
         return app;
     }

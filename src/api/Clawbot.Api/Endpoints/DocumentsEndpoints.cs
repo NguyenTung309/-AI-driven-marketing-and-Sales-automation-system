@@ -1,4 +1,5 @@
 using Clawbot.Agents.Contracts.Docs;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Documents;
 using Clawbot.Domain.Documents;
 using Clawbot.Infrastructure.Persistence;
@@ -13,16 +14,17 @@ public static class DocumentsEndpoints
 {
     public static IEndpointRouteBuilder MapDocuments(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/docs").RequireAuthorization();
+        // SPEC-11 §6a: reads need docs:read, mutations (incl. generate) docs:write.
+        var grp = app.MapGroup("/api/docs");
 
-        grp.MapPost("/generate", GenerateAsync);
+        grp.MapPost("/generate", GenerateAsync).RequirePermission("docs:write");
 
-        grp.MapGet("/templates", ListTemplatesAsync);
-        grp.MapPost("/templates", CreateTemplateAsync);
-        grp.MapPut("/templates/{id:guid}", UpdateTemplateAsync);
-        grp.MapDelete("/templates/{id:guid}", DeleteTemplateAsync);
+        grp.MapGet("/templates", ListTemplatesAsync).RequirePermission("docs:read");
+        grp.MapPost("/templates", CreateTemplateAsync).RequirePermission("docs:write");
+        grp.MapPut("/templates/{id:guid}", UpdateTemplateAsync).RequirePermission("docs:write");
+        grp.MapDelete("/templates/{id:guid}", DeleteTemplateAsync).RequirePermission("docs:write");
 
-        grp.MapGet("/generated", ListGeneratedAsync);
+        grp.MapGet("/generated", ListGeneratedAsync).RequirePermission("docs:read");
 
         return app;
     }

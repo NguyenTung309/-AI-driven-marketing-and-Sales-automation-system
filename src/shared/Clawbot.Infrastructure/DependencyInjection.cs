@@ -52,8 +52,9 @@ public static class DependencyInjection
             {
                 opt.User.RequireUniqueEmail = true;
                 opt.Password.RequiredLength = 8;
-                opt.Lockout.MaxFailedAccessAttempts = 5;
-                opt.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+                // SPEC-11: lockout policy from AuthPolicy (code is source of truth).
+                opt.Lockout.MaxFailedAccessAttempts = AuthPolicy.MaxFailedAccessAttempts;
+                opt.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(AuthPolicy.LockoutMinutes);
             })
             .AddRoles<AppRole>()
             .AddEntityFrameworkStores<AppDbContext>()
@@ -63,6 +64,17 @@ public static class DependencyInjection
 
         services.AddSingleton<IConnectionMultiplexer>(_ =>
             ConnectionMultiplexer.Connect(cfg.GetConnectionString("Redis") ?? "localhost:6379"));
+
+        // SPEC-11 auth services: refresh-token rotation + runtime permission resolution.
+        // PostConfigure forces the timing from AuthPolicy so appsettings cannot drift it.
+        services.Configure<Auth.RefreshTokenOptions>(cfg.GetSection("RefreshToken"));
+        services.PostConfigure<Auth.RefreshTokenOptions>(o =>
+        {
+            o.Days = AuthPolicy.RefreshTokenDays;
+            o.GraceSeconds = AuthPolicy.RefreshGraceSeconds;
+        });
+        services.AddScoped<Auth.IRefreshTokenService, Auth.RefreshTokenService>();
+        services.AddScoped<Auth.IPermissionResolver, Auth.PermissionResolver>();
 
         services.AddMassTransit(bus =>
         {

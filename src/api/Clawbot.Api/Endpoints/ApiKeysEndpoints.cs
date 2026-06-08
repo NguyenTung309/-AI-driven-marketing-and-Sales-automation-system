@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Security;
 using Clawbot.Domain.Security;
 using Clawbot.Infrastructure.Persistence;
@@ -12,7 +13,8 @@ public static class ApiKeysEndpoints
 {
     public static IEndpointRouteBuilder MapApiKeys(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/api-keys").RequireAuthorization();
+        // SPEC-11 §6a: API key management requires api-keys:manage (Admin).
+        var group = app.MapGroup("/api/api-keys").RequirePermission("api-keys:manage");
 
         group.MapGet("/", ListAsync);
         group.MapPost("/", IssueAsync);

@@ -1,24 +1,31 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { loadPermissions, refreshAccessToken } from "@/shared/api/client";
+import { useAuthStore } from "@/shared/auth/authStore";
 
-interface AuthState {
-  token: string | null;
-  setToken: (t: string | null) => void;
-}
-
-const AuthCtx = createContext<AuthState>({ token: null, setToken: () => {} });
-
+/**
+ * SPEC-11: on app start / F5, hydrate the access token from the refresh cookie ONCE before
+ * rendering protected routes. A 401 here (first-time visitor / no cookie) is a normal "anon"
+ * state — not an error — so we fall through to /login silently.
+ */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setTokenState] = useState<string | null>(() =>
-    localStorage.getItem("clawbot.access_token")
-  );
+  const status = useAuthStore((s) => s.status);
 
-  const setToken = (t: string | null) => {
-    if (t) localStorage.setItem("clawbot.access_token", t);
-    else localStorage.removeItem("clawbot.access_token");
-    setTokenState(t);
-  };
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const token = await refreshAccessToken();
+      if (cancelled) return;
+      if (token) await loadPermissions();
+      else useAuthStore.getState().setStatus("anon");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  return <AuthCtx.Provider value={{ token, setToken }}>{children}</AuthCtx.Provider>;
+  if (status === "loading") {
+    return <div className="flex min-h-screen items-center justify-center text-gray-500">Loading…</div>;
+  }
+
+  return <>{children}</>;
 }
-
-export const useAuth = () => useContext(AuthCtx);

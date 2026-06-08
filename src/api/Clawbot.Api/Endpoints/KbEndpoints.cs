@@ -1,4 +1,5 @@
 using System.Text;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.KnowledgeBase;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Infrastructure.Persistence;
@@ -12,26 +13,27 @@ public static class KbEndpoints
 {
     public static IEndpointRouteBuilder MapKb(this IEndpointRouteBuilder app)
     {
-        var modules = app.MapGroup("/api/kb/modules").RequireAuthorization();
+        // SPEC-11 §6a: reads need kb:read, mutations kb:write.
+        var modules = app.MapGroup("/api/kb/modules");
 
-        modules.MapGet("/", ListModulesAsync);
-        modules.MapGet("/{id:guid}", GetModuleAsync);
-        modules.MapPost("/", CreateModuleAsync);
-        modules.MapPut("/{id:guid}", UpdateModuleAsync);
-        modules.MapPost("/{id:guid}/archive", ArchiveModuleAsync);
+        modules.MapGet("/", ListModulesAsync).RequirePermission("kb:read");
+        modules.MapGet("/{id:guid}", GetModuleAsync).RequirePermission("kb:read");
+        modules.MapPost("/", CreateModuleAsync).RequirePermission("kb:write");
+        modules.MapPut("/{id:guid}", UpdateModuleAsync).RequirePermission("kb:write");
+        modules.MapPost("/{id:guid}/archive", ArchiveModuleAsync).RequirePermission("kb:write");
 
-        modules.MapGet("/{id:guid}/versions", ListVersionsAsync);
-        modules.MapPost("/{id:guid}/versions", CreateVersionAsync);
-        modules.MapGet("/{id:guid}/versions/{versionId:guid}", GetVersionDetailAsync);
-        modules.MapPost("/{id:guid}/versions/{versionId:guid}/deploy", DeployVersionAsync);
-        modules.MapPost("/{id:guid}/versions/{versionId:guid}/rollback", RollbackToVersionAsync);
-        modules.MapGet("/{id:guid}/diff", DiffVersionsAsync);
+        modules.MapGet("/{id:guid}/versions", ListVersionsAsync).RequirePermission("kb:read");
+        modules.MapPost("/{id:guid}/versions", CreateVersionAsync).RequirePermission("kb:write");
+        modules.MapGet("/{id:guid}/versions/{versionId:guid}", GetVersionDetailAsync).RequirePermission("kb:read");
+        modules.MapPost("/{id:guid}/versions/{versionId:guid}/deploy", DeployVersionAsync).RequirePermission("kb:write");
+        modules.MapPost("/{id:guid}/versions/{versionId:guid}/rollback", RollbackToVersionAsync).RequirePermission("kb:write");
+        modules.MapGet("/{id:guid}/diff", DiffVersionsAsync).RequirePermission("kb:read");
 
-        modules.MapGet("/{id:guid}/test-cases", ListTestCasesAsync);
-        modules.MapPost("/{id:guid}/test-cases", AddTestCaseAsync);
-        modules.MapPost("/{id:guid}/test", RunTestAsync);
+        modules.MapGet("/{id:guid}/test-cases", ListTestCasesAsync).RequirePermission("kb:read");
+        modules.MapPost("/{id:guid}/test-cases", AddTestCaseAsync).RequirePermission("kb:write");
+        modules.MapPost("/{id:guid}/test", RunTestAsync).RequirePermission("kb:write");
 
-        app.MapGet("/api/kb/accuracy", AccuracyDashboardAsync).RequireAuthorization();
+        app.MapGet("/api/kb/accuracy", AccuracyDashboardAsync).RequirePermission("kb:read");
         return app;
     }
 

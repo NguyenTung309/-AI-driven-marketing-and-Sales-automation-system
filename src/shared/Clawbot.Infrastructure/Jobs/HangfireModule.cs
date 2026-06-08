@@ -35,6 +35,7 @@ public static class HangfireModule
 
         services.AddScoped<RetentionPurgeJob>();
         services.AddScoped<DailyKpiRollupJob>();
+        services.AddScoped<RefreshTokenCleanupJob>();
         return services;
     }
 
@@ -52,5 +53,10 @@ public static class HangfireModule
             "kpi",
             j => j.RunAsync(CancellationToken.None),
             Cron.Daily(7, 30));
+        recurring.AddOrUpdate<RefreshTokenCleanupJob>(
+            "refresh-token-cleanup",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Daily(3));
     }
 }

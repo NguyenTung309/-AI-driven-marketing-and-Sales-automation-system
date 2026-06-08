@@ -78,6 +78,8 @@ services:
       - ConnectionStrings__Redis=redis:6379
       - ConnectionStrings__RabbitMq=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672
       - Vector__Qdrant__Host=qdrant
+      # JWT signing key (HS256 needs >=32 bytes). Dev default here; override in staging/prod.
+      - Jwt__SigningKey=${JWT_SIGNING_KEY:-dev-only-jwt-signing-key-change-before-staging-0123456789}
     depends_on:
       sqlserver:
         condition: service_healthy
@@ -103,6 +105,8 @@ services:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://0.0.0.0:5050
       - Gateway__Pancake__WebhookSecret=${PANCAKE_WEBHOOK_SECRET:-dev-secret-replace-before-staging}
+      # Must match clawbot-api's Jwt__SigningKey so the gateway can verify forwarded tokens.
+      - Jwt__SigningKey=${JWT_SIGNING_KEY:-dev-only-jwt-signing-key-change-before-staging-0123456789}
     depends_on:
       - clawbot-api
     restart: unless-stopped

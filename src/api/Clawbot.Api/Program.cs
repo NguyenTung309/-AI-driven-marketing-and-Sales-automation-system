@@ -9,6 +9,7 @@ using Clawbot.Infrastructure;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.SharedKernel.Inbox;
+using Clawbot.SharedKernel.Security;
 using Hangfire;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -21,8 +22,14 @@ builder.Host.UseSerilog((ctx, lc) => lc.ReadFrom.Configuration(ctx.Configuration
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddClawbotJobs(builder.Configuration);
-// jwt options
+// jwt options — SigningKey/Issuer/Audience come from config (secret); the timing is forced
+// from AuthPolicy via PostConfigure so appsettings cannot drift it (SPEC-11).
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+builder.Services.PostConfigure<JwtOptions>(o =>
+{
+    o.AccessTokenMinutes = AuthPolicy.AccessTokenMinutes;
+    o.ClockSkewSeconds = AuthPolicy.ClockSkewSeconds;
+});
 builder.Services.AddSingleton<JwtTokenIssuer>();
 
 var jwt = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
@@ -39,6 +46,22 @@ builder.Services
             ValidIssuer = jwt.Issuer,
             ValidAudience = jwt.Audience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.SigningKey)),
+            // SPEC-11: explicit clock skew, identical on Gateway + backend (AuthPolicy).
+            ClockSkew = TimeSpan.FromSeconds(AuthPolicy.ClockSkewSeconds),
+        };
+
+        // SPEC-11 D9: SignalR cannot set the Authorization header, so accept the access
+        // token from the ?access_token= query string on hub connections.
+        o.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                    context.Token = accessToken;
+                return Task.CompletedTask;
+            },
         };
     });
 

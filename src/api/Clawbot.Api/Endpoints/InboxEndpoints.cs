@@ -1,3 +1,4 @@
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Inbox;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
@@ -13,14 +14,15 @@ public static class InboxEndpoints
 {
     public static IEndpointRouteBuilder MapInbox(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/inbox").RequireAuthorization();
+        // SPEC-11 §6a: reads need conversations:read, mutations conversations:write.
+        var grp = app.MapGroup("/api/inbox");
 
-        grp.MapGet("/conversations", ListAsync);
-        grp.MapGet("/conversations/{id:guid}", GetAsync);
-        grp.MapPost("/conversations/{id:guid}/assign", AssignAsync);
-        grp.MapPost("/conversations/{id:guid}/resolve", ResolveAsync);
-        grp.MapPost("/conversations/{id:guid}/escalate", EscalateAsync);
-        grp.MapPost("/conversations/{id:guid}/messages", SendOutboundAsync);
+        grp.MapGet("/conversations", ListAsync).RequirePermission("conversations:read");
+        grp.MapGet("/conversations/{id:guid}", GetAsync).RequirePermission("conversations:read");
+        grp.MapPost("/conversations/{id:guid}/assign", AssignAsync).RequirePermission("conversations:write");
+        grp.MapPost("/conversations/{id:guid}/resolve", ResolveAsync).RequirePermission("conversations:write");
+        grp.MapPost("/conversations/{id:guid}/escalate", EscalateAsync).RequirePermission("conversations:write");
+        grp.MapPost("/conversations/{id:guid}/messages", SendOutboundAsync).RequirePermission("conversations:write");
 
         return app;
     }

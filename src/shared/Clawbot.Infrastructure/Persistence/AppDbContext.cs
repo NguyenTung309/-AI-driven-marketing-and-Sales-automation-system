@@ -36,6 +36,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<Auth.RefreshToken> RefreshTokens => Set<Auth.RefreshToken>();
 
     // Contacts
     public DbSet<Contact> Contacts => Set<Contact>();

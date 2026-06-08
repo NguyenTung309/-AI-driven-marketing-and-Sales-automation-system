@@ -1,3 +1,4 @@
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Channels;
 using Clawbot.Domain.Channels;
 using Clawbot.Infrastructure.Persistence;
@@ -13,7 +14,8 @@ public static class ChannelsEndpoints
 {
     public static IEndpointRouteBuilder MapChannels(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/channels/pancake").RequireAuthorization();
+        // SPEC-11 §6a: channel configuration requires channels:manage (Admin).
+        var grp = app.MapGroup("/api/channels/pancake").RequirePermission("channels:manage");
 
         grp.MapGet("/config", GetAsync);
         grp.MapPut("/config", UpsertAsync);
