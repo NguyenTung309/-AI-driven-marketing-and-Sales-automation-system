@@ -73,6 +73,10 @@ builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Ads.AdsAgent.AdsAgentCli
 {
     o.Address = new Uri(agentServiceUrl);
 });
+builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Lead.LeadAgent.LeadAgentClient>(o =>
+{
+    o.Address = new Uri(agentServiceUrl);
+});
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Report.ReportAgent.ReportAgentClient>(o =>
 {
     o.Address = new Uri(agentServiceUrl);

@@ -1,4 +1,5 @@
 using Clawbot.Infrastructure.Channels;
+using Clawbot.Infrastructure.Vectors;
 using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Inbox;
 using Clawbot.SharedKernel.Time;
@@ -20,7 +21,8 @@ public sealed class ChannelMessageIngestorTests
         var notifier = Substitute.For<IInboxNotifier>();
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
-        var sut = new ChannelMessageIngestor(fx.Db, notifier, clock, NullLogger<ChannelMessageIngestor>.Instance);
+        var embeddingSync = Substitute.For<IContactEmbeddingSync>();
+        var sut = new ChannelMessageIngestor(fx.Db, notifier, clock, embeddingSync, NullLogger<ChannelMessageIngestor>.Instance);
         return (sut, notifier);
     }
 

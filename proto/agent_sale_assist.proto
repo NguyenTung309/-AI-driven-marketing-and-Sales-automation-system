@@ -7,6 +7,7 @@ package clawbot.agents.sale_assist;
 service SaleAssistAgent {
   rpc Draft (DraftRequest) returns (DraftResponse);
   rpc Summarize (SummarizeRequest) returns (SummarizeResponse);
+  rpc AutoSummaryOnResolve (AutoSummaryRequest) returns (AutoSummaryResponse);
 }
 
 message DraftRequest {
@@ -28,4 +29,15 @@ message SummarizeRequest {
 
 message SummarizeResponse {
   string summary = 1;
+}
+
+message AutoSummaryRequest {
+  string tenant_id = 1;
+  string conversation_id = 2;
+}
+
+message AutoSummaryResponse {
+  string summary = 1;
+  repeated string key_points = 2;
+  bool persisted = 3;
 }

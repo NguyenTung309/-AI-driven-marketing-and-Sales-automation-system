@@ -1,9 +1,11 @@
 using Clawbot.Api.Contracts.Inbox;
+using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Inbox;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
+using Hangfire;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -112,7 +114,11 @@ public static class InboxEndpoints
     }
 
     private static async Task<IResult> ResolveAsync(
-        Guid id, AppDbContext db, ITenantAccessor tenants, IInboxNotifier notifier, CancellationToken ct)
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IInboxNotifier notifier,
+        CancellationToken ct)
     {
         var tenant = tenants.Require();
         var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id, ct).ConfigureAwait(false);
@@ -121,6 +127,10 @@ public static class InboxEndpoints
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         await notifier.NotifyConversationUpdatedAsync(tenant.TenantId,
             new InboxConversationEvent(conv.Id, conv.Status, conv.AssignedTo, conv.LastMessageAt), ct).ConfigureAwait(false);
+
+        // Auto-summary on resolve — enqueue as Hangfire background job (non-blocking)
+        BackgroundJob.Enqueue<AutoSummaryJob>(j => j.RunAsync(tenant.TenantId, id, CancellationToken.None));
+
         return Results.NoContent();
     }
 

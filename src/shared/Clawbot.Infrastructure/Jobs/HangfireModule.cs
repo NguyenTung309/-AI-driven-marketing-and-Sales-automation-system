@@ -47,6 +47,7 @@ public static class HangfireModule
         services.AddScoped<AdsDaypartPauseJob>();
         services.AddScoped<AdsDaypartResumeJob>();
         services.AddScoped<WeeklyAdsReportJob>();
+        services.AddScoped<AutoSummaryJob>();
         return services;
     }
 

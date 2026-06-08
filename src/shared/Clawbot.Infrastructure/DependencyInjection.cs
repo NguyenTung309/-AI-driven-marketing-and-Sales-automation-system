@@ -113,6 +113,7 @@ public static class DependencyInjection
         // Vector store: Qdrant is the only supported backend now SQL Server doesn't carry pgvector.
         services.AddSingleton(_ => new QdrantClient(cfg["Vector:Qdrant:Host"] ?? "localhost"));
         services.AddScoped<IVectorStore, QdrantVectorStore>();
+        services.AddSingleton<IContactEmbeddingSync, ContactEmbeddingSync>();
 
         return services;
     }

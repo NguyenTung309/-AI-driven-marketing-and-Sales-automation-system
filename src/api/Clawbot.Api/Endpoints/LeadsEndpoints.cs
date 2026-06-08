@@ -1,5 +1,7 @@
+using Clawbot.Agents.Contracts.Lead;
 using Clawbot.Agents.Core.Lead;
 using Clawbot.Api.Contracts.Leads;
+using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Leads;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -18,6 +20,7 @@ public static class LeadsEndpoints
         grp.MapGet("/", ListAsync);
         grp.MapGet("/{id:guid}", GetAsync);
         grp.MapPost("/", CreateAsync);
+        grp.MapPost("/create-with-skills", CreateWithSkillsAsync);
         grp.MapPost("/{id:guid}/activities", RecordActivityAsync);
         grp.MapPost("/{id:guid}/assign", AssignAsync);
 
@@ -87,6 +90,53 @@ public static class LeadsEndpoints
         return Results.Created($"/api/leads/{lead.Id}",
             new CreateLeadResponse(lead.Id,
                 dupes.Select(d => new LeadDedupHitDto(d.LeadId, d.ContactId, d.Reason, d.Confidence)).ToList()));
+    }
+
+    private static async Task<IResult> CreateWithSkillsAsync(
+        CreateLeadRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        LeadAgent.LeadAgentClient leadClient,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+
+        if (body.ContactId == Guid.Empty)
+            return Results.BadRequest(new { error = "contact_id required" });
+
+        var contact = await db.Contacts
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.Id == body.ContactId && c.TenantId == tenant.TenantId, ct)
+            .ConfigureAwait(false);
+
+        if (contact is null)
+            return Results.NotFound(new { error = "contact not found" });
+
+        var grpcRequest = new LeadCreateWithSkillsRequest
+        {
+            TenantId = tenant.TenantId.ToString("D"),
+            ContactId = body.ContactId.ToString("D"),
+            DisplayName = contact?.DisplayName ?? "",
+            Phone = body.Phone ?? "",
+            Email = body.Email ?? "",
+            SourcePlatform = body.SourcePlatform,
+            Locale = contact?.Locale ?? "",
+            Country = ""
+        };
+
+        var grpcResponse = await leadClient.CreateWithSkillsAsync(grpcRequest, cancellationToken: ct).ConfigureAwait(false);
+
+        var result = new CreateWithSkillsResult(
+            Guid.Parse(grpcResponse.LeadId),
+            grpcResponse.SpamFlagged,
+            grpcResponse.SpamReason,
+            grpcResponse.Timezone,
+            grpcResponse.EnrichmentCompany,
+            grpcResponse.PossibleDup,
+            grpcResponse.DedupCandidates.Select(c => new LeadDedupCandidateDto(
+                Guid.Parse(c.ContactId), c.Similarity)).ToList());
+
+        return Results.Created($"/api/leads/{result.LeadId}", result);
     }
 
     private static async Task<IResult> RecordActivityAsync(

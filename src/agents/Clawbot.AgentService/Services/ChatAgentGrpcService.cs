@@ -59,7 +59,7 @@ public sealed partial class ChatAgentGrpcService(
 
         var phase = reply.Blocked ? "blocked" : "completed";
         session.AppendTrace("chat", "chat-agent", phase,
-            $"intent={reply.Intent} blocked={reply.Blocked} latency={reply.LatencyMs}ms tokens={reply.InputTokens}/{reply.OutputTokens} usd={reply.UsdCost:0.0000} citations={reply.Citations.Count}{(reply.BlockReason is null ? "" : " block=" + reply.BlockReason)}",
+            $"intent={reply.Intent} blocked={reply.Blocked} latency={reply.LatencyMs}ms tokens={reply.InputTokens}/{reply.OutputTokens} usd={reply.UsdCost:0.0000} citations={reply.Citations.Count} lang={reply.Language} toxic_blocked={reply.ToxicityBlocked} spam={reply.SpamFlagged}{(reply.BlockReason is null ? "" : " block=" + reply.BlockReason)}",
             _clock.UtcNow);
         session.Finish(_clock.UtcNow);
 

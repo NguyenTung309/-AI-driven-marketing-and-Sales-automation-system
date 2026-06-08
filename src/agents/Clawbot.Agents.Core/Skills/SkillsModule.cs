@@ -2,6 +2,7 @@ using Clawbot.Agents.Core.Skills.Content;
 using Clawbot.Agents.Core.Skills.Lead;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Agents.Core.Skills.Ops;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Clawbot.Agents.Core.Skills;
@@ -11,8 +12,13 @@ namespace Clawbot.Agents.Core.Skills;
 // See .sdd/skills/_index.md for the full catalog.
 public static class SkillsModule
 {
-    public static IServiceCollection AddClawbotSkills(this IServiceCollection services)
+    public static IServiceCollection AddClawbotSkills(this IServiceCollection services, IConfiguration cfg)
     {
+        // Options binding
+        services.Configure<SummarizerOptions>(cfg.GetSection(SummarizerOptions.SectionName));
+        services.Configure<ToxicityOptions>(cfg.GetSection(ToxicityOptions.SectionName));
+        services.Configure<ContactEnricherOptions>(cfg.GetSection(ContactEnricherOptions.SectionName));
+
         // NLP
         services.AddSingleton<IIntentClassifier, KeywordIntentClassifier>();
         services.AddSingleton<ISentimentAnalyzer, LexiconSentimentAnalyzer>();
@@ -42,6 +48,12 @@ public static class SkillsModule
         services.AddSingleton<IForecaster, MlNetForecaster>();
         services.AddSingleton<IPromptInjectionDefender, HeuristicPromptInjectionDefender>();
         services.AddSingleton<IClaudeCostTracker, InMemoryClaudeCostTracker>();
+
+        // HttpClient for contact enricher (config-gated Hunter/Apollo)
+        services.AddHttpClient(nameof(HunterContactEnricher), c =>
+        {
+            c.Timeout = TimeSpan.FromSeconds(15);
+        });
 
         return services;
     }
