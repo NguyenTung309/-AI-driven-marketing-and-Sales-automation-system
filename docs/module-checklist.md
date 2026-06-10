@@ -3,7 +3,7 @@
 > Persistent tracking. Tick `[x]` khi xong. Nguồn plan: [../C:/Users/AdminDatVo/.claude/plans/wiggly-wandering-blum.md] + [spec-audit.md](spec-audit.md).
 > Convention: `[ ]` chưa làm · `[~]` đang làm · `[x]` xong · `[!]` blocked.
 >
-> Last updated: 2026-06-07
+> Last updated: 2026-06-09
 
 ---
 
@@ -85,7 +85,7 @@
 - [ ] Real Pancake account + access_token + webhook_secret → ops setup (not code)
 - [ ] First webhook empirical test → may need to adjust `SignatureHeader` / `SignatureEncoding` / payload field names; all swappable via PUT `/api/channels/pancake/config` without redeploy
 - [x] Health check `/health/channels/pancake` → after first successful round-trip — [HealthEndpoints.cs](../src/api/Clawbot.Api/Endpoints/HealthEndpoints.cs)
-- [ ] Per-tenant outbound rate limit (Pancake quotas) → after empirical measurement
+- [x] Per-tenant outbound rate limit (Pancake quotas) — token bucket 120/min/tenant — [PancakeChannelAdapter.cs](../src/shared/Clawbot.Infrastructure/Channels/Pancake/PancakeChannelAdapter.cs)
 - [x] Integration test mock Pancake vendor → M21 — [DatabaseSmokeTests.cs](../tests/Clawbot.Integration.Tests/DatabaseSmokeTests.cs) (M06 roundtrip test)
 
 ### M08 — Omnichannel Inbox API + unified conversation merge · Imp 5 · Diff 3 · T4 · **DONE 2026-05-29**
@@ -104,7 +104,7 @@
 - [ ] Full-text search `GET /api/inbox/search?q=` → defer (needs SQL Server FTS index or OpenSearch)
 - [ ] Export conversation log `GET /api/inbox/conversations/{id}/export.csv` → defer P3
 - [x] `external_message_id` column on `messages` for strict dedup → done W6.12 — [0007_messages_external_id.sql](../deploy/migrations/0007_messages_external_id.sql) + [ChannelMessageIngestor.cs](../src/shared/Clawbot.Infrastructure/Channels/ChannelMessageIngestor.cs)
-- [ ] Lead score join in list ordering → after M15
+- [x] Lead score join in list ordering — hot-first then recency — [InboxEndpoints.cs](../src/api/Clawbot.Api/Endpoints/InboxEndpoints.cs)
 
 ### M09 — Semantic Kernel + RAG (Qdrant) · Imp 5 · Diff 5 · T3–T4 · **SPIKE LANDED 2026-05-28**
 - [x] Spike RFC: SK plugin-host only + Anthropic SDK direct chosen — [.sdd/rfcs/001-semantic-kernel-vs-direct-anthropic.md](../.sdd/rfcs/001-semantic-kernel-vs-direct-anthropic.md)
@@ -141,7 +141,7 @@
 - [ ] Token-by-token streaming (SSE-style chunk) → P2 optimization
 - [x] Escalation rule (confidence<threshold | intent=escalation → assign sale) → done W5 — [ChatAgent.cs](../src/agents/Clawbot.Agents.Core/Chat/ChatAgent.cs)
 - [x] Out-of-hours auto-reply (UC-A07) scheduled scenario → done W5 — [OutOfHoursAutoReplyJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/OutOfHoursAutoReplyJob.cs)
-- [ ] p95 latency <3s Serilog+OTel histograms → M11 cost-tracker batch
+- [x] p95 latency Serilog+OTel histograms — OpenTelemetry (ASP.NET/HttpClient/runtime) — [TelemetryModule.cs](../src/shared/Clawbot.Infrastructure/Observability/TelemetryModule.cs) (OTLP exporter deferred — audit GHSA-4625-4j76-fww9)
 - [ ] Cost tracker (`IClaudeCostTracker.RecordAsync`) wire → M11 P0 skill
 
 ### M14 — Agent-SaleAssist · Imp 5 · Diff 3 · T5 · **DONE 2026-05-29**
@@ -266,10 +266,10 @@
 - [x] Worker queues: default/retention/kpi
 - [x] Build xanh 12 projects, 0/0
 - [x] Admin-only auth filter on `/hangfire` dashboard → tighten before prod — [HangfireAdminFilter.cs](../src/api/Clawbot.Api/Auth/HangfireAdminFilter.cs)
-- [ ] `messages` retention purge (>30d) — schema needs to expose PII flag first
+- [x] `messages` retention purge (>30d) — RetentionPurgeJob nulls original_content, keeps redacted — [RetentionPurgeJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/RetentionPurgeJob.cs)
 - [ ] `DailyReportJob` (Telegram push UC-I01) → after Telegram channel adapter
 - [ ] `DripSequenceJob` per-lead → after M15 drip templates + Pancake outbound batch
-- [ ] `KbAccuracyTestJob` (daily) → after real embedder lands per RFC-001 open question
+- [x] `KbAccuracyTestJob` (daily) — alerts deployed KB <85% via SignalR — [KbAccuracyTestJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/KbAccuracyTestJob.cs) (real scores after embedder+content)
 - [x] `HealthCheckJob` (hourly) → after Telegram channel adapter — [HealthCheckJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/HealthCheckJob.cs)
 
 ### M13 — Rate-limit middleware + Webhook HMAC verify · Imp 4 · Diff 2 · T2 · **DONE 2026-05-29**
@@ -310,8 +310,8 @@
 - [x] Templates seed QUOTE-V1 + ONBOARDING-KIT (idempotent MERGE on `(tenant_id, code)`, Scriban-style `{{ var }}` body) — [document-templates.sql](../deploy/seed/document-templates.sql)
 - [x] API → AgentService via `DocsAgent.DocsAgentClient` gRPC typed client (registered in `Program.cs`)
 - [x] Unit tests 12/12 green (template/renderer/agent/storage incl. real QuestPDF render) — [DocsRenderingTests.cs](../tests/Clawbot.Agents.Tests/Docs/DocsRenderingTests.cs); Agents.Tests + AgentService + Api build 0/0 on .NET 8
-- [ ] MinIO signed URL (7d) — `LocalDocumentStorage` is the baseline; swap `IDocumentStorage` impl later (Minio pkg already referenced)
-- [ ] QR code footer via `IQrGenerator` (M11 P2) → defer
+- [x] MinIO signed URL (7d) — `MinioDocumentStorage` config-gated, overrides Local — [MinioDocumentStorage.cs](../src/shared/Clawbot.Infrastructure/Documents/MinioDocumentStorage.cs)
+- [x] QR code footer — `DocBranding.QrPayload` → QRCoder in PDF footer — [DocsServices.cs](../src/agents/Clawbot.Agents.Core/Docs/DocsServices.cs)
 - [ ] Read receipt tracker (open beacon) → defer (`generated_documents.opened_at` column + `MarkOpened` ready)
 - [ ] BROCHURE-HSK, SLIDE-DEMO-5 templates → defer (renderer already handles any `doc_type`)
 - [ ] Real send via `sent_via` channel → defer (delivery separated from generation)
