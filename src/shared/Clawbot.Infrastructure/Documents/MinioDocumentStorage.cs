@@ -14,6 +14,7 @@ public sealed class MinioDocumentStorage : IDocumentStorage
 
     private readonly IMinioClient _client;
     private readonly string _bucket;
+    private volatile bool _bucketEnsured;
 
     public MinioDocumentStorage(IConfiguration cfg)
     {
@@ -38,10 +39,14 @@ public sealed class MinioDocumentStorage : IDocumentStorage
         if (string.IsNullOrWhiteSpace(fileName))
             throw new ArgumentException("fileName required", nameof(fileName));
 
-        var exists = await _client.BucketExistsAsync(
-            new BucketExistsArgs().WithBucket(_bucket), ct).ConfigureAwait(false);
-        if (!exists)
-            await _client.MakeBucketAsync(new MakeBucketArgs().WithBucket(_bucket), ct).ConfigureAwait(false);
+        if (!_bucketEnsured)
+        {
+            var exists = await _client.BucketExistsAsync(
+                new BucketExistsArgs().WithBucket(_bucket), ct).ConfigureAwait(false);
+            if (!exists)
+                await _client.MakeBucketAsync(new MakeBucketArgs().WithBucket(_bucket), ct).ConfigureAwait(false);
+            _bucketEnsured = true; // singleton; worst-case a couple of redundant checks under first-call races
+        }
 
         using var ms = new MemoryStream(content);
         await _client.PutObjectAsync(new PutObjectArgs()
