@@ -39,7 +39,12 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
     public void Assign(Guid userId) => AssignedTo = userId;
 
     public void Resolve() => Status = "resolved";
-    public void Escalate() => Status = "escalated";
+
+    public void Escalate()
+    {
+        Status = "escalated";
+        Raise(new Events.ConversationEscalated(TenantId, Id, DateTimeOffset.UtcNow));
+    }
 
     public Message AppendMessage(string direction, string senderType, string content, string contentType, DateTimeOffset sentAt, string? externalMessageId = null, string? originalContent = null, string? redactedContent = null)
     {

@@ -20,8 +20,9 @@ public sealed class Lead : AggregateRoot<Guid>, ITenantOwned
 
     private Lead() { }
 
-    public static Lead Create(Guid tenantId, Guid contactId, string sourcePlatform, DateTimeOffset createdAt) =>
-        new()
+    public static Lead Create(Guid tenantId, Guid contactId, string sourcePlatform, DateTimeOffset createdAt)
+    {
+        var lead = new Lead
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
@@ -29,6 +30,9 @@ public sealed class Lead : AggregateRoot<Guid>, ITenantOwned
             SourcePlatform = sourcePlatform,
             CreatedAt = createdAt,
         };
+        lead.Raise(new Events.LeadCreated(tenantId, lead.Id, contactId, sourcePlatform, createdAt));
+        return lead;
+    }
 
     public void AdjustScore(int delta, string reason, DateTimeOffset at)
     {
