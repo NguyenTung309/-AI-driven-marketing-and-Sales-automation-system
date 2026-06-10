@@ -1,3 +1,4 @@
+using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Conversations;
 using Clawbot.Infrastructure.Persistence;
@@ -22,12 +23,14 @@ public sealed partial class ChannelMessageIngestor(
     IInboxNotifier notifier,
     IClock clock,
     IContactEmbeddingSync embeddingSync,
+    IPiiRedactor piiRedactor,
     ILogger<ChannelMessageIngestor> logger) : IChannelMessageIngestor
 {
     private readonly AppDbContext _db = db;
     private readonly IInboxNotifier _notifier = notifier;
     private readonly IClock _clock = clock;
     private readonly IContactEmbeddingSync _embeddingSync = embeddingSync;
+    private readonly IPiiRedactor _pii = piiRedactor;
     private readonly ILogger<ChannelMessageIngestor> _logger = logger;
 
     public async Task<IngestResult> IngestAsync(Guid tenantId, ChannelMessage message, CancellationToken ct = default)
@@ -43,12 +46,20 @@ public sealed partial class ChannelMessageIngestor(
             return new IngestResult(conversation.Id, null, true);
         }
 
+        var externalMsgId = message.Metadata.TryGetValue("external_message_id", out var extId) ? extId : null;
+
+        // PII redaction: store original + redacted versions
+        var redacted = await _pii.RedactAsync(message.Text, ct).ConfigureAwait(false);
+
         var msg = conversation.AppendMessage(
             direction: "in",
             senderType: "contact",
-            content: message.Text,
+            content: redacted.RedactedText,
             contentType: message.Metadata.TryGetValue("content_type", out var ct2) ? ct2 : "text",
-            sentAt: message.SentAt);
+            sentAt: message.SentAt,
+            externalMessageId: externalMsgId,
+            originalContent: message.Text,
+            redactedContent: redacted.RedactedText);
 
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -111,9 +122,15 @@ public sealed partial class ChannelMessageIngestor(
 
     private async Task<bool> IsDuplicateAsync(Guid conversationId, ChannelMessage message, CancellationToken ct)
     {
-        if (!message.Metadata.TryGetValue("external_message_id", out var externalId) || string.IsNullOrEmpty(externalId))
-            return false;
+        // Strict dedup: use external_message_id if available
+        if (message.Metadata.TryGetValue("external_message_id", out var externalId) && !string.IsNullOrEmpty(externalId))
+        {
+            return await _db.Messages
+                .IgnoreQueryFilters()
+                .AnyAsync(m => m.ExternalMessageId == externalId, ct).ConfigureAwait(false);
+        }
 
+        // Fallback: heuristic dedup
         return await _db.Messages
             .IgnoreQueryFilters()
             .AnyAsync(m => m.ConversationId == conversationId

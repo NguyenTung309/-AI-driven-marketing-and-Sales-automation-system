@@ -14,6 +14,7 @@
     <ProjectReference Include="..\..\shared\Clawbot.SharedKernel\Clawbot.SharedKernel.csproj" />
     <ProjectReference Include="..\Clawbot.Api.Contracts\Clawbot.Api.Contracts.csproj" />
     <ProjectReference Include="..\..\agents\Clawbot.Agents.Contracts\Clawbot.Agents.Contracts.csproj" />
+    <ProjectReference Include="..\..\agents\Clawbot.Agents.Core\Clawbot.Agents.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

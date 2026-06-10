@@ -1,4 +1,5 @@
 using Clawbot.Api.Contracts.Inbox;
+using Clawbot.Api.Middleware;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
@@ -15,7 +16,7 @@ public static class InboxEndpoints
 {
     public static IEndpointRouteBuilder MapInbox(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/inbox").RequireAuthorization();
+        var grp = app.MapGroup("/api/inbox").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.ChatPolicy);
 
         grp.MapGet("/conversations", ListAsync);
         grp.MapGet("/conversations/{id:guid}", GetAsync);

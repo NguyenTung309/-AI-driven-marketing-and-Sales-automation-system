@@ -15,7 +15,9 @@ public interface IContactEmbeddingSync
 // so ILeadDeduplicator (fuzzy) has vectors to search against.
 public sealed class ContactEmbeddingSync : IContactEmbeddingSync
 {
-    private const string Collection = "contacts";
+    // Versioned by embedder dimension so a model swap (e.g. 384→1536) lands in a new
+    // collection instead of dim-mismatching the old one. Must match QdrantLeadDeduplicator.
+    private readonly string _collection;
     private readonly IEmbeddingProvider _embedding;
     private readonly IVectorStore _store;
 
@@ -23,6 +25,7 @@ public sealed class ContactEmbeddingSync : IContactEmbeddingSync
     {
         _embedding = embedding;
         _store = store;
+        _collection = $"contacts_v{embedding.Dimension}";
     }
 
     public async Task UpsertContactAsync(Contact contact, Guid tenantId, CancellationToken ct = default)
@@ -45,7 +48,7 @@ public sealed class ContactEmbeddingSync : IContactEmbeddingSync
                 ["email"] = contact.Email ?? ""
             });
 
-        await _store.UpsertAsync(Collection, new[] { record }, ct).ConfigureAwait(false);
+        await _store.UpsertAsync(_collection, new[] { record }, ct).ConfigureAwait(false);
     }
 
     public async Task BackfillAllAsync(Guid tenantId, IReadOnlyList<Contact> contacts, CancellationToken ct = default)
@@ -75,7 +78,7 @@ public sealed class ContactEmbeddingSync : IContactEmbeddingSync
         }
 
         if (records.Count > 0)
-            await _store.UpsertAsync(Collection, records, ct).ConfigureAwait(false);
+            await _store.UpsertAsync(_collection, records, ct).ConfigureAwait(false);
     }
 
     private static string BuildKeyString(Contact c)

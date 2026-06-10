@@ -1,4 +1,5 @@
 using Clawbot.Api.Contracts.ChatScenarios;
+using Clawbot.Api.Middleware;
 using Clawbot.Domain.ChatScenarios;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -14,7 +15,7 @@ public static class ChatScenariosEndpoints
 {
     public static IEndpointRouteBuilder MapChatScenarios(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/chat-scenarios").RequireAuthorization();
+        var grp = app.MapGroup("/api/chat-scenarios").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/", ListAsync);
         grp.MapGet("/{id:guid}", GetAsync);

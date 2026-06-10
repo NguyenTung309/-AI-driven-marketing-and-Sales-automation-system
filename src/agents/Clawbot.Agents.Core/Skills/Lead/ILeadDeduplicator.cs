@@ -17,7 +17,8 @@ public interface ILeadDeduplicator : ISkill
 // Layers on top of EfLeadDedupService (exact phone/email match) — this handles fuzzy.
 internal sealed class QdrantLeadDeduplicator : ILeadDeduplicator
 {
-    private const string Collection = "contacts";
+    // Versioned by embedder dimension — must match ContactEmbeddingSync's collection name.
+    private readonly string _collection;
     private readonly IEmbeddingProvider _embedding;
     private readonly IVectorStore _store;
 
@@ -25,6 +26,7 @@ internal sealed class QdrantLeadDeduplicator : ILeadDeduplicator
     {
         _embedding = embedding;
         _store = store;
+        _collection = $"contacts_v{embedding.Dimension}";
     }
 
     public string Name => "lead-deduplication";
@@ -39,7 +41,7 @@ internal sealed class QdrantLeadDeduplicator : ILeadDeduplicator
             return Array.Empty<DedupCandidate>();
 
         var embedding = await _embedding.EmbedAsync(key, ct).ConfigureAwait(false);
-        var matches = await _store.SearchAsync(Collection, embedding, topK * 4, ct).ConfigureAwait(false);
+        var matches = await _store.SearchAsync(_collection, embedding, topK * 4, ct).ConfigureAwait(false);
 
         var candidates = new List<DedupCandidate>();
         foreach (var m in matches)

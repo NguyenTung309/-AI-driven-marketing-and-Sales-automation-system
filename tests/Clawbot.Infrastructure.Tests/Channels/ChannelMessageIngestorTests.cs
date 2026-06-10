@@ -1,3 +1,4 @@
+using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Vectors;
 using Clawbot.SharedKernel.Channels;
@@ -22,7 +23,10 @@ public sealed class ChannelMessageIngestorTests
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
         var embeddingSync = Substitute.For<IContactEmbeddingSync>();
-        var sut = new ChannelMessageIngestor(fx.Db, notifier, clock, embeddingSync, NullLogger<ChannelMessageIngestor>.Instance);
+        var piiRedactor = Substitute.For<IPiiRedactor>();
+        piiRedactor.RedactAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => new RedactionResult(ci.ArgAt<string>(0), Array.Empty<PiiSpan>()));
+        var sut = new ChannelMessageIngestor(fx.Db, notifier, clock, embeddingSync, piiRedactor, NullLogger<ChannelMessageIngestor>.Instance);
         return (sut, notifier);
     }
 

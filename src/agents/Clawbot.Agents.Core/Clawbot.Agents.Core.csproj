@@ -13,6 +13,9 @@
     <PackageReference Include="Microsoft.ML" />
     <PackageReference Include="Microsoft.ML.TimeSeries" />
     <PackageReference Include="QuestPDF" />
+    <PackageReference Include="QRCoder" />
+    <PackageReference Include="OpenCCNET" />
+    <PackageReference Include="StackExchange.Redis" />
   </ItemGroup>
 
   <ItemGroup>

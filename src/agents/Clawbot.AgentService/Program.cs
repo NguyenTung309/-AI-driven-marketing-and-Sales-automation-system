@@ -21,7 +21,7 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddSingleton<AgentRegistry>(_ => new AgentRegistry(Array.Empty<IAgent>()));
 builder.Services.AddSingleton<PlanningOrchestrator>();
 builder.Services.AddClawbotSkills(builder.Configuration);
-builder.Services.AddClawbotRag();
+builder.Services.AddClawbotRag(builder.Configuration);
 builder.Services.AddClawbotChat(builder.Configuration);
 builder.Services.AddClawbotContent(builder.Configuration);
 builder.Services.AddClawbotResearch(builder.Configuration);

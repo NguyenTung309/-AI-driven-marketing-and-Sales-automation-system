@@ -1,12 +1,20 @@
+using System.Net;
+using Clawbot.Api.Middleware;
+using Clawbot.Domain.Security;
 using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Api.Endpoints;
 
-public static class WebhookEndpoints
+public static partial class WebhookEndpoints
 {
+    [LoggerMessage(EventId = 3001, Level = LogLevel.Warning,
+        Message = "Webhook HMAC rejected for tenant {TenantSlug} from {Ip}")]
+    private static partial void LogHmacRejected(ILogger logger, string tenantSlug, string ip);
+
     public static IEndpointRouteBuilder MapWebhooks(this IEndpointRouteBuilder app)
     {
         app.MapPost("/webhooks/pancake/{tenantSlug}", async (
@@ -15,14 +23,34 @@ public static class WebhookEndpoints
             IChannelAdapter adapter,
             IChannelMessageIngestor ingestor,
             AppDbContext db,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
+            var logger = loggerFactory.CreateLogger("WebhookEndpoints");
             using var reader = new StreamReader(req.Body);
             var body = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
             var headers = req.Headers.ToDictionary(h => h.Key, h => h.Value.ToString(), StringComparer.OrdinalIgnoreCase);
 
             var ok = await adapter.VerifyWebhookSignatureAsync(body, headers, ct).ConfigureAwait(false);
-            if (!ok) return Results.Unauthorized();
+            if (!ok)
+            {
+                var ip = req.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                LogHmacRejected(logger, tenantSlug, ip);
+
+                db.AuditLogs.Add(AuditLog.Create(
+                    tenantId: Guid.Empty,
+                    userId: null,
+                    action: "webhook.hmac.reject",
+                    resourceType: "webhook",
+                    resourceId: null,
+                    occurredAt: DateTimeOffset.UtcNow,
+                    diffJson: $"{{\"tenant_slug\":\"{tenantSlug}\",\"reason\":\"hmac_mismatch\"}}",
+                    ip: req.HttpContext.Connection.RemoteIpAddress,
+                    userAgent: req.Headers.UserAgent.ToString()));
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+                return Results.Unauthorized();
+            }
 
             var tenant = await db.Tenants
                 .IgnoreQueryFilters()
@@ -38,7 +66,7 @@ public static class WebhookEndpoints
             }
 
             return Results.Accepted();
-        }).AllowAnonymous();
+        }).AllowAnonymous().RequireRateLimiting(RateLimitingExtensions.WebhookPolicy);
 
         return app;
     }

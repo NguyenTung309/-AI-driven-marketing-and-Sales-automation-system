@@ -12,7 +12,9 @@ using Clawbot.Infrastructure.Jobs;
 using Clawbot.SharedKernel.Content;
 using Clawbot.SharedKernel.Inbox;
 using Hangfire;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 
@@ -42,9 +44,33 @@ builder.Services
             ValidAudience = jwt.Audience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.SigningKey)),
         };
-    });
+    })
+    .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
+        ApiKeyAuthenticationHandler.SchemeName, _ => { });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorizationBuilder()
+    .SetDefaultPolicy(new AuthorizationPolicyBuilder(
+            JwtBearerDefaults.AuthenticationScheme,
+            ApiKeyAuthenticationHandler.SchemeName)
+        .RequireAuthenticatedUser()
+        .Build())
+    .AddPolicy("perm:kb.read", p => p.AddRequirements(new PermissionRequirement("kb.read")))
+    .AddPolicy("perm:kb.write", p => p.AddRequirements(new PermissionRequirement("kb.write")))
+    .AddPolicy("perm:kb.deploy", p => p.AddRequirements(new PermissionRequirement("kb.deploy")))
+    .AddPolicy("perm:inbox.read", p => p.AddRequirements(new PermissionRequirement("inbox.read")))
+    .AddPolicy("perm:inbox.assign", p => p.AddRequirements(new PermissionRequirement("inbox.assign")))
+    .AddPolicy("perm:lead.read", p => p.AddRequirements(new PermissionRequirement("lead.read")))
+    .AddPolicy("perm:lead.write", p => p.AddRequirements(new PermissionRequirement("lead.write")))
+    .AddPolicy("perm:content.read", p => p.AddRequirements(new PermissionRequirement("content.read")))
+    .AddPolicy("perm:content.write", p => p.AddRequirements(new PermissionRequirement("content.write")))
+    .AddPolicy("perm:content.approve", p => p.AddRequirements(new PermissionRequirement("content.approve")))
+    .AddPolicy("perm:docs.generate", p => p.AddRequirements(new PermissionRequirement("docs.generate")))
+    .AddPolicy("perm:ads.read", p => p.AddRequirements(new PermissionRequirement("ads.read")))
+    .AddPolicy("perm:ads.manage", p => p.AddRequirements(new PermissionRequirement("ads.manage")))
+    .AddPolicy("perm:analytics.read", p => p.AddRequirements(new PermissionRequirement("analytics.read")))
+    .AddPolicy("perm:admin.system", p => p.AddRequirements(new PermissionRequirement("admin.system")))
+    .AddPolicy("perm:admin.audit", p => p.AddRequirements(new PermissionRequirement("admin.audit")));
+builder.Services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
 builder.Services.AddClawbotRateLimiting();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IInboxNotifier, SignalRInboxNotifier>();
@@ -119,12 +145,14 @@ app.MapLeads();
 app.MapChatScenarios();
 app.MapChannels();
 app.MapWebhooks();
+app.MapContacts();
+app.MapAdmin();
 app.MapBoundedContexts();
 app.MapHub<DashboardHub>("/hubs/dashboard");
 app.MapHub<InboxHub>("/hubs/inbox");
 app.MapHangfireDashboard("/hangfire", new DashboardOptions
 {
-    Authorization = Array.Empty<Hangfire.Dashboard.IDashboardAuthorizationFilter>(),
+    Authorization = [new HangfireAdminFilter()],
 });
 
 HangfireModule.ScheduleClawbotJobs(app.Services);
