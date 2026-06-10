@@ -12,12 +12,14 @@ using Clawbot.Agents.Core.Skills;
 using Clawbot.AgentService.Services;
 using Clawbot.Application;
 using Clawbot.Infrastructure;
+using Clawbot.Infrastructure.Observability;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddGrpc();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddClawbotTelemetry(builder.Configuration, "clawbot-agent");
 builder.Services.AddSingleton<AgentRegistry>(_ => new AgentRegistry(Array.Empty<IAgent>()));
 builder.Services.AddSingleton<PlanningOrchestrator>();
 builder.Services.AddClawbotSkills(builder.Configuration);
