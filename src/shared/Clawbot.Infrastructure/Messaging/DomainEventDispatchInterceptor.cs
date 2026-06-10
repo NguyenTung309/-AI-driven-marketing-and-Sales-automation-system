@@ -1,6 +1,7 @@
 using Clawbot.Domain.Common;
 using MassTransit;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Infrastructure.Messaging;
 
@@ -9,9 +10,12 @@ namespace Clawbot.Infrastructure.Messaging;
 // (AddEntityFrameworkOutbox + InboxState/OutboxState/OutboxMessage tables + migration + UseBusOutbox)
 // is the reliability upgrade — deferred until validated against a real SQL Server + RabbitMQ (M21),
 // because its migration DDL cannot be runtime-verified in this environment.
-public sealed class DomainEventDispatchInterceptor(IPublishEndpoint publish) : SaveChangesInterceptor
+public sealed partial class DomainEventDispatchInterceptor(
+    IPublishEndpoint publish,
+    ILogger<DomainEventDispatchInterceptor> logger) : SaveChangesInterceptor
 {
     private readonly IPublishEndpoint _publish = publish;
+    private readonly ILogger<DomainEventDispatchInterceptor> _logger = logger;
 
     public override async ValueTask<int> SavedChangesAsync(
         SaveChangesCompletedEventData eventData, int result, CancellationToken cancellationToken = default)
@@ -27,11 +31,26 @@ public sealed class DomainEventDispatchInterceptor(IPublishEndpoint publish) : S
             foreach (var aggregate in aggregates)
             {
                 foreach (var domainEvent in aggregate.DomainEvents.ToList())
-                    await _publish.Publish(domainEvent, domainEvent.GetType(), cancellationToken).ConfigureAwait(false);
+                {
+                    try
+                    {
+                        await _publish.Publish(domainEvent, domainEvent.GetType(), cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Data is already committed — a broker outage must NOT surface as a save failure.
+                        // Event is lost until the transactional outbox lands (M21); log loudly.
+                        LogPublishFailed(_logger, ex, domainEvent.GetType().Name);
+                    }
+                }
                 aggregate.ClearDomainEvents();
             }
         }
 
         return await base.SavedChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
     }
+
+    [LoggerMessage(EventId = 9120, Level = LogLevel.Error,
+        Message = "Failed to publish domain event {EventType} after commit (event lost until outbox lands)")]
+    private static partial void LogPublishFailed(ILogger logger, Exception ex, string eventType);
 }
