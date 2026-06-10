@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using QRCoder;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -117,6 +118,8 @@ public sealed class QuestPdfDocumentRenderer : IDocumentRenderer
         {
             row.RelativeItem().Text(branding.FooterNote ?? string.Empty)
                 .FontSize(8).FontColor(Colors.Grey.Darken1);
+            if (!string.IsNullOrWhiteSpace(branding.QrPayload))
+                row.ConstantItem(40).AlignRight().Height(40).Image(QrPng(branding.QrPayload));
             row.ConstantItem(90).AlignRight().Text(t =>
             {
                 t.DefaultTextStyle(s => s.FontSize(8).FontColor(Colors.Grey.Darken1));
@@ -126,6 +129,15 @@ public sealed class QuestPdfDocumentRenderer : IDocumentRenderer
                 t.TotalPages();
             });
         });
+    }
+
+    // QR footer (M17): same QRCoder lib as IQrGenerator, called sync from the renderer.
+    private static byte[] QrPng(string payload)
+    {
+        using var gen = new QRCodeGenerator();
+        using var data = gen.CreateQrCode(payload, QRCodeGenerator.ECCLevel.M);
+        using var png = new PngByteQRCode(data);
+        return png.GetGraphic(4);
     }
 
     private static string DocTypeLabel(string? docType) => (docType ?? string.Empty).ToUpperInvariant() switch
