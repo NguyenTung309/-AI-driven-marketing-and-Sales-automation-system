@@ -48,7 +48,9 @@ public static class InboxEndpoints
         var total = await query.CountAsync(ct).ConfigureAwait(false);
 
         var rows = await query
-            .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
+            // M15 lead-score join: surface hot-lead conversations first, then by recency.
+            .OrderByDescending(c => db.Leads.Where(l => l.ContactId == c.ContactId).Max(l => (int?)l.Score) ?? 0)
+            .ThenByDescending(c => c.LastMessageAt ?? c.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(c => new

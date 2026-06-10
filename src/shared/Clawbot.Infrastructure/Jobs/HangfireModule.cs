@@ -53,6 +53,7 @@ public static class HangfireModule
         services.AddScoped<DripSequenceJob>();
         services.AddScoped<IdleConversationAlertJob>();
         services.AddScoped<LeadFollowUpJob>();
+        services.AddScoped<KbAccuracyTestJob>();
         return services;
     }
 
@@ -150,5 +151,10 @@ public static class HangfireModule
             "default",
             j => j.RunAsync(CancellationToken.None),
             "0 * * * *");
+        recurring.AddOrUpdate<KbAccuracyTestJob>(
+            "kb-accuracy-check",
+            "kpi",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Daily(1));
     }
 }

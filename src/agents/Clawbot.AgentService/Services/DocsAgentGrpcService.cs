@@ -45,7 +45,8 @@ public sealed class DocsAgentGrpcService(
         var branding = new CoreDocs.DocBranding(
             tenantName,
             LogoText: null,
-            FooterNote: $"{tenantName} · Tài liệu tạo tự động bởi ClawBot");
+            FooterNote: $"{tenantName} · Tài liệu tạo tự động bởi ClawBot",
+            QrPayload: $"clawbot://doc/{tenantId:N}/{request.TemplateCode}");
 
         var vars = new Dictionary<string, string>(request.Vars, StringComparer.Ordinal);
         var renderRequest = new CoreDocs.DocsRenderRequest(

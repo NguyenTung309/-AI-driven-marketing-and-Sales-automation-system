@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Security;
@@ -14,6 +15,19 @@ public sealed class PancakeChannelAdapter(
     ITenantAccessor tenants) : IChannelAdapter
 {
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
+
+    // Per-tenant outbound rate limit (M06): token bucket, 120 sends/min/tenant, short queue.
+    private static readonly PartitionedRateLimiter<Guid> OutboundLimiter =
+        PartitionedRateLimiter.Create<Guid, Guid>(tenantId =>
+            RateLimitPartition.GetTokenBucketLimiter(tenantId, _ => new TokenBucketRateLimiterOptions
+            {
+                TokenLimit = 120,
+                TokensPerPeriod = 120,
+                ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                QueueLimit = 10,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                AutoReplenishment = true,
+            }));
     private readonly HttpClient _http = http;
     private readonly IPancakeConfigResolver _resolver = resolver;
     private readonly ITenantAccessor _tenants = tenants;
@@ -78,6 +92,11 @@ public sealed class PancakeChannelAdapter(
     {
         if (string.IsNullOrEmpty(externalThreadId))
             throw new ArgumentException("thread id required", nameof(externalThreadId));
+
+        var tenantId = _tenants.Current?.TenantId ?? Guid.Empty;
+        using var lease = await OutboundLimiter.AcquireAsync(tenantId, 1, ct).ConfigureAwait(false);
+        if (!lease.IsAcquired)
+            throw new InvalidOperationException("Pancake outbound rate limit exceeded for tenant.");
 
         var cfg = await CurrentConfigAsync(ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Pancake config not resolved for current tenant.");

@@ -9,6 +9,7 @@ using Clawbot.Application;
 using Clawbot.Infrastructure;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Jobs;
+using Clawbot.Infrastructure.Observability;
 using Clawbot.SharedKernel.Content;
 using Clawbot.SharedKernel.Inbox;
 using Hangfire;
@@ -25,6 +26,7 @@ builder.Host.UseSerilog((ctx, lc) => lc.ReadFrom.Configuration(ctx.Configuration
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddClawbotJobs(builder.Configuration);
+builder.Services.AddClawbotTelemetry(builder.Configuration, "clawbot-api");
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 builder.Services.AddSingleton<JwtTokenIssuer>();

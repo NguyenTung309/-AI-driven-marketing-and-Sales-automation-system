@@ -12,12 +12,15 @@ using Clawbot.Agents.Core.Skills;
 using Clawbot.AgentService.Services;
 using Clawbot.Application;
 using Clawbot.Infrastructure;
+using Clawbot.Infrastructure.Documents;
+using Clawbot.Infrastructure.Observability;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddGrpc();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddClawbotTelemetry(builder.Configuration, "clawbot-agent");
 builder.Services.AddSingleton<AgentRegistry>(_ => new AgentRegistry(Array.Empty<IAgent>()));
 builder.Services.AddSingleton<PlanningOrchestrator>();
 builder.Services.AddClawbotSkills(builder.Configuration);
@@ -28,6 +31,9 @@ builder.Services.AddClawbotResearch(builder.Configuration);
 builder.Services.AddClawbotSaleAssist();
 builder.Services.AddClawbotLead();
 builder.Services.AddClawbotDocs(builder.Configuration);
+// MinIO storage overrides LocalDocumentStorage when configured (7-day signed URLs).
+if (!string.IsNullOrWhiteSpace(builder.Configuration["Docs:Storage:Minio:Endpoint"]))
+    builder.Services.AddSingleton<IDocumentStorage, MinioDocumentStorage>();
 
 var app = builder.Build();
 

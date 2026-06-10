@@ -13,8 +13,13 @@ namespace Clawbot.Integration.Tests;
 public sealed class ClawbotWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly SqlServerFixture _sql;
+    private readonly Action<IServiceCollection>? _configureAuth;
 
-    public ClawbotWebApplicationFactory(SqlServerFixture sql) => _sql = sql;
+    public ClawbotWebApplicationFactory(SqlServerFixture sql, Action<IServiceCollection>? configureAuth = null)
+    {
+        _sql = sql;
+        _configureAuth = configureAuth;
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -33,16 +38,24 @@ public sealed class ClawbotWebApplicationFactory : WebApplicationFactory<Program
             });
         });
 
-        builder.ConfigureServices(services =>
+        if (_configureAuth is not null)
         {
-            services.AddAuthentication("Test")
-                .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("Test", _ => { });
+            // Caller installs its own auth scheme (e.g. a no-perms principal for 403 tests).
+            builder.ConfigureServices(_configureAuth);
+        }
+        else
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.AddAuthentication("Test")
+                    .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("Test", _ => { });
 
-            services.AddAuthorizationBuilder()
-                .SetDefaultPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder("Test")
-                    .RequireAuthenticatedUser()
-                    .Build());
-        });
+                services.AddAuthorizationBuilder()
+                    .SetDefaultPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder("Test")
+                        .RequireAuthenticatedUser()
+                        .Build());
+            });
+        }
 
         builder.ConfigureLogging(logging =>
         {

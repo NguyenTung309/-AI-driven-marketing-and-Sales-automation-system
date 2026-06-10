@@ -41,11 +41,14 @@ public static class DependencyInjection
 
         services.AddScoped<IAuditContext, HttpAuditContext>();
         services.AddScoped<AuditSaveChangesInterceptor>();
+        services.AddScoped<Messaging.DomainEventDispatchInterceptor>();
 
         services.AddDbContext<AppDbContext>((sp, opt) =>
         {
             opt.UseSqlServer(cfg.GetConnectionString("SqlServer"));
-            opt.AddInterceptors(sp.GetRequiredService<AuditSaveChangesInterceptor>());
+            opt.AddInterceptors(
+                sp.GetRequiredService<AuditSaveChangesInterceptor>(),
+                sp.GetRequiredService<Messaging.DomainEventDispatchInterceptor>());
         });
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
@@ -67,6 +70,7 @@ public static class DependencyInjection
 
         services.AddMassTransit(bus =>
         {
+            bus.AddConsumer<Messaging.ConversationEscalatedConsumer>();
             bus.UsingRabbitMq((ctx, mq) =>
             {
                 mq.Host(cfg.GetConnectionString("RabbitMq") ?? "amqp://guest:guest@localhost:5672");
