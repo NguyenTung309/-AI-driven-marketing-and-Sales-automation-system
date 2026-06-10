@@ -1,5 +1,6 @@
 using Clawbot.Agents.Contracts.Docs;
 using Clawbot.Api.Contracts.Documents;
+using Clawbot.Api.Middleware;
 using Clawbot.Domain.Documents;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -13,7 +14,7 @@ public static class DocumentsEndpoints
 {
     public static IEndpointRouteBuilder MapDocuments(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/docs").RequireAuthorization();
+        var grp = app.MapGroup("/api/docs").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapPost("/generate", GenerateAsync);
 

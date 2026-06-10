@@ -1,5 +1,6 @@
 using Clawbot.Agents.Contracts.Ads;
 using Clawbot.Api.Contracts.Ads;
+using Clawbot.Api.Middleware;
 using Clawbot.Domain.Ads;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -14,7 +15,7 @@ public static class AdsEndpoints
 {
     public static IEndpointRouteBuilder MapAds(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/ads").RequireAuthorization();
+        var grp = app.MapGroup("/api/ads").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/rules", ListRulesAsync);
         grp.MapPost("/rules", CreateRuleAsync);

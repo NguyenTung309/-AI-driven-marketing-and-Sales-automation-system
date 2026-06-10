@@ -2,14 +2,9 @@ using Clawbot.SharedKernel.Vectors;
 
 namespace Clawbot.Agents.Core.Rag;
 
-/// <summary>
-/// Pulls top-K snippets from the `kb_versions` Qdrant collection. Filtering by
-/// tenant + module code is done client-side over payload until we add Qdrant
-/// payload filters in M10. Source-of-truth content remains in `kb_versions.content_md`.
-/// </summary>
 public sealed class QdrantRagRetriever(IVectorStore store, IEmbeddingProvider embedder) : IRagRetriever
 {
-    public const string Collection = "kb_versions";
+    public string Collection { get; } = $"kb_v{embedder.Dimension}";
 
     public async Task<IReadOnlyList<RagChunk>> RetrieveAsync(RagRequest request, CancellationToken ct = default)
     {

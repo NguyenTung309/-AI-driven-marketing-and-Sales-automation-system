@@ -1,4 +1,5 @@
 using Clawbot.Api.Contracts.Channels;
+using Clawbot.Api.Middleware;
 using Clawbot.Domain.Channels;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -13,7 +14,7 @@ public static class ChannelsEndpoints
 {
     public static IEndpointRouteBuilder MapChannels(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/channels/pancake").RequireAuthorization();
+        var grp = app.MapGroup("/api/channels/pancake").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/config", GetAsync);
         grp.MapPut("/config", UpsertAsync);

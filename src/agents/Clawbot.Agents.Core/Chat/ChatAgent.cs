@@ -29,7 +29,8 @@ public sealed record ChatAgentReply(
     string? BlockReason,
     string? Language = null,
     bool ToxicityBlocked = false,
-    bool SpamFlagged = false);
+    bool SpamFlagged = false,
+    bool Escalate = false);
 
 public sealed class ChatAgent(
     IRagRetriever rag,
@@ -119,13 +120,18 @@ public sealed class ChatAgent(
             request.TenantId, "chat-agent", "claude",
             reply.InputTokens, reply.OutputTokens, reply.UsdCost, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
 
+        var escalate = string.Equals(intentResult.Label, "escalation", StringComparison.OrdinalIgnoreCase)
+            || chunks.Count == 0
+            || (chunks.Count > 0 && chunks.Max(c => c.Score) < 0.35f);
+
         started.Stop();
         return new ChatAgentReply(reply.Text, chunks,
             reply.InputTokens, reply.OutputTokens, reply.UsdCost, started.ElapsedMilliseconds,
             Intent: intentResult.Label, Blocked: false, BlockReason: null,
             Language: langResult.LanguageCode,
             ToxicityBlocked: false,
-            SpamFlagged: spamSignal.IsSpam);
+            SpamFlagged: spamSignal.IsSpam,
+            Escalate: escalate);
     }
 
     private static string BuildSystemPrompt(IReadOnlyList<RagChunk> chunks, string intent, string languageCode)

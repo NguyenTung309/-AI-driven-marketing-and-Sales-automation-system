@@ -48,6 +48,11 @@ public static class HangfireModule
         services.AddScoped<AdsDaypartResumeJob>();
         services.AddScoped<WeeklyAdsReportJob>();
         services.AddScoped<AutoSummaryJob>();
+        services.AddScoped<HealthCheckJob>();
+        services.AddScoped<OutOfHoursAutoReplyJob>();
+        services.AddScoped<DripSequenceJob>();
+        services.AddScoped<IdleConversationAlertJob>();
+        services.AddScoped<LeadFollowUpJob>();
         return services;
     }
 
@@ -120,5 +125,30 @@ public static class HangfireModule
             "ads",
             j => j.RunAsync(CancellationToken.None),
             Cron.Weekly(DayOfWeek.Monday, 2, 0));
+        recurring.AddOrUpdate<HealthCheckJob>(
+            "health-check",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Hourly);
+        recurring.AddOrUpdate<OutOfHoursAutoReplyJob>(
+            "out-of-hours-auto-reply",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            "*/10 * * * *");
+        recurring.AddOrUpdate<DripSequenceJob>(
+            "drip-sequence-sender",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            "*/5 * * * *");
+        recurring.AddOrUpdate<IdleConversationAlertJob>(
+            "idle-conversation-alert",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            "*/2 * * * *");
+        recurring.AddOrUpdate<LeadFollowUpJob>(
+            "lead-followup",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            "0 * * * *");
     }
 }

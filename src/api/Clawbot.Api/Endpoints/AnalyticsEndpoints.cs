@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using Clawbot.Agents.Contracts.Report;
 using Clawbot.Api.Contracts.Analytics;
+using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.SharedKernel.Multitenancy;
 using Grpc.Core;
@@ -13,7 +14,7 @@ public static class AnalyticsEndpoints
 {
     public static IEndpointRouteBuilder MapAnalytics(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/analytics").RequireAuthorization();
+        var grp = app.MapGroup("/api/analytics").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/omnichannel", GetOmnichannelAsync);
         grp.MapGet("/funnel", GetFunnelAsync);

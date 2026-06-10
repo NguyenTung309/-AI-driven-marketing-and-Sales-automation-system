@@ -1,2 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <InternalsVisibleTo Include="Clawbot.Infrastructure" />
+    <InternalsVisibleTo Include="Clawbot.Domain.Tests" />
+  </ItemGroup>
 </Project>

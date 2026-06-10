@@ -1,4 +1,5 @@
 using Clawbot.Api.Contracts.Security;
+using Clawbot.Api.Middleware;
 using Clawbot.Domain.Security;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -11,7 +12,7 @@ public static class RolesEndpoints
 {
     public static IEndpointRouteBuilder MapRoles(this IEndpointRouteBuilder app)
     {
-        var roles = app.MapGroup("/api/rbac/roles").RequireAuthorization();
+        var roles = app.MapGroup("/api/rbac/roles").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         roles.MapGet("/", ListRolesAsync);
         roles.MapPost("/", CreateRoleAsync);
@@ -20,7 +21,7 @@ public static class RolesEndpoints
         roles.MapGet("/{id:guid}/permissions", ListRolePermissionsAsync);
         roles.MapPut("/{id:guid}/permissions", SetRolePermissionsAsync);
 
-        var perms = app.MapGroup("/api/rbac/permissions").RequireAuthorization();
+        var perms = app.MapGroup("/api/rbac/permissions").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
         perms.MapGet("/", ListPermissionsAsync);
 
         return app;

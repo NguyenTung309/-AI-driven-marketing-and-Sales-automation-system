@@ -138,11 +138,13 @@ public sealed class QdrantLeadDeduplicatorTests
         var contactId = Guid.NewGuid();
 
         var embedding = Substitute.For<IEmbeddingProvider>();
+        embedding.Dimension.Returns(384);
         embedding.EmbedAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(new ReadOnlyMemory<float>(new float[384]));
 
         var store = Substitute.For<IVectorStore>();
-        store.SearchAsync("contacts", Arg.Any<ReadOnlyMemory<float>>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+        // Collection is versioned by embedder dimension (contacts_v{dim}).
+        store.SearchAsync("contacts_v384", Arg.Any<ReadOnlyMemory<float>>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new List<VectorMatch>
             {
                 new(contactId.ToString("D"), 0.85f,

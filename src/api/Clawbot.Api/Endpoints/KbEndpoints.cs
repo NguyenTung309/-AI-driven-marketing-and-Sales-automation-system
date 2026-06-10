@@ -1,5 +1,9 @@
 using System.Text;
+using Clawbot.Agents.Core.Chat;
+using Clawbot.Agents.Core.Kb;
+using Clawbot.Agents.Core.Rag;
 using Clawbot.Api.Contracts.KnowledgeBase;
+using Clawbot.Api.Middleware;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -12,7 +16,7 @@ public static class KbEndpoints
 {
     public static IEndpointRouteBuilder MapKb(this IEndpointRouteBuilder app)
     {
-        var modules = app.MapGroup("/api/kb/modules").RequireAuthorization();
+        var modules = app.MapGroup("/api/kb/modules").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         modules.MapGet("/", ListModulesAsync);
         modules.MapGet("/{id:guid}", GetModuleAsync);
@@ -191,11 +195,12 @@ public static class KbEndpoints
         AppDbContext db,
         ITenantAccessor tenants,
         IClock clock,
+        KbDeployService deployService,
         CancellationToken ct)
     {
         var tenantId = tenants.Require().TenantId;
-        var owns = await db.KbModules.AnyAsync(m => m.Id == id && m.TenantId == tenantId, ct);
-        if (!owns) return Results.NotFound();
+        var owns = await db.KbModules.FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId, ct);
+        if (owns is null) return Results.NotFound();
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var deployed = await db.KbVersions
@@ -207,6 +212,9 @@ public static class KbEndpoints
         if (target is null) return Results.NotFound();
         target.Deploy(clock.UtcNow);
         await db.SaveChangesAsync(ct);
+
+        await deployService.EmbedAndUpsertAsync(target, owns.Code, tenantId, ct);
+
         await tx.CommitAsync(ct);
         return Results.NoContent();
     }
@@ -217,9 +225,9 @@ public static class KbEndpoints
         AppDbContext db,
         ITenantAccessor tenants,
         IClock clock,
+        KbDeployService deployService,
         CancellationToken ct) =>
-        // Rollback is semantically the same as deploy(versionId). Provided as a distinct verb for audit clarity.
-        await DeployVersionAsync(id, versionId, db, tenants, clock, ct);
+        await DeployVersionAsync(id, versionId, db, tenants, clock, deployService, ct);
 
     private static async Task<IResult> DiffVersionsAsync(
         Guid id,
@@ -293,11 +301,13 @@ public static class KbEndpoints
         AppDbContext db,
         ITenantAccessor tenants,
         IClock clock,
+        IRagRetriever rag,
+        IClaudeChatClient claude,
         CancellationToken ct)
     {
         var tenantId = tenants.Require().TenantId;
-        var owns = await db.KbModules.AnyAsync(m => m.Id == id && m.TenantId == tenantId, ct);
-        if (!owns) return Results.NotFound();
+        var owns = await db.KbModules.FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId, ct);
+        if (owns is null) return Results.NotFound();
 
         var deployedVersion = await db.KbVersions
             .Where(v => v.KbModuleId == id && v.Status == "deployed")
@@ -310,19 +320,34 @@ public static class KbEndpoints
             .ToListAsync(ct);
         if (cases.Count == 0) return Results.BadRequest("no_test_cases");
 
-        // TODO(M09): call IRagRetriever + LLM to answer each question, compare with expected.
-        // Stub: pretend 0.85 pass rate so dashboards have data flowing during T1.
-        var results = cases
-            .Select((c, idx) => new KbTestCaseResult(c.Id, c.Question, idx % 7 != 0, null))
-            .ToList();
-        var passed = results.Count(r => r.Passed);
-        var score = decimal.Round(100m * passed / results.Count, 2);
+        var results = new List<KbTestCaseResult>();
+        foreach (var testCase in cases)
+        {
+            var chunks = await rag.RetrieveAsync(
+                new RagRequest(tenantId, owns.Code, testCase.Question, 3), ct);
+
+            var context = string.Join("\n---\n", chunks.Select(c => c.Snippet));
+            var evalPrompt = $"Context:\n{context}\n\nQuestion: {testCase.Question}\n" +
+                $"Expected answer: {testCase.ExpectedAnswer}\n\n" +
+                "Does the context contain information to answer the question correctly? " +
+                "Reply with only JSON: {\"passed\":true/false,\"reason\":\"...\"}";
+
+            var reply = await claude.CompleteAsync(
+                "You are a KB accuracy evaluator. Check if the retrieved context supports the expected answer.",
+                Array.Empty<ChatTurn>(), evalPrompt, ct);
+
+            var passed = reply.Text.Contains("\"passed\":true", StringComparison.OrdinalIgnoreCase);
+            results.Add(new KbTestCaseResult(testCase.Id, testCase.Question, passed, null));
+        }
+
+        var passedCount = results.Count(r => r.Passed);
+        var score = decimal.Round(100m * passedCount / results.Count, 2);
 
         deployedVersion.RecordAccuracy(score);
         await db.SaveChangesAsync(ct);
 
         return Results.Ok(new KbTestRunResult(deployedVersion.Id, deployedVersion.Version,
-            results.Count, passed, score, results));
+            results.Count, passedCount, score, results));
     }
 
     private static async Task<IResult> AccuracyDashboardAsync(

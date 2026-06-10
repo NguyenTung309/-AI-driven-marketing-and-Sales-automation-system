@@ -1,5 +1,6 @@
 using Clawbot.Agents.Contracts.SaleAssist;
 using Clawbot.Api.Contracts.SaleAssist;
+using Clawbot.Api.Middleware;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -12,7 +13,7 @@ public static class SaleAssistEndpoints
 {
     public static IEndpointRouteBuilder MapSaleAssist(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/sale-assist").RequireAuthorization();
+        var grp = app.MapGroup("/api/sale-assist").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.ChatPolicy);
 
         grp.MapPost("/draft", DraftAsync);
         grp.MapPost("/summary", SummarizeAsync);
@@ -21,6 +22,9 @@ public static class SaleAssistEndpoints
         grp.MapPost("/quick-replies", CreateQuickReplyAsync);
         grp.MapPut("/quick-replies/{id:guid}", UpdateQuickReplyAsync);
         grp.MapDelete("/quick-replies/{id:guid}", DeleteQuickReplyAsync);
+
+        grp.MapGet("/daily-summary", DailySummaryAsync);
+        grp.MapGet("/upsell-suggestions", UpsellSuggestionsAsync);
 
         return app;
     }
@@ -119,5 +123,69 @@ public static class SaleAssistEndpoints
         db.QuickReplyTemplates.Remove(tpl);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.NoContent();
+    }
+
+    private static async Task<IResult> DailySummaryAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var today = DateTimeOffset.UtcNow.Date;
+        var tomorrow = today.AddDays(1);
+
+        var newLeads = await db.Leads
+            .IgnoreQueryFilters()
+            .CountAsync(l => l.TenantId == tenantId && l.CreatedAt >= today && l.CreatedAt < tomorrow, ct);
+
+        var conversations = await db.Conversations
+            .IgnoreQueryFilters()
+            .CountAsync(c => c.TenantId == tenantId && c.CreatedAt >= today && c.CreatedAt < tomorrow, ct);
+
+        var messagesSent = await db.Messages
+            .IgnoreQueryFilters()
+            .CountAsync(m => m.TenantId == tenantId && m.Direction == "out" && m.SentAt >= today && m.SentAt < tomorrow, ct);
+
+        var hotLeads = await db.Leads
+            .IgnoreQueryFilters()
+            .CountAsync(l => l.TenantId == tenantId && l.Stage == "hot", ct);
+
+        return Results.Ok(new
+        {
+            date = today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            new_leads = newLeads,
+            conversations,
+            messages_sent = messagesSent,
+            hot_leads = hotLeads,
+        });
+    }
+
+    private static async Task<IResult> UpsellSuggestionsAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+
+        var hotLeads = await db.Leads
+            .IgnoreQueryFilters()
+            .Where(l => l.TenantId == tenantId && l.Stage == "hot" && l.DeletedAt == null)
+            .OrderByDescending(l => l.Score)
+            .Take(20)
+            .Select(l => new
+            {
+                l.Id,
+                l.Score,
+                l.LastActivityAt,
+                Contact = l.ContactId != null ? new
+                {
+                    Name = db.Contacts.Where(c => c.Id == l.ContactId).Select(c => c.DisplayName).FirstOrDefault(),
+                    Phone = db.Contacts.Where(c => c.Id == l.ContactId).Select(c => c.Phone).FirstOrDefault(),
+                } : null,
+                Suggestion = "Offer advanced course package or premium subscription",
+            })
+            .ToListAsync(ct);
+
+        return Results.Ok(new { hot_leads = hotLeads, count = hotLeads.Count });
     }
 }

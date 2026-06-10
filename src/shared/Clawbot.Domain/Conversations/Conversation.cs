@@ -41,9 +41,9 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
     public void Resolve() => Status = "resolved";
     public void Escalate() => Status = "escalated";
 
-    public Message AppendMessage(string direction, string senderType, string content, string contentType, DateTimeOffset sentAt)
+    public Message AppendMessage(string direction, string senderType, string content, string contentType, DateTimeOffset sentAt, string? externalMessageId = null, string? originalContent = null, string? redactedContent = null)
     {
-        var msg = Message.Create(Id, TenantId, direction, senderType, content, contentType, sentAt);
+        var msg = Message.Create(Id, TenantId, direction, senderType, content, contentType, sentAt, externalMessageId, originalContent, redactedContent);
         _messages.Add(msg);
         LastMessageAt = sentAt;
         return msg;

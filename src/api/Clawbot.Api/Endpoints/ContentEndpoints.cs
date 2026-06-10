@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Clawbot.Agents.Contracts.Content;
 using Clawbot.Agents.Contracts.Research;
 using Clawbot.Api.Contracts.Content;
+using Clawbot.Api.Middleware;
 using Clawbot.Domain.Content;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Content;
@@ -18,7 +19,7 @@ public static class ContentEndpoints
 {
     public static IEndpointRouteBuilder MapContent(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/content").RequireAuthorization();
+        var grp = app.MapGroup("/api/content").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/briefs", ListBriefsAsync);
         grp.MapGet("/briefs/{id:guid}", GetBriefAsync);

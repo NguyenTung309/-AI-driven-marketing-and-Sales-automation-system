@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Auth;
+using Clawbot.Api.Middleware;
 using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Persistence;
@@ -23,7 +24,7 @@ public static partial class AuthEndpoints
 
     public static IEndpointRouteBuilder MapAuth(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/auth");
+        var group = app.MapGroup("/auth").RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
 
         group.MapPost("/login", LoginAsync).AllowAnonymous();
         group.MapPost("/login/2fa", LoginWithTwoFactorAsync).AllowAnonymous();

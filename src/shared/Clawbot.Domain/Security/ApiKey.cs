@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Clawbot.Domain.Common;
 
 namespace Clawbot.Domain.Security;
@@ -15,13 +16,18 @@ public sealed class ApiKey : AggregateRoot<Guid>, ITenantOwned
 
     private ApiKey() { }
 
-    public static ApiKey Issue(Guid tenantId, string name, string keyHash, DateTimeOffset createdAt, DateTimeOffset? expiresAt = null) =>
+    public static ApiKey Issue(
+        Guid tenantId, string name, string keyHash, DateTimeOffset createdAt,
+        DateTimeOffset? expiresAt = null, IReadOnlyList<string>? scopes = null) =>
         new()
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             Name = name,
             KeyHash = keyHash,
+            ScopesJson = scopes is { Count: > 0 }
+                ? JsonSerializer.Serialize(scopes)
+                : "[]",
             ExpiresAt = expiresAt,
             CreatedAt = createdAt,
         };
