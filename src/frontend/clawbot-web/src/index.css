@@ -1,6 +1,100 @@
+/* Học Bá Admin Dashboard — design tokens (Stitch project 15408388482133270285 DESIGN.md).
+   Token names mirror the Stitch tailwind.config so screen markup classes resolve verbatim. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Material+Symbols+Outlined&display=swap");
 @import "tailwindcss";
+
+@theme {
+  /* ---- Colors (Học Bá Red brand + Material-style surface scale) ---- */
+  --color-primary: #d32f2f;
+  --color-primary-hover: #b71c1c;
+  --color-primary-container: #d32f2f;
+  --color-on-primary: #ffffff;
+  --color-secondary: #1e293b;
+  --color-on-secondary: #ffffff;
+
+  --color-surface: #f8fafc;                 /* L0 canvas */
+  --color-surface-container-lowest: #ffffff;/* L1 card */
+  --color-surface-container: #eceef0;
+  --color-surface-variant: #e2e8f0;         /* borders / table head fill */
+  --color-on-surface: #191c1e;
+  --color-on-surface-variant: #5b6470;
+  --color-outline: #e2e8f0;
+
+  /* Semantic — agent status / telemetry */
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-tertiary: #10b981;
+
+  /* ---- Type ---- */
+  --font-sans: "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-display-lg: "Inter", sans-serif;
+  --font-headline-md: "Inter", sans-serif;
+  --font-headline-sm: "Inter", sans-serif;
+  --font-body-lg: "Inter", sans-serif;
+  --font-body-md: "Inter", sans-serif;
+  --font-telemetry-data: "Inter", sans-serif;
+  --font-label-caps: "Inter", sans-serif;
+  --font-mono-status: "JetBrains Mono", monospace;
+
+  --text-display-lg: 36px;
+  --text-display-lg--line-height: 44px;
+  --text-display-lg--font-weight: 700;
+  --text-display-lg--letter-spacing: -0.02em;
+  --text-headline-md: 24px;
+  --text-headline-md--line-height: 32px;
+  --text-headline-md--font-weight: 600;
+  --text-headline-md--letter-spacing: -0.01em;
+  --text-headline-sm: 20px;
+  --text-headline-sm--line-height: 28px;
+  --text-headline-sm--font-weight: 600;
+  --text-body-lg: 16px;
+  --text-body-lg--line-height: 24px;
+  --text-body-md: 14px;
+  --text-body-md--line-height: 20px;
+  --text-telemetry-data: 28px;
+  --text-telemetry-data--line-height: 34px;
+  --text-telemetry-data--font-weight: 700;
+  --text-telemetry-data--letter-spacing: -1px;
+  --text-label-caps: 12px;
+  --text-label-caps--line-height: 16px;
+  --text-label-caps--font-weight: 700;
+  --text-label-caps--letter-spacing: 0.05em;
+  --text-mono-status: 13px;
+  --text-mono-status--line-height: 16px;
+  --text-mono-status--font-weight: 500;
+
+  /* ---- Shape (soft 4px) ---- */
+  --radius: 0.25rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+
+  /* ---- Spacing / layout ---- */
+  --spacing-stack-sm: 8px;
+  --spacing-stack-md: 16px;
+  --spacing-stack-lg: 32px;
+  --spacing-card-padding: 20px;
+  --spacing-gutter: 24px;
+  --spacing-sidebar-width: 260px;
+  --spacing-topbar-height: 64px;
+}
 
 body {
   margin: 0;
-  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
+  background: var(--color-surface);
+  color: var(--color-on-surface);
+  -webkit-font-smoothing: antialiased;
+}
+
+.material-symbols-outlined {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  direction: ltr;
 }

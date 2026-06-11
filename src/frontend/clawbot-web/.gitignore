@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Stitch design cache (re-fetchable via MCP)
+.stitch/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
