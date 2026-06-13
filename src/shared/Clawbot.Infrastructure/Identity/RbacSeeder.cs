@@ -1,3 +1,4 @@
+using Clawbot.Domain.Agents;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Persistence;
@@ -17,6 +18,19 @@ public static partial class RbacSeeder
 {
     public static readonly IReadOnlyList<string> DefaultRoles =
         new[] { "Admin", "Sale", "Marketer", "QA", "Viewer" };
+
+    // 8 agents (M25). Seeded "running" so the toggle gate allows auto-actions by default.
+    private static readonly (string Code, string DisplayName, string AgentType)[] DefaultAgents =
+    [
+        ("chat-agent", "Agent-Chat", "chat"),
+        ("sale-assist", "Agent-SaleAssist", "sale_assist"),
+        ("lead-agent", "Agent-Lead", "lead"),
+        ("content-agent", "Agent-Content", "content"),
+        ("research-agent", "Agent-Research", "research"),
+        ("docs-agent", "Agent-Docs", "docs"),
+        ("report-agent", "Agent-Report", "report"),
+        ("ads-agent", "Agent-Ads", "ads"),
+    ];
 
     private static readonly Dictionary<string, string[]> RolePermissions = new()
     {
@@ -124,6 +138,19 @@ public static partial class RbacSeeder
 
                     db.RolePermissions.Add(RolePermission.Create(domainRole.Id, permId));
                 }
+            }
+
+            var existingAgentCodes = await db.AgentConfigs
+                .IgnoreQueryFilters()
+                .Where(a => a.TenantId == tenant.Id)
+                .Select(a => a.Code)
+                .ToListAsync(ct);
+            foreach (var (code, displayName, agentType) in DefaultAgents)
+            {
+                if (existingAgentCodes.Contains(code)) continue;
+                var agent = AgentConfig.Create(tenant.Id, code, displayName, agentType, "claude", now);
+                agent.Start(); // seeded enabled (running)
+                db.AgentConfigs.Add(agent);
             }
         }
 

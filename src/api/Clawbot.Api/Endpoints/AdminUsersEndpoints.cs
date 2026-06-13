@@ -30,6 +30,14 @@ public static class AdminUsersEndpoints
         return grp;
     }
 
+    // Identity AppUser is not ITenantOwned (no global filter), so admin ops must scope by tenant
+    // explicitly — otherwise an admin could mutate another tenant's user by guessing the id (IDOR).
+    private static async Task<AppUser?> FindInTenantAsync(UserManager<AppUser> users, ITenantAccessor tenants, Guid id)
+    {
+        var user = await users.FindByIdAsync(id.ToString());
+        return user is not null && user.TenantId == tenants.Require().TenantId ? user : null;
+    }
+
     private static async Task<IResult> ListAsync(
         UserManager<AppUser> users, ITenantAccessor tenants,
         [FromQuery] string? q, [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default)
@@ -76,9 +84,9 @@ public static class AdminUsersEndpoints
         return Results.Created($"/api/admin/users/{user.Id}", new { user.Id, user.Email, user.DisplayName });
     }
 
-    private static async Task<IResult> UpdateAsync(Guid id, UpdateUserRequest req, UserManager<AppUser> users)
+    private static async Task<IResult> UpdateAsync(Guid id, UpdateUserRequest req, UserManager<AppUser> users, ITenantAccessor tenants)
     {
-        var user = await users.FindByIdAsync(id.ToString());
+        var user = await FindInTenantAsync(users, tenants, id);
         if (user is null) return Results.NotFound();
 
         if (req.DisplayName is not null) user.DisplayName = req.DisplayName;
@@ -99,12 +107,12 @@ public static class AdminUsersEndpoints
         return result.Succeeded ? Results.NoContent() : Results.BadRequest(result.Errors.Select(e => e.Description));
     }
 
-    private static Task<IResult> DisableAsync(Guid id, UserManager<AppUser> users) => SetActiveAsync(id, false, users);
-    private static Task<IResult> EnableAsync(Guid id, UserManager<AppUser> users) => SetActiveAsync(id, true, users);
+    private static Task<IResult> DisableAsync(Guid id, UserManager<AppUser> users, ITenantAccessor tenants) => SetActiveAsync(id, false, users, tenants);
+    private static Task<IResult> EnableAsync(Guid id, UserManager<AppUser> users, ITenantAccessor tenants) => SetActiveAsync(id, true, users, tenants);
 
-    private static async Task<IResult> SetActiveAsync(Guid id, bool active, UserManager<AppUser> users)
+    private static async Task<IResult> SetActiveAsync(Guid id, bool active, UserManager<AppUser> users, ITenantAccessor tenants)
     {
-        var user = await users.FindByIdAsync(id.ToString());
+        var user = await FindInTenantAsync(users, tenants, id);
         if (user is null) return Results.NotFound();
         user.IsActive = active;
         await users.SetLockoutEndDateAsync(user, active ? null : DateTimeOffset.MaxValue);
@@ -112,9 +120,9 @@ public static class AdminUsersEndpoints
         return Results.Ok(new { user.Id, user.IsActive });
     }
 
-    private static async Task<IResult> ResetPasswordAsync(Guid id, UserManager<AppUser> users, IEmailSender email)
+    private static async Task<IResult> ResetPasswordAsync(Guid id, UserManager<AppUser> users, IEmailSender email, ITenantAccessor tenants)
     {
-        var user = await users.FindByIdAsync(id.ToString());
+        var user = await FindInTenantAsync(users, tenants, id);
         if (user is null) return Results.NotFound();
 
         var token = await users.GeneratePasswordResetTokenAsync(user);
