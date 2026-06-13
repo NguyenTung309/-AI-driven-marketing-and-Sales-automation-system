@@ -139,6 +139,7 @@
 - [ ] Prompt injection guard via `IPromptInjectionDefender` → defer to M11
 - [ ] Toxicity filter output via `IToxicityFilter` → defer to M11
 - [ ] Token-by-token streaming (SSE-style chunk) → P2 optimization
+- [ ] **Comment auto-reply (Agent-Chat L2)** — phát hiện comment có ý mua → trả lời dưới comment <30s + gửi DM mời riêng (từ pain-point audit; Pancake ingest comment nhưng chưa tự trả lời)
 - [x] Escalation rule (confidence<threshold | intent=escalation → assign sale) → done W5 — [ChatAgent.cs](../src/agents/Clawbot.Agents.Core/Chat/ChatAgent.cs)
 - [x] Out-of-hours auto-reply (UC-A07) scheduled scenario → done W5 — [OutOfHoursAutoReplyJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/OutOfHoursAutoReplyJob.cs)
 - [x] p95 latency Serilog+OTel histograms — OpenTelemetry (ASP.NET/HttpClient/runtime) — [TelemetryModule.cs](../src/shared/Clawbot.Infrastructure/Observability/TelemetryModule.cs) (OTLP exporter deferred — audit GHSA-4625-4j76-fww9)
@@ -154,7 +155,7 @@
 - [x] `quick_reply_templates` CRUD: GET/POST/PUT/DELETE `/api/sale-assist/quick-replies`
 - [x] API → AgentService via `Grpc.Net.ClientFactory` (`SaleAssistAgentClient` typed client)
 - [x] Build xanh 12 projects, 0/0
-- [x] Alert job: conversation idle >5 min → Telegram + SignalR → done W6.6 — [IdleConversationAlertJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/IdleConversationAlertJob.cs) (SignalR only, Telegram blocked)
+- [x] Alert job: conversation idle >5 min → SignalR/in-app → done W6.6 — [IdleConversationAlertJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/IdleConversationAlertJob.cs)
 - [x] Context panel API: lead history + score + next-step → done W6.7 — [LeadsEndpoints.cs](../src/api/Clawbot.Api/Endpoints/LeadsEndpoints.cs)
 - [x] Upsell suggestion when lead.stage='hot' + gói ngắn → done W6.8 — [SaleAssistEndpoints.cs](../src/api/Clawbot.Api/Endpoints/SaleAssistEndpoints.cs)
 - [ ] Sale tone check (block banned phrases) before send → M11 toxicity-filter
@@ -174,12 +175,13 @@
 - [x] Build xanh 12 projects, 0/0
 - [x] `lead_scoring_rules` seed defaults (asks_price+10, shares_phone+20, etc.) → done W6.1 — [lead-scoring-rules.sql](../deploy/seed/lead-scoring-rules.sql)
 - [ ] Qdrant similarity dedup ≥0.92 on (name+phone tail+email embedding) → M11 lead-deduplicator skill
+- [ ] **Score-change reason logging (Agent-Lead L1)** — lưu lý do tại sao điểm ±N mỗi activity (từ pain-point audit; hiện chỉ lưu điểm tổng)
 - [x] Drip sequences (per-channel templates) → done W6.2 — [0008_drip_sequences.sql](../deploy/migrations/0008_drip_sequences.sql) + [DripSequenceJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/DripSequenceJob.cs)
 - [x] No-show follow-up 2h after demo missed → done W6.3 — [LeadFollowUpJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/LeadFollowUpJob.cs)
 - [x] Re-engage stale lead 30d → done W6.4 — [LeadFollowUpJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/LeadFollowUpJob.cs)
 - [x] Pipeline forecast endpoint `GET /api/leads/forecast` → done W6.5 — [LeadsEndpoints.cs](../src/api/Clawbot.Api/Endpoints/LeadsEndpoints.cs)
 - [ ] Lead import/export CSV → P3
-- [ ] Telegram alert <2 min on hot lead → after M12 + Telegram channel adapter
+- [ ] Hot-lead alert (≥70đ) <2 min → SignalR/in-app — auto-assign done; realtime push cần xác minh
 
 ---
 
@@ -267,10 +269,10 @@
 - [x] Build xanh 12 projects, 0/0
 - [x] Admin-only auth filter on `/hangfire` dashboard → tighten before prod — [HangfireAdminFilter.cs](../src/api/Clawbot.Api/Auth/HangfireAdminFilter.cs)
 - [x] `messages` retention purge (>30d) — RetentionPurgeJob nulls original_content, keeps redacted — [RetentionPurgeJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/RetentionPurgeJob.cs)
-- [ ] `DailyReportJob` (Telegram push UC-I01) → after Telegram channel adapter
+- [ ] `DailyReportJob` (UC-I01) — push tổng hợp 7h30 qua SignalR/in-app; hiện mới có `DailyKpiRollupJob` rollup
 - [ ] `DripSequenceJob` per-lead → after M15 drip templates + Pancake outbound batch
 - [x] `KbAccuracyTestJob` (daily) — alerts deployed KB <85% via SignalR — [KbAccuracyTestJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/KbAccuracyTestJob.cs) (real scores after embedder+content)
-- [x] `HealthCheckJob` (hourly) → after Telegram channel adapter — [HealthCheckJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/HealthCheckJob.cs)
+- [x] `HealthCheckJob` (hourly) — [HealthCheckJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/HealthCheckJob.cs)
 
 ### M13 — Rate-limit middleware + Webhook HMAC verify · Imp 4 · Diff 2 · T2 · **DONE 2026-05-29**
 - [x] `RateLimitingExtensions.AddClawbotRateLimiting` 4 policies: auth(10/min), webhook(120/min), chat(60/min), general(300/min) + global 600/min — [RateLimitingExtensions.cs](../src/api/Clawbot.Api/Middleware/RateLimitingExtensions.cs)
@@ -301,7 +303,7 @@
 - [ ] Document library + preview + send
 - [ ] Analytics dashboard (KPI 5 kênh)
 - [ ] Admin (users/roles/api-keys/integrations)
-- [ ] Notification center + Telegram link
+- [ ] Notification center (SignalR realtime)
 
 ### M17 — Document Generation (QuestPDF) · Imp 4 · Diff 3 · T9 · **DONE 2026-06-04**
 - [x] Impl `DocsAgentGrpcService.Generate` (load template by code → render → store → persist `generated_documents`) — [DocsAgentGrpcService.cs](../src/agents/Clawbot.AgentService/Services/DocsAgentGrpcService.cs)
@@ -380,6 +382,64 @@
 - [x] Seed `deploy/seed/ads-rules.sql` (idempotent MERGE, 5 rules per platform)
 - [x] Config: `Ads:Meta` + `Ads:TikTok` in both appsettings + `.env.example`
 - [x] Build 0/0, 192 tests green (+24 new ads tests)
+
+---
+
+## Pain-point audit — đối chiếu [PhanTich_User_PainPoint_AI_Agent.docx](PhanTich_User_PainPoint_AI_Agent.md.docx) (2026-06-13)
+
+> Khách cung cấp tài liệu: 7 user persona + 8 AI agent / 18 luồng nghiệp vụ. Rà chéo với source code hiện tại. Kết luận: **8 agent map đủ vào module đã build**; còn vài gap nhỏ (xem dưới). Cảnh báo nội bộ qua SignalR/in-app.
+
+### 8 Agent → module → trạng thái
+| Agent (số luồng) | Module | Trạng thái |
+|---|---|---|
+| **Agent-Chat** (4) — trả lời 24/7, comment, anti-injection, cost/cuộc | M10 · M11 · M06/M08 | ✅ — trừ **comment auto-reply <30s + DM mời riêng** (Luồng 2) chưa wire |
+| **Agent-SaleAssist** (5) — draft, xếp ưu tiên, idle alert, upsell | M14 · M15 | ✅ — idle >5min (SignalR) done; **tier >10min → Sales Lead** cần xác minh |
+| **Agent-Lead** (3) — chấm điểm, giao khách nóng, nuôi dưỡng | M15 | ✅ — alert khách nóng qua SignalR done; trừ **ghi lý do ±điểm** |
+| **Agent-Content** (3) | M18 | ✅ |
+| **Agent-Research** (2) | M18 | ✅ |
+| **Agent-Docs** (2) — báo giá, brochure | M17 | ✅ (brochure/slide template defer) |
+| **Agent-Report** (4) — daily, forecast, anomaly, AI-quality | M20 · M12 | ✅ — anomaly alert qua SignalR; trừ **DailyReportJob push** + **20-câu test set + đáp án chuẩn** |
+| **Agent-Ads** (3) — tối ưu/giờ, lookalike, budget alert | M19 | ✅ — budget 90% alert qua SignalR/webhook done |
+
+### Gap khách yêu cầu (bổ sung tracking)
+> Telegram **không dùng** (quyết định 2026-06-13) — mọi cảnh báo qua **SignalR / in-app**.
+1. **Comment auto-reply** (Chat-L2) — trả lời dưới comment <30s + gửi DM mời. Pancake ingest comment nhưng chưa có flow tự trả lời. → ticket M10/M06 dưới.
+2. **KB content + 20-câu test set/đáp án chuẩn + 6 module tiếng Trung** (Report-L4, Chat accuracy) — `KbAccuracyTestJob` có sẵn, thiếu bộ 20 câu + đáp án + content. → M04 (đã defer; khách xác nhận cần).
+3. **DailyReportJob push** (Report-L1) — hiện chỉ `DailyKpiRollupJob` rollup vào `kpi_daily`; chưa có job push tổng hợp 7h30 (qua SignalR/in-app). → M12.
+4. **Lead score-change reason** (Lead-L1) — chưa lưu lý do thay đổi điểm. → M15 (nhỏ).
+5. **Idle 2-tier** (SaleAssist-L4) — xác minh tier >10min → Sales Lead trong `IdleConversationAlertJob`.
+
+---
+
+## Backend gaps mới (rà soát 2026-06-13) — chức năng FE/doc cần nhưng CHƯA có
+
+> Đối chiếu 12 surface FE (M16) + 18 luồng doc với route hiện có (`src/api/.../Endpoints/*`). Các endpoint dưới **xác nhận chưa tồn tại** trong route hiện tại.
+
+### M23 — Account & User administration (NEW · Imp 4 · Diff 3 · **TODO**)
+> Quyết định /review-requirements 2026-06-13: **Admin tạo user, KHÔNG self-register** (single-org). Email = **SMTP config-gated**.
+- [ ] `/api/admin/users` CRUD — list/create/disable user + gán role + admin-reset password (FE **Admin** surface); hiện chỉ có `/api/rbac/roles` + `/api/api-keys`, chưa có user CRUD
+- [ ] `POST /auth/change-password` (đã đăng nhập) — FE `ChangePasswordDialog` cần; hiện chỉ có reset-qua-token
+- [ ] `GET/PUT /api/profile` — đọc/cập nhật hồ sơ (họ tên, SĐT, ngày sinh); `/auth/me` chỉ trả claims, FE Hồ sơ đang mock
+- [ ] Avatar upload (MinIO) — FE nút "đổi ảnh đại diện"
+- [ ] `IEmailSender` — **SMTP config-gated** (graceful, bật khi có creds) → gửi reset token + onboarding (hiện chỉ log token)
+- [x] ~~`POST /auth/register` self-serve~~ — **bỏ** (admin-provisioned, no public register)
+
+### M24 — Notification center backend (NEW · Imp 4 · Diff 2 · **TODO**)
+- [ ] `notifications` table + entity — persist alert (hot-lead, idle, anomaly, ads-budget, system); hiện alert chỉ ephemeral qua SignalR
+- [ ] `GET /api/notifications` (paged + unread filter) + `POST /api/notifications/{id}/read` + mark-all-read
+- [ ] `INotificationStore` — notifier ghi DB song song push SignalR (FE **Notification center** M16)
+
+### M25 — Agent control & observability (NEW · Imp 3 · Diff 3 · **TODO**)
+- [ ] `GET /api/agents` — list 8 agent + status (enabled/running/last-run/health) — FE **Agent dashboard**
+- [ ] `POST /api/agents/{code}/enable|disable` — flag per-tenant **tắt/bật auto-action** của agent-type (gRPC vẫn chạy, không kill process) — FE start/stop
+- [ ] `GET /api/agents/{code}/traces` — đọc agent run logs; `agent_traces` đã persist (M10) nhưng thiếu endpoint
+- [ ] `GET /api/analytics/agent-cost` — chi phí theo từng agent (Report-L4: agent tốn nhất, TB/cuộc); cost tracker hiện in-memory tenant+month
+
+### Bổ sung vào module hiện có
+- **M14** — [ ] SaleAssist draft feedback loop ("AI tự học", doc L1) — ghi outcome khi sale gửi/sửa draft để cải thiện gợi ý
+- **M15** — [ ] Least-load assignment (doc: "sale rảnh nhất / ít khách nhất") — hiện `RoundRobinLeadAssignmentService`; cân nhắc least-active-load
+- **M11/M10** — [ ] Persistent cost ledger (DB) thay `InMemoryClaudeCostTracker` — cần cho báo cáo chi phí lịch sử + agent-cost report
+- **M10** — [ ] Out-of-hours window cấu hình per-tenant (hiện `OutOfHoursAutoReplyJob` window cố định)
 
 ---
 

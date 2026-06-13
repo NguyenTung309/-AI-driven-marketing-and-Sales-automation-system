@@ -12,6 +12,7 @@ using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Observability;
 using Clawbot.SharedKernel.Content;
 using Clawbot.SharedKernel.Inbox;
+using Clawbot.SharedKernel.Notifications;
 using Hangfire;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -77,6 +78,7 @@ builder.Services.AddClawbotRateLimiting();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IInboxNotifier, SignalRInboxNotifier>();
 builder.Services.AddScoped<IContentNotifier, SignalRContentNotifier>();
+builder.Services.AddScoped<INotificationPublisher, Clawbot.Api.Hubs.DbNotificationPublisher>();
 builder.Services.AddScoped<AnalyticsAggregationService>();
 builder.Services.AddScoped<AnalyticsExportService>();
 
@@ -149,9 +151,11 @@ app.MapChannels();
 app.MapWebhooks();
 app.MapContacts();
 app.MapAdmin();
+app.MapNotifications();
 app.MapBoundedContexts();
 app.MapHub<DashboardHub>("/hubs/dashboard");
 app.MapHub<InboxHub>("/hubs/inbox");
+app.MapHub<NotificationHub>("/hubs/notifications");
 app.MapHangfireDashboard("/hangfire", new DashboardOptions
 {
     Authorization = [new HangfireAdminFilter()],

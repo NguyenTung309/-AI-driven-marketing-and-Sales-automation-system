@@ -12,6 +12,7 @@ using Clawbot.Domain.Conversations;
 using Clawbot.Domain.Documents;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
+using Clawbot.Domain.Notifications;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
@@ -35,6 +36,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     // Contacts
     public DbSet<Contact> Contacts => Set<Contact>();
