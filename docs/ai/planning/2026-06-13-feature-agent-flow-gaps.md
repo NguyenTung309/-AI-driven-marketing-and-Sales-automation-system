@@ -3,7 +3,7 @@ phase: planning
 title: Agent Business-Flow Gaps — Implementation Plan
 feature: agent-flow-gaps
 date: 2026-06-13
-status: in-progress
+status: implemented (Phase 0 spike deferred — Pancake access)
 branch: feature-analytics-kpi
 requirements: ./../requirements/2026-06-13-feature-agent-flow-gaps.md
 design: ./../design/2026-06-13-feature-agent-flow-gaps.md
@@ -12,6 +12,13 @@ design: ./../design/2026-06-13-feature-agent-flow-gaps.md
 # Agent Business-Flow Gaps — Implementation Plan
 
 > 3 missing + 7 actionable partials from the 2026-06-13 audit. Decisions: least-busy **replaces** round-robin · Lead-2/3 **event-driven via WS1 outbox** (prereq) · Ads-1 **hourly+throttle** · Chat-2 **spike-gated**. Alerts via SignalR (no Telegram). Verify gate: `dotnet build Clawbot.sln` 0/0 + `dotnet test` green (250 baseline) after each task.
+
+## Status (2026-06-13 — implemented)
+- **Phase 0 (Chat-2 spike):** ⛔ DEFERRED — needs Pancake webhook/API access (external). T3.8 schema landed regardless.
+- **Phase 1 (WS1 outbox):** ✅ DONE (commit `82354fd`/earlier) — events, interceptor (pre-save → outbox), `AddEntityFrameworkOutbox`, migration `0015`. *Runtime relay needs SQL Server + RabbitMQ (Docker) to verify end-to-end.*
+- **Phase 2 (lead consumers + least-busy):** ✅ DONE — `LeastBusyLeadAssignmentService` (replaces round-robin), `LeadBecameHot/WarmConsumer`, seeded warm drip.
+- **Phase 3 (independent):** ✅ DONE — 3.1 competitor monitor · 3.2 upsell · 3.3 idle tier-2 · 3.4 report delta · 3.5 docs expiry/extract/send · 3.6 ads hourly+budget · 3.7 research TZ · 3.8 chat-2 schema (reply/DM flow gated on Phase 0).
+- **Verify:** build 0/0; unit tests green (Domain 47 / Agents 148 / Api 28 / Infra 55 / AgentService 6 / Application 1). Migrations `0015–0019` need a SQL Server run (Docker/CI) to validate DDL.
 
 ## Task queue (ordered by phase)
 

@@ -26,11 +26,6 @@ public sealed partial class LeadBecameWarmConsumer(
         var msg = context.Message;
         var ct = context.CancellationToken;
 
-        var alreadyEnrolled = await _db.Set<DripEnrollment>().IgnoreQueryFilters()
-            .AnyAsync(e => e.TenantId == msg.TenantId && e.LeadId == msg.LeadId && e.Status == "active", ct)
-            .ConfigureAwait(false);
-        if (alreadyEnrolled) return;
-
         var sequence = await _db.Set<DripSequence>().IgnoreQueryFilters()
             .Where(s => s.TenantId == msg.TenantId && s.TriggerEvent == "warm_lead" && s.IsActive)
             .OrderBy(s => s.CreatedAt)
@@ -40,6 +35,13 @@ public sealed partial class LeadBecameWarmConsumer(
             LogNoSequence(_logger, msg.TenantId, msg.LeadId);
             return;
         }
+
+        // Idempotent: skip if this lead was ever enrolled into this sequence — covers re-warming
+        // (cold->warm again) which would otherwise violate UNIQUE(sequence_id, lead_id).
+        var alreadyEnrolled = await _db.Set<DripEnrollment>().IgnoreQueryFilters()
+            .AnyAsync(e => e.LeadId == msg.LeadId && e.SequenceId == sequence.Id, ct)
+            .ConfigureAwait(false);
+        if (alreadyEnrolled) return;
 
         var firstStepDelay = await _db.Set<DripSequenceStep>()
             .Where(s => s.SequenceId == sequence.Id)
