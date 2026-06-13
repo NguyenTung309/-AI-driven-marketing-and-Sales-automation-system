@@ -79,6 +79,13 @@ builder.Services.AddSignalR();
 builder.Services.AddScoped<IInboxNotifier, SignalRInboxNotifier>();
 builder.Services.AddScoped<IContentNotifier, SignalRContentNotifier>();
 builder.Services.AddScoped<INotificationPublisher, Clawbot.Api.Hubs.DbNotificationPublisher>();
+// Document storage for avatar upload (M23): Local by default, MinIO presigned (7d) when configured.
+var docsStorage = builder.Configuration.GetSection(Clawbot.Agents.Core.Docs.DocsStorageOptions.SectionName)
+    .Get<Clawbot.Agents.Core.Docs.DocsStorageOptions>() ?? new Clawbot.Agents.Core.Docs.DocsStorageOptions();
+builder.Services.AddSingleton(docsStorage);
+builder.Services.AddSingleton<Clawbot.Agents.Core.Docs.IDocumentStorage, Clawbot.Agents.Core.Docs.LocalDocumentStorage>();
+if (!string.IsNullOrWhiteSpace(builder.Configuration["Docs:Storage:Minio:Endpoint"]))
+    builder.Services.AddSingleton<Clawbot.Agents.Core.Docs.IDocumentStorage, Clawbot.Infrastructure.Documents.MinioDocumentStorage>();
 builder.Services.AddScoped<AnalyticsAggregationService>();
 builder.Services.AddScoped<AnalyticsExportService>();
 
