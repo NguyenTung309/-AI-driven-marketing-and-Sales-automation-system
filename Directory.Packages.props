@@ -18,6 +18,7 @@
     <PackageVersion Include="Microsoft.Extensions.Http.Polly" Version="8.0.10" />
     <PackageVersion Include="MassTransit" Version="8.3.1" />
     <PackageVersion Include="MassTransit.RabbitMQ" Version="8.3.1" />
+    <PackageVersion Include="MassTransit.EntityFrameworkCore" Version="8.3.1" />
     <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
     <PackageVersion Include="StackExchange.Redis" Version="2.8.16" />

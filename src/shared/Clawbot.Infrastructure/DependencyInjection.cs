@@ -72,6 +72,19 @@ public static class DependencyInjection
         services.AddMassTransit(bus =>
         {
             bus.AddConsumer<Messaging.ConversationEscalatedConsumer>();
+            bus.AddConsumer<Messaging.LeadBecameHotConsumer>();
+            bus.AddConsumer<Messaging.LeadBecameWarmConsumer>();
+
+            // WS1: transactional outbox — domain events published during SaveChanges enlist into
+            // OutboxMessage within the same transaction, then relay to RabbitMQ (exactly-once,
+            // durable across broker outage). Tables created by migration 0015_masstransit_outbox.sql.
+            bus.AddEntityFrameworkOutbox<AppDbContext>(o =>
+            {
+                o.QueryDelay = TimeSpan.FromSeconds(10);
+                o.UseSqlServer();
+                o.UseBusOutbox();
+            });
+
             bus.UsingRabbitMq((ctx, mq) =>
             {
                 mq.Host(cfg.GetConnectionString("RabbitMq") ?? "amqp://guest:guest@localhost:5672");

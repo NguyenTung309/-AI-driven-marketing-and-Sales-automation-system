@@ -5,19 +5,25 @@ public interface ILeadAssignmentService
     Task<Guid?> PickOwnerAsync(Guid tenantId, CancellationToken ct = default);
 }
 
-public sealed record AssignmentPool(IReadOnlyList<Guid> EligibleUserIds);
+// A sale eligible for assignment plus their current open workload (lower = less busy).
+public sealed record AssignmentCandidate(Guid UserId, int OpenLoad);
 
-public sealed class RoundRobinLeadAssignmentService(IAssignmentPoolSource source) : ILeadAssignmentService
+public sealed record AssignmentPool(IReadOnlyList<AssignmentCandidate> Candidates);
+
+// M15 / Lead-2: assign hot leads to the least-busy sale ("sale rảnh nhất").
+// Replaces the previous round-robin strategy. Tie-break by UserId for deterministic picks.
+public sealed class LeastBusyLeadAssignmentService(IAssignmentPoolSource source) : ILeadAssignmentService
 {
-    private static int _cursor;
     private readonly IAssignmentPoolSource _source = source;
 
     public async Task<Guid?> PickOwnerAsync(Guid tenantId, CancellationToken ct = default)
     {
         var pool = await _source.LoadAsync(tenantId, ct).ConfigureAwait(false);
-        if (pool.EligibleUserIds.Count == 0) return null;
-        var idx = Interlocked.Increment(ref _cursor);
-        return pool.EligibleUserIds[Math.Abs(idx) % pool.EligibleUserIds.Count];
+        if (pool.Candidates.Count == 0) return null;
+        return pool.Candidates
+            .OrderBy(c => c.OpenLoad)
+            .ThenBy(c => c.UserId)
+            .First().UserId;
     }
 }
 

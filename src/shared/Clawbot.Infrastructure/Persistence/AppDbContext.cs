@@ -18,6 +18,7 @@ using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.SharedKernel.Multitenancy;
+using MassTransit;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -104,6 +105,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     {
         base.OnModelCreating(builder);
         builder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+
+        // MassTransit transactional outbox (WS1): event publish enlists in the same SaveChanges
+        // transaction as the aggregate write — exactly-once, no loss on broker outage.
+        // These entities keep canonical PascalCase schema (skipped by ApplySnakeCase).
+        builder.AddInboxStateEntity();
+        builder.AddOutboxMessageEntity();
+        builder.AddOutboxStateEntity();
 
         // Domain aggregates assign their own Guid identifiers in factory methods, so keys are
         // not store-generated. Without this, EF marks navigation-appended children (e.g.
