@@ -73,17 +73,17 @@
 
 ### ⏳ Pending (M16 — 12 surface)
 - [~] **Dashboard tổng quan** — KPI wired (`/api/analytics/omnichannel`); cần thêm chart + realtime SignalR
-- [ ] **Unified Inbox** (priority sort + filter + SignalR realtime)
-- [ ] **Conversation view** + context panel
+- [x] **Unified Inbox** (priority sort + filter + SignalR realtime)
+- [x] **Conversation view** + context panel
 - [ ] **Sale Assist** (draft + quick reply + alert toast)
-- [ ] **KB editor** + version history + accuracy chart
-- [ ] **Agent dashboard** + start/stop + logs (dùng `WorkflowNode`)
-- [ ] **Lead list** + Kanban pipeline + detail
+- [x] **KB editor** + version history + accuracy chart
+- [x] **Agent dashboard** + start/stop + logs (dùng `WorkflowNode`)
+- [x] **Lead list** + Kanban pipeline + detail
 - [ ] **Content brief editor** + queue + calendar
 - [ ] **Document library** + preview + send
 - [ ] **Analytics dashboard** (KPI 5 kênh)
 - [ ] **Admin** (users / roles / api-keys / integrations)
-- [ ] **Notification center** + Telegram link
+- [~] **Notification center** + Telegram link — center + SignalR đã xong, Telegram adapter còn thiếu
 
 ---
 

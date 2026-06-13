@@ -293,17 +293,17 @@
 - [x] **UI primitives** — Button · Card · StatusPill · MetricCard · ToggleSwitch · Input · DataTable · WorkflowNode · Modal · Alert
 - [x] Login + 2FA flow — split-screen + states (error/locked/loading); Quên mật khẩu 4 bước; Hồ sơ 3 tab + dialog đổi MK + 2FA toggle. Login wired `POST /auth/login`; forgot/profile data-wiring pending
 - [~] Dashboard tổng quan — skeleton + mock KPI (wire API pending)
-- [ ] Unified Inbox (priority sort + filter + SignalR realtime)
-- [ ] Conversation view + context panel
+- [x] Unified Inbox (priority sort + filter + SignalR realtime)
+- [x] Conversation view + context panel
 - [ ] Sale Assist (draft + quick reply + alert toast)
-- [ ] KB editor + version history + accuracy chart
-- [ ] Agent dashboard + start/stop + logs
-- [ ] Lead list + Kanban pipeline + detail
+- [x] KB editor + version history + accuracy chart
+- [x] Agent dashboard + start/stop + logs
+- [x] Lead list + Kanban pipeline + detail
 - [ ] Content brief editor + queue + calendar
 - [ ] Document library + preview + send
 - [ ] Analytics dashboard (KPI 5 kênh)
 - [ ] Admin (users/roles/api-keys/integrations)
-- [ ] Notification center (SignalR realtime)
+- [x] Notification center (SignalR realtime)
 
 ### M17 — Document Generation (QuestPDF) · Imp 4 · Diff 3 · T9 · **DONE 2026-06-04**
 - [x] Impl `DocsAgentGrpcService.Generate` (load template by code → render → store → persist `generated_documents`) — [DocsAgentGrpcService.cs](../src/agents/Clawbot.AgentService/Services/DocsAgentGrpcService.cs)
@@ -408,6 +408,53 @@
 3. **DailyReportJob push** (Report-L1) — hiện chỉ `DailyKpiRollupJob` rollup vào `kpi_daily`; chưa có job push tổng hợp 7h30 (qua SignalR/in-app). → M12.
 4. **Lead score-change reason** (Lead-L1) — chưa lưu lý do thay đổi điểm. → M15 (nhỏ).
 5. **Idle 2-tier** (SaleAssist-L4) — xác minh tier >10min → Sales Lead trong `IdleConversationAlertJob`.
+
+### Deep audit (8-agent fan-out 2026-06-13) — per-luồng covered/partial/missing
+> Audit sâu từng luồng (8 agent / 25 flow-entry). Kết quả: **9 covered · 13 partial · 3 missing**. Phần lớn partial là *by-design* hoặc *blocked-on-creds* (xem cột Ghi chú); chỉ 3 missing + vài partial là gap thật cần code.
+
+| Agent · Luồng | Verdict | Ghi chú |
+|---|---|---|
+| Chat-1 trả lời 24/7 đa kênh | ⚠️ partial | Chỉ adapter Pancake (broker hợp kênh — **by-design** M06); lang directive chỉ informational |
+| Chat-2 comment auto-reply <30s + DM | ❌ **missing** | `Message`/`ChannelMessage` không có `comment`/`post_id`; không có job; conv = 1 thread/1 platform |
+| Chat-3 anti-injection | ✅ covered | Heuristic 27 cụm; refuse + trace. Audit-log-on-block chỉ vào `agent_session` (chưa `audit_log`) |
+| Chat-4 cost/cuộc | ✅ covered | Ledger keyed tenant+month (không có `ConversationId`); cap $200 check ở summary, **chưa enforce record-time** |
+| SaleAssist-1 draft <3s | ✅ covered | RAG + Claude; <3s không guarantee (phụ thuộc API) |
+| SaleAssist-2 xếp ưu tiên + alert ≥70 | ✅ covered | Inbox rank theo score done; **alert khi lên 'hot' chưa publish** |
+| SaleAssist-3 idle >5/>10min | ⚠️ partial | 5min→assignee done; **10min→Sales Lead chưa có** (`IdleThreshold` hard-code 5) |
+| SaleAssist-4 upsell sắp chốt | ❌ **missing** | `UpsellSuggestionsAsync` trả **chuỗi tĩnh hardcode**; không phân tích tín hiệu chốt |
+| Lead-1 chấm điểm + ghi lý do | ✅ covered | `AdjustScore` ghi `LeadActivity` reason; thiếu seed event-code VN + job tự trừ điểm inactivity |
+| Lead-2 giao khách nóng + notify | ⚠️ partial | Round-robin **không phải least-busy**; `RecordActivity` lên 'hot' **không auto-assign/notify** |
+| Lead-3 nuôi dưỡng drip/remarketing | ⚠️ partial | `DripSequenceJob` chạy nhưng **không auto-enroll** lead 30-69; cold→ads automated |
+| Content-1 viết 5 nền tảng + prompt ảnh | ⚠️ partial | Image-prompt **chưa expose API**; không validate format; `IVideoScriptComposer` unused |
+| Content-2 repurpose | ✅ covered | — |
+| Content-3 auto-schedule giờ vàng | ⚠️ partial | Chỉ HTTP publisher (**chưa native API/Buffer/Later**) — blocked-on-creds |
+| Research-1 trend tuần | ⚠️ partial | Chạy Mon 00:00 **UTC** ≠ 7h sáng VN local — cần fix cron timezone |
+| Research-2 theo dõi đối thủ | ❌ **missing** | `RssCompetitorMonitor` đăng ký DI nhưng **orphaned** — không job/endpoint/persistence |
+| Docs-1 báo giá PDF + link 7d + gửi | ⚠️ partial | Render+branding done; **không extract info từ hội thoại, không `ExpiresAt` 7d, không gửi thật** |
+| Docs-2 brochure/slide/onboarding + KB | ⚠️ partial | Template done; **không merge KB lúc generate**, không bundle kit |
+| Report-1 tổng hợp daily 7h30 + so sánh | ⚠️ partial | Rollup done; **delta hôm qua/tuần trước chưa tính backend** |
+| Report-2 forecast 7 ngày | ✅ covered | ML.NET SSA + bounds; chưa tune seasonality |
+| Report-3 anomaly alert | ✅ covered | z-score + SignalR done |
+| Report-4 AI-quality 20-câu + cost/agent | ⚠️ partial | KB-accuracy job có; **không fix 20 câu, on-demand (chưa daily), không đo per-agent response quality** |
+| Ads-1 tối ưu mỗi giờ | ⚠️ partial | Chạy **4h/lần ≠ hourly**; budget alert reactive (webhook) chưa proactive-compute |
+| Ads-2 lookalike | ⚠️ partial | Seed-collection thật; **`BuildLookalikeAsync` của Meta/TikTok connector stub `null`** — blocked-on-creds |
+| Ads-3 budget 90% alert | ✅ covered | **Wired publisher 2026-06-13** (`AdsAgentGrpcService.HandleSignal`→`ads_budget` notification) |
+
+**3 MISSING (code thật còn thiếu):**
+- [ ] **Chat-2 comment auto-reply + DM** — cần: `ChannelMessage.MessageType=comment\|dm` + `parent_post_id`, parse comment trong Pancake adapter, intent purchase-signal, job phát hiện comment→reply+mở DM. → M10/M06 (lớn).
+- [ ] **SaleAssist-4 upsell** — thay chuỗi tĩnh bằng phân tích tín hiệu chốt + gợi ý theo profile/hội thoại. → M14.
+- [ ] **Research-2 competitor monitor** — wire `RssCompetitorMonitor` vào `CompetitorScanJob` + Hangfire cron + endpoint + domain model persist. → M18.
+
+**Partial cần code (không phải by-design):**
+- [ ] Lead-2 auto-assign + notify khi lên 'hot' (hiện chỉ assign lúc tạo) · least-busy thay round-robin. → M15.
+- [ ] Lead-3 auto-enroll drip cho lead ấm 30-69. → M15.
+- [ ] SaleAssist-3 idle tier >10min → Sales Lead. → M14.
+- [ ] Research-1 cron timezone (7h sáng VN, hiện UTC). → M18 (nhỏ).
+- [ ] Report-1 delta so sánh hôm qua/tuần trước (backend). → M20.
+- [ ] Docs-1 extract info hội thoại + `ExpiresAt` 7d + gửi Zalo/email thật. → M17.
+- [ ] Ads-1 hourly cron + proactive budget-ratio compute (hiện 4h + reactive). → M19.
+
+**Partial by-design / blocked (không phải gap):** Chat-1 Pancake unified broker (M06 design) · Content-3 + Ads-2 native API/connector cần creds Meta/TikTok (ops) · SignalR-only thay Telegram (quyết định 2026-06-13) · forecast seasonality + KB Chinese content (blocked).
 
 ---
 
