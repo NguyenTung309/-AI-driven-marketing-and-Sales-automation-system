@@ -6,3 +6,5 @@ export * from "./ToggleSwitch";
 export * from "./Input";
 export * from "./DataTable";
 export * from "./WorkflowNode";
+export * from "./Modal";
+export * from "./Alert";

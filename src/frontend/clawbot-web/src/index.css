@@ -14,11 +14,13 @@
 
   --color-surface: #f8fafc;                 /* L0 canvas */
   --color-surface-container-lowest: #ffffff;/* L1 card */
+  --color-surface-container-low: #f2f4f6;   /* faint panel fill (login) */
   --color-surface-container: #eceef0;
   --color-surface-variant: #e2e8f0;         /* borders / table head fill */
   --color-on-surface: #191c1e;
   --color-on-surface-variant: #5b6470;
   --color-outline: #e2e8f0;
+  --color-outline-variant: #e4beba;         /* subtle divider */
 
   /* Semantic — agent status / telemetry */
   --color-success: #10b981;
@@ -36,12 +38,26 @@
   --font-body-md: "Inter", sans-serif;
   --font-telemetry-data: "Inter", sans-serif;
   --font-label-caps: "Inter", sans-serif;
+  --font-headline-lg: "Inter", sans-serif;
+  --font-label-lg: "Inter", sans-serif;
+  --font-label-sm: "Inter", sans-serif;
   --font-mono-status: "JetBrains Mono", monospace;
 
   --text-display-lg: 36px;
   --text-display-lg--line-height: 44px;
   --text-display-lg--font-weight: 700;
   --text-display-lg--letter-spacing: -0.02em;
+  --text-headline-lg: 32px;
+  --text-headline-lg--line-height: 40px;
+  --text-headline-lg--font-weight: 700;
+  --text-headline-lg--letter-spacing: -0.02em;
+  --text-label-lg: 14px;
+  --text-label-lg--line-height: 20px;
+  --text-label-lg--font-weight: 600;
+  --text-label-lg--letter-spacing: 0.01em;
+  --text-label-sm: 11px;
+  --text-label-sm--line-height: 14px;
+  --text-label-sm--font-weight: 500;
   --text-headline-md: 24px;
   --text-headline-md--line-height: 32px;
   --text-headline-md--font-weight: 600;

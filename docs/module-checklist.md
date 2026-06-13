@@ -3,7 +3,7 @@
 > Persistent tracking. Tick `[x]` khi xong. Nguồn plan: [../C:/Users/AdminDatVo/.claude/plans/wiggly-wandering-blum.md] + [spec-audit.md](spec-audit.md).
 > Convention: `[ ]` chưa làm · `[~]` đang làm · `[x]` xong · `[!]` blocked.
 >
-> Last updated: 2026-06-09
+> Last updated: 2026-06-13
 
 ---
 
@@ -285,8 +285,12 @@
 - [ ] Vendor-specific verifiers (since Pancake unified — only need Pancake; rest deferred)
 - [x] 401 audit log on reject → after M03 audit interceptor lands — [WebhookEndpoints.cs](../src/api/Clawbot.Api/Endpoints/WebhookEndpoints.cs)
 
-### M16 — Frontend UI (12 surface) · Imp 4 · Diff 4 · T4–T11
-- [ ] Login + 2FA flow
+### M16 — Frontend UI (12 surface) · Imp 4 · Diff 4 · T4–T11 · **IN PROGRESS** — base + Login&Profile DONE 2026-06-13
+> Stack: React 19 + Vite + TS + Tailwind 4 + Router 7 + TanStack Query + Zustand. Design rules + screen checklist: [Design.md](Design.md). Nguồn: Stitch project `15408388482133270285`.
+- [x] **FE base** — design tokens (`@theme`) + `AppShell` + `Sidebar` (260px đỏ) + `Topbar` + `AuthCardShell`
+- [x] **UI primitives** — Button · Card · StatusPill · MetricCard · ToggleSwitch · Input · DataTable · WorkflowNode · Modal · Alert
+- [x] Login + 2FA flow — split-screen + states (error/locked/loading); Quên mật khẩu 4 bước; Hồ sơ 3 tab + dialog đổi MK + 2FA toggle. Login wired `POST /auth/login`; forgot/profile data-wiring pending
+- [~] Dashboard tổng quan — skeleton + mock KPI (wire API pending)
 - [ ] Unified Inbox (priority sort + filter + SignalR realtime)
 - [ ] Conversation view + context panel
 - [ ] Sale Assist (draft + quick reply + alert toast)
@@ -395,7 +399,7 @@
 | T9 | — | **M17** | Document generation — QuestPDF (commit 9eb8e6d). |
 | T10 | — | **M19** | Ads automation Meta+TikTok (commit fcddfbe). |
 | T11 | — | **M20** | Analytics KPI + Metabase + anomaly/forecast (commit cf553a0). |
-| T12 | **M16** | — | Frontend UI (12 surfaces) — pending. |
+| T12 | **M16** | — | Frontend UI — base (tokens+shell+10 primitives) + Login&Profile group done 2026-06-13; 11 surface còn lại pending. |
 | T13 | **M21** | — | Test infra: integration (Testcontainers) + CI + coverage gate — pending. |
 
 ---
