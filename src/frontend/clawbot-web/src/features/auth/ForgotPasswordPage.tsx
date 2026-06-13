@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AuthCardShell } from "@/shared/layout/AuthCardShell";
+import { requestPasswordReset, confirmPasswordReset } from "@/shared/api/auth";
 
 type Step = "request" | "otp" | "reset" | "success";
 
@@ -96,9 +97,15 @@ export default function ForgotPasswordPage() {
     return () => window.clearTimeout(id);
   }, [step, navigate]);
 
-  function submitRequest(e: React.FormEvent) {
+  async function submitRequest(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    // Backend returns 200 even for unknown emails (anti-enumeration); always advance.
+    try {
+      await requestPasswordReset(email);
+    } catch {
+      /* network error is non-fatal here; let user proceed to enter the token */
+    }
     setSeconds(OTP_TTL_SECONDS);
     setStep("otp");
   }
@@ -109,11 +116,12 @@ export default function ForgotPasswordPage() {
       setError("Vui lòng nhập đủ 6 chữ số.");
       return;
     }
+    // No server-side OTP verify endpoint: the value is carried as the reset token to /auth/reset/confirm.
     setError(null);
     setStep("reset");
   }
 
-  function submitReset(e: React.FormEvent) {
+  async function submitReset(e: React.FormEvent) {
     e.preventDefault();
     if (password.length < 8) {
       setError("Mật khẩu phải dài tối thiểu 8 ký tự.");
@@ -124,7 +132,12 @@ export default function ForgotPasswordPage() {
       return;
     }
     setError(null);
-    setStep("success");
+    try {
+      await confirmPasswordReset(email, otp, password);
+      setStep("success");
+    } catch {
+      setError("Mã/token không hợp lệ hoặc đã hết hạn. Vui lòng thử lại.");
+    }
   }
 
   return (

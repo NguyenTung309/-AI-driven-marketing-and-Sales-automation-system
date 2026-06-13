@@ -1,7 +1,10 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Card, DataTable, StatusPill, ToggleSwitch, type Column } from "@/shared/ui";
+import { getMe, disableTwoFactor } from "@/shared/api/auth";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
+import { TwoFactorSetupDialog } from "./TwoFactorSetupDialog";
 
 type ProfileTab = "info" | "permissions" | "security";
 
@@ -11,16 +14,11 @@ const TABS: readonly { readonly key: ProfileTab; readonly label: string }[] = [
   { key: "security", label: "Nhật ký bảo mật" },
 ];
 
-interface Permission {
-  readonly label: string;
-  readonly granted: boolean;
-}
-
-const PERMISSIONS: readonly Permission[] = [
-  { label: "Truy cập báo cáo KPI (Agent-Report)", granted: true },
-  { label: "Cấu hình khuôn mẫu Prompt (Agent-Config)", granted: true },
-  { label: "Quản lý Kho tri thức (Knowledge Base)", granted: true },
-  { label: "Thiết lập cổng thanh toán", granted: false },
+// Fallback khi /auth/me chưa trả permissions.
+const FALLBACK_PERMS: readonly string[] = [
+  "Truy cập báo cáo KPI",
+  "Cấu hình khuôn mẫu Prompt",
+  "Quản lý Kho tri thức",
 ];
 
 interface LoginLog {
@@ -30,6 +28,7 @@ interface LoginLog {
   readonly device: string;
 }
 
+// NOTE: chưa có API login-history per-user → mock. (audit-logs là admin-scope, khác mục đích.)
 const LOGIN_LOGS: readonly LoginLog[] = [
   { id: "1", time: "15:30 10/10/2026", ip: "192.168.1.5", device: "Chrome - Windows" },
   { id: "2", time: "10:15 09/10/2026", ip: "192.168.1.5", device: "Firefox - macOS" },
@@ -40,12 +39,7 @@ const LOG_COLUMNS: readonly Column<LoginLog>[] = [
   { key: "time", header: "Thời gian", render: (r) => r.time },
   { key: "ip", header: "IP Truy cập", render: (r) => <span className="font-mono">{r.ip}</span> },
   { key: "device", header: "Thiết bị / Trình duyệt", render: (r) => r.device },
-  {
-    key: "status",
-    header: "Trạng thái",
-    className: "text-right",
-    render: () => <StatusPill tone="success">Thành công</StatusPill>,
-  },
+  { key: "status", header: "Trạng thái", className: "text-right", render: () => <StatusPill tone="success">Thành công</StatusPill> },
 ];
 
 const fieldInput =
@@ -81,20 +75,42 @@ function Field({
 }
 
 function TwoFactorRow() {
-  const [on, setOn] = useState(true);
+  const [on, setOn] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+
+  async function toggle(next: boolean) {
+    if (next) {
+      setSetupOpen(true); // activated only after verify
+    } else {
+      try {
+        await disableTwoFactor();
+      } finally {
+        setOn(false);
+      }
+    }
+  }
+
   return (
-    <div className="p-6 bg-surface-container-low rounded-xl border border-dashed border-outline-variant flex items-center justify-between">
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 rounded-full bg-white flex items-center justify-center shadow-sm">
-          <span className="material-symbols-outlined text-primary">security</span>
+    <>
+      <div className="p-6 bg-surface-container-low rounded-xl border border-dashed border-outline-variant flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-full bg-white flex items-center justify-center shadow-sm">
+            <span className="material-symbols-outlined text-primary">security</span>
+          </div>
+          <div>
+            <h5 className="font-bold text-on-surface">Xác thực 2 yếu tố (2FA)</h5>
+            <p className="text-body-md text-on-surface-variant">Tăng cường bảo mật cho tài khoản quản trị của bạn.</p>
+          </div>
         </div>
-        <div>
-          <h5 className="font-bold text-on-surface">Xác thực 2 yếu tố (2FA)</h5>
-          <p className="text-body-md text-on-surface-variant">Tăng cường bảo mật cho tài khoản quản trị của bạn.</p>
-        </div>
+        <ToggleSwitch checked={on} onChange={toggle} />
       </div>
-      <ToggleSwitch checked={on} onChange={setOn} />
-    </div>
+      <TwoFactorSetupDialog
+        key={setupOpen ? "2fa-open" : "2fa-closed"}
+        open={setupOpen}
+        onClose={() => setSetupOpen(false)}
+        onVerified={() => setOn(true)}
+      />
+    </>
   );
 }
 
@@ -130,26 +146,21 @@ function InfoTab() {
   );
 }
 
-function PermissionsTab() {
+function PermissionsTab({ perms }: { readonly perms: readonly string[] }) {
+  const list = perms.length > 0 ? perms : FALLBACK_PERMS;
   return (
     <div className="flex flex-col gap-6">
-      <h4 className="font-bold text-on-surface text-body-lg">Danh sách quyền hạn được cấp</h4>
+      <h4 className="font-bold text-on-surface text-body-lg">Danh sách quyền hạn được cấp ({list.length})</h4>
       <div className="space-y-4">
-        {PERMISSIONS.map((p) => (
-          <div key={p.label} className="flex items-center gap-4">
-            <input
-              type="checkbox"
-              checked={p.granted}
-              disabled
-              readOnly
-              className="w-5 h-5 rounded border-outline-variant text-primary cursor-not-allowed"
-            />
-            <span className={`text-body-lg ${p.granted ? "text-on-surface" : "text-on-surface-variant"}`}>{p.label}</span>
+        {list.map((p) => (
+          <div key={p} className="flex items-center gap-4">
+            <input type="checkbox" checked disabled readOnly className="w-5 h-5 rounded border-outline-variant text-primary cursor-not-allowed" />
+            <span className="text-body-lg text-on-surface font-mono">{p}</span>
           </div>
         ))}
       </div>
       <p className="text-body-md text-on-surface-variant/70 italic">
-        Quyền hạn do Hệ thống cấp phát. Vui lòng liên hệ Admin để thay đổi.
+        Quyền hạn do Hệ thống cấp phát (theo vai trò). Vui lòng liên hệ Admin để thay đổi.
       </p>
     </div>
   );
@@ -158,6 +169,10 @@ function PermissionsTab() {
 export default function ProfilePage() {
   const [tab, setTab] = useState<ProfileTab>("info");
   const [pwOpen, setPwOpen] = useState(false);
+  const { data: me } = useQuery({ queryKey: ["me"], queryFn: getMe });
+
+  const roleBadge = me?.roles?.[0] ?? "Quản trị viên hệ thống";
+  const perms = me?.permissions ?? [];
 
   return (
     <AppShell title="Cài đặt tài khoản">
@@ -167,7 +182,6 @@ export default function ProfilePage() {
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-10 gap-6 items-start">
-        {/* Left: identity + stats */}
         <div className="lg:col-span-3 flex flex-col gap-6">
           <Card className="flex flex-col items-center">
             <div className="relative mb-6">
@@ -185,11 +199,11 @@ export default function ProfilePage() {
             <div className="text-center mb-8">
               <h3 className="text-headline-md font-bold text-on-surface mb-1">Nguyễn Văn A</h3>
               <div className="inline-flex items-center px-3 py-1 bg-primary/10 text-primary rounded font-bold text-label-lg mb-2">
-                Quản trị viên hệ thống
+                {roleBadge}
               </div>
               <div className="flex items-center justify-center gap-1 text-body-md text-on-surface-variant">
                 <span className="w-2 h-2 rounded-full bg-success" />
-                <span>Đang hoạt động</span>
+                <span>{me?.tenantSlug ? `Tenant: ${me.tenantSlug}` : "Đang hoạt động"}</span>
               </div>
             </div>
             <button
@@ -206,18 +220,17 @@ export default function ProfilePage() {
             <h4 className="text-label-lg text-on-surface-variant uppercase mb-4">Thống kê hoạt động</h4>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <p className="text-body-md text-on-surface-variant">Lần cuối</p>
-                <p className="font-bold text-on-surface">2 phút trước</p>
+                <p className="text-body-md text-on-surface-variant">Vai trò</p>
+                <p className="font-bold text-on-surface">{me?.roles?.length ?? 0}</p>
               </div>
               <div>
-                <p className="text-body-md text-on-surface-variant">Thiết bị</p>
-                <p className="font-bold text-on-surface">MacBook Pro</p>
+                <p className="text-body-md text-on-surface-variant">Quyền hạn</p>
+                <p className="font-bold text-on-surface">{perms.length}</p>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right: tabbed panel */}
         <div className="lg:col-span-7">
           <div className="bg-surface-container-lowest rounded-lg border border-outline overflow-hidden">
             <div className="flex border-b border-outline px-6 pt-4 gap-2">
@@ -227,9 +240,7 @@ export default function ProfilePage() {
                   type="button"
                   onClick={() => setTab(t.key)}
                   className={`px-4 py-4 font-bold text-label-lg transition-colors ${
-                    tab === t.key
-                      ? "text-primary border-b-2 border-primary"
-                      : "text-on-surface-variant hover:text-primary"
+                    tab === t.key ? "text-primary border-b-2 border-primary" : "text-on-surface-variant hover:text-primary"
                   }`}
                 >
                   {t.label}
@@ -238,10 +249,8 @@ export default function ProfilePage() {
             </div>
             <div className="p-6">
               {tab === "info" ? <InfoTab /> : null}
-              {tab === "permissions" ? <PermissionsTab /> : null}
-              {tab === "security" ? (
-                <DataTable columns={LOG_COLUMNS} rows={LOGIN_LOGS} rowKey={(r) => r.id} />
-              ) : null}
+              {tab === "permissions" ? <PermissionsTab perms={perms} /> : null}
+              {tab === "security" ? <DataTable columns={LOG_COLUMNS} rows={LOGIN_LOGS} rowKey={(r) => r.id} /> : null}
             </div>
           </div>
         </div>

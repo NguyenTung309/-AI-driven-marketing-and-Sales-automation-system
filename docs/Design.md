@@ -72,7 +72,7 @@
 - [x] **Dialog đổi mật khẩu** (Modal + thanh đo độ mạnh + cảnh báo)
 
 ### ⏳ Pending (M16 — 12 surface)
-- [~] **Dashboard tổng quan** (skeleton + mock metric; cần wire API)
+- [~] **Dashboard tổng quan** — KPI wired (`/api/analytics/omnichannel`); cần thêm chart + realtime SignalR
 - [ ] **Unified Inbox** (priority sort + filter + SignalR realtime)
 - [ ] **Conversation view** + context panel
 - [ ] **Sale Assist** (draft + quick reply + alert toast)
@@ -87,13 +87,81 @@
 
 ---
 
-## Backend wiring status
+## Backend wiring
 
-- [x] axios `apiClient` (baseURL `VITE_API_BASE_URL` ?? `/api`, Bearer interceptor) — `shared/api/client.ts`
-- [x] `AuthContext` (token ↔ localStorage) + route guard `RequireAuth`
-- [x] **Login** → `POST /api/auth/login` (thật)
-- [ ] **Forgot** → `/auth/reset/request` + `/auth/reset/confirm` (UI đang mock client-side)
-- [ ] **Profile** → `/auth/me` (load) + endpoint update profile + `/auth/2fa/*` (UI đang mock)
-- [ ] **Dashboard / Inbox / Lead / …** → API tương ứng
+### Hạ tầng
+- `shared/api/client.ts` — axios `apiClient` (baseURL `VITE_API_BASE_URL` ?? `/api`, Bearer interceptor từ localStorage).
+- `shared/auth/AuthContext.tsx` — token ↔ localStorage + route guard `RequireAuth`.
+- `shared/api/auth.ts` — module typed cho toàn bộ endpoint `/auth/*` (login, login/2fa, reset, 2fa enable/verify/disable, me).
+- `shared/api/analytics.ts` — `getOmnichannel()`.
+- Data fetch dùng **TanStack Query** (`useQuery`); mutation gọi thẳng hàm trong api module.
 
-> Backend endpoints đa số đã có (xem [module-checklist.md](module-checklist.md) M02/M08/M15…). Bước tiếp: thay mock bằng TanStack Query hooks gọi `apiClient`.
+### Đã wire (thật)
+- [x] **Login** → `POST /auth/login`; xử lý **202 → 2FA** (`POST /auth/login/2fa`) + **423 locked** + 401 (`shared/api/auth.ts` → `LoginPage`).
+- [x] **Quên mật khẩu** → `POST /auth/reset/request` (bước 1) + `POST /auth/reset/confirm` (bước đặt lại MK).
+- [x] **Hồ sơ** → `GET /auth/me` (useQuery): tab **Phân quyền** dùng `permissions[]` thật, badge = `roles[0]`, thống kê = số vai trò/quyền.
+- [x] **2FA setup** (`TwoFactorSetupDialog`) → `POST /auth/2fa/enable` (lấy khóa) → `/auth/2fa/verify` (kích hoạt); toggle off → `/auth/2fa/disable`.
+- [x] **Dashboard** → `GET /api/analytics/omnichannel` (useQuery): cộng dồn rows → MetricCard; StatusPill phản ánh `stale`/lỗi API.
+
+### Còn gap (cần backend hoặc bước sau)
+- [ ] **OTP ≠ token**: backend reset dùng **Identity token** (đang log server-side, chưa gửi email), không phải OTP 6 số. UI mang giá trị OTP làm `token` khi confirm → cần endpoint gửi email/OTP thật.
+- [ ] **Lưu hồ sơ** (họ tên/SĐT/ngày sinh): `/auth/me` chỉ trả claims (sub/tenant/roles/perms) — **không có** field tên/email/phone, cũng **chưa có** endpoint update profile. Field giữ editable, nút Lưu chưa nối.
+- [ ] **Đổi mật khẩu khi đã đăng nhập** (`ChangePasswordDialog`): **chưa có** endpoint (chỉ có reset qua token). Cần `POST /auth/change-password`.
+- [ ] **Nhật ký đăng nhập** (tab bảo mật): chưa có API login-history per-user → đang mock (`/api/admin/audit-logs` là admin-scope, khác mục đích).
+
+---
+
+## Backend endpoint catalog (cho FE wire)
+
+> Nguồn: `src/api/Clawbot.Api/Endpoints/*.cs`. Rate-limit: `/auth` = AuthPolicy(10/min) · `/api/inbox`+`/api/sale-assist` = ChatPolicy(60/min) · còn lại = GeneralPolicy(300/min) · webhook 120/min. Hầu hết `/api/*` yêu cầu auth (Bearer JWT); `(anon)` = AllowAnonymous.
+
+### Auth — `/auth`
+| Method | Path | Body / Note |
+|---|---|---|
+| POST | `/auth/login` (anon) | `{email,password}` → `{accessToken,expiresAt}` · 202 `{requiresTwoFactor}` · 401 · 423 locked |
+| POST | `/auth/login/2fa` (anon) | `{email,password,code}` → `{accessToken,expiresAt}` |
+| POST | `/auth/reset/request` (anon) | `{email}` → 200 (anti-enumeration) |
+| POST | `/auth/reset/confirm` (anon) | `{email,token,newPassword}` → 200 \| 400 |
+| POST | `/auth/2fa/enable` | → `{sharedKey,authenticatorUri}` |
+| POST | `/auth/2fa/verify` | `{code}` → 200 \| 400 |
+| POST | `/auth/2fa/disable` | → 200 |
+| GET | `/auth/me` | → `{sub,tenantId,tenantSlug,roles[],permissions[]}` |
+
+### RBAC — `/api/rbac`
+`GET\|POST /roles` · `PUT\|DELETE /roles/{id}` · `GET\|PUT /roles/{id}/permissions` · `GET /permissions`
+
+### API keys — `/api/api-keys`
+`GET` · `POST` (plaintext-once) · `DELETE /{id}`
+
+### Knowledge Base — `/api/kb`
+`GET\|POST /modules` · `GET\|PUT /modules/{id}` · `POST /modules/{id}/archive` · `GET\|POST /modules/{id}/versions` · `GET /modules/{id}/versions/{versionId}` · `POST .../deploy` · `POST .../rollback` · `GET /modules/{id}/diff?fromVersion=&toVersion=` · `GET\|POST /modules/{id}/test-cases` · `POST /modules/{id}/test` · `GET /api/kb/accuracy`
+
+### Inbox — `/api/inbox` (ChatPolicy, + SignalR `InboxHub` realtime)
+`GET /conversations` (paged, filter status/platform, hot-first) · `GET /conversations/{id}` · `POST /conversations/{id}/assign` · `/resolve` · `/escalate` · `/messages` (gửi outbound)
+
+### Sale Assist — `/api/sale-assist` (ChatPolicy)
+`POST /draft` · `POST /summary` · `GET\|POST /quick-replies` · `PUT\|DELETE /quick-replies/{id}` · `GET /daily-summary` · `GET /upsell-suggestions`
+
+### Leads — `/api/leads`
+`GET` (paged, score desc) · `GET /{id}` · `POST` · `POST /create-with-skills` · `POST /{id}/activities` · `POST /{id}/assign` · `GET /forecast` · `GET /{id}/context` · **`/api/lead-scoring-rules`**: `GET\|POST` · `DELETE /{id}`
+
+### Chat scenarios — `/api/chat-scenarios`
+`GET` · `GET /{id}` · `POST` · `PUT /{id}` · `DELETE /{id}` · `POST /match` · `POST /{id}/outcome`
+
+### Content — `/api/content`
+`GET\|POST /briefs` · `GET\|PUT\|DELETE /briefs/{id}` · `GET /trends` · `POST /trends/scan` · `POST /items/generate` · `GET /queue` · `PUT\|DELETE /items/{id}` · `POST /items/{id}/approve\|reject\|schedule\|repurpose` · `GET /calendar` · `DELETE /schedule/{id}`
+
+### Documents — `/api/docs`
+`POST /generate` → `{documentId,fileUrl,fileHash,sizeBytes,latencyMs}` · `GET\|POST /templates` · `PUT\|DELETE /templates/{id}` · `GET /generated`
+
+### Analytics — `/api/analytics`
+`GET /omnichannel?from=&to=` → `{from,to,rows[{platform,leads,dms,replies,conversions,avgResponseTimeSec,adSpend,cpl}],stale}` · `GET /funnel` · `GET /agent-performance` · `GET /anomalies` · `GET /forecast` · `GET /export`
+
+### Ads — `/api/ads`
+`GET\|POST /rules` · `PUT\|DELETE /rules/{id}` · `GET /campaigns` · `PUT /campaigns/{id}/target-cpl` · `GET /actions` · `POST /campaigns/{id}/evaluate` · `POST /lookalike`
+
+### Channels — `/api/channels/pancake`
+`GET\|PUT\|DELETE /config` · `GET /webhook-url`
+
+### Admin / Contacts / Health / Webhook
+`GET /api/admin/audit-logs` · `POST /api/contacts/merge` · `GET /health/live\|/ready\|/channels/pancake` (anon) · `POST /webhooks/pancake/{tenantSlug}` (anon, HMAC)
