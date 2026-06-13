@@ -101,6 +101,53 @@ public sealed partial class SaleAssistAgentGrpcService(
         return response;
     }
 
+    public override async Task<UpsellResponse> Upsell(UpsellRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+        if (!Guid.TryParse(request.TenantId, out var tid) || tid == Guid.Empty)
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "tenant_id required"));
+        if (!Guid.TryParse(request.ConversationId, out var cid) || cid == Guid.Empty)
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "conversation_id required"));
+
+        var conv = await _db.Conversations.IgnoreQueryFilters()
+            .Where(c => c.Id == cid && c.TenantId == tid)
+            .Select(c => new { c.ContactId })
+            .FirstOrDefaultAsync(context.CancellationToken).ConfigureAwait(false)
+            ?? throw new RpcException(new Status(StatusCode.NotFound, "conversation not found"));
+
+        // Hybrid gate: only spend LLM tokens when the lead is near closing (stage 'hot').
+        var lead = conv.ContactId is null ? null : await _db.Leads.IgnoreQueryFilters()
+            .Where(l => l.TenantId == tid && l.ContactId == conv.ContactId && l.DeletedAt == null)
+            .OrderByDescending(l => l.Score)
+            .Select(l => new { l.Stage, l.Score })
+            .FirstOrDefaultAsync(context.CancellationToken).ConfigureAwait(false);
+
+        if (lead is null || lead.Stage != "hot")
+        {
+            return new UpsellResponse
+            {
+                Eligible = false,
+                Suggestion = string.Empty,
+                Reason = lead is null ? "no lead for conversation" : $"lead stage '{lead.Stage}' not hot yet",
+                LeadScore = lead?.Score ?? 0,
+            };
+        }
+
+        var ctx = await LoadContextAsync(request.TenantId, request.ConversationId, context.CancellationToken).ConfigureAwait(false);
+        var result = await _agent.SuggestUpsellAsync(ctx, context.CancellationToken).ConfigureAwait(false);
+
+        var hasSignal = result.Suggestion.Length > 0
+            && !string.Equals(result.Suggestion, "NONE", StringComparison.OrdinalIgnoreCase);
+        return new UpsellResponse
+        {
+            Eligible = hasSignal,
+            Suggestion = hasSignal ? result.Suggestion : string.Empty,
+            Reason = hasSignal ? "hot lead with closing signal" : "no closing signal detected",
+            LeadScore = lead.Score,
+        };
+    }
+
     [LoggerMessage(EventId = 8001, Level = LogLevel.Information, Message = "Auto-summary persisted for conversation {ConversationId} with {KeyPointCount} key points")]
     private static partial void LogAutoSummaryPersisted(ILogger logger, Guid conversationId, int keyPointCount);
 

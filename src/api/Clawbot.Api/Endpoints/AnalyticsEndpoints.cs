@@ -19,6 +19,7 @@ public static class AnalyticsEndpoints
         var grp = app.MapGroup("/api/analytics").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/omnichannel", GetOmnichannelAsync);
+        grp.MapGet("/omnichannel-delta", GetOmnichannelDeltaAsync);
         grp.MapGet("/funnel", GetFunnelAsync);
         grp.MapGet("/agent-performance", GetAgentPerformanceAsync);
         grp.MapGet("/anomalies", GetAnomaliesAsync);
@@ -75,6 +76,24 @@ public static class AnalyticsEndpoints
 
         var response = await analytics.GetOmnichannelAsync(tenant.TenantId, range.From, range.To, ct)
             .ConfigureAwait(false);
+        return Results.Ok(response);
+    }
+
+    // Report-1: per-metric delta vs prior period (compare=dod|wow).
+    private static async Task<IResult> GetOmnichannelDeltaAsync(
+        AnalyticsAggregationService analytics,
+        ITenantAccessor tenants,
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        [FromQuery] string? compare,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var range = ParseRange(from, to);
+        if (range.Error is not null) return range.Error;
+
+        var response = await analytics.GetOmnichannelDeltaAsync(
+            tenant.TenantId, range.From, range.To, compare ?? "dod", ct).ConfigureAwait(false);
         return Results.Ok(response);
     }
 

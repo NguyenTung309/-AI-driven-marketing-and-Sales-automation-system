@@ -1,4 +1,5 @@
 using Clawbot.Domain.Agents;
+using Clawbot.Domain.Leads;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Persistence;
@@ -151,6 +152,21 @@ public static partial class RbacSeeder
                 var agent = AgentConfig.Create(tenant.Id, code, displayName, agentType, "claude", now);
                 agent.Start(); // seeded enabled (running)
                 db.AgentConfigs.Add(agent);
+            }
+
+            // Lead-3: default warm-lead drip sequence (4 steps within 7 days) so warm leads
+            // (30-69) auto-enroll via LeadBecameWarmConsumer. Idempotent by trigger_event.
+            var hasWarmDrip = await db.Set<DripSequence>()
+                .IgnoreQueryFilters()
+                .AnyAsync(s => s.TenantId == tenant.Id && s.TriggerEvent == "warm_lead", ct);
+            if (!hasWarmDrip)
+            {
+                var drip = DripSequence.Create(tenant.Id, "Nuôi dưỡng khách ấm", "warm_lead", now);
+                drip.AddStep(1, 1, "pancake", "Chào {lead_name}, cảm ơn bạn đã quan tâm tới Học Bá! Bạn cần tư vấn thêm về khóa học nào ạ?");
+                drip.AddStep(2, 47, "pancake", "{lead_name} ơi, Học Bá đang có ưu đãi học thử miễn phí — bạn có muốn đặt lịch trải nghiệm không?");
+                drip.AddStep(3, 72, "pancake", "Học Bá gửi {lead_name} lộ trình học tiếng Trung cá nhân hóa. Bạn tham khảo thử nhé!");
+                drip.AddStep(4, 48, "pancake", "{lead_name} còn băn khoăn gì về khóa học không? Đội ngũ Học Bá luôn sẵn sàng hỗ trợ bạn.");
+                db.Set<DripSequence>().Add(drip);
             }
         }
 

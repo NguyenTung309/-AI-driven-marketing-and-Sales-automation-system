@@ -34,4 +34,5 @@ public sealed record GeneratedDocumentDto(
     string? SentVia,
     DateTimeOffset? SentAt,
     DateTimeOffset? OpenedAt,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? ExpiresAt = null);

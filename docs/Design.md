@@ -140,7 +140,7 @@
 `GET /conversations` (paged, filter status/platform, hot-first) · `GET /conversations/{id}` · `POST /conversations/{id}/assign` · `/resolve` · `/escalate` · `/messages` (gửi outbound)
 
 ### Sale Assist — `/api/sale-assist` (ChatPolicy)
-`POST /draft` · `POST /summary` · `GET\|POST /quick-replies` · `PUT\|DELETE /quick-replies/{id}` · `GET /daily-summary` · `GET /upsell-suggestions`
+`POST /draft` · `POST /summary` · `GET\|POST /quick-replies` · `PUT\|DELETE /quick-replies/{id}` · `GET /daily-summary` · `GET /upsell-suggestions` · **`GET /upsell?conversationId=`** → `{eligible,suggestion,reason,leadScore}` (SaleAssist-4: hot-gate + Claude; `eligible=false` khi lead chưa 'hot')
 
 ### Leads — `/api/leads`
 `GET` (paged, score desc) · `GET /{id}` · `POST` · `POST /create-with-skills` · `POST /{id}/activities` · `POST /{id}/assign` · `GET /forecast` · `GET /{id}/context` · **`/api/lead-scoring-rules`**: `GET\|POST` · `DELETE /{id}`
@@ -152,16 +152,26 @@
 `GET\|POST /briefs` · `GET\|PUT\|DELETE /briefs/{id}` · `GET /trends` · `POST /trends/scan` · `POST /items/generate` · `GET /queue` · `PUT\|DELETE /items/{id}` · `POST /items/{id}/approve\|reject\|schedule\|repurpose` · `GET /calendar` · `DELETE /schedule/{id}`
 
 ### Documents — `/api/docs`
-`POST /generate` → `{documentId,fileUrl,fileHash,sizeBytes,latencyMs}` · `GET\|POST /templates` · `PUT\|DELETE /templates/{id}` · `GET /generated`
+`POST /generate` (body `{templateCode,contactId?,vars?,sentVia?}`; `sentVia="email"` → gửi SMTP gated + đánh dấu sent) → `{documentId,fileUrl,fileHash,sizeBytes,latencyMs}` · `GET\|POST /templates` · `PUT\|DELETE /templates/{id}` · `GET /generated` (kèm `expiresAt`) · **`GET /{id}/download`** → 302 redirect tới fileUrl · **410** khi link quá hạn 7 ngày (Docs-1). Auto-fill var từ Contact: `contact_name/customer_name/contact_phone/contact_email`.
 
 ### Analytics — `/api/analytics`
-`GET /omnichannel?from=&to=` → `{from,to,rows[{platform,leads,dms,replies,conversions,avgResponseTimeSec,adSpend,cpl}],stale}` · `GET /funnel` · `GET /agent-performance` · `GET /anomalies` · `GET /forecast` · `GET /export`
+`GET /omnichannel?from=&to=` → `{from,to,rows[{platform,leads,dms,replies,conversions,avgResponseTimeSec,adSpend,cpl}],stale}` · **`GET /omnichannel-delta?from=&to=&compare=dod|wow`** → `{from,to,compare,prevFrom,prevTo,metrics[{metric,current,previous,deltaPct}]}` (Report-1) · `GET /funnel` · `GET /agent-performance` · `GET /anomalies` · `GET /forecast` · `GET /export` · `GET /agent-cost`
+
+### Competitors — `/api/competitors` (Research-2)
+`GET /sources` (perm `content.read`) · `POST /sources` (perm `content.write`, max 20/tenant, body `{name,url,sourceType?}`) · `PUT\|DELETE /sources/{id}` · `GET /posts?sourceId=&take=` → `[{id,sourceId,url,title,snippet,publishedAt,detectedAt}]`. Quét tự động hàng ngày 06:00 VN (CompetitorScanJob) → notification `competitor` khi có bài mới.
 
 ### Ads — `/api/ads`
 `GET\|POST /rules` · `PUT\|DELETE /rules/{id}` · `GET /campaigns` · `PUT /campaigns/{id}/target-cpl` · `GET /actions` · `POST /campaigns/{id}/evaluate` · `POST /lookalike`
 
 ### Channels — `/api/channels/pancake`
 `GET\|PUT\|DELETE /config` · `GET /webhook-url`
+
+### Admin users / Profile / Notifications / Agents (M23/M24/M25)
+- **`/api/admin/users`** (perm `admin.system`): `GET` list · `POST` create · `PUT /{id}` · `POST /{id}/enable\|disable` · `POST /{id}/reset-password` (tenant-scoped).
+- **`/api/profile`**: `GET` · `PUT` (displayName/phone/dateOfBirth) · `POST /avatar` (multipart ≤2MB image, IDocumentStorage).
+- **`/api/notifications`**: `GET` (paged + `?unread=`) · `GET /unread-count` · `POST /{id}/read` · `POST /read-all`. SignalR `NotificationHub` `/hubs/notifications`. Types: `hot_lead`·`idle`·`idle_escalation`·`ads_budget`·`competitor`·`anomaly`·`system`.
+- **`/api/agents`** (M25): `GET` list (status/last-run) · `POST /{code}/enable\|disable` · `GET /{code}/traces`.
+- `POST /auth/change-password` (đã đăng nhập).
 
 ### Admin / Contacts / Health / Webhook
 `GET /api/admin/audit-logs` · `POST /api/contacts/merge` · `GET /health/live\|/ready\|/channels/pancake` (anon) · `POST /webhooks/pancake/{tenantSlug}` (anon, HMAC)

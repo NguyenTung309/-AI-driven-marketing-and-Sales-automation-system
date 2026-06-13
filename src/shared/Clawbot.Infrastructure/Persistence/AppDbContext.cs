@@ -6,6 +6,7 @@ using Clawbot.Domain.Analytics;
 using Clawbot.Domain.Channels;
 using Clawbot.Domain.ChatScenarios;
 using Clawbot.Domain.Common;
+using Clawbot.Domain.Competitors;
 using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Content;
 using Clawbot.Domain.Conversations;
@@ -18,6 +19,7 @@ using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.SharedKernel.Multitenancy;
+using MassTransit;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -91,6 +93,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     // Channels
     public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();
 
+    // Competitors (Research-2)
+    public DbSet<CompetitorSource> CompetitorSources => Set<CompetitorSource>();
+    public DbSet<CompetitorPost> CompetitorPosts => Set<CompetitorPost>();
+
     IConversationSet IAppDbContext.Conversations => new EfConversationSet(Conversations);
 
     Task<int> IAppDbContext.SaveChangesAsync(CancellationToken ct) => base.SaveChangesAsync(ct);
@@ -104,6 +110,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     {
         base.OnModelCreating(builder);
         builder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+
+        // MassTransit transactional outbox (WS1): event publish enlists in the same SaveChanges
+        // transaction as the aggregate write — exactly-once, no loss on broker outage.
+        // These entities keep canonical PascalCase schema (skipped by ApplySnakeCase).
+        builder.AddInboxStateEntity();
+        builder.AddOutboxMessageEntity();
+        builder.AddOutboxStateEntity();
 
         // Domain aggregates assign their own Guid identifiers in factory methods, so keys are
         // not store-generated. Without this, EF marks navigation-appended children (e.g.

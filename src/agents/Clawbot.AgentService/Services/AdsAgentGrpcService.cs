@@ -60,6 +60,24 @@ public sealed partial class AdsAgentGrpcService(
                 tenantId, campaignId, decision.RuleId, decision.Action, decision.Note, _clock.UtcNow);
             _db.AdsActions.Add(action);
 
+            // Ads-1: proactive budget alert is not a campaign action — notify MKT Lead/Admin and skip the connector.
+            if (decision.Action == "alert")
+            {
+                await _publisher.PublishAsync(new NotificationRequest(
+                    tenantId, null, "ads_budget", "Ngân sách quảng cáo đạt ngưỡng (90%)",
+                    Severity: "warning",
+                    Body: $"Chiến dịch {campaignId} đã chi {decision.Note}. Kiểm tra Quảng cáo.",
+                    Link: "/ads"), context.CancellationToken).ConfigureAwait(false);
+                executed.Add(new AdsActionExecuted
+                {
+                    RuleId = string.Empty,
+                    ActionTaken = decision.Action,
+                    Note = decision.Note,
+                });
+                LogActionExecuted(_logger, tenantId, campaignId, decision.Action, decision.Note);
+                continue;
+            }
+
             var applied = await _agent.ApplyActionAsync(
                 campaign.Platform, campaign.ExternalCampaignId, decision.Action, null, context.CancellationToken).ConfigureAwait(false);
 

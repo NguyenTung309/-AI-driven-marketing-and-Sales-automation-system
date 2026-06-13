@@ -27,6 +27,21 @@ public sealed record OmniChannelResponse(
     IReadOnlyList<OmniChannelRowDto> Rows,
     bool Stale);
 
+// Report-1: per-metric comparison vs the prior period (dod = day-over-day, wow = week-over-week).
+public sealed record MetricDeltaDto(
+    string Metric,
+    decimal Current,
+    decimal Previous,
+    decimal? DeltaPct);
+
+public sealed record OmniChannelDeltaResponse(
+    DateOnly From,
+    DateOnly To,
+    string Compare,
+    DateOnly PrevFrom,
+    DateOnly PrevTo,
+    IReadOnlyList<MetricDeltaDto> Metrics);
+
 public sealed record FunnelDto(
     string Platform,
     int Leads,

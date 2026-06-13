@@ -101,15 +101,15 @@ public sealed class LeadScoringEngineTests
     }
 }
 
-// M15 — RoundRobinLeadAssignmentService owner rotation.
-public sealed class RoundRobinLeadAssignmentServiceTests
+// M15 / Lead-2 — LeastBusyLeadAssignmentService picks the freest sale.
+public sealed class LeastBusyLeadAssignmentServiceTests
 {
-    private static RoundRobinLeadAssignmentService Build(params Guid[] users)
+    private static LeastBusyLeadAssignmentService Build(params AssignmentCandidate[] candidates)
     {
         var source = Substitute.For<IAssignmentPoolSource>();
         source.LoadAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-              .Returns(new AssignmentPool(users));
-        return new RoundRobinLeadAssignmentService(source);
+              .Returns(new AssignmentPool(candidates));
+        return new LeastBusyLeadAssignmentService(source);
     }
 
     [Fact]
@@ -123,29 +123,25 @@ public sealed class RoundRobinLeadAssignmentServiceTests
     }
 
     [Fact]
-    public async Task Single_user_always_returned()
+    public async Task Picks_candidate_with_lowest_load()
     {
-        var user = Guid.NewGuid();
-        var sut = Build(user);
+        var busy = new AssignmentCandidate(Guid.NewGuid(), 7);
+        var free = new AssignmentCandidate(Guid.NewGuid(), 1);
+        var mid = new AssignmentCandidate(Guid.NewGuid(), 3);
+        var sut = Build(busy, free, mid);
 
-        (await sut.PickOwnerAsync(Guid.NewGuid(), CancellationToken.None)).Should().Be(user);
-        (await sut.PickOwnerAsync(Guid.NewGuid(), CancellationToken.None)).Should().Be(user);
+        (await sut.PickOwnerAsync(Guid.NewGuid(), CancellationToken.None)).Should().Be(free.UserId);
     }
 
     [Fact]
-    public async Task Rotates_across_pool()
+    public async Task Ties_break_deterministically_by_user_id()
     {
-        var users = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
-        var sut = Build(users);
+        var a = new AssignmentCandidate(Guid.Parse("11111111-1111-1111-1111-111111111111"), 2);
+        var b = new AssignmentCandidate(Guid.Parse("22222222-2222-2222-2222-222222222222"), 2);
+        var sut = Build(b, a);
 
-        var picks = new List<Guid?>();
-        for (var i = 0; i < users.Length; i++)
-        {
-            picks.Add(await sut.PickOwnerAsync(Guid.NewGuid(), CancellationToken.None));
-        }
-
-        // Cursor advances by one each call, so N consecutive picks cover all N owners.
-        picks.Should().OnlyHaveUniqueItems();
-        picks.Should().BeEquivalentTo(users.Select(u => (Guid?)u));
+        // Both load 2 → lowest UserId wins; repeat picks are stable (no rotation).
+        (await sut.PickOwnerAsync(Guid.NewGuid(), CancellationToken.None)).Should().Be(a.UserId);
+        (await sut.PickOwnerAsync(Guid.NewGuid(), CancellationToken.None)).Should().Be(a.UserId);
     }
 }

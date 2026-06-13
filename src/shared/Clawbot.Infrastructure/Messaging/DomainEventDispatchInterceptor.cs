@@ -5,11 +5,13 @@ using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Infrastructure.Messaging;
 
-// Publishes aggregate domain events to MassTransit after a successful SaveChanges.
-// INTERIM: publish-after-commit. The chosen MassTransit EF transactional outbox
-// (AddEntityFrameworkOutbox + InboxState/OutboxState/OutboxMessage tables + migration + UseBusOutbox)
-// is the reliability upgrade — deferred until validated against a real SQL Server + RabbitMQ (M21),
-// because its migration DDL cannot be runtime-verified in this environment.
+// Publishes aggregate domain events through the MassTransit transactional outbox (WS1).
+// Publishing happens in SavingChangesAsync (BEFORE the write completes) so that, with
+// UseBusOutbox() configured, each event is buffered and persisted to OutboxMessage in the
+// SAME SaveChanges transaction as the aggregate change — exactly-once, durable across a
+// broker outage. MassTransit's delivery service relays to RabbitMQ after commit.
+// NOTE: the outbox tables (migration 0019) + end-to-end relay require a real SQL Server +
+// RabbitMQ to verify (Docker / M21); compilation + SQLite model are covered by unit tests.
 public sealed partial class DomainEventDispatchInterceptor(
     IPublishEndpoint publish,
     ILogger<DomainEventDispatchInterceptor> logger) : SaveChangesInterceptor
@@ -17,8 +19,8 @@ public sealed partial class DomainEventDispatchInterceptor(
     private readonly IPublishEndpoint _publish = publish;
     private readonly ILogger<DomainEventDispatchInterceptor> _logger = logger;
 
-    public override async ValueTask<int> SavedChangesAsync(
-        SaveChangesCompletedEventData eventData, int result, CancellationToken cancellationToken = default)
+    public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+        DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
     {
         if (eventData.Context is not null)
         {
@@ -34,12 +36,11 @@ public sealed partial class DomainEventDispatchInterceptor(
                 {
                     try
                     {
+                        // With UseBusOutbox() this enlists into the outbox (no direct broker call).
                         await _publish.Publish(domainEvent, domainEvent.GetType(), cancellationToken).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
-                        // Data is already committed — a broker outage must NOT surface as a save failure.
-                        // Event is lost until the transactional outbox lands (M21); log loudly.
                         LogPublishFailed(_logger, ex, domainEvent.GetType().Name);
                     }
                 }
@@ -47,10 +48,10 @@ public sealed partial class DomainEventDispatchInterceptor(
             }
         }
 
-        return await base.SavedChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
+        return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
     }
 
     [LoggerMessage(EventId = 9120, Level = LogLevel.Error,
-        Message = "Failed to publish domain event {EventType} after commit (event lost until outbox lands)")]
+        Message = "Failed to enlist domain event {EventType} into outbox")]
     private static partial void LogPublishFailed(ILogger logger, Exception ex, string eventType);
 }

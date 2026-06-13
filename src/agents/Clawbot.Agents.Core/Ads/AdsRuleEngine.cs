@@ -7,6 +7,9 @@ public static class AdsRuleEngine
     private static readonly TimeOnly QuietStart = new(2, 0);
     private static readonly TimeOnly QuietEnd = new(5, 0);
 
+    // Ads-1: proactive budget-spend alert threshold (90% of daily budget).
+    private const decimal BudgetAlertRatio = 0.9m;
+
     public static IReadOnlyList<AdsDecision> Evaluate(
         AdsMetricSnapshot current,
         decimal? targetCpl,
@@ -19,6 +22,14 @@ public static class AdsRuleEngine
         ArgumentNullException.ThrowIfNull(last3Days);
 
         var decisions = new List<AdsDecision>();
+
+        // Ads-1: proactive budget alert — fires regardless of quiet hours / rules so spend
+        // hitting 90% is surfaced even overnight. Notification fan-out handled by the caller.
+        if (current.DailyBudget > 0 && current.Spend / current.DailyBudget >= BudgetAlertRatio)
+        {
+            decisions.Add(new AdsDecision(null, "budget", "alert",
+                $"spend {current.Spend:F2} / budget {current.DailyBudget:F2} >= 90%"));
+        }
 
         if (IsQuietHour(nowGmt7))
         {

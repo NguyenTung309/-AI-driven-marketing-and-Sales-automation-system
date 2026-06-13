@@ -59,7 +59,9 @@ public sealed partial class ChannelMessageIngestor(
             sentAt: message.SentAt,
             externalMessageId: externalMsgId,
             originalContent: message.Text,
-            redactedContent: redacted.RedactedText);
+            redactedContent: redacted.RedactedText,
+            messageType: message.MessageType,
+            parentPostId: message.ParentPostId);
 
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
 
