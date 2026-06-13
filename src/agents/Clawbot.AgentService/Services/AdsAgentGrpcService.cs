@@ -2,6 +2,7 @@ using Clawbot.Agents.Contracts.Ads;
 using Clawbot.Agents.Core.Ads;
 using Clawbot.Domain.Ads;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Notifications;
 using Clawbot.SharedKernel.Time;
 using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
@@ -13,11 +14,13 @@ namespace Clawbot.AgentService.Services;
 public sealed partial class AdsAgentGrpcService(
     CoreAds.AdsAgent agent,
     AppDbContext db,
+    INotificationPublisher publisher,
     IClock clock,
     ILogger<AdsAgentGrpcService> logger) : Clawbot.Agents.Contracts.Ads.AdsAgent.AdsAgentBase
 {
     private readonly CoreAds.AdsAgent _agent = agent;
     private readonly AppDbContext _db = db;
+    private readonly INotificationPublisher _publisher = publisher;
     private readonly IClock _clock = clock;
     private readonly ILogger<AdsAgentGrpcService> _logger = logger;
 
@@ -117,7 +120,7 @@ public sealed partial class AdsAgentGrpcService(
         return new AdsRemarketResponse { Success = success };
     }
 
-    public override Task<AdsSignalResponse> HandleSignal(AdsSignalRequest request, ServerCallContext context)
+    public override async Task<AdsSignalResponse> HandleSignal(AdsSignalRequest request, ServerCallContext context)
     {
         ArgumentNullException.ThrowIfNull(request);
         var tenantId = ParseTenantId(request.TenantId);
@@ -125,10 +128,15 @@ public sealed partial class AdsAgentGrpcService(
         if (request.SignalType == "budget_threshold")
         {
             LogBudgetAlert(_logger, tenantId, request.CampaignId, request.PayloadJson);
-            return Task.FromResult(new AdsSignalResponse { Handled = true, ActionTaken = "alert" });
+            await _publisher.PublishAsync(new NotificationRequest(
+                tenantId, null, "ads_budget", "Ngân sách quảng cáo đạt ngưỡng (90%)",
+                Severity: "warning",
+                Body: $"Chiến dịch {request.CampaignId} đã chạm ngưỡng ngân sách — kiểm tra Quảng cáo.",
+                Link: "/ads"), context.CancellationToken).ConfigureAwait(false);
+            return new AdsSignalResponse { Handled = true, ActionTaken = "alert" };
         }
 
-        return Task.FromResult(new AdsSignalResponse { Handled = false, Error = "unknown signal type" });
+        return new AdsSignalResponse { Handled = false, Error = "unknown signal type" };
     }
 
     private static Guid ParseTenantId(string tenantId)
