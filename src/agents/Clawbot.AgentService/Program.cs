@@ -14,6 +14,7 @@ using Clawbot.Application;
 using Clawbot.Infrastructure;
 using Clawbot.Infrastructure.Documents;
 using Clawbot.Infrastructure.Observability;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +25,12 @@ builder.Services.AddClawbotTelemetry(builder.Configuration, "clawbot-agent");
 builder.Services.AddSingleton<AgentRegistry>(_ => new AgentRegistry(Array.Empty<IAgent>()));
 builder.Services.AddSingleton<PlanningOrchestrator>();
 builder.Services.AddClawbotSkills(builder.Configuration);
+// M25: persist Claude cost to claude_cost_ledger (overrides in-memory tracker from the skills module).
+builder.Services.RemoveAll<Clawbot.Agents.Core.Skills.Ops.IClaudeCostTracker>();
+builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Ops.IClaudeCostTracker, Clawbot.Infrastructure.Agents.DbClaudeCostTracker>();
+// M25: chat agent honors per-tenant enable/disable (AgentConfig.Status).
+builder.Services.RemoveAll<Clawbot.Agents.Core.Chat.IAgentToggleGate>();
+builder.Services.AddSingleton<Clawbot.Agents.Core.Chat.IAgentToggleGate, Clawbot.Infrastructure.Agents.DbAgentToggleGate>();
 builder.Services.AddClawbotRag(builder.Configuration);
 builder.Services.AddClawbotChat(builder.Configuration);
 builder.Services.AddClawbotContent(builder.Configuration);

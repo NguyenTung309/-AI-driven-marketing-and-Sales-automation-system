@@ -6,6 +6,7 @@ using Clawbot.Infrastructure.Analytics;
 using Clawbot.Infrastructure.Audit;
 using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Channels.Pancake;
+using Clawbot.Infrastructure.Email;
 using Clawbot.Infrastructure.Content.Publishing;
 using Clawbot.Infrastructure.Ads;
 using Clawbot.Infrastructure.Leads;
@@ -118,6 +119,7 @@ public static class DependencyInjection
         services.AddSingleton(_ => new QdrantClient(cfg["Vector:Qdrant:Host"] ?? "localhost"));
         services.AddScoped<IVectorStore, QdrantVectorStore>();
         services.AddSingleton<IContactEmbeddingSync, ContactEmbeddingSync>();
+        services.AddScoped<IEmailSender, SmtpEmailSender>();
 
         return services;
     }

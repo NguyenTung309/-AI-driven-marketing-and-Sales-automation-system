@@ -42,7 +42,8 @@ public sealed class ChatAgent(
     ILanguageDetector language,
     IToxicityFilter toxicity,
     ISpamDetector spam,
-    IOptions<ToxicityOptions> toxicityOptions)
+    IOptions<ToxicityOptions> toxicityOptions,
+    IAgentToggleGate toggle)
 {
     private const string DefaultSystemPrompt =
         "You are ClawBot — an omnichannel sales assistant for a Chinese-language tutoring center. " +
@@ -59,11 +60,21 @@ public sealed class ChatAgent(
     private readonly IToxicityFilter _toxicity = toxicity;
     private readonly ISpamDetector _spam = spam;
     private readonly ToxicityOptions _toxicityOptions = toxicityOptions.Value;
+    private readonly IAgentToggleGate _toggle = toggle;
 
     public async Task<ChatAgentReply> ReplyAsync(ChatAgentRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         var started = System.Diagnostics.Stopwatch.StartNew();
+
+        // M25: skip auto-reply if the chat agent is disabled for this tenant.
+        if (!await _toggle.IsAutoActionEnabledAsync(request.TenantId, "chat", ct).ConfigureAwait(false))
+        {
+            started.Stop();
+            return new ChatAgentReply(
+                string.Empty, Array.Empty<RagChunk>(), 0, 0, 0m, started.ElapsedMilliseconds,
+                Intent: "disabled", Blocked: true, BlockReason: "agent_disabled");
+        }
 
         var verdict = await _injection.InspectAsync(request.UserText, ct).ConfigureAwait(false);
         if (verdict.IsMalicious)

@@ -20,15 +20,18 @@ description: Task queue + blocker log for account/user-admin, notification cente
 
 → **Cần user quyết.** M23 task queue dưới giả định đã chốt.
 
-## M23 — Account & User administration  · **BLOCKED** (chờ quyết Identity)
-- [blocked] T0 — Reconcile Identity↔DDL (Option A/B/C ở trên) + migration + EnsureCreated/DDL parity
-- [todo] T1 — `0010` ALTER user table `+ date_of_birth`, `+ avatar_url`; thêm `DateOfBirth`/`AvatarUrl` vào `AppUser`
+## M23 — Account & User administration  · **IN PROGRESS** — reconcile DONE 2026-06-13 (build 0/0, Infra 51/51)
+- [done] T0 — **Identity↔DDL reconcile (Option A)**: `IdentityUserConfiguration` maps `AppUser`→`users` (bảng cả domain FK tới); `0013_identity_reconcile.sql` ALTER `users` (+8 cột Identity + date_of_birth/avatar_url) + CREATE 6 bảng `AspNet*`. Model verify qua EnsureCreated ✓. **⚠️ DDL 0013 cần integration auth test (Docker) verify trước prod** — fix luôn lỗi prod-auth tiềm ẩn (EF cần AspNetUsers, DDL chỉ có users).
+- [done] T1 — `DateOfBirth`/`AvatarUrl`/`IsActive`/`LastLoginAt` thêm vào `AppUser` + map
+- [todo] T2 — `SmtpEmailSender` (System.Net.Mail BCL, config-gated) + wire `/auth/reset/request`
 - [todo] T2 — `SmtpEmailSender : IEmailSender` (System.Net.Mail BCL, config-gated graceful) + DI; wire vào `/auth/reset/request`
-- [todo] T3 — `AdminUsersEndpoints` `/api/admin/users` GET(list)/POST(create)/PUT/{id}/disable/reset-password (perm `admin.system`) qua `UserManager`
-- [todo] T4 — `ProfileEndpoints` `GET/PUT /api/profile` + `POST /api/profile/avatar` (MinIO presigned, reuse `MinioDocumentStorage`)
-- [todo] T5 — `POST /auth/change-password` (authenticated) vào `AuthEndpoints` (`UserManager.ChangePasswordAsync`)
-- [todo] T6 — DTOs trong `Clawbot.Api.Contracts/Admin` + `Account`; map `MapAdminUsers()`/`MapProfile()` trong Program.cs
-- [todo] T7 — build 0/0 + tests (admin user CRUD, change-password, profile)
+- [done] T2 — `SmtpEmailSender : IEmailSender` (System.Net.Mail BCL, config-gated) + DI; wired vào `/auth/reset/request`
+- [done] T3 — `AdminUsersEndpoints` `/api/admin/users` GET/POST/PUT/{id}/{disable,enable,reset-password} (perm `admin.system`) qua `UserManager`
+- [done] T4 — `ProfileEndpoints` `GET/PUT /api/profile`. **Avatar `POST /api/profile/avatar` DEFER** — `IDocumentStorage` chỉ đăng ký ở AgentService, cần đăng ký ở API + multipart.
+- [done] T5 — `POST /auth/change-password` (authenticated) trong `AuthEndpoints` + `ChangePasswordRequest`
+- [done] T6 — request records trong endpoint files + Contracts; map `MapAdminUsers()`/`MapProfile()` Program.cs
+- [done] T7 — build **0/0**. Unit/integration auth tests chưa thêm (cần Docker cho DDL-path).
+- [todo] avatar upload (MinIO) — follow-up.
 
 ## M24 — Notification center backend  · **DONE 2026-06-13** (build 0/0)
 - [done] T1 — `0011_notifications.sql` (tenant_id, user_id NULL, type, severity, title, body, link, is_read, read_at, created_at; index tenant/user/is_read/created)
@@ -40,15 +43,15 @@ description: Task queue + blocker log for account/user-admin, notification cente
 - [~] T7 — build **0/0 green** ✓ ; unit tests chưa thêm
 - **Note**: broadcast (user_id null) = 1 row + tenant push (per-user fan-out defer tới khi Identity reconcile — cần list user).
 
-## M25 — Agent control & observability  · **READY** (không dính Identity)
-- [todo] T1 — `0012_agent_settings.sql` UNIQUE(tenant_id, agent_code), auto_action_enabled, updated_at/by
-- [todo] T2 — `0013_claude_cost_ledger.sql` (tenant_id, agent_code, conversation_id NULL, input/output tokens, usd, created_at; index)
-- [todo] T3 — `AgentSetting` + `ClaudeCostEntry` entities + EF configs + DbSets
-- [todo] T4 — `DbClaudeCostTracker : IClaudeCostTracker` (ghi ledger) thay/đứng cạnh `InMemoryClaudeCostTracker`; DI swap
-- [todo] T5 — AgentService: ChatAgent + jobs đọc `agent_settings.auto_action_enabled` trước auto-action
-- [todo] T6 — `AgentsEndpoints` `GET /api/agents`(+status từ traces) + enable/disable (perm `agent.manage`) + `GET /{code}/traces`
-- [todo] T7 — `GET /api/analytics/agent-cost` group ledger theo agent_code
-- [todo] T8 — build 0/0 + tests
+## M25 — Agent control & observability  · **DONE 2026-06-13** (build 0/0, Infra tests 51/51) — trừ T5
+- [skip] T1 — ~~`agent_settings`~~ : **reuse `AgentConfig`** (table `agents`, `Status` running/stopped + `Start()/Stop()`) — không cần bảng mới
+- [done] T2 — `0012_claude_cost_ledger.sql`
+- [done] T3 — `ClaudeCostEntry` entity + `ClaudeCostEntryConfiguration` + DbSet `ClaudeCostLedger`
+- [done] T4 — `DbClaudeCostTracker` (IServiceScopeFactory → scoped DbContext, singleton-safe); override InMemory trong AgentService Program.cs **sau** `AddClawbotSkills` (RemoveAll + AddSingleton)
+- [done] T6 — `AgentsEndpoints`: `GET /api/agents` (+lastRunAt) · `POST /{code}/enable|disable` (Start/Stop) · `GET /{code}/traces`
+- [done] T7 — `GET /api/analytics/agent-cost` (group `claude_cost_ledger` theo agent_code)
+- [done] T8 — build **0/0**; `Clawbot.Infrastructure.Tests` 51/51 green
+- [done] T5 — ChatAgent honor flag: `IAgentToggleGate` (Agents.Core, default always-on) + `DbAgentToggleGate` (reads `AgentConfig.Status`); ChatAgent skips auto-reply khi disabled. Build 0/0, Agents.Tests 147/147.
 
 ## Sequencing note
 User chọn build cả 3 tuần tự. Do M23 blocked, đề xuất: **(1) chốt Identity reconcile → M23**, hoặc **(2) build M24 → M25 trước** (ready ngay) rồi quay lại M23. Phụ (draft-feedback M14, least-load M15) sau.

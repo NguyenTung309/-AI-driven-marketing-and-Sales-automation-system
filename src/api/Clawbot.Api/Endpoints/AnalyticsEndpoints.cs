@@ -4,9 +4,11 @@ using Clawbot.Agents.Contracts.Report;
 using Clawbot.Api.Contracts.Analytics;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
+using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Grpc.Core;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
 
@@ -22,8 +24,42 @@ public static class AnalyticsEndpoints
         grp.MapGet("/anomalies", GetAnomaliesAsync);
         grp.MapGet("/forecast", GetForecastAsync);
         grp.MapGet("/export", ExportAsync);
+        grp.MapGet("/agent-cost", AgentCostAsync);
 
         return app;
+    }
+
+    // M25 — per-agent Claude cost from the ledger (agent nào tốn nhất, trung bình/cuộc).
+    private static async Task<IResult> AgentCostAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var toDate = DateTimeOffset.TryParse(to, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedTo)
+            ? parsedTo : DateTimeOffset.UtcNow;
+        var fromDate = DateTimeOffset.TryParse(from, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedFrom)
+            ? parsedFrom : toDate.AddDays(-30);
+
+        var items = await db.ClaudeCostLedger
+            .IgnoreQueryFilters()
+            .Where(c => c.TenantId == tenantId && c.CreatedAt >= fromDate && c.CreatedAt <= toDate)
+            .GroupBy(c => c.AgentCode)
+            .Select(g => new
+            {
+                AgentCode = g.Key,
+                Calls = g.Count(),
+                InputTokens = g.Sum(x => x.InputTokens),
+                OutputTokens = g.Sum(x => x.OutputTokens),
+                Usd = g.Sum(x => x.Usd),
+                AvgUsdPerCall = g.Average(x => x.Usd),
+            })
+            .OrderByDescending(x => x.Usd)
+            .ToListAsync(ct);
+
+        return Results.Ok(new { from = fromDate, to = toDate, items });
     }
 
     private static async Task<IResult> GetOmnichannelAsync(
