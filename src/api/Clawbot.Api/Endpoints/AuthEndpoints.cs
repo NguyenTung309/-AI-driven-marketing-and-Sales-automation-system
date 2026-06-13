@@ -5,6 +5,7 @@ using System.Text.Encodings.Web;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Auth;
 using Clawbot.Api.Middleware;
+using Clawbot.Application.Abstractions;
 using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Persistence;
@@ -34,6 +35,7 @@ public static partial class AuthEndpoints
         group.MapPost("/2fa/verify", VerifyTwoFactorAsync).RequireAuthorization();
         group.MapPost("/2fa/disable", DisableTwoFactorAsync).RequireAuthorization();
         group.MapGet("/me", Me).RequireAuthorization();
+        group.MapPost("/change-password", ChangePasswordAsync).RequireAuthorization();
 
         return app;
     }
@@ -82,15 +84,31 @@ public static partial class AuthEndpoints
     private static async Task<IResult> RequestResetAsync(
         PasswordResetRequest req,
         UserManager<AppUser> users,
+        IEmailSender email,
         ILogger<Program> log)
     {
         var user = await users.FindByEmailAsync(req.Email);
         if (user is null) return Results.Ok(); // Avoid email enumeration.
 
         var token = await users.GeneratePasswordResetTokenAsync(user);
-        // TODO(M03): emit via email service. For now log so dev can copy.
-        LogResetTokenIssued(log, req.Email, token);
+        LogResetTokenIssued(log, req.Email, token); // also logged so dev can copy when SMTP unset
+        await email.SendAsync(req.Email, "Đặt lại mật khẩu Học Bá",
+            $"Mã đặt lại mật khẩu của bạn: {token}");
         return Results.Ok();
+    }
+
+    private static async Task<IResult> ChangePasswordAsync(
+        ChangePasswordRequest req,
+        System.Security.Claims.ClaimsPrincipal principal,
+        UserManager<AppUser> users)
+    {
+        var user = await users.GetUserAsync(principal);
+        if (user is null) return Results.Unauthorized();
+
+        var result = await users.ChangePasswordAsync(user, req.CurrentPassword, req.NewPassword);
+        return result.Succeeded
+            ? Results.Ok()
+            : Results.BadRequest(result.Errors.Select(e => e.Description));
     }
 
     private static async Task<IResult> ConfirmResetAsync(

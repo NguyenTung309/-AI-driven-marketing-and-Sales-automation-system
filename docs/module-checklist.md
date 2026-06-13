@@ -415,7 +415,7 @@
 
 > Đối chiếu 12 surface FE (M16) + 18 luồng doc với route hiện có (`src/api/.../Endpoints/*`). Các endpoint dưới **xác nhận chưa tồn tại** trong route hiện tại.
 
-### M23 — Account & User administration (NEW · Imp 4 · Diff 3 · **TODO**)
+### M23 — Account & User administration (NEW · Imp 4 · Diff 3 · **DONE 2026-06-13** build 0/0; avatar + DDL-auth-verify pending)
 > Quyết định /review-requirements 2026-06-13: **Admin tạo user, KHÔNG self-register** (single-org). Email = **SMTP config-gated**.
 - [ ] `/api/admin/users` CRUD — list/create/disable user + gán role + admin-reset password (FE **Admin** surface); hiện chỉ có `/api/rbac/roles` + `/api/api-keys`, chưa có user CRUD
 - [ ] `POST /auth/change-password` (đã đăng nhập) — FE `ChangePasswordDialog` cần; hiện chỉ có reset-qua-token
@@ -424,12 +424,12 @@
 - [ ] `IEmailSender` — **SMTP config-gated** (graceful, bật khi có creds) → gửi reset token + onboarding (hiện chỉ log token)
 - [x] ~~`POST /auth/register` self-serve~~ — **bỏ** (admin-provisioned, no public register)
 
-### M24 — Notification center backend (NEW · Imp 4 · Diff 2 · **TODO**)
+### M24 — Notification center backend (NEW · Imp 4 · Diff 2 · **DONE 2026-06-13** build 0/0)
 - [ ] `notifications` table + entity — persist alert (hot-lead, idle, anomaly, ads-budget, system); hiện alert chỉ ephemeral qua SignalR
 - [ ] `GET /api/notifications` (paged + unread filter) + `POST /api/notifications/{id}/read` + mark-all-read
 - [ ] `INotificationStore` — notifier ghi DB song song push SignalR (FE **Notification center** M16)
 
-### M25 — Agent control & observability (NEW · Imp 3 · Diff 3 · **TODO**)
+### M25 — Agent control & observability (NEW · Imp 3 · Diff 3 · **DONE 2026-06-13** build 0/0; ChatAgent flag-honor deferred)
 - [ ] `GET /api/agents` — list 8 agent + status (enabled/running/last-run/health) — FE **Agent dashboard**
 - [ ] `POST /api/agents/{code}/enable|disable` — flag per-tenant **tắt/bật auto-action** của agent-type (gRPC vẫn chạy, không kill process) — FE start/stop
 - [ ] `GET /api/agents/{code}/traces` — đọc agent run logs; `agent_traces` đã persist (M10) nhưng thiếu endpoint

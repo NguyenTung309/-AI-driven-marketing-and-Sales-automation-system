@@ -48,6 +48,7 @@ public static class SkillsModule
         services.AddSingleton<IForecaster, MlNetForecaster>();
         services.AddSingleton<IPromptInjectionDefender, HeuristicPromptInjectionDefender>();
         services.AddSingleton<IClaudeCostTracker, InMemoryClaudeCostTracker>();
+        services.AddSingleton<Chat.IAgentToggleGate, Chat.AlwaysEnabledAgentToggleGate>();
 
         // HttpClient for contact enricher (config-gated Hunter/Apollo)
         services.AddHttpClient(nameof(HunterContactEnricher), c =>

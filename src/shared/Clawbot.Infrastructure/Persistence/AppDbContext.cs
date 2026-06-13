@@ -63,6 +63,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<AgentConfig> AgentConfigs => Set<AgentConfig>();
     public DbSet<AgentSession> AgentSessions => Set<AgentSession>();
     public DbSet<AgentTrace> AgentTraces => Set<AgentTrace>();
+    public DbSet<ClaudeCostEntry> ClaudeCostLedger => Set<ClaudeCostEntry>();
 
     // Sale Assist
     public DbSet<QuickReplyTemplate> QuickReplyTemplates => Set<QuickReplyTemplate>();
