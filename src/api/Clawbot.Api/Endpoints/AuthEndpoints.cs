@@ -210,6 +210,7 @@ public static partial class AuthEndpoints
 
     private static bool IsActive(this AppUser user)
     {
+        if (!user.IsActive) return false; // admin-set deactivation flag (M23)
         if (!user.LockoutEnabled) return true;
         return !user.LockoutEnd.HasValue || user.LockoutEnd <= DateTimeOffset.UtcNow;
     }

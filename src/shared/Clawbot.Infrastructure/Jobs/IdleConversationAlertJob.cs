@@ -1,5 +1,6 @@
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Inbox;
+using Clawbot.SharedKernel.Notifications;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -9,6 +10,7 @@ namespace Clawbot.Infrastructure.Jobs;
 public sealed partial class IdleConversationAlertJob(
     AppDbContext db,
     IInboxNotifier notifier,
+    INotificationPublisher publisher,
     ILogger<IdleConversationAlertJob> logger)
 {
     private static readonly TimeSpan IdleThreshold = TimeSpan.FromMinutes(5);
@@ -42,6 +44,12 @@ public sealed partial class IdleConversationAlertJob(
                 conv.Id, Guid.Empty, "system", "system",
                 "Cuộc trò chuyện đã không hoạt động hơn 5 phút. Vui lòng kiểm tra.",
                 "text", DateTimeOffset.UtcNow), ct);
+
+            await publisher.PublishAsync(new NotificationRequest(
+                conv.TenantId, conv.AssignedTo, "idle", "Hội thoại chờ quá 5 phút",
+                Severity: "warning",
+                Body: "Một hội thoại đã không hoạt động hơn 5 phút — vui lòng kiểm tra.",
+                Link: $"/conversations/{conv.Id}"), ct);
         }
     }
 

@@ -2,6 +2,7 @@ using Clawbot.Agents.Contracts.Report;
 using Clawbot.Domain.Analytics;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Content;
+using Clawbot.SharedKernel.Notifications;
 using Clawbot.SharedKernel.Time;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
@@ -13,12 +14,14 @@ public sealed partial class AnomalyAlertJob(
     AppDbContext db,
     ReportAgent.ReportAgentClient reportAgent,
     IContentNotifier notifier,
+    INotificationPublisher publisher,
     IClock clock,
     ILogger<AnomalyAlertJob> logger)
 {
     private readonly AppDbContext _db = db;
     private readonly ReportAgent.ReportAgentClient _reportAgent = reportAgent;
     private readonly IContentNotifier _notifier = notifier;
+    private readonly INotificationPublisher _publisher = publisher;
     private readonly IClock _clock = clock;
     private readonly ILogger<AnomalyAlertJob> _logger = logger;
 
@@ -136,6 +139,10 @@ public sealed partial class AnomalyAlertJob(
             tenantId,
             new AnalyticsAlertEvent(tenantId, alertType, platform, metric, severity, message, _clock.UtcNow),
             ct).ConfigureAwait(false);
+
+        await _publisher.PublishAsync(new NotificationRequest(
+            tenantId, null, alertType, $"Cảnh báo {metric} ({platform})",
+            Severity: severity, Body: message), ct).ConfigureAwait(false);
     }
 
     [LoggerMessage(EventId = 5101, Level = LogLevel.Warning, Message = "Analytics alert {AlertType} for tenant {TenantId}, platform {Platform}, metric {Metric}")]

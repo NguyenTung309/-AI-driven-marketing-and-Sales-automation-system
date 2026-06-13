@@ -5,8 +5,11 @@
 -- columns Identity requires + the AspNet* sub-tables did not exist at all → auth only worked
 -- against EF EnsureCreated, never against the DDL schema. This migration closes that gap.
 --
--- ⚠️ Verify against a real SQL Server (integration auth test) before prod: column names/types
---    must match EF's snake_cased Identity model exactly.
+-- NOTE: the migration runner (SqlServerFixture / deploy) executes each .sql file as ONE batch
+-- via SqlCommand — it does NOT understand the `GO` separator. So: no `GO` here, and indexes that
+-- reference the just-ALTERed `users` columns live in 0014 (a separate file = a fresh batch, run
+-- after this ALTER has committed). CREATE INDEX on freshly-CREATEd tables is fine in-batch.
+-- ⚠️ Verify against a real SQL Server (integration auth test) before prod.
 
 -- 1) Add the Identity columns AppUser/UserManager needs to the existing `users` table.
 ALTER TABLE users ADD
@@ -20,10 +23,6 @@ ALTER TABLE users ADD
     lockout_enabled        BIT NOT NULL DEFAULT 1,
     date_of_birth          DATE,
     avatar_url             NVARCHAR(512);
-GO
-CREATE INDEX ix_users_normalized_email     ON users (normalized_email);
-CREATE INDEX ix_users_normalized_user_name ON users (normalized_user_name);
-GO
 
 -- 2) Identity sub-tables (kept on AspNet* names; snake_case columns to match EF).
 CREATE TABLE AspNetRoles (
@@ -69,4 +68,3 @@ CREATE TABLE AspNetRoleClaims (
     claim_type  NVARCHAR(MAX),
     claim_value NVARCHAR(MAX)
 );
-GO
