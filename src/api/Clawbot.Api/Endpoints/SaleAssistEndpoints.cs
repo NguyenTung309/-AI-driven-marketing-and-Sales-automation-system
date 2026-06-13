@@ -25,8 +25,28 @@ public static class SaleAssistEndpoints
 
         grp.MapGet("/daily-summary", DailySummaryAsync);
         grp.MapGet("/upsell-suggestions", UpsellSuggestionsAsync);
+        grp.MapGet("/upsell", UpsellAsync);
 
         return app;
+    }
+
+    // SaleAssist-4: dynamic, contextual upsell for one conversation (hot-gated + Claude).
+    private static async Task<IResult> UpsellAsync(
+        Guid conversationId,
+        ITenantAccessor tenants,
+        SaleAssistAgent.SaleAssistAgentClient grpc,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        if (conversationId == Guid.Empty) return Results.BadRequest(new { error = "conversationId required" });
+
+        var resp = await grpc.UpsellAsync(new UpsellRequest
+        {
+            TenantId = tenant.TenantId.ToString(),
+            ConversationId = conversationId.ToString(),
+        }, cancellationToken: ct);
+
+        return Results.Ok(new SaleAssistUpsellResponse(resp.Eligible, resp.Suggestion, resp.Reason, resp.LeadScore));
     }
 
     private static async Task<IResult> DraftAsync(

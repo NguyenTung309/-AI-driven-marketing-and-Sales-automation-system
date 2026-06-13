@@ -1,5 +1,6 @@
 using Clawbot.Agents.Core.Ads;
 using Clawbot.Agents.Core.Lead;
+using Clawbot.Agents.Core.Skills.Content;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Application.Abstractions;
 using Clawbot.Infrastructure.Analytics;
@@ -99,6 +100,7 @@ public static class DependencyInjection
         services.Configure<PublisherOptions>(cfg.GetSection(PublisherOptions.SectionName));
         services.AddSingleton<IGoldenHourResolver, DefaultGoldenHourResolver>();
 
+        services.AddCompetitorMonitor(); // Research-2: competitor feed scanner (typed HttpClient)
         services.AddScoped<IChannelMessageIngestor, ChannelMessageIngestor>();
         services.AddScoped<IKpiAggregator, KpiAggregator>();
         services.AddScoped<ILeadDedupService, EfLeadDedupService>();

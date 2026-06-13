@@ -11,6 +11,10 @@ public sealed class Message : Entity<Guid>, ITenantOwned
     public Guid? SenderUserId { get; private set; }
     public string Content { get; private set; } = string.Empty;
     public string ContentType { get; private set; } = "text";
+    // Chat-2: 'text' (DM/normal) | 'comment' (public comment under a post) | 'dm'. ParentPostId
+    // links a comment to its post so the comment auto-reply + DM-invite flow can act on it.
+    public string MessageType { get; private set; } = "text";
+    public string? ParentPostId { get; private set; }
     public string? ExternalMessageId { get; private set; }
     public string? OriginalContent { get; private set; }
     public string? RedactedContent { get; private set; }
@@ -28,7 +32,9 @@ public sealed class Message : Entity<Guid>, ITenantOwned
         DateTimeOffset sentAt,
         string? externalMessageId = null,
         string? originalContent = null,
-        string? redactedContent = null) =>
+        string? redactedContent = null,
+        string messageType = "text",
+        string? parentPostId = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -41,6 +47,8 @@ public sealed class Message : Entity<Guid>, ITenantOwned
             ExternalMessageId = externalMessageId,
             OriginalContent = originalContent,
             RedactedContent = redactedContent,
+            MessageType = messageType,
+            ParentPostId = parentPostId,
             SentAt = sentAt,
         };
 }

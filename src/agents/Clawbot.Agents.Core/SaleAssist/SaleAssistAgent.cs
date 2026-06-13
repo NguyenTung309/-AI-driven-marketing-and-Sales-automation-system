@@ -33,6 +33,13 @@ public sealed record SummaryResult(
     decimal UsdCost,
     long LatencyMs);
 
+public sealed record UpsellResult(
+    string Suggestion,
+    int InputTokens,
+    int OutputTokens,
+    decimal UsdCost,
+    long LatencyMs);
+
 public sealed class SaleAssistAgent(
     IRagRetriever rag,
     IClaudeChatClient claude,
@@ -48,6 +55,12 @@ public sealed class SaleAssistAgent(
     private const string SummarySystem =
         "You are ClawBot Sale Assist. Summarize the conversation in 3 bullet points: customer goal, blockers, next best action. " +
         "Use Vietnamese. Keep each bullet under 20 words.";
+
+    private const string UpsellSystem =
+        "You are ClawBot Sale Assist. This customer is a hot lead near closing. Based ONLY on what they discussed, " +
+        "propose ONE concrete upsell or cross-sell offer (combo, premium package, add-on, longer course) that fits their stated goal. " +
+        "Vietnamese, <=60 words, friendly and specific. If the conversation shows no real closing signal, reply exactly 'NONE'. " +
+        "Return ONLY the suggestion text.";
 
     private readonly IRagRetriever _rag = rag;
     private readonly IClaudeChatClient _claude = claude;
@@ -106,6 +119,28 @@ public sealed class SaleAssistAgent(
 
         sw.Stop();
         return new SummaryResult(reply.Text.Trim(),
+            reply.InputTokens, reply.OutputTokens, reply.UsdCost, sw.ElapsedMilliseconds);
+    }
+
+    // SaleAssist-4: contextual upsell suggestion. Caller gates on lead.Stage=='hot' before invoking;
+    // Claude reads the recent turns + KB hints and proposes a concrete offer (or 'NONE' if no closing signal).
+    public async Task<UpsellResult> SuggestUpsellAsync(ConversationContext ctx, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(ctx);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        var lastCustomerText = ctx.RecentTurns.LastOrDefault(t => t.Direction == "in")?.Content ?? string.Empty;
+        var chunks = await _rag.RetrieveAsync(
+            new RagRequest(ctx.TenantId, KbModuleCode: null, lastCustomerText, TopK: 3), ct).ConfigureAwait(false);
+
+        var system = AppendKb(UpsellSystem, chunks);
+        var transcript = BuildTranscript(ctx.RecentTurns);
+        var reply = await _claude.CompleteAsync(
+            system, history: Array.Empty<ChatTurn>(),
+            userMessage: $"Conversation so far:\n{transcript}\n\nUpsell suggestion:", ct).ConfigureAwait(false);
+
+        sw.Stop();
+        return new UpsellResult(reply.Text.Trim(),
             reply.InputTokens, reply.OutputTokens, reply.UsdCost, sw.ElapsedMilliseconds);
     }
 

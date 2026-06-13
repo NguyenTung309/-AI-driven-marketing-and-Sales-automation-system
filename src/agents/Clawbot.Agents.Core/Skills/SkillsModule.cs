@@ -39,7 +39,8 @@ public static class SkillsModule
         services.AddSingleton<IImagePromptGenerator, ClaudeImagePromptGenerator>();
         services.AddSingleton<IVideoScriptComposer, HvcVideoScriptComposer>();
         services.AddSingleton<IViZhTranslator, ClaudeViZhTranslator>();
-        services.AddSingleton<ICompetitorMonitor, RssCompetitorMonitor>();
+        // ICompetitorMonitor is registered in AddInfrastructure (AddCompetitorMonitor) so the API's
+        // Hangfire CompetitorScanJob can resolve it without pulling in the full skills module.
 
         // Ops / Cross-cutting
         services.AddSingleton<IPdfTableRenderer, QuestPdfTableRenderer>();

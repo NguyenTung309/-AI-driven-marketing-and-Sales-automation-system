@@ -31,6 +31,40 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
             latestCreatedAt is null || latestCreatedAt < DateTimeOffset.UtcNow.AddHours(-36));
     }
 
+    // Report-1: totals for the period vs the prior period (dod shifts back the range length capped
+    // at 1 day, wow shifts back 7 days), with per-metric delta %. Computed on-the-fly from kpi_daily.
+    public async Task<OmniChannelDeltaResponse> GetOmnichannelDeltaAsync(
+        Guid tenantId,
+        DateOnly from,
+        DateOnly to,
+        string compare,
+        CancellationToken ct = default)
+    {
+        var normalized = string.Equals(compare, "wow", StringComparison.OrdinalIgnoreCase) ? "wow" : "dod";
+        var shiftDays = normalized == "wow" ? 7 : Math.Max(1, to.DayNumber - from.DayNumber + 1);
+        var prevFrom = from.AddDays(-shiftDays);
+        var prevTo = to.AddDays(-shiftDays);
+
+        var current = await LoadKpiAsync(tenantId, from, to, platform: null, ct).ConfigureAwait(false);
+        var previous = await LoadKpiAsync(tenantId, prevFrom, prevTo, platform: null, ct).ConfigureAwait(false);
+
+        var metrics = new List<MetricDeltaDto>
+        {
+            BuildDelta("leads", current.Sum(r => r.Leads), previous.Sum(r => r.Leads)),
+            BuildDelta("dms", current.Sum(r => r.Dms), previous.Sum(r => r.Dms)),
+            BuildDelta("replies", current.Sum(r => r.Replies), previous.Sum(r => r.Replies)),
+            BuildDelta("conversions", current.Sum(r => r.Conversions), previous.Sum(r => r.Conversions)),
+            BuildDelta("adSpend", SumNullable(current.Select(r => r.AdSpend)) ?? 0m, SumNullable(previous.Select(r => r.AdSpend)) ?? 0m),
+            BuildDelta("avgResponseTimeSec", AverageNullable(current.Select(r => r.AvgResponseTimeSec)) ?? 0m, AverageNullable(previous.Select(r => r.AvgResponseTimeSec)) ?? 0m),
+        };
+
+        return new OmniChannelDeltaResponse(from, to, normalized, prevFrom, prevTo, metrics);
+    }
+
+    private static MetricDeltaDto BuildDelta(string metric, decimal current, decimal previous) =>
+        new(metric, current, previous,
+            previous == 0m ? null : Math.Round((current - previous) / previous * 100m, 1));
+
     public async Task<FunnelDto> GetFunnelAsync(
         Guid tenantId,
         DateOnly from,

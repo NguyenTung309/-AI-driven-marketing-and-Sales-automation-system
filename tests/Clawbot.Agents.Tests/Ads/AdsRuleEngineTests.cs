@@ -53,7 +53,8 @@ public sealed class AdsRuleEngineTests
     [Fact]
     public void Evaluate_multiple_rules_returns_multiple_decisions()
     {
-        var snapshot = new AdsMetricSnapshot(Cpl: 200, Frequency: 3, Ctr: 0.5m, Spend: 950, DailyBudget: 1000);
+        // Spend kept below 90% so the proactive budget alert doesn't add a 4th decision here.
+        var snapshot = new AdsMetricSnapshot(Cpl: 200, Frequency: 3, Ctr: 0.5m, Spend: 500, DailyBudget: 1000);
         var rules = new[]
         {
             AdsRule.Create(TenantId, "meta", "cpl", "gt", 1.5m, "pause", Now),
@@ -134,7 +135,8 @@ public sealed class AdsRuleEngineTests
     public void Evaluate_during_quiet_hour_returns_dayparting_pause_only()
     {
         var quietTime = new DateTimeOffset(2026, 6, 7, 3, 0, 0, TimeSpan.FromHours(7));
-        var snapshot = new AdsMetricSnapshot(Cpl: 200, Frequency: 3, Ctr: 0.5m, Spend: 950, DailyBudget: 1000);
+        // Spend below 90% so only the dayparting pause is returned (no budget alert).
+        var snapshot = new AdsMetricSnapshot(Cpl: 200, Frequency: 3, Ctr: 0.5m, Spend: 500, DailyBudget: 1000);
         var rules = new[]
         {
             AdsRule.Create(TenantId, "meta", "cpl", "gt", 1.5m, "pause", Now),
@@ -146,5 +148,17 @@ public sealed class AdsRuleEngineTests
         result.Should().ContainSingle();
         result[0].Action.Should().Be("pause");
         result[0].Note.Should().Contain("quiet hour");
+    }
+
+    [Fact]
+    public void Evaluate_budget_at_90pct_returns_budget_alert()
+    {
+        // Ads-1: spend >= 90% of daily budget fires a proactive alert, even during quiet hours.
+        var quietTime = new DateTimeOffset(2026, 6, 7, 3, 0, 0, TimeSpan.FromHours(7));
+        var snapshot = new AdsMetricSnapshot(Cpl: 50, Frequency: 1, Ctr: 2.0m, Spend: 950, DailyBudget: 1000);
+
+        var result = AdsRuleEngine.Evaluate(snapshot, targetCpl: 100m, [], null, quietTime, []);
+
+        result.Should().Contain(d => d.Action == "alert" && d.Metric == "budget");
     }
 }

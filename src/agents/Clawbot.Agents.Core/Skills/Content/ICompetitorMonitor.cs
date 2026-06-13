@@ -3,10 +3,23 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 using AngleSharp;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Clawbot.Agents.Core.Skills.Content;
 
 public sealed record CompetitorPost(string Source, string Url, string Title, string? Snippet, DateTimeOffset PublishedAt);
+
+// Research-2: registers the competitor monitor (with its own HttpClient) outside the full skills
+// module, so the API — which runs the Hangfire CompetitorScanJob but must NOT register all skills —
+// can resolve it via AddInfrastructure.
+public static class CompetitorMonitorModule
+{
+    public static IServiceCollection AddCompetitorMonitor(this IServiceCollection services)
+    {
+        services.AddHttpClient<ICompetitorMonitor, RssCompetitorMonitor>();
+        return services;
+    }
+}
 
 public interface ICompetitorMonitor : ISkill
 {

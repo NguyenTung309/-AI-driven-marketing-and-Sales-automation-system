@@ -6,6 +6,7 @@ using Clawbot.Domain.Analytics;
 using Clawbot.Domain.Channels;
 using Clawbot.Domain.ChatScenarios;
 using Clawbot.Domain.Common;
+using Clawbot.Domain.Competitors;
 using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Content;
 using Clawbot.Domain.Conversations;
@@ -91,6 +92,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
     // Channels
     public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();
+
+    // Competitors (Research-2)
+    public DbSet<CompetitorSource> CompetitorSources => Set<CompetitorSource>();
+    public DbSet<CompetitorPost> CompetitorPosts => Set<CompetitorPost>();
 
     IConversationSet IAppDbContext.Conversations => new EfConversationSet(Conversations);
 

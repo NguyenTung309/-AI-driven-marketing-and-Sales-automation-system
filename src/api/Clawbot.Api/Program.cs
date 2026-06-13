@@ -162,6 +162,7 @@ app.MapAdminUsers();
 app.MapProfile();
 app.MapNotifications();
 app.MapAgents();
+app.MapCompetitors();
 app.MapBoundedContexts();
 app.MapHub<DashboardHub>("/hubs/dashboard");
 app.MapHub<InboxHub>("/hubs/inbox");

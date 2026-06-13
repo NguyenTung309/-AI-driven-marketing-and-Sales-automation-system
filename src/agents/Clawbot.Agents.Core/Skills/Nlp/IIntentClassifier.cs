@@ -12,6 +12,8 @@ internal sealed class KeywordIntentClassifier : IIntentClassifier
 {
     private static readonly (string Label, string[] Keywords)[] Rules =
     {
+        // Chat-2: strong purchase/closing signals rank first so they win over a mere price question.
+        ("purchase_intent", new[] { "mua", "chốt", "thanh toán", "chuyển khoản", "đăng ký luôn", "lấy gói", "order", "buy", "purchase", "购买", "支付", "下单" }),
         ("ask_price",    new[] { "giá", "học phí", "bao nhiêu", "phí", "price", "cost", "学费" }),
         ("ask_schedule", new[] { "lịch", "giờ", "khi nào", "schedule", "时间" }),
         ("book_trial",   new[] { "đăng ký", "thử", "trial", "register", "book", "报名" }),
