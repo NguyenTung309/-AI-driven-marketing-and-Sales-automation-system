@@ -111,6 +111,13 @@ Verified against a real Pancake token:
   - **`GET /pages/{page_id}/conversations/{conversation_id}/messages`** requires `customer_id` (returns 400 "Thiếu mã khách hàng" without it) → message/send calls need `customer_id` (= the psid).
   - **Still needed to SHIP the wiring (not feasibility):** an actual comment to observe a populated `post_id` + the reply-comment / private-reply (DM) action shape — OR a real Pancake **webhook payload** sample (the webhook shape differs from this polling API; current `ParseAsync` parses a speculative `{events:[]}` shape that does not match real Pancake webhooks and must be rewritten against a real sample). Do NOT rewrite the parser speculatively.
 
+## Pancake capability split (2026-06-13, confirmed on live API)
+- **Reply comment + private-reply (DM)** → **via Pancake** (`messages` on a `type=COMMENT` conversation). Pancake has no endpoint literally named "reply comment", but functionally it IS the messages POST on a COMMENT conversation. Chat-2 stays on Pancake.
+- **Publish/compose FB post (Content-3)** → **NOT in Pancake public API** (verified — Pancake exposes read posts `GET /pages/{id}/posts` but no create-post API). → route posting through **Meta Graph API** (`POST /{page-id}/feed`) directly, reusing the existing `HttpSocialPublisher` path. Revises the earlier "everything via Pancake" assumption.
+
+## External-service config policy (rà soát 2026-06-13)
+Every external-service integration MUST bind config via a strongly-typed Options module (no raw `cfg["..."]` reads). Compliant: Anthropic, Ads:Meta, Ads:TikTok, Content:Publisher, Content:Llm, Content:Trends:*, Embedding, Skills:ContactEnrich, Pancake (DB+section). **Gaps fixed this pass:** Qdrant, SMTP (Email), MinIO (Docs:Storage:Minio) — were reading raw `cfg[...]` → now `QdrantOptions`/`SmtpOptions`/`MinioOptions`. New **Meta Graph posting** must ship with `MetaGraphOptions`.
+
 ## API Design
 
 | Method | Route | Auth | Purpose |

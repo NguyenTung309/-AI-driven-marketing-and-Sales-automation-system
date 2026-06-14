@@ -292,16 +292,16 @@
 - [x] **FE base** — design tokens (`@theme`) + `AppShell` + `Sidebar` (260px đỏ) + `Topbar` + `AuthCardShell`
 - [x] **UI primitives** — Button · Card · StatusPill · MetricCard · ToggleSwitch · Input · DataTable · WorkflowNode · Modal · Alert
 - [x] Login + 2FA flow — split-screen + states (error/locked/loading); Quên mật khẩu 4 bước; Hồ sơ 3 tab + dialog đổi MK + 2FA toggle. Login wired `POST /auth/login`; forgot/profile data-wiring pending
-- [~] Dashboard tổng quan — skeleton + mock KPI (wire API pending)
+- [x] Dashboard tổng quan — KPI/charts/realtime wired to analytics APIs
 - [x] Unified Inbox (priority sort + filter + SignalR realtime)
 - [x] Conversation view + context panel
-- [ ] Sale Assist (draft + quick reply + alert toast)
+- [x] Sale Assist (draft + quick reply + alert toast)
 - [x] KB editor + version history + accuracy chart
 - [x] Agent dashboard + start/stop + logs
 - [x] Lead list + Kanban pipeline + detail
-- [ ] Content brief editor + queue + calendar
-- [ ] Document library + preview + send
-- [ ] Analytics dashboard (KPI 5 kênh)
+- [x] Content brief editor + queue + calendar — `/content` wired to `/api/content` briefs/trends/queue/items/calendar
+- [x] Document library + preview + send — `/documents` wired to `/api/docs` templates/generated/generate (`sentVia=email`)
+- [x] Analytics dashboard (KPI 5 kênh) — `/analytics` wired to `/api/analytics` omnichannel/delta/funnel/agent-performance/agent-cost/forecast/anomalies/export
 - [ ] Admin (users/roles/api-keys/integrations)
 - [x] Notification center (SignalR realtime)
 
@@ -455,6 +455,21 @@
 - [ ] Ads-1 hourly cron + proactive budget-ratio compute (hiện 4h + reactive). → M19.
 
 **Partial by-design / blocked (không phải gap):** Chat-1 Pancake unified broker (M06 design) · Content-3 + Ads-2 native API/connector cần creds Meta/TikTok (ops) · SignalR-only thay Telegram (quyết định 2026-06-13) · forecast seasonality + KB Chinese content (blocked).
+
+### Pancake capability (xác minh API thật 2026-06-13)
+- **Reply comment + DM (Chat-2):** ✅ qua Pancake — `messages` trên conversation `type=COMMENT` (filter `?type=COMMENT` hợp lệ; `post_id` có trên conversation). Cần 1 comment thật + 1 webhook payload thật để wire (ParseAsync hiện parse shape giả định → phải viết lại theo mẫu thật).
+- **Đăng bài FB (Content-3):** ❌ Pancake public API **không có** create-post → đăng bài đi **Meta Graph API** (`POST /{page-id}/feed`), KHÔNG qua Pancake. Đã sửa base URL Pancake sai → `pancake.vn/api/v1` (commit `3811cc5`).
+
+### External-service config audit (2026-06-13) — mọi service ngoài phải có Options module
+| Service | Section | Trạng thái |
+|---|---|---|
+| Anthropic · Ads:Meta · Ads:TikTok · Content:Publisher · Content:Llm · Content:Trends:* · Embedding · Skills:ContactEnrich | (Options) | ✅ đã có |
+| Pancake | `Channels:Pancake` + DB per-tenant (encrypted) | ✅ có cả admin endpoint |
+| **Qdrant** | `Vector:Qdrant` | ✅ **fix** — `QdrantOptions` (Host/Port/UseTls/ApiKey), bỏ raw `cfg[]` |
+| **SMTP** | `Email:Smtp` | ✅ **fix** — `SmtpOptions`, `SmtpEmailSender` dùng `IOptions` |
+| **MinIO** | `Docs:Storage:Minio` | ✅ **fix** — `MinioOptions`, bỏ raw `cfg[]` |
+| Meta Graph (đăng bài — NEW) | `Ads:Meta`/`Graph` | ⏳ cần `MetaGraphOptions` khi build Content-3 posting |
+| Redis · RabbitMq · SqlServer | ConnectionStrings | ✅ connstr (infra) |
 
 ---
 
