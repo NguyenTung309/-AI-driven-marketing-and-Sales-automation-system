@@ -72,17 +72,17 @@
 - [x] **Dialog đổi mật khẩu** (Modal + thanh đo độ mạnh + cảnh báo)
 
 ### ⏳ Pending (M16 — 12 surface)
-- [~] **Dashboard tổng quan** — KPI wired (`/api/analytics/omnichannel`); cần thêm chart + realtime SignalR
+- [x] **Dashboard tổng quan** — KPI + chart + forecast/funnel/agent telemetry + realtime SignalR
 - [x] **Unified Inbox** (priority sort + filter + SignalR realtime)
 - [x] **Conversation view** + context panel
-- [ ] **Sale Assist** (draft + quick reply + alert toast)
+- [x] **Sale Assist** (draft + quick reply + alert toast)
 - [x] **KB editor** + version history + accuracy chart
 - [x] **Agent dashboard** + start/stop + logs (dùng `WorkflowNode`)
 - [x] **Lead list** + Kanban pipeline + detail
-- [ ] **Content brief editor** + queue + calendar
-- [ ] **Document library** + preview + send
-- [ ] **Analytics dashboard** (KPI 5 kênh)
-- [ ] **Admin** (users / roles / api-keys / integrations)
+- [x] **Content brief editor** + queue + calendar — brief CRUD + generate/approve/reject/schedule/repurpose + trend scan/calendar wired to `/api/content`
+- [x] **Document library** + preview + send — template CRUD + generated list/preview + generate/send email via `/api/docs`
+- [x] **Analytics dashboard** (KPI 5 kênh) — `/analytics` wired to `/api/analytics` omnichannel/delta/funnel/agent-performance/agent-cost/forecast/anomalies/export
+- [x] **Admin** (users / roles / api-keys / integrations) — `/system` wired to `/api/admin/users`, `/api/rbac`, `/api/api-keys`, `/api/channels/pancake`, `/api/admin/audit-logs`
 - [~] **Notification center** + Telegram link — center + SignalR đã xong, Telegram adapter còn thiếu
 
 ---

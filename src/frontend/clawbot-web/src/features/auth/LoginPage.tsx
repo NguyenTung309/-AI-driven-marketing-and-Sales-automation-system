@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { isAxiosError } from "axios";
-import { useAuth } from "@/shared/auth/AuthContext";
+import { useAuth } from "@/shared/auth/authState";
 import { Alert } from "@/shared/ui";
 import { login, loginTwoFactor } from "@/shared/api/auth";
 
