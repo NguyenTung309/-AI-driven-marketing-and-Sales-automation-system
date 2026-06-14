@@ -105,7 +105,11 @@ Verified against a real Pancake token:
 - **Base URL:** `https://pancake.vn/api/v1` · auth `?access_token=` (code default was a wrong placeholder `pages.fm/api/public_api/v1` → **fixed** commit `3811cc5`).
 - **Endpoints confirmed (read-only):** `GET /me`, `GET /pages`, `GET /pages/{page_id}/conversations`.
 - **Comment vs DM distinction EXISTS:** each conversation carries `"type"` (`INBOX` observed; `COMMENT` per Pancake model for Facebook pages). Conversation id format `pzl_u_<page>_<customer>`.
-- **Verdict:** Chat-2 comment-reply + DM flow is **feasible**. Remaining to wire/test: a **Facebook page** must be connected (the test account only has a *personal Zalo* page, which has no post comments → no `COMMENT`/`post_id` data to verify the reply-comment + private-reply endpoints). Need an FB page OR a sample comment webhook payload to map `post_id`/private-reply action.
+- **Verdict:** Chat-2 comment-reply + DM flow is **CONFIRMED feasible** (verified on a real Facebook page `747794245092906`):
+  - Conversation objects expose **`post`** + **`post_id`** (null = inbox/DM, populated = comment) and id format `<page_id>_<customer_psid>`.
+  - **`GET /pages/{page_id}/conversations?type=COMMENT`** is a valid filter (returned `{conversations:[],success:true}` — empty only because the fresh test pages have no comments yet).
+  - **`GET /pages/{page_id}/conversations/{conversation_id}/messages`** requires `customer_id` (returns 400 "Thiếu mã khách hàng" without it) → message/send calls need `customer_id` (= the psid).
+  - **Still needed to SHIP the wiring (not feasibility):** an actual comment to observe a populated `post_id` + the reply-comment / private-reply (DM) action shape — OR a real Pancake **webhook payload** sample (the webhook shape differs from this polling API; current `ParseAsync` parses a speculative `{events:[]}` shape that does not match real Pancake webhooks and must be rewritten against a real sample). Do NOT rewrite the parser speculatively.
 
 ## API Design
 
