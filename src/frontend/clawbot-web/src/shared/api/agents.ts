@@ -1,0 +1,80 @@
+import { apiClient } from "./client";
+
+export type AgentStatus = "running" | "stopped" | "error" | string;
+
+export interface AgentListItem {
+  readonly code: string;
+  readonly displayName: string;
+  readonly agentType: string;
+  readonly model: string;
+  readonly status: AgentStatus;
+  readonly updatedAt: string;
+  readonly lastRunAt: string | null;
+}
+
+export interface AgentListResponse {
+  readonly items: readonly AgentListItem[];
+}
+
+export interface AgentStatusResponse {
+  readonly code: string;
+  readonly status: AgentStatus;
+}
+
+export interface AgentTraceItem {
+  readonly id: string;
+  readonly sessionId: string;
+  readonly agentName: string;
+  readonly phase: string;
+  readonly message: string;
+  readonly occurredAt: string;
+}
+
+export interface AgentTraceResponse {
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly items: readonly AgentTraceItem[];
+}
+
+export interface AgentCostItem {
+  readonly agentCode: string;
+  readonly calls: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly usd: number;
+  readonly avgUsdPerCall: number;
+}
+
+export interface AgentCostResponse {
+  readonly from: string;
+  readonly to: string;
+  readonly items: readonly AgentCostItem[];
+}
+
+export async function listAgents(): Promise<AgentListResponse> {
+  const res = await apiClient.get<AgentListResponse>("/api/agents");
+  return res.data;
+}
+
+export async function enableAgent(code: string): Promise<AgentStatusResponse> {
+  const res = await apiClient.post<AgentStatusResponse>(`/api/agents/${encodeURIComponent(code)}/enable`);
+  return res.data;
+}
+
+export async function disableAgent(code: string): Promise<AgentStatusResponse> {
+  const res = await apiClient.post<AgentStatusResponse>(`/api/agents/${encodeURIComponent(code)}/disable`);
+  return res.data;
+}
+
+export async function getAgentTraces(code: string, page = 1, pageSize = 50): Promise<AgentTraceResponse> {
+  const res = await apiClient.get<AgentTraceResponse>(`/api/agents/${encodeURIComponent(code)}/traces`, {
+    params: { page, pageSize },
+  });
+  return res.data;
+}
+
+export async function getAgentCost(): Promise<AgentCostResponse> {
+  const res = await apiClient.get<AgentCostResponse>("/api/analytics/agent-cost");
+  return res.data;
+}

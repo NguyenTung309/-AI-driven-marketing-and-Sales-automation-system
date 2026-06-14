@@ -18,7 +18,7 @@ function itemClass(isActive: boolean): string {
 export function Sidebar({ className = "" }: SidebarProps) {
   return (
     <aside
-      className={`bg-primary text-on-primary fixed left-0 top-0 h-full w-[260px] flex flex-col z-20 shadow-xl ${className}`}
+      className={`bg-primary text-on-primary fixed left-0 top-0 hidden h-full w-[260px] flex-col md:flex z-20 shadow-xl ${className}`}
     >
       <div className="px-gutter py-6 flex flex-col items-start gap-2">
         <h1 className="text-headline-md font-bold text-white">Học Bá Education</h1>
