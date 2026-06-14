@@ -100,6 +100,13 @@ CompetitorPost : Entity<Guid>, ITenantOwned
 - **GeneratedDocument** — add `ExpiresAt`; `Create(...)` sets `expiresAt = createdAt + 7d`; download path 410 when expired.
 - **DripSequence** — seed one default per tenant `TriggerEvent='warm_lead'`, 4 steps / 7 days (admin editable).
 
+## Chat-2 Pancake spike — RESULT (2026-06-13, live probe)
+Verified against a real Pancake token:
+- **Base URL:** `https://pancake.vn/api/v1` · auth `?access_token=` (code default was a wrong placeholder `pages.fm/api/public_api/v1` → **fixed** commit `3811cc5`).
+- **Endpoints confirmed (read-only):** `GET /me`, `GET /pages`, `GET /pages/{page_id}/conversations`.
+- **Comment vs DM distinction EXISTS:** each conversation carries `"type"` (`INBOX` observed; `COMMENT` per Pancake model for Facebook pages). Conversation id format `pzl_u_<page>_<customer>`.
+- **Verdict:** Chat-2 comment-reply + DM flow is **feasible**. Remaining to wire/test: a **Facebook page** must be connected (the test account only has a *personal Zalo* page, which has no post comments → no `COMMENT`/`post_id` data to verify the reply-comment + private-reply endpoints). Need an FB page OR a sample comment webhook payload to map `post_id`/private-reply action.
+
 ## API Design
 
 | Method | Route | Auth | Purpose |
