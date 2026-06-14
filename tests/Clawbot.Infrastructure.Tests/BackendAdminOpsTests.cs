@@ -85,8 +85,8 @@ public sealed class BackendAdminOpsTests
     [Fact]
     public async Task SmtpEmailSender_noops_when_unconfigured()
     {
-        var config = new ConfigurationBuilder().Build(); // no Email:Smtp:Host
-        var sender = new SmtpEmailSender(config, NullLogger<SmtpEmailSender>.Instance);
+        var options = Microsoft.Extensions.Options.Options.Create(new SmtpOptions()); // Host null → no-op
+        var sender = new SmtpEmailSender(options, NullLogger<SmtpEmailSender>.Instance);
 
         var act = async () => await sender.SendAsync("user@example.com", "subject", "body");
         await act.Should().NotThrowAsync();

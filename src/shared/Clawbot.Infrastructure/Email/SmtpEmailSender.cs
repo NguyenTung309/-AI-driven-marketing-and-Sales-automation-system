@@ -1,35 +1,32 @@
 using System.Net;
 using System.Net.Mail;
 using Clawbot.Application.Abstractions;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Clawbot.Infrastructure.Email;
 
 /// <summary>
 /// SMTP email via BCL <see cref="SmtpClient"/> (no extra NuGet → clears the audit gate).
-/// Config-gated: if <c>Email:Smtp:Host</c> is unset it logs + no-ops (dev stays green).
+/// Config-gated via <see cref="SmtpOptions"/>: if Host is unset it logs + no-ops (dev stays green).
 /// </summary>
-public sealed partial class SmtpEmailSender(IConfiguration config, ILogger<SmtpEmailSender> logger) : IEmailSender
+public sealed partial class SmtpEmailSender(IOptions<SmtpOptions> options, ILogger<SmtpEmailSender> logger) : IEmailSender
 {
+    private readonly SmtpOptions _opts = options.Value;
+
     public async Task SendAsync(string recipient, string subject, string body, CancellationToken ct = default)
     {
-        var host = config["Email:Smtp:Host"];
-        if (string.IsNullOrWhiteSpace(host))
+        if (string.IsNullOrWhiteSpace(_opts.Host))
         {
             LogSkipped(logger, recipient, subject);
             return;
         }
 
-        var port = int.TryParse(config["Email:Smtp:Port"], out var p) ? p : 587;
-        var from = config["Email:Smtp:From"] ?? "no-reply@hoc-ba.edu.vn";
-
-        using var message = new MailMessage(from, recipient, subject, body);
-        using var client = new SmtpClient(host, port);
-        var user = config["Email:Smtp:User"];
-        if (!string.IsNullOrWhiteSpace(user))
-            client.Credentials = new NetworkCredential(user, config["Email:Smtp:Password"]);
-        client.EnableSsl = !string.Equals(config["Email:Smtp:UseSsl"], "false", StringComparison.OrdinalIgnoreCase);
+        using var message = new MailMessage(_opts.From, recipient, subject, body);
+        using var client = new SmtpClient(_opts.Host, _opts.Port);
+        if (!string.IsNullOrWhiteSpace(_opts.User))
+            client.Credentials = new NetworkCredential(_opts.User, _opts.Password);
+        client.EnableSsl = _opts.UseSsl;
 
         await client.SendMailAsync(message, ct).ConfigureAwait(false);
         LogSent(logger, recipient, subject);
