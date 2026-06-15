@@ -80,6 +80,10 @@ services:
       - Vector__Qdrant__Host=qdrant
       # JWT signing key (HS256 needs >=32 bytes). Dev default here; override in staging/prod.
       - Jwt__SigningKey=${JWT_SIGNING_KEY:-dev-only-jwt-signing-key-change-before-staging-0123456789}
+      # Pancake tokens - doc tu file .env (cung thu muc)
+      - PANCAKE_ACCESS_TOKEN=${PANCAKE_ACCESS_TOKEN:-}
+      - PANCAKE_PAGE_ACCESS_TOKEN=${PANCAKE_PAGE_ACCESS_TOKEN:-}
+      - PANCAKE_PAGE_ID=${PANCAKE_PAGE_ID:-}
     depends_on:
       sqlserver:
         condition: service_healthy
@@ -107,6 +111,10 @@ services:
       - Gateway__Pancake__WebhookSecret=${PANCAKE_WEBHOOK_SECRET:-dev-secret-replace-before-staging}
       # Must match clawbot-api's Jwt__SigningKey so the gateway can verify forwarded tokens.
       - Jwt__SigningKey=${JWT_SIGNING_KEY:-dev-only-jwt-signing-key-change-before-staging-0123456789}
+      # Pancake tokens - doc tu file .env (cung thu muc)
+      - PANCAKE_ACCESS_TOKEN=${PANCAKE_ACCESS_TOKEN:-}
+      - PANCAKE_PAGE_ACCESS_TOKEN=${PANCAKE_PAGE_ACCESS_TOKEN:-}
+      - PANCAKE_PAGE_ID=${PANCAKE_PAGE_ID:-}
     depends_on:
       - clawbot-api
     restart: unless-stopped
@@ -120,3 +128,5 @@ volumes:
   sqlserver_data:
   qdrant_data:
   minio_data:
+
+

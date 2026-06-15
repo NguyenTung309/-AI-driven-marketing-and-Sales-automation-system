@@ -1,4 +1,4 @@
-using Clawbot.Agents.Core.Lead;
+﻿using Clawbot.Agents.Core.Lead;
 using Clawbot.Agents.Core.Skills;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Application.Abstractions;
@@ -87,6 +87,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IClock, SystemClock>();
         services.AddScoped<ITenantAccessor, HttpTenantAccessor>();
+        services.AddScoped<ITenantResolver, DemoTenantResolver>();
         services.Configure<EncryptionOptions>(cfg.GetSection("Encryption"));
         services.AddSingleton<IEncryptor, AesEncryptor>();
 
@@ -108,3 +109,4 @@ public static class DependencyInjection
         return services;
     }
 }
+

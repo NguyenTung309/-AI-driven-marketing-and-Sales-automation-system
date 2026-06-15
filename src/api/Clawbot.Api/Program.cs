@@ -3,13 +3,17 @@ using System.Text;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Endpoints;
 using Clawbot.Api.Hubs;
+using Microsoft.Extensions.FileProviders;
 using Clawbot.Api.Middleware;
+using Clawbot.Api.Services;
+using Clawbot.Api.Background;
 using Clawbot.Application;
 using Clawbot.Infrastructure;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.SharedKernel.Inbox;
 using Clawbot.SharedKernel.Security;
+using Clawbot.SharedKernel.Demo;
 using Hangfire;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -22,7 +26,7 @@ builder.Host.UseSerilog((ctx, lc) => lc.ReadFrom.Configuration(ctx.Configuration
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddClawbotJobs(builder.Configuration);
-// jwt options â€” SigningKey/Issuer/Audience come from config (secret); the timing is forced
+// jwt options — SigningKey/Issuer/Audience come from config (secret); the timing is forced
 // from AuthPolicy via PostConfigure so appsettings cannot drift it (SPEC-11).
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 builder.Services.PostConfigure<JwtOptions>(o =>
@@ -79,11 +83,20 @@ builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Docs.DocsAgent.DocsAgent
 {
     o.Address = new Uri(agentServiceUrl);
 });
+
+// SPEC-12: Demo mode services
+var demoOpts = builder.Configuration.GetSection(DemoOptions.Section).Get<DemoOptions>() ?? new DemoOptions();
+if (demoOpts.Mode)
+{
+    builder.Services.Configure<DemoOptions>(builder.Configuration.GetSection(DemoOptions.Section));
+    builder.Services.AddHttpClient();
+    builder.Services.AddSingleton<DemoRuntimeConfigStore>();
+    builder.Services.AddSingleton<DemoTraceService>();
+    builder.Services.AddHostedService<PancakePollingService>();
+    }
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
-    // Bounded-context stubs (BoundedContextEndpoints) overlap real handlers on the same
-    // path (e.g. /api/kb/accuracy vs the stub's /api/kb/accuracy/), which breaks OpenAPI
-    // generation. Pick the first action so Swagger renders; both routes still work at runtime.
     c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First()));
 builder.Services.AddCors(c =>
     c.AddDefaultPolicy(p =>
@@ -110,13 +123,27 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+
 app.UseSerilogRequestLogging();
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 
+// SPEC-12: Demo mode middleware must run early (before route mapping)
+if (demoOpts.Mode)
+{
+    app.UseMiddleware<DemoModeMiddleware>();
+}
+
 app.MapHealth();
+
+// SPEC-12: Register demo endpoints (only in demo mode)
+if (demoOpts.Mode)
+{
+    app.MapDemo();
+}
+
 app.MapAuth();
 app.MapRoles();
 app.MapApiKeys();
@@ -143,8 +170,10 @@ await RbacSeeder.SeedAsync(app.Services).ConfigureAwait(false);
 if (app.Environment.IsDevelopment())
 {
     await DevDataSeeder.SeedAdminAsync(app.Services).ConfigureAwait(false);
+    await DevDataSeeder.SeedAutoReplyTemplateAsync(app.Services).ConfigureAwait(false);
 }
 
 app.Run();
 
 public partial class Program { }
+

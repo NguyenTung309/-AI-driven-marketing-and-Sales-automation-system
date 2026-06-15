@@ -13,7 +13,7 @@ Traces to: FR-10, SPEC-10 (Admin & Security), ADR-007, UC-J02
 
 ## 1. Business Context
 
-ClawBot là app **nội bộ** (5 nhân sự, 1 tenant). Auth hiện tại có 2 vấn đề:
+ClawBot là app **nội bộ** (9+ nhân sự, 1 tenant). Các nhóm người dùng: Admin, Sales Lead, Sale, MKT Lead (Marketer), QA & Prompt Engineer, PM / Data Analyst. Auth hiện tại có 2 vấn đề:
 
 1. **`JwtTokenIssuer.cs` nhồi permission vào JWT** (`perm` claims) + nhồi `role[]` mảng.
    `IssueAsync` query `role_permissions` rồi bơm vào token → permission "đóng băng", đổi quyền
@@ -24,7 +24,7 @@ ClawBot là app **nội bộ** (5 nhân sự, 1 tenant). Auth hiện tại có 2
 Ngoài ra phát hiện khi audit code: hệ thống đang có **2 kho role tách biệt** (xem D1) gây mơ
 hồ khi xác định "role_id" — spec này gộp về 1 kho.
 
-**Hướng refactor:** phân quyền cứng (5 role), JWT chỉ mang `userId` + `roleId`, backend tự
+**Hướng refactor:** phân quyền cứng (6 role), JWT chỉ mang `userId` + `roleId`, backend tự
 tra & enforce permission (Gateway giữ sạch theo ADR-007), thêm refresh token httpOnly + rotate.
 
 ## 2. User Stories
@@ -40,7 +40,7 @@ tra & enforce permission (Gateway giữ sạch theo ADR-007), thêm refresh toke
 
 | # | Quyết định | Lý do |
 |---|---|---|
-| D1 | **Gộp về 1 kho role = Identity `AppRole`.** Seed 5 role với **Id CỐ ĐỊNH** (hằng số GUID, không `NewGuid()`). Bảng `role_permissions.role_id` trỏ vào `AppRole.Id` cố định đó. Domain `roles` table KHÔNG dùng cho auth. | Hiện có 2 kho role (Identity `AppRole` Id random + domain `roles` Id random), nối nhau bằng Name → `role_id` mơ hồ. Id cố định khử mơ hồ, không cần resolve name→id lúc login. |
+| D1 | **Gộp về 1 kho role = Identity `AppRole`.** Seed 6 role với **Id CỐ ĐỊNH** (hằng số GUID, không `NewGuid()`). Bảng `role_permissions.role_id` trỏ vào `AppRole.Id` cố định đó. Domain `roles` table KHÔNG dùng cho auth. | Hiện có 2 kho role (Identity `AppRole` Id random + domain `roles` Id random), nối nhau bằng Name → `role_id` mơ hồ. Id cố định khử mơ hồ, không cần resolve name→id lúc login. |
 | D2 | **GIỮ schema `user_roles` many-to-many.** Enforce "1 user = 1 role" ở **application layer** (gán role: xóa dòng cũ rồi insert mới). | Đổi schema rủi ro cao, lợi ích thấp. Many-to-many "dư khả năng" nhưng không sai, giữ cửa mở tương lai. |
 | D3 | JWT mang `sub` (userId) + `role_id` (AppRole.Id) đơn trị. **Bỏ** claim `perm[]` và `role[]`. | Permission tra runtime ở backend → đổi quyền role có hiệu lực ngay. |
 | D4 | **Phương án A — Gateway chỉ verify JWT + forward. Backend tự tra & enforce permission.** Gateway KHÔNG đụng Redis/DB, KHÔNG inject `X-Permissions`. | ADR-007: "Gateway zero project refs, infrastructure only". Backend đã có sẵn EF + Redis. Tránh thêm dep + RFC cho Gateway. Triệt tiêu luôn vector spoof header. |
@@ -56,12 +56,12 @@ tra & enforce permission (Gateway giữ sạch theo ADR-007), thêm refresh toke
 ## 4. Acceptance Criteria (EARS)
 
 **Role model (D1, D2)**
-- THE SYSTEM SHALL seed đúng 5 Identity role `Admin/Sale/Marketer/QA/Viewer` với Id cố định (hằng số).
+- THE SYSTEM SHALL seed đúng 6 Identity role `Admin/SalesLead/Sale/Marketer/QA/Viewer` với Id cố định (hằng số).
 - THE SYSTEM SHALL trỏ `role_permissions.role_id` vào Id cố định của Identity role tương ứng.
 - THE SYSTEM SHALL giữ bảng `user_roles` many-to-many (không đổi schema).
 - WHEN gán role cho 1 user THE SYSTEM SHALL xóa toàn bộ dòng `user_roles` cũ của user trước khi
   insert dòng mới (đảm bảo 1 user đúng 1 role).
-- IF một user có 0 role hoặc role ngoài 5 role cứng THEN THE SYSTEM SHALL default-deny (coi như
+- IF một user có 0 role hoặc role ngoài 6 role cứng THEN THE SYSTEM SHALL default-deny (coi như
   không có quyền nào) và trả 403 ở handler có yêu cầu permission.
 
 **Login**
@@ -238,42 +238,66 @@ CREATE INDEX ix_refresh_tokens_family ON refresh_tokens (family_id);
 ### Identity role Id cố định (seed hằng số)
 
 ```
-Admin     = 11111111-1111-1111-1111-111111111111
-Sale      = 22222222-2222-2222-2222-222222222222
-Marketer  = 33333333-3333-3333-3333-333333333333
-QA        = 44444444-4444-4444-4444-444444444444
-Viewer    = 55555555-5555-5555-5555-555555555555
+Admin      = 11111111-1111-1111-1111-111111111111
+SalesLead  = 22222222-2222-2222-2222-222222222222
+Sale       = 33333333-3333-3333-3333-333333333333
+Marketer   = 44444444-4444-4444-4444-444444444444
+QA         = 55555555-5555-5555-5555-555555555555
+Viewer     = 66666666-6666-6666-6666-666666666666
 (giá trị minh hoạ — chốt GUID thực khi implement, miễn là HẰNG SỐ)
 ```
 
 ### Permission Matrix (seed cứng)
 
-| Permission | Admin | Sale | Marketer | QA | Viewer |
+| Permission | Admin | SalesLead | Sale | Marketer | QA | Viewer |
 |---|:--:|:--:|:--:|:--:|:--:|
-| conversations:read  | ✅ | ✅ | ✅ | ✅ | ✅ |
-| conversations:write | ✅ | ✅ | ❌ | ❌ | ❌ |
-| leads:read          | ✅ | ✅ | ✅ | ✅ | ✅ |
-| leads:write         | ✅ | ✅ | ❌ | ❌ | ❌ |
-| content:read        | ✅ | ✅ | ✅ | ✅ | ✅ |
-| content:write       | ✅ | ❌ | ✅ | ❌ | ❌ |
-| ads:read            | ✅ | ❌ | ✅ | ✅ | ✅ |
-| ads:write           | ✅ | ❌ | ✅ | ❌ | ❌ |
-| analytics:read      | ✅ | ✅ | ✅ | ✅ | ✅ |
-| kb:read             | ✅ | ✅ | ✅ | ✅ | ✅ |
-| kb:write            | ✅ | ❌ | ✅ | ✅ | ❌ |
-| docs:read           | ✅ | ✅ | ✅ | ✅ | ✅ |
-| docs:write          | ✅ | ✅ | ✅ | ❌ | ❌ |
-| sale-assist:use     | ✅ | ✅ | ❌ | ❌ | ❌ |
-| chat-scenarios:read | ✅ | ✅ | ✅ | ✅ | ✅ |
-| chat-scenarios:write| ✅ | ❌ | ✅ | ✅ | ❌ |
-| channels:manage     | ✅ | ❌ | ❌ | ❌ | ❌ |
-| api-keys:manage     | ✅ | ❌ | ❌ | ❌ | ❌ |
-| rbac:manage         | ✅ | ❌ | ❌ | ❌ | ❌ |
-| users:manage        | ✅ | ❌ | ❌ | ❌ | ❌ |
-| system:config       | ✅ | ❌ | ❌ | ❌ | ❌ |
+| conversations:read  | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| conversations:write | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| leads:read          | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| leads:write         | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| content:read        | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| content:write       | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| ads:read            | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| ads:write           | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| analytics:read      | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| kb:read             | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| kb:write            | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ |
+| docs:read           | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| docs:write          | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| sale-assist:use     | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| chat-scenarios:read | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| chat-scenarios:write| ✅ | ✅ | ❌ | ✅ | ✅ | ❌ |
+| channels:manage     | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| api-keys:manage     | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| rbac:manage         | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| users:manage        | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| system:config       | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 > Ma trận trên là **đề xuất** — Thắng confirm/chỉnh. Permission nào chưa cần enforce phase này thì
 > để endpoint ở mức authenticated (D8) và bỏ code khỏi map §6a.
+
+**SalesLead role** — dành cho Trưởng phòng Kinh doanh (P3, 1 người). Kế thừa toàn bộ quyền của Sale
+(conversations, leads, docs, sale-assist) và thêm `kb:write` (xây dựng Knowledge Base), `chat-scenarios:write`
+(viết 50 kịch bản bán hàng). Không có quyền quản trị hệ thống (users, channels, api-keys, rbac).
+
+Lý do tách riêng khỏi Sale:
+- Sale không được phép sửa KB (rủi ro sai thông tin ảnh hưởng toàn bộ agent)
+- Sale không được phép viết kịch bản (chỉ Sales Lead + Admin + Marketer + QA mới có quyền này)
+- Sales Lead cần quyền cao hơn Sale để giám sát chất lượng và đào tạo
+
+**Viewer role** dành cho PM / Data Analyst (P5) và các vai trò chỉ xem khác: có toàn bộ quyền
+read (conversations, leads, content, ads, analytics, kb, docs, chat-scenarios), không có quyền write nào.
+
+**Ánh xạ Persona → Role:**
+| Persona | Role | Số lượng |
+|---|---|---|
+| U1 - Sale | Sale | 4 |
+| U2 - MKT Lead (P2) | Marketer | 1 |
+| U3 - QA & Prompt Engineer (P4) | QA | 1 |
+| U4 - Sales Lead (P3) | SalesLead | 1 |
+| U5 - PM / Data Analyst (P5) | Viewer | 1 |
+| U6 - Admin | Admin | 1+ |
+
 
 ### 6a. Endpoint → Permission map (enforce theo D8)
 

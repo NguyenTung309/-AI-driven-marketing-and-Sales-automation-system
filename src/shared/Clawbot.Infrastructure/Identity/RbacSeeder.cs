@@ -22,39 +22,41 @@ public static partial class RbacSeeder
     public const string Marketer = "Marketer";
     public const string QA = "QA";
     public const string Viewer = "Viewer";
+    public const string SalesLead = "SalesLead";
 
     public static readonly IReadOnlyDictionary<string, Guid> RoleIds = new Dictionary<string, Guid>
     {
         [Admin] = Guid.Parse("11111111-1111-1111-1111-111111111111"),
-        [Sale] = Guid.Parse("22222222-2222-2222-2222-222222222222"),
-        [Marketer] = Guid.Parse("33333333-3333-3333-3333-333333333333"),
-        [QA] = Guid.Parse("44444444-4444-4444-4444-444444444444"),
-        [Viewer] = Guid.Parse("55555555-5555-5555-5555-555555555555"),
+        [SalesLead] = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+        [Sale] = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+        [Marketer] = Guid.Parse("44444444-4444-4444-4444-444444444444"),
+        [QA] = Guid.Parse("55555555-5555-5555-5555-555555555555"),
+        [Viewer] = Guid.Parse("66666666-6666-6666-6666-666666666666"),
     };
 
     public static readonly IReadOnlyList<string> DefaultRoles = RoleIds.Keys.ToArray();
 
-    private static readonly string[] All = [Admin, Sale, Marketer, QA, Viewer];
+    private static readonly string[] All = [Admin, SalesLead, Sale, Marketer, QA, Viewer];
 
     // SPEC-11 §6 permission matrix.
     private static readonly (string Code, string[] Roles)[] Matrix =
     [
         ("conversations:read", All),
-        ("conversations:write", [Admin, Sale]),
+        ("conversations:write", [Admin, SalesLead, Sale]),
         ("leads:read", All),
-        ("leads:write", [Admin, Sale]),
+        ("leads:write", [Admin, SalesLead, Sale]),
         ("content:read", All),
         ("content:write", [Admin, Marketer]),
         ("ads:read", [Admin, Marketer, QA, Viewer]),
         ("ads:write", [Admin, Marketer]),
         ("analytics:read", All),
         ("kb:read", All),
-        ("kb:write", [Admin, Marketer, QA]),
+        ("kb:write", [Admin, SalesLead, Marketer, QA]),
         ("docs:read", All),
-        ("docs:write", [Admin, Sale, Marketer]),
-        ("sale-assist:use", [Admin, Sale]),
+        ("docs:write", [Admin, SalesLead, Sale, Marketer]),
+        ("sale-assist:use", [Admin, SalesLead, Sale]),
         ("chat-scenarios:read", All),
-        ("chat-scenarios:write", [Admin, Marketer, QA]),
+        ("chat-scenarios:write", [Admin, SalesLead, Marketer, QA]),
         ("channels:manage", [Admin]),
         ("api-keys:manage", [Admin]),
         ("rbac:manage", [Admin]),

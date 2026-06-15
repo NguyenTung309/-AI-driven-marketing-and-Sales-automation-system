@@ -90,9 +90,9 @@ public sealed class PancakeChannelAdapter(
             .Replace("{thread_id}", threadPart, StringComparison.Ordinal);
         var url = $"{cfg.BaseUrl.TrimEnd('/')}{path}";
         if (string.Equals(cfg.AuthMode, "query", StringComparison.Ordinal))
-            url += (url.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "access_token=" + Uri.EscapeDataString(cfg.AccessToken);
+            url += (url.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "page_access_token=" + Uri.EscapeDataString(cfg.AccessToken);
 
-        var payload = new SendBody(text);
+        var payload = new SendBody("reply_inbox", text);
         using var req = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = JsonContent.Create(payload, options: JsonOpts),
@@ -120,7 +120,7 @@ public sealed class PancakeChannelAdapter(
             : (composite, string.Empty);
     }
 
-    private sealed record SendBody([property: JsonPropertyName("message")] string Message);
+    private sealed record SendBody([property: JsonPropertyName("action")] string Action, [property: JsonPropertyName("message")] string Message);
 
     private sealed record PancakeWebhookPayload(
         [property: JsonPropertyName("events")] IReadOnlyList<PancakeEvent>? Events);

@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Clawbot.Application.Abstractions;
 using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
@@ -87,6 +87,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     // Channel & LLM configs
     public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();
     public DbSet<LlmConfig> LlmConfigs => Set<LlmConfig>();
+    // Processed messages (dedup for demo polling)
+    public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
 
     IConversationSet IAppDbContext.Conversations => new EfConversationSet(Conversations);
 
@@ -96,7 +98,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     {
         public void Add(Conversation conversation) => set.Add(conversation);
 
-        // Global query filters (tenant isolation + soft delete) apply automatically — no manual tenant_id filter.
+        // Global query filters (tenant isolation + soft delete) apply automatically â€” no manual tenant_id filter.
         public Task<Conversation?> FindByThreadAsync(string platform, string externalThreadId, CancellationToken ct = default) =>
             set.FirstOrDefaultAsync(c => c.Platform == platform && c.ExternalThreadId == externalThreadId, ct);
     }
@@ -144,3 +146,4 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
             e => e.TenantId == (tenantRef.Current != null ? tenantRef.Current.TenantId : Guid.Empty));
     }
 }
+
