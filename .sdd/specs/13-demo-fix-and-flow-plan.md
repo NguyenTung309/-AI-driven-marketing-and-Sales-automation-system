@@ -26,7 +26,7 @@
 - Test: `tests/api/Clawbot.Api.Tests/Services/PancakePollingServiceTests.cs`
 - Migration: add `processed_messages` table
 
-- [ ] **Step 0.1: Create ProcessedMessage entity**
+- [x] **Step 0.1: Create ProcessedMessage entity**
 
   Create `ProcessedMessage.cs`:
 
@@ -53,7 +53,7 @@ public sealed class ProcessedMessage
 }
 ```
 
-- [ ] **Step 0.2: Add EF config + DbSet**
+- [x] **Step 0.2: Add EF config + DbSet**
 
   Create `ProcessedMessageConfiguration.cs`:
 
@@ -91,7 +91,7 @@ public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
 modelBuilder.ApplyConfiguration(new ProcessedMessageConfiguration());
 ```
 
-- [ ] **Step 0.3: Create EF migration**
+- [x] **Step 0.3: Create EF migration**
 
 ```powershell
 cd src\Clawbot.Infrastructure
@@ -99,7 +99,7 @@ dotnet ef migrations add AddProcessedMessages --context AppDbContext
 dotnet ef migrations script --output deploy/migrations/0002_processed_messages.sql
 ```
 
-- [ ] **Step 0.4: Create ITenantResolver + DemoTenantResolver**
+- [x] **Step 0.4: Create ITenantResolver + DemoTenantResolver**
 
   `ITenantResolver.cs`:
 
@@ -144,7 +144,7 @@ public sealed class DemoTenantResolver : ITenantResolver
 services.AddScoped<ITenantResolver, DemoTenantResolver>();
 ```
 
-- [ ] **Step 0.5: Rewrite PancakePollingService (DB dedup + IngestAsync + ITenantResolver)**
+- [x] **Step 0.5: Rewrite PancakePollingService (DB dedup + IngestAsync + ITenantResolver)**
 
   Key changes from current code:
   - Remove `_seenIds` and `_seenQueue` (in-memory dedup)
@@ -197,7 +197,7 @@ await ingestor.IngestAsync(tenantId, channelMsg, ct);
 // Then resolve + send auto-reply...
 ```
 
-- [ ] **Step 0.6: Write tests**
+- [x] **Step 0.6: Write tests**
 
   Create `tests/api/Clawbot.Api.Tests/Services/PancakePollingServiceTests.cs`:
 
@@ -231,14 +231,14 @@ public sealed class PancakePollingServiceTests
 }
 ```
 
-- [ ] **Step 0.7: Build + run tests**
+- [x] **Step 0.7: Build + run tests**
 
 ```powershell
 dotnet build src/Clawbot.sln
 dotnet test tests/api/Clawbot.Api.Tests
 ```
 
-- [ ] **Step 0.8: Commit**
+- [x] **Step 0.8: Commit**
 
 ```powershell
 git add .
