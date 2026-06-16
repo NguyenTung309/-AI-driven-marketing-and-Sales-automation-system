@@ -37,7 +37,8 @@ public sealed class PancakeConfigResolver(
                     SignatureAlgo: row.SignatureAlgo,
                     SignatureEncoding: row.SignatureEncoding,
                     SendPathTemplate: row.SendPathTemplate,
-                    AuthMode: row.AuthMode);
+                    AuthMode: row.AuthMode,
+                    PageId: string.Empty);
             }
         }
 
@@ -52,7 +53,8 @@ public sealed class PancakeConfigResolver(
             SignatureAlgo: (section["SignatureAlgo"] ?? "hmac-sha256").ToLowerInvariant(),
             SignatureEncoding: (section["SignatureEncoding"] ?? "hex").ToLowerInvariant(),
             SendPathTemplate: section["SendPathTemplate"] ?? DefaultSendPath,
-            AuthMode: (section["AuthMode"] ?? "query").ToLowerInvariant());
+            AuthMode: (section["AuthMode"] ?? "query").ToLowerInvariant(),
+            PageId: section["PageId"] ?? string.Empty);
     }
 
     private string SafeDecrypt(string cipher)
