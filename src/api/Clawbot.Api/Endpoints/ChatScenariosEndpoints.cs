@@ -1,5 +1,6 @@
-using Clawbot.Api.Auth;
+﻿using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.ChatScenarios;
+using Clawbot.Api.Middleware;
 using Clawbot.Domain.ChatScenarios;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -8,15 +9,14 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
 
-// M05 — chat_scenarios CRUD + trigger/platform match + success-rate tracker.
+// M05 â€” chat_scenarios CRUD + trigger/platform match + success-rate tracker.
 // Rows are tenant-scoped; AppDbContext applies the global ITenantOwned query filter,
 // so handlers do not filter TenantId explicitly on reads.
 public static class ChatScenariosEndpoints
 {
     public static IEndpointRouteBuilder MapChatScenarios(this IEndpointRouteBuilder app)
     {
-        // SPEC-11 §6a: reads (incl. read-only match) need chat-scenarios:read; mutations write.
-        var grp = app.MapGroup("/api/chat-scenarios");
+var grp = app.MapGroup("/api/chat-scenarios").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/", ListAsync).RequirePermission("chat-scenarios:read");
         grp.MapGet("/{id:guid}", GetAsync).RequirePermission("chat-scenarios:read");
@@ -156,3 +156,7 @@ public static class ChatScenariosEndpoints
         return Results.Ok(ToDto(scenario));
     }
 }
+
+
+
+

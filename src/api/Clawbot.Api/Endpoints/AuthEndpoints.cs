@@ -1,9 +1,10 @@
-using System.Net;
+﻿using System.Net;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Auth;
 using Clawbot.Api.Middleware;
+using Clawbot.Application.Abstractions;
 using Clawbot.Infrastructure.Auth;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Persistence;
@@ -24,7 +25,7 @@ public static partial class AuthEndpoints
 
     public static IEndpointRouteBuilder MapAuth(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/auth");
+        var group = app.MapGroup("/auth").RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
 
         group.MapPost("/login", LoginAsync).AllowAnonymous().RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
         group.MapPost("/login/2fa", LoginWithTwoFactorAsync).AllowAnonymous().RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
@@ -36,6 +37,7 @@ public static partial class AuthEndpoints
         group.MapPost("/2fa/verify", VerifyTwoFactorAsync).RequireAuthorization();
         group.MapPost("/2fa/disable", DisableTwoFactorAsync).RequireAuthorization();
         group.MapGet("/me", Me).RequireAuthorization();
+        group.MapPost("/change-password", ChangePasswordAsync).RequireAuthorization();
 
         return app;
     }
@@ -61,7 +63,7 @@ public static partial class AuthEndpoints
         }
         if (!check.Succeeded) return Results.Unauthorized();
 
-        // CheckPasswordSignInAsync only validates password + lockout — it never reports
+        // CheckPasswordSignInAsync only validates password + lockout - it never reports
         // RequiresTwoFactor (only PasswordSignInAsync does). Check 2FA explicitly so an
         // account with 2FA enabled is challenged instead of being signed in directly.
         if (await users.GetTwoFactorEnabledAsync(user))
@@ -112,7 +114,7 @@ public static partial class AuthEndpoints
         var result = await refreshTokens.RotateAsync(raw, ClientIp(http), ct);
         if (result.Outcome != RotateOutcome.Success)
         {
-            // Invalid (expired/unknown) or Reuse (family already revoked) → clear + 401.
+            // Invalid (expired/unknown) or Reuse (family already revoked) -> clear + 401.
             ClearRefreshCookie(http, env);
             return Results.Unauthorized();
         }
@@ -149,15 +151,31 @@ public static partial class AuthEndpoints
     private static async Task<IResult> RequestResetAsync(
         PasswordResetRequest req,
         UserManager<AppUser> users,
+        IEmailSender email,
         ILogger<Program> log)
     {
         var user = await users.FindByEmailAsync(req.Email);
         if (user is null) return Results.Ok(); // Avoid email enumeration.
 
         var token = await users.GeneratePasswordResetTokenAsync(user);
-        // TODO(M03): emit via email service. For now log so dev can copy.
-        LogResetTokenIssued(log, req.Email, token);
+        LogResetTokenIssued(log, req.Email, token); // also logged so dev can copy when SMTP unset
+        await email.SendAsync(req.Email, "Đặt lại mật khẩu Học Bá",
+            $"Mã đặt lại mật khẩu của bạn: {token}");
         return Results.Ok();
+    }
+
+    private static async Task<IResult> ChangePasswordAsync(
+        ChangePasswordRequest req,
+        System.Security.Claims.ClaimsPrincipal principal,
+        UserManager<AppUser> users)
+    {
+        var user = await users.GetUserAsync(principal);
+        if (user is null) return Results.Unauthorized();
+
+        var result = await users.ChangePasswordAsync(user, req.CurrentPassword, req.NewPassword);
+        return result.Succeeded
+            ? Results.Ok()
+            : Results.BadRequest(result.Errors.Select(e => e.Description));
     }
 
     private static async Task<IResult> ConfirmResetAsync(
@@ -173,7 +191,7 @@ public static partial class AuthEndpoints
         if (!result.Succeeded)
             return Results.BadRequest(result.Errors.Select(e => e.Description));
 
-        // SPEC-11: reset commonly follows a suspected compromise — force re-login on every
+        // SPEC-11: reset commonly follows a suspected compromise - force re-login on every
         // device by revoking the whole refresh-token family.
         await refreshTokens.RevokeAllForUserAsync(user.Id, ct);
         return Results.Ok();
@@ -278,7 +296,7 @@ public static partial class AuthEndpoints
     }
 
     // Maps the user's Identity role name to its fixed Id. 0 roles / an unknown role yields
-    // Guid.Empty → backend default-denies any permission-gated endpoint (AC).
+    // Guid.Empty -> backend default-denies any permission-gated endpoint (AC).
     private static Guid ResolveRoleId(IEnumerable<string> roleNames)
     {
         foreach (var name in roleNames)
@@ -315,9 +333,8 @@ public static partial class AuthEndpoints
     // SPEC-11 D11: a usable account must be active (is_active flag) AND not locked out.
     private static bool IsActive(this AppUser user)
     {
-        if (!user.IsActive) return false;
+        if (!user.IsActive) return false; // admin-set deactivation flag (M23)
         if (!user.LockoutEnabled) return true;
         return !user.LockoutEnd.HasValue || user.LockoutEnd <= DateTimeOffset.UtcNow;
     }
 }
-

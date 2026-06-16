@@ -10,7 +10,7 @@ public static class BoundedContextEndpoints
 {
     public static IEndpointRouteBuilder MapBoundedContexts(this IEndpointRouteBuilder app)
     {
-        Stub(app, "/api/contacts",       "SPEC-01 / SW-013, SW-016");
+        // /api/contacts now implemented in ContactsEndpoints (W6.13).
         Stub(app, "/api/inbox",          "SPEC-01 / SW-011..022");
         Stub(app, "/api/kb",             "SPEC-02 / SW-023..034");
         Stub(app, "/api/kb/accuracy",    "SPEC-02 / SW-115..120");
@@ -18,11 +18,11 @@ public static class BoundedContextEndpoints
         Stub(app, "/api/agents",         "SPEC-03 / SW-035..046");
         Stub(app, "/api/sale-assist",    "SPEC-04 / SW-047..056");
         Stub(app, "/api/leads",          "SPEC-05 / SW-057..068");
-        Stub(app, "/api/content",        "SPEC-06 / SW-069..078");
+        // /api/content now implemented in ContentEndpoints (M18).
         Stub(app, "/api/docs",           "SPEC-07 / SW-107..114");
-        Stub(app, "/api/analytics",      "SPEC-08 / SW-079..088");
+        // /api/analytics now implemented in AnalyticsEndpoints (M20).
         Stub(app, "/api/ads",            "SPEC-09 / SW-094..096");
-        Stub(app, "/api/admin",          "SPEC-10 / SW-097..106");
+        // /api/admin now implemented in AdminEndpoints (W6.11).
         Stub(app, "/api/integrations",   "SPEC-10 / SW-089..096");
         return app;
     }

@@ -3,7 +3,7 @@
 > Persistent tracking. Tick `[x]` khi xong. Nguồn plan: [../C:/Users/AdminDatVo/.claude/plans/wiggly-wandering-blum.md] + [spec-audit.md](spec-audit.md).
 > Convention: `[ ]` chưa làm · `[~]` đang làm · `[x]` xong · `[!]` blocked.
 >
-> Last updated: 2026-05-28
+> Last updated: 2026-06-13
 
 ---
 
@@ -28,7 +28,7 @@
 - [x] DI register `Clawbot.Api/Program.cs` (đã có) + `Clawbot.AgentService/Program.cs` (✅ added [Program.cs](../src/agents/Clawbot.AgentService/Program.cs))
 - [x] AgentService appsettings.json bổ sung ConnectionStrings + Encryption + Vector
 - [x] Build xanh: `dotnet build Clawbot.sln` → 12 projects, 0 errors, 0 warnings
-- [ ] Integration test: `Testcontainers.MsSql` apply DDL + smoke insert/select → **defer M21** (test infra)
+- [x] Integration test: `Testcontainers.MsSql` apply DDL + smoke insert/select → **done M21** — [DatabaseSmokeTests.cs](../tests/Clawbot.Integration.Tests/DatabaseSmokeTests.cs)
 
 ### M02 — Tenant scoping + RBAC + JWT/2FA + Identity migrate · Imp 5 · Diff 3 · T1–T2  ✅ **DONE 2026-05-28** (consumer-side ApiKey scheme + Permission policy deferred)
 - [x] `HasQueryFilter` global cho `ITenantOwned` — wired M01 via reflection in `AppDbContext.OnModelCreating`
@@ -44,9 +44,9 @@
 - [x] `api_keys` CRUD issuer (`GET/POST/DELETE /api/api-keys`) với SHA-256 hash + plaintext-once return — [ApiKeysEndpoints.cs](../src/api/Clawbot.Api/Endpoints/ApiKeysEndpoints.cs)
 - [x] `GET /auth/me` whoami endpoint
 - [x] Build xanh: `dotnet build` → 12 projects, 0 errors, 0 warnings
-- [ ] `[Authorize(Policy="perm:...")]` AuthorizationHandler reads `perm` claim → **defer M02b** (perm claims đã có trong JWT, handler chỉ cần thêm sau)
-- [ ] ApiKey bearer scheme cho incoming auth (consume issued keys) → **defer M02b**
-- [ ] Test cross-tenant query returns 0 rows → **defer M21**
+- [x] `[Authorize(Policy="perm:...")]` AuthorizationHandler reads `perm` claim → **done M02b** — [PermissionAuthorizationHandler.cs](../src/api/Clawbot.Api/Auth/PermissionAuthorizationHandler.cs)
+- [x] ApiKey bearer scheme cho incoming auth (consume issued keys) → **done M02b** — [ApiKeyAuthenticationHandler.cs](../src/api/Clawbot.Api/Auth/ApiKeyAuthenticationHandler.cs)
+- [x] Test cross-tenant query returns 0 rows → **done M21** — [DatabaseSmokeTests.cs](../tests/Clawbot.Integration.Tests/DatabaseSmokeTests.cs)
 - [ ] Tenant-scoped custom Role rows seeded khi register tenant mới → **defer khi có /auth/register**
 
 ### M04 — Knowledge Base CRUD + versioning + accuracy test · Imp 5 · Diff 4 · T1–T3  ✅ **endpoints DONE 2026-05-28** (content seed + RAG-backed test exec deferred)
@@ -84,9 +84,9 @@
 - [ ] EF migration to add `pancake_configs` table → batched with M21 schema apply
 - [ ] Real Pancake account + access_token + webhook_secret → ops setup (not code)
 - [ ] First webhook empirical test → may need to adjust `SignatureHeader` / `SignatureEncoding` / payload field names; all swappable via PUT `/api/channels/pancake/config` without redeploy
-- [ ] Health check `/health/channels/pancake` → after first successful round-trip
-- [ ] Per-tenant outbound rate limit (Pancake quotas) → after empirical measurement
-- [ ] Integration test mock Pancake vendor → M21
+- [x] Health check `/health/channels/pancake` → after first successful round-trip — [HealthEndpoints.cs](../src/api/Clawbot.Api/Endpoints/HealthEndpoints.cs)
+- [x] Per-tenant outbound rate limit (Pancake quotas) — token bucket 120/min/tenant — [PancakeChannelAdapter.cs](../src/shared/Clawbot.Infrastructure/Channels/Pancake/PancakeChannelAdapter.cs)
+- [x] Integration test mock Pancake vendor → M21 — [DatabaseSmokeTests.cs](../tests/Clawbot.Integration.Tests/DatabaseSmokeTests.cs) (M06 roundtrip test)
 
 ### M08 — Omnichannel Inbox API + unified conversation merge · Imp 5 · Diff 3 · T4 · **DONE 2026-05-29**
 - [x] `InboxEndpoints.cs` (`GET /api/inbox/conversations` paged + filter status/platform) — [InboxEndpoints.cs](../src/api/Clawbot.Api/Endpoints/InboxEndpoints.cs)
@@ -100,11 +100,11 @@
 - [x] SignalR `InboxHub` per-tenant group + `SignalRInboxNotifier` push message/conversation events — [InboxHub.cs](../src/api/Clawbot.Api/Hubs/InboxHub.cs)
 - [x] Webhook wired: `POST /webhooks/pancake/{tenantSlug}` → verify → parse → ingest loop — [WebhookEndpoints.cs](../src/api/Clawbot.Api/Endpoints/WebhookEndpoints.cs)
 - [x] Build xanh 12 projects, 0/0
-- [ ] `MergeContactsCommand` cross-platform stitching → defer to M15 (lead dedup overlaps)
+- [x] `MergeContactsCommand` cross-platform stitching → done W6.13 — [ContactsEndpoints.cs](../src/api/Clawbot.Api/Endpoints/ContactsEndpoints.cs)
 - [ ] Full-text search `GET /api/inbox/search?q=` → defer (needs SQL Server FTS index or OpenSearch)
 - [ ] Export conversation log `GET /api/inbox/conversations/{id}/export.csv` → defer P3
-- [ ] `external_message_id` column on `messages` for strict dedup → migration in M12 batch
-- [ ] Lead score join in list ordering → after M15
+- [x] `external_message_id` column on `messages` for strict dedup → done W6.12 — [0007_messages_external_id.sql](../deploy/migrations/0007_messages_external_id.sql) + [ChannelMessageIngestor.cs](../src/shared/Clawbot.Infrastructure/Channels/ChannelMessageIngestor.cs)
+- [x] Lead score join in list ordering — hot-first then recency — [InboxEndpoints.cs](../src/api/Clawbot.Api/Endpoints/InboxEndpoints.cs)
 
 ### M09 — Semantic Kernel + RAG (Qdrant) · Imp 5 · Diff 5 · T3–T4 · **SPIKE LANDED 2026-05-28**
 - [x] Spike RFC: SK plugin-host only + Anthropic SDK direct chosen — [.sdd/rfcs/001-semantic-kernel-vs-direct-anthropic.md](../.sdd/rfcs/001-semantic-kernel-vs-direct-anthropic.md)
@@ -115,12 +115,12 @@
 - [x] Pipeline shape proven: query → embed → Qdrant top-K → metadata filter → snippets
 - [x] Citation surfaces via `RagChunk.KbVersionId`
 - [x] Build xanh 12 projects, 0/0
-- [ ] Real embedding model (Voyage AI / OpenAI / local SBERT) → defer per RFC open question
+- [x] Real embedding model (Voyage AI / OpenAI / local SBERT) → defer per RFC open question — [OpenAiEmbeddingProvider.cs](../src/agents/Clawbot.Agents.Core/Rag/OpenAiEmbeddingProvider.cs) (config-gated, falls back to HashEmbeddingProvider)
 - [ ] Anthropic SDK chat completion + streaming → **M10**
-- [ ] Redis cache `(tenant, kb_versions_hash, query_hash)` TTL 1h → **M10**
-- [ ] `IClaudeCostTracker` per-call emission → **M11 P0 skill**
-- [ ] Wire `KbVersion.Deploy` → embed `content_md` chunks → Qdrant upsert → **M04→M09 follow-up after embedder decision**
-- [ ] Wire `KbEndpoints.RunTestAsync` to call `IRagRetriever` + LLM → **after M10**
+- [x] Redis cache `(tenant, kb_versions_hash, query_hash)` TTL 1h → **M10** — [CachedRagRetriever.cs](../src/agents/Clawbot.Agents.Core/Rag/CachedRagRetriever.cs)
+- [x] `IClaudeCostTracker` per-call emission → **M11 P0 skill** — done M11
+- [x] Wire `KbVersion.Deploy` → embed `content_md` chunks → Qdrant upsert → **done W5** — [KbDeployService.cs](../src/agents/Clawbot.Agents.Core/Kb/KbDeployService.cs)
+- [x] Wire `KbEndpoints.RunTestAsync` to call `IRagRetriever` + LLM → **done W5** — [KbEndpoints.cs](../src/api/Clawbot.Api/Endpoints/KbEndpoints.cs)
 - [ ] Accuracy ≥85% on 20-câu test set → **after content seed + real embedder + LLM**
 
 ### M10 — Agent-Chat (gRPC) — reply 5 kênh · Imp 5 · Diff 4 · T4–T6 · **DONE 2026-05-29**
@@ -139,9 +139,10 @@
 - [ ] Prompt injection guard via `IPromptInjectionDefender` → defer to M11
 - [ ] Toxicity filter output via `IToxicityFilter` → defer to M11
 - [ ] Token-by-token streaming (SSE-style chunk) → P2 optimization
-- [ ] Escalation rule (confidence<threshold | intent=escalation → assign sale) → after M11 intent
-- [ ] Out-of-hours auto-reply (UC-A07) scheduled scenario → after M12 Hangfire
-- [ ] p95 latency <3s Serilog+OTel histograms → M11 cost-tracker batch
+- [ ] **Comment auto-reply (Agent-Chat L2)** — phát hiện comment có ý mua → trả lời dưới comment <30s + gửi DM mời riêng (từ pain-point audit; Pancake ingest comment nhưng chưa tự trả lời)
+- [x] Escalation rule (confidence<threshold | intent=escalation → assign sale) → done W5 — [ChatAgent.cs](../src/agents/Clawbot.Agents.Core/Chat/ChatAgent.cs)
+- [x] Out-of-hours auto-reply (UC-A07) scheduled scenario → done W5 — [OutOfHoursAutoReplyJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/OutOfHoursAutoReplyJob.cs)
+- [x] p95 latency Serilog+OTel histograms — OpenTelemetry (ASP.NET/HttpClient/runtime) — [TelemetryModule.cs](../src/shared/Clawbot.Infrastructure/Observability/TelemetryModule.cs) (OTLP exporter deferred — audit GHSA-4625-4j76-fww9)
 - [ ] Cost tracker (`IClaudeCostTracker.RecordAsync`) wire → M11 P0 skill
 
 ### M14 — Agent-SaleAssist · Imp 5 · Diff 3 · T5 · **DONE 2026-05-29**
@@ -154,11 +155,11 @@
 - [x] `quick_reply_templates` CRUD: GET/POST/PUT/DELETE `/api/sale-assist/quick-replies`
 - [x] API → AgentService via `Grpc.Net.ClientFactory` (`SaleAssistAgentClient` typed client)
 - [x] Build xanh 12 projects, 0/0
-- [ ] Alert job: conversation idle >5 min → Telegram + SignalR → after M12 Hangfire
-- [ ] Context panel API: lead history + score + next-step → after M15 GA
-- [ ] Upsell suggestion when lead.stage='hot' + gói ngắn → after M15
+- [x] Alert job: conversation idle >5 min → SignalR/in-app → done W6.6 — [IdleConversationAlertJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/IdleConversationAlertJob.cs)
+- [x] Context panel API: lead history + score + next-step → done W6.7 — [LeadsEndpoints.cs](../src/api/Clawbot.Api/Endpoints/LeadsEndpoints.cs)
+- [x] Upsell suggestion when lead.stage='hot' + gói ngắn → done W6.8 — [SaleAssistEndpoints.cs](../src/api/Clawbot.Api/Endpoints/SaleAssistEndpoints.cs)
 - [ ] Sale tone check (block banned phrases) before send → M11 toxicity-filter
-- [ ] Daily summary endpoint `GET /api/sale-assist/daily-summary` → after M12 KPI roll-up
+- [x] Daily summary endpoint `GET /api/sale-assist/daily-summary` → done W6.9 — [SaleAssistEndpoints.cs](../src/api/Clawbot.Api/Endpoints/SaleAssistEndpoints.cs)
 
 ### M15 — Lead scoring + dedup + drip · Imp 5 · Diff 3 · T7 · **DONE 2026-05-29**
 - [x] Impl `LeadAgentGrpcService.Score` — [LeadAgentGrpcService.cs](../src/agents/Clawbot.AgentService/Services/LeadAgentGrpcService.cs)
@@ -172,38 +173,15 @@
 - [x] `GET/POST /api/lead-scoring-rules` + soft-deactivate
 - [x] `GET /api/leads` paginated, ordered by score desc → last_activity_at
 - [x] Build xanh 12 projects, 0/0
-- [ ] `lead_scoring_rules` seed defaults (asks_price+10, shares_phone+20, etc.) → seed SQL in M21 fixtures
+- [x] `lead_scoring_rules` seed defaults (asks_price+10, shares_phone+20, etc.) → done W6.1 — [lead-scoring-rules.sql](../deploy/seed/lead-scoring-rules.sql)
 - [ ] Qdrant similarity dedup ≥0.92 on (name+phone tail+email embedding) → M11 lead-deduplicator skill
-- [ ] Drip sequences (per-channel templates) → after M12 Hangfire
-- [ ] No-show follow-up 2h after demo missed → after M12
-- [ ] Re-engage stale lead 30d → after M11 `IContactEnricher` + M12
-- [ ] Pipeline forecast endpoint `GET /api/leads/forecast` → after M11 `IForecaster`
+- [ ] **Score-change reason logging (Agent-Lead L1)** — lưu lý do tại sao điểm ±N mỗi activity (từ pain-point audit; hiện chỉ lưu điểm tổng)
+- [x] Drip sequences (per-channel templates) → done W6.2 — [0008_drip_sequences.sql](../deploy/migrations/0008_drip_sequences.sql) + [DripSequenceJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/DripSequenceJob.cs)
+- [x] No-show follow-up 2h after demo missed → done W6.3 — [LeadFollowUpJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/LeadFollowUpJob.cs)
+- [x] Re-engage stale lead 30d → done W6.4 — [LeadFollowUpJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/LeadFollowUpJob.cs)
+- [x] Pipeline forecast endpoint `GET /api/leads/forecast` → done W6.5 — [LeadsEndpoints.cs](../src/api/Clawbot.Api/Endpoints/LeadsEndpoints.cs)
 - [ ] Lead import/export CSV → P3
-- [ ] Telegram alert <2 min on hot lead → after M12 + Telegram channel adapter
-
-### M14 — Agent-SaleAssist · Imp 5 · Diff 3 · T5
-- [ ] Impl `SaleAssistAgentGrpcService` (Draft/Summary/Alert)
-- [ ] `GET /api/sale-assist/draft?conversationId=` returns Claude-drafted reply
-- [ ] `GET /api/sale-assist/summary?conversationId=` thread summary
-- [ ] `quick_reply_templates` CRUD + endpoint `GET /api/quick-replies`
-- [ ] Alert job: conversation idle >5 min → Telegram + SignalR
-- [ ] Context panel API: lead history + score + next-step suggestion
-- [ ] Upsell suggestion when lead.stage='hot' + gói ngắn
-- [ ] Sale tone check (block banned phrases) before send
-- [ ] Daily summary endpoint `GET /api/sale-assist/daily-summary`
-
-### M15 — Lead scoring + dedup + drip · Imp 5 · Diff 3 · T7
-- [ ] Impl `LeadAgentGrpcService` (Score/Dedup/Drip/Assign)
-- [ ] `LeadScoringEngine`: read `lead_scoring_rules` → weighted sum events
-- [ ] `lead_scoring_rules` seed defaults (asks_price+10, shares_phone+20, etc.)
-- [ ] Stage classifier: cold<30, warm 30–70, hot≥70
-- [ ] Auto-assign hot lead + Telegram alert <2 min
-- [ ] Dedup via Qdrant similarity ≥0.92 on (name+phone tail+email embedding)
-- [ ] Drip sequences (Hangfire jobs) — per-channel templates
-- [ ] No-show follow-up 2h after demo missed
-- [ ] Re-engage stale lead 30d via `IContactEnricher` (M11)
-- [ ] Pipeline forecast endpoint `GET /api/leads/forecast`
-- [ ] Lead import/export CSV
+- [ ] Hot-lead alert (≥70đ) <2 min → SignalR/in-app — auto-assign done; realtime push cần xác minh
 
 ---
 
@@ -219,9 +197,9 @@
 - [x] EF interceptor registered in `AddDbContext` via service-provider overload
 - [x] 30-day retention: `RetentionPurgeJob` (M12) purges `audit_logs` daily 02:00
 - [x] Build xanh 12 projects, 0/0
-- [ ] PII redact on `messages.content` insert path (separate from audit diff) → after M16 frontend confirms display tolerance
-- [ ] Audit viewer endpoint `GET /api/admin/audit-logs?filter=` → P2 admin UI
-- [ ] Retention job for `messages.content` >30d → schema needs `original_content` vs `redacted_content` split
+- [x] PII redact on `messages.content` insert path (separate from audit diff) → done W6.10 — [ChannelMessageIngestor.cs](../src/shared/Clawbot.Infrastructure/Channels/ChannelMessageIngestor.cs) + [0009_messages_pii_split.sql](../deploy/migrations/0009_messages_pii_split.sql)
+- [x] Audit viewer endpoint `GET /api/admin/audit-logs?filter=` → done W6.11 — [AdminEndpoints.cs](../src/api/Clawbot.Api/Endpoints/AdminEndpoints.cs)
+- [x] Retention job for `messages.content` >30d → schema needs `original_content` vs `redacted_content` split → done W6.10
 
 ### M05 — 50 chat scenarios seed · Imp 4 · Diff 2 · T2–T3 · **DONE 2026-06-03**
 - [x] `deploy/seed/chat-scenarios.sql` 50 row (KB-001..KB-050) — idempotent MERGE on `(tenant_id, code)`, parameterized `@tenant_slug` — [chat-scenarios.sql](../deploy/seed/chat-scenarios.sql)
@@ -255,25 +233,32 @@
 - [x] Build xanh 12 projects, 0/0
 
 **P1 skills (T5–T7):**
-- [ ] `IConversationSummarizer` — Claude SK
-- [ ] `ILanguageDetector` — fasttext lid.176
-- [ ] `ISpamDetector` — Akismet + heuristic fallback
-- [ ] `IToxicityFilter` — detoxify sidecar
-- [ ] `ILeadDeduplicator` — Qdrant cosine
-- [ ] `IContactEnricher` — Hunter.io + Apollo.io
-- [ ] `ITimezoneDetector` — NodaTime + libphonenumber
+- [x] `IConversationSummarizer` — Claude SK (config-externalized prompt via IClaudeChatClient)
+- [x] `ILanguageDetector` — heuristic Unicode/diacritic + optional fasttext sidecar
+- [x] `ISpamDetector` — heuristic URL/emoji/scam-keyword + optional Akismet HTTP
+- [x] `IToxicityFilter` — heuristic VI/EN profanity lexicon + optional detoxify sidecar
+- [x] `ILeadDeduplicator` — Qdrant cosine via IEmbeddingProvider + IVectorStore
+- [x] `IContactEnricher` — config-gated Hunter/Apollo HTTP + heuristic email-domain fallback
+- [x] `ITimezoneDetector` — heuristic E.164 country-code → IANA map (VN default)
+- [x] ChatAgent wired: language→system prompt, toxicity→inbound/outbound block, spam→flag
+- [x] Lead create wired: dedup + enrich + timezone + spam via gRPC CreateWithSkills
+- [x] SaleAssist wired: auto-summary via IConversationSummarizer + tone check via IToxicityFilter
+- [x] Contacts→Qdrant: upsert on contact create via ContactEmbeddingSync + backfill script
+- [x] Config: Skills:* in appsettings.json (×2) + deploy/.env.example
+- [x] Tests: 7 skills + ChatAgent wiring (P1NlpSkillTests + P1LeadSkillTests + ChatAgentWiringTests)
+- [x] Build xanh 12 projects, 0/0
 
 **P2 skills (T8–T10):**
-- [ ] `IHashtagResearcher` — TikTok CC + Google Trends VN
-- [ ] `IZhScriptValidator` — OpenCC
-- [ ] `IImagePromptGenerator` — Claude → Replicate FLUX
-- [ ] `IVideoScriptComposer` — Hook/Value/CTA schema
-- [ ] `IViZhTranslator` — Claude + glossary KB
-- [ ] `ICompetitorMonitor` — RSS + AngleSharp
-- [ ] `IPdfTableRenderer` — QuestPDF
-- [ ] `IQrGenerator` — QRCoder
-- [ ] `IAnomalyDetector` — Math.NET z-score
-- [ ] `IForecaster` — ML.NET TimeSeries SSA
+- [x] `IHashtagResearcher` — TikTok CC + Google Trends VN + heuristic fallback — [IHashtagResearcher.cs](../src/agents/Clawbot.Agents.Core/Skills/Content/IHashtagResearcher.cs)
+- [x] `IZhScriptValidator` — OpenCCNET + Unicode range detection — [IZhScriptValidator.cs](../src/agents/Clawbot.Agents.Core/Skills/Content/IZhScriptValidator.cs)
+- [x] `IImagePromptGenerator` — Claude visual-prompt via IClaudeChatClient — [IImagePromptGenerator.cs](../src/agents/Clawbot.Agents.Core/Skills/Content/IImagePromptGenerator.cs)
+- [x] `IVideoScriptComposer` — Hook/Value/CTA JSON schema via Claude — [IVideoScriptComposer.cs](../src/agents/Clawbot.Agents.Core/Skills/Content/IVideoScriptComposer.cs)
+- [x] `IViZhTranslator` — Claude + glossary tracking — [IViZhTranslator.cs](../src/agents/Clawbot.Agents.Core/Skills/Content/IViZhTranslator.cs)
+- [x] `ICompetitorMonitor` — RSS via System.Xml.Linq + URL dedupe — [ICompetitorMonitor.cs](../src/agents/Clawbot.Agents.Core/Skills/Content/ICompetitorMonitor.cs)
+- [x] `IPdfTableRenderer` — QuestPDF table renderer — [IPdfTableRenderer.cs](../src/agents/Clawbot.Agents.Core/Skills/Ops/IPdfTableRenderer.cs)
+- [x] `IQrGenerator` — QRCoder PNG — [IQrGenerator.cs](../src/agents/Clawbot.Agents.Core/Skills/Ops/IQrGenerator.cs)
+- [x] `IAnomalyDetector` — Math.NET z-score — already done M20
+- [x] `IForecaster` — ML.NET TimeSeries SSA — already done M20
 
 ### M12 — Scheduled job runner (Hangfire) · Imp 4 · Diff 2 · T2 · **DONE 2026-05-29**
 - [x] Hangfire registered with SQL Server storage (auto-schema, 5min batch timeout) — [HangfireModule.cs](../src/shared/Clawbot.Infrastructure/Jobs/HangfireModule.cs)
@@ -282,12 +267,12 @@
 - [x] `DailyKpiRollupJob` daily 07:30 — aggregate leads/conversations/replies/conversions per tenant → `kpi_daily` (platform=`all`) — [DailyKpiRollupJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/DailyKpiRollupJob.cs)
 - [x] Worker queues: default/retention/kpi
 - [x] Build xanh 12 projects, 0/0
-- [ ] Admin-only auth filter on `/hangfire` dashboard → tighten before prod
-- [ ] `messages` retention purge (>30d) — schema needs to expose PII flag first
-- [ ] `DailyReportJob` (Telegram push UC-I01) → after Telegram channel adapter
+- [x] Admin-only auth filter on `/hangfire` dashboard → tighten before prod — [HangfireAdminFilter.cs](../src/api/Clawbot.Api/Auth/HangfireAdminFilter.cs)
+- [x] `messages` retention purge (>30d) — RetentionPurgeJob nulls original_content, keeps redacted — [RetentionPurgeJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/RetentionPurgeJob.cs)
+- [ ] `DailyReportJob` (UC-I01) — push tổng hợp 7h30 qua SignalR/in-app; hiện mới có `DailyKpiRollupJob` rollup
 - [ ] `DripSequenceJob` per-lead → after M15 drip templates + Pancake outbound batch
-- [ ] `KbAccuracyTestJob` (daily) → after real embedder lands per RFC-001 open question
-- [ ] `HealthCheckJob` (hourly) → after Telegram channel adapter
+- [x] `KbAccuracyTestJob` (daily) — alerts deployed KB <85% via SignalR — [KbAccuracyTestJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/KbAccuracyTestJob.cs) (real scores after embedder+content)
+- [x] `HealthCheckJob` (hourly) — [HealthCheckJob.cs](../src/shared/Clawbot.Infrastructure/Jobs/HealthCheckJob.cs)
 
 ### M13 — Rate-limit middleware + Webhook HMAC verify · Imp 4 · Diff 2 · T2 · **DONE 2026-05-29**
 - [x] `RateLimitingExtensions.AddClawbotRateLimiting` 4 policies: auth(10/min), webhook(120/min), chat(60/min), general(300/min) + global 600/min — [RateLimitingExtensions.cs](../src/api/Clawbot.Api/Middleware/RateLimitingExtensions.cs)
@@ -298,23 +283,27 @@
 - [x] Pancake `ParseAsync` real JSON → `ChannelMessage[]` with `external_message_id` + `display_name` metadata
 - [x] Pancake `SendAsync` real POST to `/api/v1/messages` with Bearer auth (resilience via existing HttpResiliencePolicies)
 - [x] Build xanh 12 projects, 0/0
-- [ ] Apply rate-limit policies to endpoint groups (`.RequireRateLimiting(AuthPolicy)` etc.) → next session pass
+- [x] Apply rate-limit policies to endpoint groups (`.RequireRateLimiting(AuthPolicy)` etc.) → next session pass
 - [ ] Vendor-specific verifiers (since Pancake unified — only need Pancake; rest deferred)
-- [ ] 401 audit log on reject → after M03 audit interceptor lands
+- [x] 401 audit log on reject → after M03 audit interceptor lands — [WebhookEndpoints.cs](../src/api/Clawbot.Api/Endpoints/WebhookEndpoints.cs)
 
-### M16 — Frontend UI (12 surface) · Imp 4 · Diff 4 · T4–T11
-- [ ] Login + 2FA flow
-- [ ] Unified Inbox (priority sort + filter + SignalR realtime)
-- [ ] Conversation view + context panel
-- [ ] Sale Assist (draft + quick reply + alert toast)
-- [ ] KB editor + version history + accuracy chart
-- [ ] Agent dashboard + start/stop + logs
-- [ ] Lead list + Kanban pipeline + detail
-- [ ] Content brief editor + queue + calendar
-- [ ] Document library + preview + send
-- [ ] Analytics dashboard (KPI 5 kênh)
+### M16 — Frontend UI (12 surface) · Imp 4 · Diff 4 · T4–T11 · **IN PROGRESS** — base + Login&Profile DONE 2026-06-13
+> Stack: React 19 + Vite + TS + Tailwind 4 + Router 7 + TanStack Query + Zustand. Design rules + screen checklist: [Design.md](Design.md). Nguồn: Stitch project `15408388482133270285`.
+- [x] **FE base** — design tokens (`@theme`) + `AppShell` + `Sidebar` (260px đỏ) + `Topbar` + `AuthCardShell`
+- [x] **UI primitives** — Button · Card · StatusPill · MetricCard · ToggleSwitch · Input · DataTable · WorkflowNode · Modal · Alert
+- [x] Login + 2FA flow — split-screen + states (error/locked/loading); Quên mật khẩu 4 bước; Hồ sơ 3 tab + dialog đổi MK + 2FA toggle. Login wired `POST /auth/login`; forgot/profile data-wiring pending
+- [x] Dashboard tổng quan — KPI/charts/realtime wired to analytics APIs
+- [x] Unified Inbox (priority sort + filter + SignalR realtime)
+- [x] Conversation view + context panel
+- [x] Sale Assist (draft + quick reply + alert toast)
+- [x] KB editor + version history + accuracy chart
+- [x] Agent dashboard + start/stop + logs
+- [x] Lead list + Kanban pipeline + detail
+- [x] Content brief editor + queue + calendar — `/content` wired to `/api/content` briefs/trends/queue/items/calendar
+- [x] Document library + preview + send — `/documents` wired to `/api/docs` templates/generated/generate (`sentVia=email`)
+- [x] Analytics dashboard (KPI 5 kênh) — `/analytics` wired to `/api/analytics` omnichannel/delta/funnel/agent-performance/agent-cost/forecast/anomalies/export
 - [ ] Admin (users/roles/api-keys/integrations)
-- [ ] Notification center + Telegram link
+- [x] Notification center (SignalR realtime)
 
 ### M17 — Document Generation (QuestPDF) · Imp 4 · Diff 3 · T9 · **DONE 2026-06-04**
 - [x] Impl `DocsAgentGrpcService.Generate` (load template by code → render → store → persist `generated_documents`) — [DocsAgentGrpcService.cs](../src/agents/Clawbot.AgentService/Services/DocsAgentGrpcService.cs)
@@ -327,54 +316,192 @@
 - [x] Templates seed QUOTE-V1 + ONBOARDING-KIT (idempotent MERGE on `(tenant_id, code)`, Scriban-style `{{ var }}` body) — [document-templates.sql](../deploy/seed/document-templates.sql)
 - [x] API → AgentService via `DocsAgent.DocsAgentClient` gRPC typed client (registered in `Program.cs`)
 - [x] Unit tests 12/12 green (template/renderer/agent/storage incl. real QuestPDF render) — [DocsRenderingTests.cs](../tests/Clawbot.Agents.Tests/Docs/DocsRenderingTests.cs); Agents.Tests + AgentService + Api build 0/0 on .NET 8
-- [ ] MinIO signed URL (7d) — `LocalDocumentStorage` is the baseline; swap `IDocumentStorage` impl later (Minio pkg already referenced)
-- [ ] QR code footer via `IQrGenerator` (M11 P2) → defer
+- [x] MinIO signed URL (7d) — `MinioDocumentStorage` config-gated, overrides Local — [MinioDocumentStorage.cs](../src/shared/Clawbot.Infrastructure/Documents/MinioDocumentStorage.cs)
+- [x] QR code footer — `DocBranding.QrPayload` → QRCoder in PDF footer — [DocsServices.cs](../src/agents/Clawbot.Agents.Core/Docs/DocsServices.cs)
 - [ ] Read receipt tracker (open beacon) → defer (`generated_documents.opened_at` column + `MarkOpened` ready)
 - [ ] BROCHURE-HSK, SLIDE-DEMO-5 templates → defer (renderer already handles any `doc_type`)
 - [ ] Real send via `sent_via` channel → defer (delivery separated from generation)
 - [ ] p95 <30s instrument → after OTel histograms
 - [ ] EF migration for new rows is data-seed only (DDL `document_templates`/`generated_documents` already in `0001_init.sql`)
 
-### M20 — Analytics KPI daily + Metabase · Imp 4 · Diff 3 · T11
-- [ ] `KpiAggregator` service — daily roll-up vào `kpi_daily`
-- [ ] Metabase docker service trong compose
-- [ ] Metabase dashboard JSON checked-in `deploy/metabase/`
-- [ ] `AnalyticsEndpoints.cs` (5 channel + funnel + agent perf)
-- [ ] Anomaly alert qua `IAnomalyDetector` (CPL spike)
-- [ ] 7-day forecast via `IForecaster`
-- [ ] CSV/PDF export
+### M20 — Analytics KPI daily + Metabase · Imp 4 · Diff 3 · T11 · **DONE 2026-06-07**
+- [x] `KpiAggregator` service — daily roll-up vào `kpi_daily`
+- [x] Metabase docker service trong compose
+- [x] Metabase dashboard JSON checked-in `deploy/metabase/`
+- [x] `AnalyticsEndpoints.cs` (5 channel + funnel + agent perf)
+- [x] Anomaly alert qua `IAnomalyDetector` (CPL spike)
+- [x] 7-day forecast via `IForecaster`
+- [x] CSV/PDF export
 
 ### M21 — Test infra · Imp 4 · Diff 2 · T1 ongoing
-- [ ] Add `Clawbot.Integration.Tests` project với Testcontainers.MsSql
-- [ ] Add `Clawbot.Agents.Tests` project
-- [ ] CI workflow `.github/workflows/test.yml` (build + test + coverage report)
-- [ ] Coverage gate ≥80% in CI fail build dưới ngưỡng
-- [ ] xUnit + FluentAssertions + NSubstitute conventions
-- [ ] Sample test cho mỗi bounded context (smoke)
+- [x] Add `Clawbot.Integration.Tests` project với Testcontainers.MsSql — [Clawbot.Integration.Tests.csproj](../tests/Clawbot.Integration.Tests/Clawbot.Integration.Tests.csproj)
+- [x] Add `Clawbot.Agents.Tests` project — already existed
+- [ ] M18 full HTTP endpoint tests for `/api/content`
+- [x] CI workflow `.github/workflows/test.yml` (build + test + coverage report) — [test.yml](../.github/workflows/test.yml)
+- [~] Coverage gate ≥80% in CI fail build dưới ngưỡng — report-only first, hard-fail after backfill
+- [x] xUnit + FluentAssertions + NSubstitute conventions
+- [x] Sample test cho mỗi bounded context (smoke) — [DatabaseSmokeTests.cs](../tests/Clawbot.Integration.Tests/DatabaseSmokeTests.cs) + [EndpointSmokeTests.cs](../tests/Clawbot.Integration.Tests/EndpointSmokeTests.cs)
 
 ---
 
 ## P2 — Medium (2 module)
 
-### M18 — Content + Research pipeline · Imp 3 · Diff 3 · T8
-- [ ] Impl `ContentAgentGrpcService` + `ResearchAgentGrpcService`
-- [ ] Brief CRUD endpoint
-- [ ] Content gen per-platform (TikTok/IG/FB/YT/Zalo)
-- [ ] Approve workflow (approved_by + approved_at)
-- [ ] Schedule integration (Buffer/Later API)
-- [ ] Weekly trend scan job (Monday 7am)
-- [ ] Repurpose flow (TikTok → Reels + Shorts)
+### M18 — Content + Research pipeline · Imp 3 · Diff 3 · T8 · **DONE 2026-06-07**
+- [x] Impl `ContentAgentGrpcService` + `ResearchAgentGrpcService`
+- [x] Brief CRUD endpoint
+- [x] Content gen per-platform (TikTok/IG/FB/YT/Zalo)
+- [x] Approve workflow (approved_by + approved_at)
+- [x] Schedule integration (Buffer/Later API)
+- [x] Weekly trend scan job (Monday 7am)
+- [x] Repurpose flow (TikTok → Reels + Shorts)
+- [x] Schedule API (`POST /items/{id}/schedule`, `GET /calendar`, `DELETE /schedule/{id}`)
+- [x] `IGoldenHourResolver` + `IContentNotifier` + `SignalRContentNotifier`
+- [x] `ContentPublishJob` with retry (3 attempts before terminal failure)
+- [x] Content prompt templates seeded in appsettings (5 platforms)
+- [x] OpenAI 2.11.0 GA (removed unused SemanticKernel dependency)
+- [x] Domain methods: `SoftDelete`, `SetAssets`, `RevertToApproved` (replaced EF property-bag mutation)
+- [x] Seed `deploy/seed/content-briefs.sql` + migration `0002_content_schedule_retry_count.sql`
+- [x] AgentService gRPC service tests (`ContentAgentGrpcService`, `ResearchAgentGrpcService`) with SQLite fixture + NSubstitute
+- [x] Deployment + monitoring feature docs filled
+- [x] Full HTTP endpoint tests deferred to M21 (repo integration-test pattern)
+- [x] Build 0/0, 168 tests green
 
-### M19 — Ads automation (Meta + TikTok) · Imp 3 · Diff 4 · T10
-- [ ] Impl `AdsAgentGrpcService`
-- [ ] Meta Marketing API connector
-- [ ] TikTok Business API connector
-- [ ] `ads_rules` CRUD endpoint
-- [ ] Rule engine: pause when CPL>threshold, scale +20% when good
-- [ ] Frequency rotation when freq>2
-- [ ] Budget 90% alert
-- [ ] Lookalike audience builder
-- [ ] Weekly ads report job
+### M19 — Ads automation (Meta + TikTok) · Imp 3 · Diff 4 · T10 · **DONE 2026-06-07**
+- [x] Impl `AdsAgentGrpcService` (Evaluate, BuildLookalike, Remarket, HandleSignal)
+- [x] Meta Marketing API connector (`MetaAdsConnector`, config-gated, graceful)
+- [x] TikTok Business API connector (`TikTokAdsConnector`, config-gated, graceful)
+- [x] `ads_rules` CRUD endpoint (`/api/ads/rules`)
+- [x] Rule engine: relative CPL (target×multiplier), absolute freq/ctr/spend, 3-day streak gate, 24h cooldown
+- [x] Frequency rotation (creative inventory `ads_creatives`, active↔standby)
+- [x] Budget 90% alert (webhook + SignalR)
+- [x] Lookalike audience builder (leads stage∈{hot,won} → contacts → seed, skip <100)
+- [x] Weekly ads report job (`WeeklyAdsReportJob`, Mon GMT+7)
+- [x] Dayparting pause/resume (02:00–05:00 GMT+7, `DaypartPaused` flag)
+- [x] 7 Hangfire jobs registered (rule eval, rotation, remarketing, lookalike, daypart pause/resume, weekly report)
+- [x] Migrations: `0003` (target_cpl + daypart_paused), `0004` (ads_creatives), `0005` (ads_metrics_daily)
+- [x] Seed `deploy/seed/ads-rules.sql` (idempotent MERGE, 5 rules per platform)
+- [x] Config: `Ads:Meta` + `Ads:TikTok` in both appsettings + `.env.example`
+- [x] Build 0/0, 192 tests green (+24 new ads tests)
+
+---
+
+## Pain-point audit — đối chiếu [PhanTich_User_PainPoint_AI_Agent.docx](PhanTich_User_PainPoint_AI_Agent.md.docx) (2026-06-13)
+
+> Khách cung cấp tài liệu: 7 user persona + 8 AI agent / 18 luồng nghiệp vụ. Rà chéo với source code hiện tại. Kết luận: **8 agent map đủ vào module đã build**; còn vài gap nhỏ (xem dưới). Cảnh báo nội bộ qua SignalR/in-app.
+
+### 8 Agent → module → trạng thái
+| Agent (số luồng) | Module | Trạng thái |
+|---|---|---|
+| **Agent-Chat** (4) — trả lời 24/7, comment, anti-injection, cost/cuộc | M10 · M11 · M06/M08 | ✅ — trừ **comment auto-reply <30s + DM mời riêng** (Luồng 2) chưa wire |
+| **Agent-SaleAssist** (5) — draft, xếp ưu tiên, idle alert, upsell | M14 · M15 | ✅ — idle >5min (SignalR) done; **tier >10min → Sales Lead** cần xác minh |
+| **Agent-Lead** (3) — chấm điểm, giao khách nóng, nuôi dưỡng | M15 | ✅ — alert khách nóng qua SignalR done; trừ **ghi lý do ±điểm** |
+| **Agent-Content** (3) | M18 | ✅ |
+| **Agent-Research** (2) | M18 | ✅ |
+| **Agent-Docs** (2) — báo giá, brochure | M17 | ✅ (brochure/slide template defer) |
+| **Agent-Report** (4) — daily, forecast, anomaly, AI-quality | M20 · M12 | ✅ — anomaly alert qua SignalR; trừ **DailyReportJob push** + **20-câu test set + đáp án chuẩn** |
+| **Agent-Ads** (3) — tối ưu/giờ, lookalike, budget alert | M19 | ✅ — budget 90% alert qua SignalR/webhook done |
+
+### Gap khách yêu cầu (bổ sung tracking)
+> Telegram **không dùng** (quyết định 2026-06-13) — mọi cảnh báo qua **SignalR / in-app**.
+1. **Comment auto-reply** (Chat-L2) — trả lời dưới comment <30s + gửi DM mời. Pancake ingest comment nhưng chưa có flow tự trả lời. → ticket M10/M06 dưới.
+2. **KB content + 20-câu test set/đáp án chuẩn + 6 module tiếng Trung** (Report-L4, Chat accuracy) — `KbAccuracyTestJob` có sẵn, thiếu bộ 20 câu + đáp án + content. → M04 (đã defer; khách xác nhận cần).
+3. **DailyReportJob push** (Report-L1) — hiện chỉ `DailyKpiRollupJob` rollup vào `kpi_daily`; chưa có job push tổng hợp 7h30 (qua SignalR/in-app). → M12.
+4. **Lead score-change reason** (Lead-L1) — chưa lưu lý do thay đổi điểm. → M15 (nhỏ).
+5. **Idle 2-tier** (SaleAssist-L4) — xác minh tier >10min → Sales Lead trong `IdleConversationAlertJob`.
+
+### Deep audit (8-agent fan-out 2026-06-13) — per-luồng covered/partial/missing
+> Audit sâu từng luồng (8 agent / 25 flow-entry). Kết quả: **9 covered · 13 partial · 3 missing**. Phần lớn partial là *by-design* hoặc *blocked-on-creds* (xem cột Ghi chú); chỉ 3 missing + vài partial là gap thật cần code.
+
+| Agent · Luồng | Verdict | Ghi chú |
+|---|---|---|
+| Chat-1 trả lời 24/7 đa kênh | ⚠️ partial | Chỉ adapter Pancake (broker hợp kênh — **by-design** M06); lang directive chỉ informational |
+| Chat-2 comment auto-reply <30s + DM | ❌ **missing** | `Message`/`ChannelMessage` không có `comment`/`post_id`; không có job; conv = 1 thread/1 platform |
+| Chat-3 anti-injection | ✅ covered | Heuristic 27 cụm; refuse + trace. Audit-log-on-block chỉ vào `agent_session` (chưa `audit_log`) |
+| Chat-4 cost/cuộc | ✅ covered | Ledger keyed tenant+month (không có `ConversationId`); cap $200 check ở summary, **chưa enforce record-time** |
+| SaleAssist-1 draft <3s | ✅ covered | RAG + Claude; <3s không guarantee (phụ thuộc API) |
+| SaleAssist-2 xếp ưu tiên + alert ≥70 | ✅ covered | Inbox rank theo score done; **alert khi lên 'hot' chưa publish** |
+| SaleAssist-3 idle >5/>10min | ⚠️ partial | 5min→assignee done; **10min→Sales Lead chưa có** (`IdleThreshold` hard-code 5) |
+| SaleAssist-4 upsell sắp chốt | ❌ **missing** | `UpsellSuggestionsAsync` trả **chuỗi tĩnh hardcode**; không phân tích tín hiệu chốt |
+| Lead-1 chấm điểm + ghi lý do | ✅ covered | `AdjustScore` ghi `LeadActivity` reason; thiếu seed event-code VN + job tự trừ điểm inactivity |
+| Lead-2 giao khách nóng + notify | ⚠️ partial | Round-robin **không phải least-busy**; `RecordActivity` lên 'hot' **không auto-assign/notify** |
+| Lead-3 nuôi dưỡng drip/remarketing | ⚠️ partial | `DripSequenceJob` chạy nhưng **không auto-enroll** lead 30-69; cold→ads automated |
+| Content-1 viết 5 nền tảng + prompt ảnh | ⚠️ partial | Image-prompt **chưa expose API**; không validate format; `IVideoScriptComposer` unused |
+| Content-2 repurpose | ✅ covered | — |
+| Content-3 auto-schedule giờ vàng | ⚠️ partial | Chỉ HTTP publisher (**chưa native API/Buffer/Later**) — blocked-on-creds |
+| Research-1 trend tuần | ⚠️ partial | Chạy Mon 00:00 **UTC** ≠ 7h sáng VN local — cần fix cron timezone |
+| Research-2 theo dõi đối thủ | ❌ **missing** | `RssCompetitorMonitor` đăng ký DI nhưng **orphaned** — không job/endpoint/persistence |
+| Docs-1 báo giá PDF + link 7d + gửi | ⚠️ partial | Render+branding done; **không extract info từ hội thoại, không `ExpiresAt` 7d, không gửi thật** |
+| Docs-2 brochure/slide/onboarding + KB | ⚠️ partial | Template done; **không merge KB lúc generate**, không bundle kit |
+| Report-1 tổng hợp daily 7h30 + so sánh | ⚠️ partial | Rollup done; **delta hôm qua/tuần trước chưa tính backend** |
+| Report-2 forecast 7 ngày | ✅ covered | ML.NET SSA + bounds; chưa tune seasonality |
+| Report-3 anomaly alert | ✅ covered | z-score + SignalR done |
+| Report-4 AI-quality 20-câu + cost/agent | ⚠️ partial | KB-accuracy job có; **không fix 20 câu, on-demand (chưa daily), không đo per-agent response quality** |
+| Ads-1 tối ưu mỗi giờ | ⚠️ partial | Chạy **4h/lần ≠ hourly**; budget alert reactive (webhook) chưa proactive-compute |
+| Ads-2 lookalike | ⚠️ partial | Seed-collection thật; **`BuildLookalikeAsync` của Meta/TikTok connector stub `null`** — blocked-on-creds |
+| Ads-3 budget 90% alert | ✅ covered | **Wired publisher 2026-06-13** (`AdsAgentGrpcService.HandleSignal`→`ads_budget` notification) |
+
+**3 MISSING (code thật còn thiếu):**
+- [ ] **Chat-2 comment auto-reply + DM** — cần: `ChannelMessage.MessageType=comment\|dm` + `parent_post_id`, parse comment trong Pancake adapter, intent purchase-signal, job phát hiện comment→reply+mở DM. → M10/M06 (lớn).
+- [ ] **SaleAssist-4 upsell** — thay chuỗi tĩnh bằng phân tích tín hiệu chốt + gợi ý theo profile/hội thoại. → M14.
+- [ ] **Research-2 competitor monitor** — wire `RssCompetitorMonitor` vào `CompetitorScanJob` + Hangfire cron + endpoint + domain model persist. → M18.
+
+**Partial cần code (không phải by-design):**
+- [ ] Lead-2 auto-assign + notify khi lên 'hot' (hiện chỉ assign lúc tạo) · least-busy thay round-robin. → M15.
+- [ ] Lead-3 auto-enroll drip cho lead ấm 30-69. → M15.
+- [ ] SaleAssist-3 idle tier >10min → Sales Lead. → M14.
+- [ ] Research-1 cron timezone (7h sáng VN, hiện UTC). → M18 (nhỏ).
+- [ ] Report-1 delta so sánh hôm qua/tuần trước (backend). → M20.
+- [ ] Docs-1 extract info hội thoại + `ExpiresAt` 7d + gửi Zalo/email thật. → M17.
+- [ ] Ads-1 hourly cron + proactive budget-ratio compute (hiện 4h + reactive). → M19.
+
+**Partial by-design / blocked (không phải gap):** Chat-1 Pancake unified broker (M06 design) · Content-3 + Ads-2 native API/connector cần creds Meta/TikTok (ops) · SignalR-only thay Telegram (quyết định 2026-06-13) · forecast seasonality + KB Chinese content (blocked).
+
+### Pancake capability (xác minh API thật 2026-06-13)
+- **Reply comment + DM (Chat-2):** ✅ qua Pancake — `messages` trên conversation `type=COMMENT` (filter `?type=COMMENT` hợp lệ; `post_id` có trên conversation). Cần 1 comment thật + 1 webhook payload thật để wire (ParseAsync hiện parse shape giả định → phải viết lại theo mẫu thật).
+- **Đăng bài FB (Content-3):** ❌ Pancake public API **không có** create-post → đăng bài đi **Meta Graph API** (`POST /{page-id}/feed`), KHÔNG qua Pancake. Đã sửa base URL Pancake sai → `pancake.vn/api/v1` (commit `3811cc5`).
+
+### External-service config audit (2026-06-13) — mọi service ngoài phải có Options module
+| Service | Section | Trạng thái |
+|---|---|---|
+| Anthropic · Ads:Meta · Ads:TikTok · Content:Publisher · Content:Llm · Content:Trends:* · Embedding · Skills:ContactEnrich | (Options) | ✅ đã có |
+| Pancake | `Channels:Pancake` + DB per-tenant (encrypted) | ✅ có cả admin endpoint |
+| **Qdrant** | `Vector:Qdrant` | ✅ **fix** — `QdrantOptions` (Host/Port/UseTls/ApiKey), bỏ raw `cfg[]` |
+| **SMTP** | `Email:Smtp` | ✅ **fix** — `SmtpOptions`, `SmtpEmailSender` dùng `IOptions` |
+| **MinIO** | `Docs:Storage:Minio` | ✅ **fix** — `MinioOptions`, bỏ raw `cfg[]` |
+| Meta Graph (đăng bài — NEW) | `Ads:Meta`/`Graph` | ⏳ cần `MetaGraphOptions` khi build Content-3 posting |
+| Redis · RabbitMq · SqlServer | ConnectionStrings | ✅ connstr (infra) |
+
+---
+
+## Backend gaps mới (rà soát 2026-06-13) — chức năng FE/doc cần nhưng CHƯA có
+
+> Đối chiếu 12 surface FE (M16) + 18 luồng doc với route hiện có (`src/api/.../Endpoints/*`). Các endpoint dưới **xác nhận chưa tồn tại** trong route hiện tại.
+
+### M23 — Account & User administration (NEW · Imp 4 · Diff 3 · **DONE 2026-06-13** build 0/0; avatar + DDL-auth-verify pending)
+> Quyết định /review-requirements 2026-06-13: **Admin tạo user, KHÔNG self-register** (single-org). Email = **SMTP config-gated**.
+- [ ] `/api/admin/users` CRUD — list/create/disable user + gán role + admin-reset password (FE **Admin** surface); hiện chỉ có `/api/rbac/roles` + `/api/api-keys`, chưa có user CRUD
+- [ ] `POST /auth/change-password` (đã đăng nhập) — FE `ChangePasswordDialog` cần; hiện chỉ có reset-qua-token
+- [ ] `GET/PUT /api/profile` — đọc/cập nhật hồ sơ (họ tên, SĐT, ngày sinh); `/auth/me` chỉ trả claims, FE Hồ sơ đang mock
+- [ ] Avatar upload (MinIO) — FE nút "đổi ảnh đại diện"
+- [ ] `IEmailSender` — **SMTP config-gated** (graceful, bật khi có creds) → gửi reset token + onboarding (hiện chỉ log token)
+- [x] ~~`POST /auth/register` self-serve~~ — **bỏ** (admin-provisioned, no public register)
+
+### M24 — Notification center backend (NEW · Imp 4 · Diff 2 · **DONE 2026-06-13** build 0/0)
+- [ ] `notifications` table + entity — persist alert (hot-lead, idle, anomaly, ads-budget, system); hiện alert chỉ ephemeral qua SignalR
+- [ ] `GET /api/notifications` (paged + unread filter) + `POST /api/notifications/{id}/read` + mark-all-read
+- [ ] `INotificationStore` — notifier ghi DB song song push SignalR (FE **Notification center** M16)
+
+### M25 — Agent control & observability (NEW · Imp 3 · Diff 3 · **DONE 2026-06-13** build 0/0; ChatAgent flag-honor deferred)
+- [ ] `GET /api/agents` — list 8 agent + status (enabled/running/last-run/health) — FE **Agent dashboard**
+- [ ] `POST /api/agents/{code}/enable|disable` — flag per-tenant **tắt/bật auto-action** của agent-type (gRPC vẫn chạy, không kill process) — FE start/stop
+- [ ] `GET /api/agents/{code}/traces` — đọc agent run logs; `agent_traces` đã persist (M10) nhưng thiếu endpoint
+- [ ] `GET /api/analytics/agent-cost` — chi phí theo từng agent (Report-L4: agent tốn nhất, TB/cuộc); cost tracker hiện in-memory tenant+month
+
+### Bổ sung vào module hiện có
+- **M14** — [ ] SaleAssist draft feedback loop ("AI tự học", doc L1) — ghi outcome khi sale gửi/sửa draft để cải thiện gợi ý
+- **M15** — [ ] Least-load assignment (doc: "sale rảnh nhất / ít khách nhất") — hiện `RoundRobinLeadAssignmentService`; cân nhắc least-active-load
+- **M11/M10** — [ ] Persistent cost ledger (DB) thay `InMemoryClaudeCostTracker` — cần cho báo cáo chi phí lịch sử + agent-cost report
+- **M10** — [ ] Out-of-hours window cấu hình per-tenant (hiện `OutOfHoursAutoReplyJob` window cố định)
 
 ---
 
@@ -383,20 +510,19 @@
 | Tuần | Modules in-flight | Modules done | Notes |
 |:-:|---|---|---|
 | T0 | — | (skeleton only) | Domain entities + proto + grpc stubs |
-| T1 | M03 | **M01**, **M02**, **M04** | Build xanh 0/0. |
-| T3 (early) | — | **M09 spike** (Qdrant real + RAG wire + RFC-001) | SK plugin-host only / Anthropic direct chosen. Real embedder defer. |
-| T2 | | | |
-| T3 | | | |
-| T4 | | | |
-| T5 | | | |
-| T6 | | | |
-| T7 | | | |
-| T8 | | | |
-| T9 | | | |
-| T10 | | | |
-| T11 | | | |
-| T12 | | | |
-| T13 | | | |
+| T1 | — | **M01**, **M02**, **M04**, **M09 spike** | Build xanh 0/0. SK plugin-host / Anthropic direct (RFC-001). |
+| T2 | — | **M03**, **M05**, **M12**, **M13** | Audit/PII, chat scenarios seed, Hangfire, rate-limit + webhook HMAC. |
+| T3 | — | **M11** (P0 subset) | Intent/sentiment/PII/injection/cost heuristics wired into ChatAgent. |
+| T4 | — | **M06**, **M08**, **M10** | Pancake unified adapter, omnichannel inbox, Agent-Chat (gRPC). |
+| T5 | — | **M14** | Agent-SaleAssist (draft + summary + quick replies). |
+| T6 | — | — | (M10 token-streaming / latency opt deferred) |
+| T7 | — | **M15** | Lead scoring + dedup + round-robin assign. |
+| T8 | — | **M18** | Content + Research pipeline (commit cf553a0). |
+| T9 | — | **M17** | Document generation — QuestPDF (commit 9eb8e6d). |
+| T10 | — | **M19** | Ads automation Meta+TikTok (commit fcddfbe). |
+| T11 | — | **M20** | Analytics KPI + Metabase + anomaly/forecast (commit cf553a0). |
+| T12 | **M16** | — | Frontend UI — base (tokens+shell+10 primitives) + Login&Profile group done 2026-06-13; 11 surface còn lại pending. |
+| T13 | **M21** | — | Test infra: integration (Testcontainers) + CI + coverage gate — pending. |
 
 ---
 

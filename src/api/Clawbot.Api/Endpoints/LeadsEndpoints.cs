@@ -1,6 +1,10 @@
+﻿using Clawbot.Agents.Contracts.Lead;
 using Clawbot.Agents.Core.Lead;
 using Clawbot.Api.Auth;
+using Clawbot.Agents.Core.Skills.Ops;
 using Clawbot.Api.Contracts.Leads;
+using Clawbot.Api.Middleware;
+using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Leads;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -14,17 +18,20 @@ public static class LeadsEndpoints
 {
     public static IEndpointRouteBuilder MapLeads(this IEndpointRouteBuilder app)
     {
-        // SPEC-11 §6a: reads need leads:read, mutations leads:write.
-        var grp = app.MapGroup("/api/leads");
+// SPEC-11 §6a: reads need leads:read, mutations leads:write.
+        var grp = app.MapGroup("/api/leads").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/", ListAsync).RequirePermission("leads:read");
         grp.MapGet("/{id:guid}", GetAsync).RequirePermission("leads:read");
         grp.MapPost("/", CreateAsync).RequirePermission("leads:write");
+        grp.MapPost("/create-with-skills", CreateWithSkillsAsync).RequirePermission("leads:write");
         grp.MapPost("/{id:guid}/activities", RecordActivityAsync).RequirePermission("leads:write");
         grp.MapPost("/{id:guid}/assign", AssignAsync).RequirePermission("leads:write");
+        grp.MapGet("/forecast", ForecastAsync).RequirePermission("leads:read");
+        grp.MapGet("/{id:guid}/context", ContextPanelAsync).RequirePermission("leads:read");
 
         // §6a: lead-scoring-rules is leads:write across the board.
-        var rules = app.MapGroup("/api/lead-scoring-rules").RequirePermission("leads:write");
+        var rules = app.MapGroup("/api/lead-scoring-rules").RequirePermission("leads:write").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
         rules.MapGet("/", ListRulesAsync);
         rules.MapPost("/", CreateRuleAsync);
         rules.MapDelete("/{id:guid}", DeactivateRuleAsync);
@@ -90,6 +97,53 @@ public static class LeadsEndpoints
         return Results.Created($"/api/leads/{lead.Id}",
             new CreateLeadResponse(lead.Id,
                 dupes.Select(d => new LeadDedupHitDto(d.LeadId, d.ContactId, d.Reason, d.Confidence)).ToList()));
+    }
+
+    private static async Task<IResult> CreateWithSkillsAsync(
+        CreateLeadRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        LeadAgent.LeadAgentClient leadClient,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+
+        if (body.ContactId == Guid.Empty)
+            return Results.BadRequest(new { error = "contact_id required" });
+
+        var contact = await db.Contacts
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.Id == body.ContactId && c.TenantId == tenant.TenantId, ct)
+            .ConfigureAwait(false);
+
+        if (contact is null)
+            return Results.NotFound(new { error = "contact not found" });
+
+        var grpcRequest = new LeadCreateWithSkillsRequest
+        {
+            TenantId = tenant.TenantId.ToString("D"),
+            ContactId = body.ContactId.ToString("D"),
+            DisplayName = contact?.DisplayName ?? "",
+            Phone = body.Phone ?? "",
+            Email = body.Email ?? "",
+            SourcePlatform = body.SourcePlatform,
+            Locale = contact?.Locale ?? "",
+            Country = ""
+        };
+
+        var grpcResponse = await leadClient.CreateWithSkillsAsync(grpcRequest, cancellationToken: ct).ConfigureAwait(false);
+
+        var result = new CreateWithSkillsResult(
+            Guid.Parse(grpcResponse.LeadId),
+            grpcResponse.SpamFlagged,
+            grpcResponse.SpamReason,
+            grpcResponse.Timezone,
+            grpcResponse.EnrichmentCompany,
+            grpcResponse.PossibleDup,
+            grpcResponse.DedupCandidates.Select(c => new LeadDedupCandidateDto(
+                Guid.Parse(c.ContactId), c.Similarity)).ToList());
+
+        return Results.Created($"/api/leads/{result.LeadId}", result);
     }
 
     private static async Task<IResult> RecordActivityAsync(
@@ -174,4 +228,106 @@ public static class LeadsEndpoints
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.NoContent();
     }
+
+    private static async Task<IResult> ForecastAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IForecaster forecaster,
+        [FromQuery] int horizonDays = 7,
+        CancellationToken ct = default)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var since = DateTimeOffset.UtcNow.AddDays(-60);
+
+        var dailyCounts = await db.Leads
+            .IgnoreQueryFilters()
+            .Where(l => l.TenantId == tenantId && l.CreatedAt >= since)
+            .GroupBy(l => l.CreatedAt.Date)
+            .Select(g => new { Date = g.Key, Count = g.Count() })
+            .OrderBy(x => x.Date)
+            .ToListAsync(ct);
+
+        if (dailyCounts.Count < 7)
+            return Results.Ok(new { forecast = Array.Empty<object>(), note = "need_at_least_7_days_of_data" });
+
+        var history = dailyCounts
+            .Select(d => (new DateTimeOffset(d.Date, TimeSpan.Zero), (double)d.Count))
+            .ToList();
+
+        var points = await forecaster.ForecastAsync(history, Math.Clamp(horizonDays, 1, 30), ct);
+
+        return Results.Ok(new
+        {
+            forecast = points.Select(p => new
+            {
+                date = p.At.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                predicted_leads = Math.Round(p.Forecast, 1),
+                lower_bound = Math.Round(p.LowerBound, 1),
+                upper_bound = Math.Round(p.UpperBound, 1),
+            }),
+        });
+    }
+
+    private static async Task<IResult> ContextPanelAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var lead = await db.Leads
+            .IgnoreQueryFilters()
+            .Where(l => l.Id == id && l.TenantId == tenantId)
+            .Select(l => new
+            {
+                l.Id,
+                l.Score,
+                l.Stage,
+                l.SourcePlatform,
+                l.LastActivityAt,
+                l.CreatedAt,
+                Contact = l.ContactId != null ? new
+                {
+                    Id = l.ContactId,
+                    Name = db.Contacts.Where(c => c.Id == l.ContactId).Select(c => c.DisplayName).FirstOrDefault(),
+                    Phone = db.Contacts.Where(c => c.Id == l.ContactId).Select(c => c.Phone).FirstOrDefault(),
+                    Email = db.Contacts.Where(c => c.Id == l.ContactId).Select(c => c.Email).FirstOrDefault(),
+                } : null,
+            })
+            .FirstOrDefaultAsync(ct);
+
+        if (lead is null) return Results.NotFound();
+
+        var activities = await db.LeadActivities
+            .Where(a => a.LeadId == id)
+            .OrderByDescending(a => a.OccurredAt)
+            .Take(20)
+            .Select(a => new { a.ActivityType, a.Notes, a.OccurredAt })
+            .ToListAsync(ct);
+
+        var nextStep = lead.Stage switch
+        {
+            "hot" => "Schedule demo or send payment link",
+            "warm" => "Follow up with pricing info or trial invite",
+            "cold" => "Re-engage with content or special offer",
+            "customer" => "Upsell advanced course or referral program",
+            "lost" => "Win-back campaign after 30 days",
+            _ => "Monitor and follow up",
+        };
+
+        return Results.Ok(new
+        {
+            lead.Id,
+            lead.Score,
+            lead.Stage,
+            lead.SourcePlatform,
+            lead.LastActivityAt,
+            lead.CreatedAt,
+            lead.Contact,
+            activities,
+            nextStep,
+        });
+    }
 }
+
+

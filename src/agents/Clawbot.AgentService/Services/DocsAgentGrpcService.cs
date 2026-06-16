@@ -45,9 +45,28 @@ public sealed class DocsAgentGrpcService(
         var branding = new CoreDocs.DocBranding(
             tenantName,
             LogoText: null,
-            FooterNote: $"{tenantName} · Tài liệu tạo tự động bởi ClawBot");
+            FooterNote: $"{tenantName} · Tài liệu tạo tự động bởi ClawBot",
+            QrPayload: $"clawbot://doc/{tenantId:N}/{request.TemplateCode}");
 
         var vars = new Dictionary<string, string>(request.Vars, StringComparer.Ordinal);
+
+        // Docs-1: auto-fill customer info from the linked contact (caller-supplied vars win).
+        Guid? contactId = Guid.TryParse(request.ContactId, out var cid) && cid != Guid.Empty ? cid : null;
+        if (contactId is not null)
+        {
+            var contact = await _db.Contacts.IgnoreQueryFilters()
+                .Where(c => c.Id == contactId.Value && c.TenantId == tenantId)
+                .Select(c => new { c.DisplayName, c.Phone, c.Email })
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            if (contact is not null)
+            {
+                TryAddVar(vars, "contact_name", contact.DisplayName);
+                TryAddVar(vars, "customer_name", contact.DisplayName);
+                TryAddVar(vars, "contact_phone", contact.Phone);
+                TryAddVar(vars, "contact_email", contact.Email);
+            }
+        }
+
         var renderRequest = new CoreDocs.DocsRenderRequest(
             tenantId, template.Code, template.DocType, template.TemplateHtml, vars, branding);
 
@@ -65,8 +84,6 @@ public sealed class DocsAgentGrpcService(
         var fileName = $"{template.Code}-{now:yyyyMMddHHmmss}-{Guid.NewGuid():N}.pdf".ToLowerInvariant();
         var fileUrl = await _storage.SaveAsync(result.Pdf, fileName, ct).ConfigureAwait(false);
 
-        Guid? contactId = Guid.TryParse(request.ContactId, out var cid) && cid != Guid.Empty ? cid : null;
-
         var doc = GeneratedDocument.Create(
             tenantId, template.Id, fileUrl, now,
             contactId: contactId, generatedBy: null, fileHash: result.Sha256);
@@ -82,5 +99,11 @@ public sealed class DocsAgentGrpcService(
             SizeBytes = result.SizeBytes,
             LatencyMs = result.LatencyMs,
         };
+    }
+
+    private static void TryAddVar(Dictionary<string, string> vars, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value) && !vars.ContainsKey(key))
+            vars[key] = value;
     }
 }

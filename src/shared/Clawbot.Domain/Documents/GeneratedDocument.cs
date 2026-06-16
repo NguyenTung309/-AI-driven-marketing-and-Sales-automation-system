@@ -14,6 +14,11 @@ public sealed class GeneratedDocument : AggregateRoot<Guid>, ITenantOwned
     public DateTimeOffset? SentAt { get; private set; }
     public DateTimeOffset? OpenedAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
+    // Docs-1: download link expires 7 days after generation.
+    public DateTimeOffset? ExpiresAt { get; private set; }
+
+    // Docs-1: quote/brochure download links are valid for 7 days.
+    public const int LinkValidityDays = 7;
 
     private GeneratedDocument() { }
 
@@ -35,7 +40,10 @@ public sealed class GeneratedDocument : AggregateRoot<Guid>, ITenantOwned
             GeneratedBy = generatedBy,
             FileHash = fileHash,
             CreatedAt = createdAt,
+            ExpiresAt = createdAt.AddDays(LinkValidityDays),
         };
+
+    public bool IsExpired(DateTimeOffset now) => ExpiresAt is not null && now > ExpiresAt.Value;
 
     public void MarkSent(string sentVia, DateTimeOffset at)
     {

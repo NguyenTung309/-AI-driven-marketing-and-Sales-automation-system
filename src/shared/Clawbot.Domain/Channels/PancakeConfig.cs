@@ -5,7 +5,7 @@ namespace Clawbot.Domain.Channels;
 public sealed class PancakeConfig : AggregateRoot<Guid>, ITenantOwned
 {
     public Guid TenantId { get; private set; }
-    public string BaseUrl { get; private set; } = "https://pages.fm/api/public_api/v1";
+    public string BaseUrl { get; private set; } = "https://pancake.vn/api/v1";
     public string AccessTokenEncrypted { get; private set; } = string.Empty;
     public string WebhookSecretEncrypted { get; private set; } = string.Empty;
     public string SignatureHeader { get; private set; } = "x-pancake-signature";

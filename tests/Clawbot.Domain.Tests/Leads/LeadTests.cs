@@ -1,4 +1,5 @@
 using Clawbot.Domain.Leads;
+using Clawbot.Domain.Leads.Events;
 using FluentAssertions;
 using Xunit;
 
@@ -44,6 +45,42 @@ public sealed class LeadTests
 
         lead.Score.Should().Be(0);
         lead.Stage.Should().Be("cold");
+    }
+
+    [Fact]
+    public void AdjustScore_raises_LeadBecameHot_on_crossing_into_hot()
+    {
+        var lead = NewLead();
+
+        lead.AdjustScore(75, "big jump", DateTimeOffset.UtcNow);
+
+        lead.DomainEvents.OfType<LeadBecameHot>().Should().ContainSingle()
+            .Which.Score.Should().Be(75);
+    }
+
+    [Fact]
+    public void AdjustScore_raises_LeadBecameWarm_on_cold_to_warm_only()
+    {
+        var lead = NewLead();
+
+        lead.AdjustScore(40, "warm up", DateTimeOffset.UtcNow);
+        lead.DomainEvents.OfType<LeadBecameWarm>().Should().ContainSingle();
+
+        // Already warm → another in-stage adjust must not re-raise.
+        lead.ClearDomainEvents();
+        lead.AdjustScore(5, "still warm", DateTimeOffset.UtcNow);
+        lead.DomainEvents.OfType<LeadBecameWarm>().Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AdjustScore_does_not_raise_warm_when_jumping_straight_to_hot()
+    {
+        var lead = NewLead();
+
+        lead.AdjustScore(80, "straight to hot", DateTimeOffset.UtcNow);
+
+        lead.DomainEvents.OfType<LeadBecameWarm>().Should().BeEmpty();
+        lead.DomainEvents.OfType<LeadBecameHot>().Should().ContainSingle();
     }
 
     [Fact]

@@ -12,7 +12,7 @@ public sealed partial class PancakeConfigResolver(
     IConfiguration cfg,
     ILogger<PancakeConfigResolver> logger) : IPancakeConfigResolver
 {
-    private const string DefaultBaseUrl = "https://pages.fm/api/public_api/v1";
+    private const string DefaultBaseUrl = "https://pancake.vn/api/v1";
     private const string DefaultSendPath = "/pages/{page_id}/conversations/{thread_id}/messages";
     private const string DefaultSigHeader = "x-pancake-signature";
 

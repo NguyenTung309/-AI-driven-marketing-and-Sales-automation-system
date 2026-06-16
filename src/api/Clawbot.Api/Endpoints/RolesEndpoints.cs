@@ -1,5 +1,6 @@
-using Clawbot.Api.Auth;
+﻿using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Security;
+using Clawbot.Api.Middleware;
 using Clawbot.Domain.Security;
 using Clawbot.Infrastructure.Auth;
 using Clawbot.Infrastructure.Identity;
@@ -14,8 +15,7 @@ public static class RolesEndpoints
 {
     public static IEndpointRouteBuilder MapRoles(this IEndpointRouteBuilder app)
     {
-        // SPEC-11 §6a: the whole RBAC editor requires rbac:manage (Admin only).
-        var roles = app.MapGroup("/api/rbac/roles").RequirePermission("rbac:manage");
+var roles = app.MapGroup("/api/rbac/roles").RequirePermission("rbac:manage").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         roles.MapGet("/", ListRolesAsync);
         roles.MapPost("/", CreateRoleAsync);
@@ -24,7 +24,7 @@ public static class RolesEndpoints
         roles.MapGet("/{id:guid}/permissions", ListRolePermissionsAsync);
         roles.MapPut("/{id:guid}/permissions", SetRolePermissionsAsync);
 
-        var perms = app.MapGroup("/api/rbac/permissions").RequirePermission("rbac:manage");
+        var perms = app.MapGroup("/api/rbac/permissions").RequirePermission("rbac:manage").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
         perms.MapGet("/", ListPermissionsAsync);
 
         return app;
@@ -97,7 +97,7 @@ public static class RolesEndpoints
     }
 
     // SPEC-11 D7: read/write role_permissions keyed on the fixed Identity AppRole.Id (the
-    // same store the backend resolves permissions from) — not the domain RbacRoles + tenant.
+    // same store the backend resolves permissions from) â€” not the domain RbacRoles + tenant.
     private static async Task<IResult> ListRolePermissionsAsync(
         Guid id,
         AppDbContext db,
@@ -148,3 +148,8 @@ public static class RolesEndpoints
         return Results.Ok(perms);
     }
 }
+
+
+
+
+

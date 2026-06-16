@@ -1,0 +1,645 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using Clawbot.Agents.Contracts.Content;
+using Clawbot.Agents.Contracts.Research;
+using Clawbot.Api.Contracts.Content;
+using Clawbot.Api.Middleware;
+using Clawbot.Domain.Content;
+using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Content;
+using Clawbot.SharedKernel.Multitenancy;
+using Clawbot.SharedKernel.Time;
+using Grpc.Core;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace Clawbot.Api.Endpoints;
+
+public static class ContentEndpoints
+{
+    public static IEndpointRouteBuilder MapContent(this IEndpointRouteBuilder app)
+    {
+        var grp = app.MapGroup("/api/content").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+
+        grp.MapGet("/briefs", ListBriefsAsync);
+        grp.MapGet("/briefs/{id:guid}", GetBriefAsync);
+        grp.MapPost("/briefs", CreateBriefAsync);
+        grp.MapPut("/briefs/{id:guid}", UpdateBriefAsync);
+        grp.MapDelete("/briefs/{id:guid}", DeleteBriefAsync);
+
+        grp.MapGet("/trends", TrendsAsync);
+        grp.MapPost("/trends/scan", ScanTrendsAsync);
+
+        grp.MapPost("/items/generate", GenerateItemAsync);
+        grp.MapGet("/queue", QueueAsync);
+        grp.MapPut("/items/{id:guid}", UpdateItemAsync);
+        grp.MapDelete("/items/{id:guid}", DeleteItemAsync);
+        grp.MapPost("/items/{id:guid}/approve", ApproveItemAsync);
+        grp.MapPost("/items/{id:guid}/reject", RejectItemAsync);
+        grp.MapPost("/items/{id:guid}/schedule", ScheduleItemAsync);
+        grp.MapPost("/items/{id:guid}/repurpose", RepurposeItemAsync);
+        grp.MapGet("/calendar", CalendarAsync);
+        grp.MapDelete("/schedule/{id:guid}", DeleteScheduleAsync);
+
+        return app;
+    }
+
+    private static async Task<IResult> ListBriefsAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        [FromQuery] string? status,
+        [FromQuery] string? platform,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var query = db.ContentBriefs.AsNoTracking()
+            .Where(b => b.Status != "archived");
+        if (!string.IsNullOrWhiteSpace(status))
+            query = query.Where(b => b.Status == status);
+        if (!string.IsNullOrWhiteSpace(platform))
+            query = query.Where(b => b.Platform == platform);
+
+        var rows = await query
+            .OrderByDescending(b => b.UpdatedAt)
+            .Select(b => ToDto(b))
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return Results.Ok(rows);
+    }
+
+    private static async Task<IResult> GetBriefAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var brief = await db.ContentBriefs.AsNoTracking()
+            .FirstOrDefaultAsync(b => b.Id == id, ct).ConfigureAwait(false);
+        return brief is null
+            ? Error(http, StatusCodes.Status404NotFound, "content.brief_not_found", "Content brief not found.")
+            : Results.Ok(ToDto(brief));
+    }
+
+    private static async Task<IResult> CreateBriefAsync(
+        CreateContentBriefRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        ClaimsPrincipal user,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        if (string.IsNullOrWhiteSpace(body.Platform) || string.IsNullOrWhiteSpace(body.Brief))
+            return Error(http, StatusCodes.Status400BadRequest, "content.brief_invalid", "platform and brief required.");
+
+        var brief = ContentBrief.Create(
+            tenant.TenantId, body.Platform.Trim(), body.Brief.Trim(), CurrentUserId(user), clock.UtcNow);
+        db.ContentBriefs.Add(brief);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return Results.Created($"/api/content/briefs/{brief.Id}", ToDto(brief));
+    }
+
+    private static async Task<IResult> UpdateBriefAsync(
+        Guid id,
+        UpdateContentBriefRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        if (string.IsNullOrWhiteSpace(body.Platform) || string.IsNullOrWhiteSpace(body.Brief))
+            return Error(http, StatusCodes.Status400BadRequest, "content.brief_invalid", "platform and brief required.");
+
+        var brief = await db.ContentBriefs.FirstOrDefaultAsync(b => b.Id == id, ct).ConfigureAwait(false);
+        if (brief is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.brief_not_found", "Content brief not found.");
+
+        brief.Update(body.Platform.Trim(), body.Brief.Trim(), clock.UtcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.Ok(ToDto(brief));
+    }
+
+    private static async Task<IResult> DeleteBriefAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var brief = await db.ContentBriefs.FirstOrDefaultAsync(b => b.Id == id, ct).ConfigureAwait(false);
+        if (brief is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.brief_not_found", "Content brief not found.");
+
+        brief.MarkStatus("archived", clock.UtcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> GenerateItemAsync(
+        GenerateContentItemRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        ContentAgent.ContentAgentClient grpc,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var resolved = await ResolveGenerateInputAsync(body, db, http, ct).ConfigureAwait(false);
+        if (resolved.Error is not null)
+            return resolved.Error;
+
+        try
+        {
+            var resp = await grpc.GenerateAsync(new ContentRequest
+            {
+                TenantId = tenant.TenantId.ToString(),
+                BriefId = resolved.BriefId?.ToString() ?? string.Empty,
+                Channel = resolved.Platform,
+                Brief = resolved.Brief,
+            }, cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
+
+            var item = await LoadItemAsync(Guid.Parse(resp.ContentId), db, ct).ConfigureAwait(false);
+            return Results.Ok(new GenerateContentItemResponse(item is null ? [] : [item]));
+        }
+        catch (RpcException ex)
+        {
+            return MapGrpcError(ex, http);
+        }
+    }
+
+    private static async Task<IResult> QueueAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        [FromQuery] string? status,
+        [FromQuery] string? platform,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
+    {
+        _ = tenants.Require();
+        if (page < 1) page = 1;
+        if (pageSize is < 1 or > 200) pageSize = 50;
+
+        var query = db.ContentItems.AsNoTracking().Where(i => i.DeletedAt == null);
+        if (!string.IsNullOrWhiteSpace(status))
+            query = query.Where(i => i.Status == status);
+        if (!string.IsNullOrWhiteSpace(platform))
+            query = query.Where(i => i.Platform == platform);
+
+        var total = await query.CountAsync(ct).ConfigureAwait(false);
+        var items = await query
+            .OrderByDescending(i => i.UpdatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(i => ToDto(i))
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return Results.Ok(new ContentQueueResponse(items, total, page, pageSize));
+    }
+
+    private static async Task<IResult> UpdateItemAsync(
+        Guid id,
+        UpdateContentItemRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        if (string.IsNullOrWhiteSpace(body.Body))
+            return Error(http, StatusCodes.Status400BadRequest, "content.item_invalid", "body required.");
+
+        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (item is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+
+        item.UpdateBody(body.Body, clock.UtcNow);
+        if (body.AssetsJson is not null)
+            item.SetAssets(body.AssetsJson, clock.UtcNow);
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.Ok(ToDto(item));
+    }
+
+    private static async Task<IResult> DeleteItemAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (item is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+
+        item.SoftDelete(clock.UtcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> ApproveItemAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        ClaimsPrincipal user,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var userId = CurrentUserId(user);
+        if (userId is null)
+            return Error(http, StatusCodes.Status400BadRequest, "content.user_missing", "Authenticated user id is required.");
+
+        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (item is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+
+        item.Approve(userId.Value, clock.UtcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.Ok(ToDto(item));
+    }
+
+    private static async Task<IResult> RejectItemAsync(
+        Guid id,
+        RejectContentItemRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        _ = body;
+        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (item is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+
+        item.Reject(clock.UtcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.Ok(ToDto(item));
+    }
+
+    private static async Task<IResult> RepurposeItemAsync(
+        Guid id,
+        RepurposeContentItemRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        ContentAgent.ContentAgentClient grpc,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        if (body.TargetPlatforms.Count == 0 || body.TargetPlatforms.Any(string.IsNullOrWhiteSpace))
+            return Error(http, StatusCodes.Status400BadRequest, "content.repurpose_invalid", "targetPlatforms required.");
+
+        try
+        {
+            var req = new RepurposeRequest
+            {
+                TenantId = tenant.TenantId.ToString(),
+                ContentId = id.ToString(),
+            };
+            req.TargetChannels.AddRange(body.TargetPlatforms);
+            var resp = await grpc.RepurposeAsync(req, cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
+
+            var ids = resp.Variants
+                .Select(v => Guid.TryParse(v.ContentId, out var parsed) ? parsed : Guid.Empty)
+                .Where(parsed => parsed != Guid.Empty)
+                .ToList();
+            var items = await LoadItemsAsync(ids, db, ct).ConfigureAwait(false);
+            return Results.Ok(new GenerateContentItemResponse(items));
+        }
+        catch (RpcException ex)
+        {
+            return MapGrpcError(ex, http);
+        }
+    }
+
+    private static async Task<IResult> ScheduleItemAsync(
+        Guid id,
+        ScheduleContentItemRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        IGoldenHourResolver goldenHour,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (item is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+        if (!string.Equals(item.Status, "approved", StringComparison.OrdinalIgnoreCase))
+            return Error(http, StatusCodes.Status400BadRequest, "content.item_not_approved", "Only approved content can be scheduled.");
+
+        var now = clock.UtcNow;
+        var resolution = ResolveScheduledAt(body, item, now, goldenHour);
+        if (resolution.ErrorCode is not null)
+            return Error(http, StatusCodes.Status400BadRequest, resolution.ErrorCode, resolution.Message ?? "Invalid schedule.");
+
+        var exists = await db.ContentSchedules.AsNoTracking()
+            .AnyAsync(s => s.ContentItemId == id && s.Status == "pending", ct).ConfigureAwait(false);
+        if (exists)
+            return Error(http, StatusCodes.Status409Conflict, "content.schedule_exists", "Content item already has a pending schedule.");
+
+        var schedule = ContentSchedule.Schedule(item.TenantId, item.Id, item.Platform, resolution.ScheduledAt, now);
+        item.MarkScheduled(now);
+        db.ContentSchedules.Add(schedule);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return Results.Created($"/api/content/schedule/{schedule.Id}", ToDto(schedule));
+    }
+
+    private static async Task<IResult> CalendarAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        [FromQuery] DateTimeOffset? from,
+        [FromQuery] DateTimeOffset? to,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var fromValue = from ?? new DateTimeOffset(clock.UtcNow.UtcDateTime.Date, TimeSpan.Zero);
+        var toValue = to ?? fromValue.AddDays(30);
+        if (toValue <= fromValue)
+            return Error(http, StatusCodes.Status400BadRequest, "content.calendar_range_invalid", "to must be after from.");
+
+        var schedules = await db.ContentSchedules.AsNoTracking()
+            .Where(s => s.ScheduledAt >= fromValue && s.ScheduledAt < toValue)
+            .OrderBy(s => s.ScheduledAt)
+            .ToListAsync(ct).ConfigureAwait(false);
+        if (schedules.Count == 0)
+            return Results.Ok(new ContentCalendarResponse([]));
+
+        var itemIds = schedules.Select(s => s.ContentItemId).Distinct().ToList();
+        var itemsById = await db.ContentItems.AsNoTracking()
+            .Where(i => itemIds.Contains(i.Id) && i.DeletedAt == null)
+            .ToDictionaryAsync(i => i.Id, ct).ConfigureAwait(false);
+        var rows = BuildCalendarRows(schedules, itemsById);
+
+        return Results.Ok(new ContentCalendarResponse(rows));
+    }
+
+    private static async Task<IResult> DeleteScheduleAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var schedule = await db.ContentSchedules.FirstOrDefaultAsync(s => s.Id == id, ct).ConfigureAwait(false);
+        if (schedule is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.schedule_not_found", "Content schedule not found.");
+        if (!string.Equals(schedule.Status, "pending", StringComparison.OrdinalIgnoreCase))
+            return Error(http, StatusCodes.Status400BadRequest, "content.schedule_not_pending", "Only pending schedules can be canceled.");
+
+        schedule.Cancel(clock.UtcNow);
+        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == schedule.ContentItemId && i.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (item is not null && string.Equals(item.Status, "scheduled", StringComparison.OrdinalIgnoreCase))
+            item.RevertToApproved(clock.UtcNow);
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> TrendsAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        [FromQuery] string? week,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var query = db.ContentBriefs.AsNoTracking()
+            .Where(b => b.Brief.StartsWith("[trend:"));
+
+        if (!string.IsNullOrWhiteSpace(week))
+        {
+            if (!ContentTrendBriefFormatter.TryNormalizeWeekOf(week, out var normalizedWeek))
+                return Error(http, StatusCodes.Status400BadRequest, "content.week_invalid", "week must use ISO format yyyy-Www.");
+
+            var prefix = $"[trend:{normalizedWeek}]";
+            query = query.Where(b => b.Brief.StartsWith(prefix));
+        }
+
+        var briefs = await query
+            .OrderByDescending(b => b.UpdatedAt)
+            .Select(b => b.Brief)
+            .ToListAsync(ct).ConfigureAwait(false);
+        var trends = briefs
+            .Select(ToTrendDto)
+            .Where(t => t is not null)
+            .Select(t => t!)
+            .ToList();
+
+        return Results.Ok(new TrendScanResponse(trends));
+    }
+
+    private static async Task<IResult> ScanTrendsAsync(
+        ResearchAgent.ResearchAgentClient grpc,
+        ITenantAccessor tenants,
+        IContentNotifier notifier,
+        IClock clock,
+        [FromQuery] string? week,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        try
+        {
+            var response = await grpc.WeeklyTrendsAsync(
+                new TrendRequest
+                {
+                    TenantId = tenant.TenantId.ToString(),
+                    WeekOf = week ?? string.Empty,
+                },
+                cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
+            var trends = response.Trends.Select(ToTrendDto).ToList();
+            await notifier.NotifyTrendScanAsync(
+                tenant.TenantId,
+                new ContentTrendScanEvent(tenant.TenantId, trends.Count, clock.UtcNow),
+                ct).ConfigureAwait(false);
+
+            return Results.Ok(new TrendScanResponse(trends));
+        }
+        catch (RpcException ex)
+        {
+            return MapGrpcError(ex, http);
+        }
+    }
+
+    private static async Task<GenerateInput> ResolveGenerateInputAsync(
+        GenerateContentItemRequest body,
+        AppDbContext db,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        if (body.BriefId.HasValue)
+        {
+            var brief = await db.ContentBriefs.AsNoTracking()
+                .FirstOrDefaultAsync(b => b.Id == body.BriefId.Value, ct).ConfigureAwait(false);
+            if (brief is null)
+                return new GenerateInput(null, string.Empty, string.Empty,
+                    Error(http, StatusCodes.Status404NotFound, "content.brief_not_found", "Content brief not found."));
+
+            return new GenerateInput(brief.Id, brief.Platform, brief.Brief, null);
+        }
+
+        if (string.IsNullOrWhiteSpace(body.Platform) || string.IsNullOrWhiteSpace(body.BriefText))
+        {
+            return new GenerateInput(null, string.Empty, string.Empty,
+                Error(http, StatusCodes.Status400BadRequest, "content.generate_invalid", "briefId or platform and briefText required."));
+        }
+
+        return new GenerateInput(null, body.Platform.Trim(), body.BriefText.Trim(), null);
+    }
+
+    private static async Task<ContentItemDto?> LoadItemAsync(Guid id, AppDbContext db, CancellationToken ct) =>
+        await db.ContentItems.AsNoTracking()
+            .Where(i => i.Id == id && i.DeletedAt == null)
+            .Select(i => ToDto(i))
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+    private static async Task<IReadOnlyList<ContentItemDto>> LoadItemsAsync(
+        List<Guid> ids,
+        AppDbContext db,
+        CancellationToken ct)
+    {
+        if (ids.Count == 0)
+            return [];
+
+        return await db.ContentItems.AsNoTracking()
+            .Where(i => ids.Contains(i.Id) && i.DeletedAt == null)
+            .OrderByDescending(i => i.CreatedAt)
+            .Select(i => ToDto(i))
+            .ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    private static ContentBriefDto ToDto(ContentBrief brief) =>
+        new(brief.Id, brief.Platform, brief.Brief, brief.Status, brief.CreatedBy, brief.CreatedAt, brief.UpdatedAt);
+
+    private static ContentItemDto ToDto(ContentItem item) =>
+        new(
+            item.Id,
+            item.BriefId,
+            item.Platform,
+            item.Status,
+            item.Body,
+            item.AssetsJson,
+            item.CreatedBy,
+            item.ApprovedBy,
+            item.ApprovedAt,
+            item.CreatedAt,
+            item.UpdatedAt);
+
+    private static ContentScheduleDto ToDto(ContentSchedule schedule) =>
+        new(
+            schedule.Id,
+            schedule.ContentItemId,
+            schedule.Platform,
+            schedule.ScheduledAt,
+            schedule.PostedAt,
+            schedule.Status,
+            schedule.PostUrl,
+            schedule.CreatedAt,
+            schedule.UpdatedAt);
+
+    internal static IReadOnlyList<ContentCalendarItemDto> BuildCalendarRows(
+        IReadOnlyList<ContentSchedule> schedules,
+        IReadOnlyDictionary<Guid, ContentItem> itemsById) =>
+        schedules
+            .Where(s => itemsById.ContainsKey(s.ContentItemId))
+            .Select(s =>
+            {
+                var item = itemsById[s.ContentItemId];
+                return new ContentCalendarItemDto(
+                    s.Id,
+                    s.ContentItemId,
+                    s.Platform,
+                    s.Status,
+                    item.Body,
+                    s.ScheduledAt,
+                    s.PostedAt,
+                    s.PostUrl);
+            })
+            .ToList();
+
+    internal static ScheduleResolution ResolveScheduledAt(
+        ScheduleContentItemRequest body,
+        ContentItem item,
+        DateTimeOffset now,
+        IGoldenHourResolver goldenHour)
+    {
+        var scheduledAt = body.ScheduledAt ?? goldenHour.ResolveNext(item.Platform, now);
+        return scheduledAt <= now
+            ? new ScheduleResolution(
+                scheduledAt,
+                "content.schedule_in_past",
+                "scheduledAt must be in the future.")
+            : new ScheduleResolution(scheduledAt, null, null);
+    }
+
+    private static TrendDto ToTrendDto(TrendItem trend) =>
+        new(trend.Topic, trend.Source, trend.Metric, trend.RelevanceScore, trend.ContentIdeas.ToList());
+
+    private static TrendDto? ToTrendDto(string brief)
+    {
+        if (!ContentTrendBriefFormatter.TryParse(brief, out var trend) || trend is null)
+            return null;
+
+        return new TrendDto(
+            trend.Topic,
+            trend.Source,
+            trend.Metric,
+            trend.RelevanceScore,
+            trend.ContentIdeas);
+    }
+
+    private static Guid? CurrentUserId(ClaimsPrincipal user)
+    {
+        var raw = user.FindFirstValue(JwtRegisteredClaimNames.Sub)
+            ?? user.FindFirstValue(ClaimTypes.NameIdentifier);
+        return Guid.TryParse(raw, out var id) && id != Guid.Empty ? id : null;
+    }
+
+    private static IResult MapGrpcError(RpcException ex, HttpContext http) =>
+        ex.StatusCode switch
+        {
+            StatusCode.InvalidArgument => Error(http, StatusCodes.Status400BadRequest, "content.agent_invalid", ex.Status.Detail),
+            StatusCode.NotFound => Error(http, StatusCodes.Status404NotFound, "content.agent_not_found", ex.Status.Detail),
+            StatusCode.Unavailable => Error(http, StatusCodes.Status503ServiceUnavailable, "content.agent_unavailable", ex.Status.Detail),
+            _ => Error(http, StatusCodes.Status502BadGateway, "content.agent_failed", ex.Status.Detail),
+        };
+
+    private static IResult Error(HttpContext http, int statusCode, string errorCode, string message) =>
+        Results.Json(
+            new ContentApiError(errorCode, message, http.TraceIdentifier),
+            statusCode: statusCode);
+
+    private sealed record GenerateInput(Guid? BriefId, string Platform, string Brief, IResult? Error);
+
+    internal sealed record ScheduleResolution(DateTimeOffset ScheduledAt, string? ErrorCode, string? Message);
+
+    private sealed record ContentApiError(string ErrorCode, string Message, string RequestId);
+}

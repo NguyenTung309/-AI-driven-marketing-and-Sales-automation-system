@@ -27,3 +27,14 @@ public sealed record LeadAssignRequest(Guid? UserId);
 
 public sealed record LeadScoringRuleDto(Guid Id, string EventCode, string? Platform, int Weight, bool IsActive, string? Description);
 public sealed record CreateLeadScoringRuleRequest(string EventCode, int Weight, string? Platform, string? Description);
+
+public sealed record CreateWithSkillsResult(
+    Guid LeadId,
+    bool SpamFlagged,
+    string SpamReason,
+    string Timezone,
+    string EnrichmentCompany,
+    bool PossibleDup,
+    IReadOnlyList<LeadDedupCandidateDto> DedupCandidates);
+
+public sealed record LeadDedupCandidateDto(Guid ContactId, float Similarity);

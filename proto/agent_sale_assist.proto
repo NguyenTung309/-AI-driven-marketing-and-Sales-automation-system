@@ -7,6 +7,8 @@ package clawbot.agents.sale_assist;
 service SaleAssistAgent {
   rpc Draft (DraftRequest) returns (DraftResponse);
   rpc Summarize (SummarizeRequest) returns (SummarizeResponse);
+  rpc AutoSummaryOnResolve (AutoSummaryRequest) returns (AutoSummaryResponse);
+  rpc Upsell (UpsellRequest) returns (UpsellResponse);
 }
 
 message DraftRequest {
@@ -28,4 +30,28 @@ message SummarizeRequest {
 
 message SummarizeResponse {
   string summary = 1;
+}
+
+message AutoSummaryRequest {
+  string tenant_id = 1;
+  string conversation_id = 2;
+}
+
+message AutoSummaryResponse {
+  string summary = 1;
+  repeated string key_points = 2;
+  bool persisted = 3;
+}
+
+// SaleAssist-4: contextual upsell suggestion for a near-closing (hot) lead.
+message UpsellRequest {
+  string tenant_id = 1;
+  string conversation_id = 2;
+}
+
+message UpsellResponse {
+  bool eligible = 1;       // false when the lead is not yet 'hot' (no LLM call made)
+  string suggestion = 2;   // AI-generated upsell text (empty when not eligible)
+  string reason = 3;       // why eligible / not eligible
+  int32 lead_score = 4;
 }

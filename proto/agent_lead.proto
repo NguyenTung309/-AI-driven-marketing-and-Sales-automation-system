@@ -6,6 +6,7 @@ package clawbot.agents.lead;
 
 service LeadAgent {
   rpc Score (LeadScoreRequest) returns (LeadScoreResponse);
+  rpc CreateWithSkills (LeadCreateWithSkillsRequest) returns (LeadCreateWithSkillsResponse);
 }
 
 message LeadScoreRequest {
@@ -17,4 +18,31 @@ message LeadScoreRequest {
 message LeadScoreResponse {
   int32 score = 1;
   string reason = 2;
+}
+
+message LeadCreateWithSkillsRequest {
+  string tenant_id = 1;
+  string contact_id = 2;
+  string display_name = 3;
+  string phone = 4;
+  string email = 5;
+  string source_platform = 6;
+  string locale = 7;
+  string country = 8;
+  string note = 9;
+}
+
+message LeadCreateWithSkillsResponse {
+  string lead_id = 1;
+  bool spam_flagged = 2;
+  string spam_reason = 3;
+  string timezone = 4;
+  string enrichment_company = 5;
+  bool possible_dup = 6;
+  repeated DedupCandidateDto dedup_candidates = 7;
+}
+
+message DedupCandidateDto {
+  string contact_id = 1;
+  float similarity = 2;
 }

@@ -38,4 +38,14 @@ public sealed class AdsRule : AggregateRoot<Guid>, ITenantOwned
         };
 
     public void Deactivate() => IsActive = false;
+
+    public void Update(string platform, string metric, string comparator, decimal threshold, string action, DateTimeOffset at)
+    {
+        Platform = platform;
+        Metric = metric;
+        Comparator = comparator;
+        Threshold = threshold;
+        Action = action;
+        UpdatedAt = at;
+    }
 }

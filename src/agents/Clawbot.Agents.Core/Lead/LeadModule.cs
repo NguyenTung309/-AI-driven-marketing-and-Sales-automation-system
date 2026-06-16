@@ -6,7 +6,7 @@ public static class LeadModule
 {
     public static IServiceCollection AddClawbotLead(this IServiceCollection services)
     {
-        services.AddScoped<ILeadAssignmentService, RoundRobinLeadAssignmentService>();
+        services.AddScoped<ILeadAssignmentService, LeastBusyLeadAssignmentService>();
         return services;
     }
 }

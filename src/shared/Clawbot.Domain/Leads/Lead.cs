@@ -20,8 +20,9 @@ public sealed class Lead : AggregateRoot<Guid>, ITenantOwned
 
     private Lead() { }
 
-    public static Lead Create(Guid tenantId, Guid contactId, string sourcePlatform, DateTimeOffset createdAt) =>
-        new()
+    public static Lead Create(Guid tenantId, Guid contactId, string sourcePlatform, DateTimeOffset createdAt)
+    {
+        var lead = new Lead
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
@@ -29,9 +30,13 @@ public sealed class Lead : AggregateRoot<Guid>, ITenantOwned
             SourcePlatform = sourcePlatform,
             CreatedAt = createdAt,
         };
+        lead.Raise(new Events.LeadCreated(tenantId, lead.Id, contactId, sourcePlatform, createdAt));
+        return lead;
+    }
 
     public void AdjustScore(int delta, string reason, DateTimeOffset at)
     {
+        var previousStage = Stage;
         Score = Math.Max(0, Score + delta);
         Stage = Score switch
         {
@@ -41,6 +46,12 @@ public sealed class Lead : AggregateRoot<Guid>, ITenantOwned
         };
         _activities.Add(LeadActivity.Create(TenantId, Id, "score_adjust", reason, at));
         LastActivityAt = at;
+
+        // Raise on upward stage transition only (consumed by Lead-2 auto-assign+notify / Lead-3 drip-enroll).
+        if (Stage == "hot" && previousStage != "hot")
+            Raise(new Events.LeadBecameHot(TenantId, Id, OwnerUserId, Score, at));
+        else if (Stage == "warm" && previousStage == "cold")
+            Raise(new Events.LeadBecameWarm(TenantId, Id, Score, at));
     }
 
     public void Assign(Guid userId) => OwnerUserId = userId;

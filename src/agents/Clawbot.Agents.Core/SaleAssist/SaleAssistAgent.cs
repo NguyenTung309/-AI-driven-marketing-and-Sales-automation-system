@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Rag;
+using Clawbot.Agents.Core.Skills.Nlp;
+using Microsoft.Extensions.Options;
 
 namespace Clawbot.Agents.Core.SaleAssist;
 
@@ -21,7 +23,8 @@ public sealed record DraftResult(
     int InputTokens,
     int OutputTokens,
     decimal UsdCost,
-    long LatencyMs);
+    long LatencyMs,
+    bool ToxicityBlocked = false);
 
 public sealed record SummaryResult(
     string Summary,
@@ -30,7 +33,19 @@ public sealed record SummaryResult(
     decimal UsdCost,
     long LatencyMs);
 
-public sealed class SaleAssistAgent(IRagRetriever rag, IClaudeChatClient claude)
+public sealed record UpsellResult(
+    string Suggestion,
+    int InputTokens,
+    int OutputTokens,
+    decimal UsdCost,
+    long LatencyMs);
+
+public sealed class SaleAssistAgent(
+    IRagRetriever rag,
+    IClaudeChatClient claude,
+    IConversationSummarizer summarizer,
+    IToxicityFilter toxicity,
+    IOptions<ToxicityOptions> toxicityOptions)
 {
     private const string DraftSystem =
         "You are ClawBot Sale Assist. Help the human sales rep by drafting the NEXT reply to send to the customer. " +
@@ -41,8 +56,17 @@ public sealed class SaleAssistAgent(IRagRetriever rag, IClaudeChatClient claude)
         "You are ClawBot Sale Assist. Summarize the conversation in 3 bullet points: customer goal, blockers, next best action. " +
         "Use Vietnamese. Keep each bullet under 20 words.";
 
+    private const string UpsellSystem =
+        "You are ClawBot Sale Assist. This customer is a hot lead near closing. Based ONLY on what they discussed, " +
+        "propose ONE concrete upsell or cross-sell offer (combo, premium package, add-on, longer course) that fits their stated goal. " +
+        "Vietnamese, <=60 words, friendly and specific. If the conversation shows no real closing signal, reply exactly 'NONE'. " +
+        "Return ONLY the suggestion text.";
+
     private readonly IRagRetriever _rag = rag;
     private readonly IClaudeChatClient _claude = claude;
+    private readonly IConversationSummarizer _summarizer = summarizer;
+    private readonly IToxicityFilter _toxicity = toxicity;
+    private readonly ToxicityOptions _toxicityOptions = toxicityOptions.Value;
 
     public async Task<DraftResult> DraftAsync(ConversationContext ctx, CancellationToken ct = default)
     {
@@ -61,6 +85,18 @@ public sealed class SaleAssistAgent(IRagRetriever rag, IClaudeChatClient claude)
         var system = AppendKb(DraftSystem, chunks);
         var prompt = $"Customer last said: \"{lastCustomerText}\". Draft the next reply.";
         var reply = await _claude.CompleteAsync(system, history, prompt, ct).ConfigureAwait(false);
+
+        // Tone check: block draft if toxic before showing to sale rep
+        var isToxic = await _toxicity.IsBlockedAsync(reply.Text, _toxicityOptions.DraftBlockThreshold, ct).ConfigureAwait(false);
+        if (isToxic)
+        {
+            sw.Stop();
+            return new DraftResult(
+                "[Draft blocked — toxic content detected. Escalate to manager.]",
+                "escalate", HintLeadScore(ctx.RecentTurns),
+                reply.InputTokens, reply.OutputTokens, reply.UsdCost, sw.ElapsedMilliseconds,
+                ToxicityBlocked: true);
+        }
 
         var action = InferAction(reply.Text, ctx.RecentTurns);
         var scoreHint = HintLeadScore(ctx.RecentTurns);
@@ -84,6 +120,43 @@ public sealed class SaleAssistAgent(IRagRetriever rag, IClaudeChatClient claude)
         sw.Stop();
         return new SummaryResult(reply.Text.Trim(),
             reply.InputTokens, reply.OutputTokens, reply.UsdCost, sw.ElapsedMilliseconds);
+    }
+
+    // SaleAssist-4: contextual upsell suggestion. Caller gates on lead.Stage=='hot' before invoking;
+    // Claude reads the recent turns + KB hints and proposes a concrete offer (or 'NONE' if no closing signal).
+    public async Task<UpsellResult> SuggestUpsellAsync(ConversationContext ctx, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(ctx);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        var lastCustomerText = ctx.RecentTurns.LastOrDefault(t => t.Direction == "in")?.Content ?? string.Empty;
+        var chunks = await _rag.RetrieveAsync(
+            new RagRequest(ctx.TenantId, KbModuleCode: null, lastCustomerText, TopK: 3), ct).ConfigureAwait(false);
+
+        var system = AppendKb(UpsellSystem, chunks);
+        var transcript = BuildTranscript(ctx.RecentTurns);
+        var reply = await _claude.CompleteAsync(
+            system, history: Array.Empty<ChatTurn>(),
+            userMessage: $"Conversation so far:\n{transcript}\n\nUpsell suggestion:", ct).ConfigureAwait(false);
+
+        sw.Stop();
+        return new UpsellResult(reply.Text.Trim(),
+            reply.InputTokens, reply.OutputTokens, reply.UsdCost, sw.ElapsedMilliseconds);
+    }
+
+    // Auto-summary for Resolve — uses IConversationSummarizer (Claude) + persists to agent_sessions trace.
+    public async Task<Core.Skills.Nlp.SummaryResult> AutoSummaryAsync(ConversationContext ctx, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(ctx);
+
+        var turns = ctx.RecentTurns
+            .Select(t => new ConversationTurn(
+                t.Direction == "in" ? "customer" : "agent",
+                t.Content,
+                t.SentAt))
+            .ToList();
+
+        return await _summarizer.SummarizeAsync(turns, maxWords: 100, ct).ConfigureAwait(false);
     }
 
     private static string AppendKb(string baseSystem, IReadOnlyList<RagChunk> chunks)

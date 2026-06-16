@@ -1,10 +1,13 @@
-using Clawbot.Api.Auth;
+﻿using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Inbox;
+using Clawbot.Api.Middleware;
+using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Inbox;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
+using Hangfire;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,8 +17,7 @@ public static class InboxEndpoints
 {
     public static IEndpointRouteBuilder MapInbox(this IEndpointRouteBuilder app)
     {
-        // SPEC-11 §6a: reads need conversations:read, mutations conversations:write.
-        var grp = app.MapGroup("/api/inbox");
+var grp = app.MapGroup("/api/inbox").RequireRateLimiting(RateLimitingExtensions.ChatPolicy);
 
         grp.MapGet("/conversations", ListAsync).RequirePermission("conversations:read");
         grp.MapGet("/conversations/{id:guid}", GetAsync).RequirePermission("conversations:read");
@@ -47,7 +49,9 @@ public static class InboxEndpoints
         var total = await query.CountAsync(ct).ConfigureAwait(false);
 
         var rows = await query
-            .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
+            // M15 lead-score join: surface hot-lead conversations first, then by recency.
+            .OrderByDescending(c => db.Leads.Where(l => l.ContactId == c.ContactId).Max(l => (int?)l.Score) ?? 0)
+            .ThenByDescending(c => c.LastMessageAt ?? c.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(c => new
@@ -114,7 +118,11 @@ public static class InboxEndpoints
     }
 
     private static async Task<IResult> ResolveAsync(
-        Guid id, AppDbContext db, ITenantAccessor tenants, IInboxNotifier notifier, CancellationToken ct)
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IInboxNotifier notifier,
+        CancellationToken ct)
     {
         var tenant = tenants.Require();
         var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id, ct).ConfigureAwait(false);
@@ -123,6 +131,10 @@ public static class InboxEndpoints
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         await notifier.NotifyConversationUpdatedAsync(tenant.TenantId,
             new InboxConversationEvent(conv.Id, conv.Status, conv.AssignedTo, conv.LastMessageAt), ct).ConfigureAwait(false);
+
+        // Auto-summary on resolve â€” enqueue as Hangfire background job (non-blocking)
+        BackgroundJob.Enqueue<AutoSummaryJob>(j => j.RunAsync(tenant.TenantId, id, CancellationToken.None));
+
         return Results.NoContent();
     }
 
@@ -166,5 +178,9 @@ public static class InboxEndpoints
     }
 
     private static string Preview(string text) =>
-        text.Length <= 140 ? text : text[..140] + "…";
+        text.Length <= 140 ? text : text[..140] + "â€¦";
 }
+
+
+
+

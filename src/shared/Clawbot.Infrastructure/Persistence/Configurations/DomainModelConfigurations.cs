@@ -1,4 +1,4 @@
-using Clawbot.Domain.Ads;
+﻿using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
 using Clawbot.Domain.Analytics;
 using Clawbot.Domain.Channels;
@@ -192,7 +192,7 @@ public sealed class KbVersionConfiguration : IEntityTypeConfiguration<KbVersion>
         builder.Property(x => x.Status).HasMaxLength(32);
         builder.HasIndex(x => new { x.KbModuleId, x.Version }).IsUnique();
         // Embedding stored as JSON-serialized float array in NVARCHAR(MAX).
-        // For vector similarity search use Qdrant — see IVectorStore.
+        // For vector similarity search use Qdrant â€” see IVectorStore.
         builder.Property(x => x.Embedding).HasColumnType("nvarchar(max)");
     }
 }
@@ -386,6 +386,28 @@ public sealed class AdsActionConfiguration : IEntityTypeConfiguration<AdsAction>
     }
 }
 
+public sealed class AdsCreativeConfiguration : IEntityTypeConfiguration<AdsCreative>
+{
+    public void Configure(EntityTypeBuilder<AdsCreative> builder)
+    {
+        builder.ToTable("ads_creatives");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.ExternalCreativeId).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.Status).HasMaxLength(16).IsRequired();
+        builder.HasIndex(x => new { x.CampaignId, x.Status });
+    }
+}
+
+public sealed class AdsMetricsDailyConfiguration : IEntityTypeConfiguration<AdsMetricsDaily>
+{
+    public void Configure(EntityTypeBuilder<AdsMetricsDaily> builder)
+    {
+        builder.ToTable("ads_metrics_daily");
+        builder.HasKey(x => x.Id);
+        builder.HasIndex(x => new { x.CampaignId, x.MetricDate }).IsUnique();
+    }
+}
+
 public sealed class KpiDailyConfiguration : IEntityTypeConfiguration<KpiDaily>
 {
     public void Configure(EntityTypeBuilder<KpiDaily> builder)
@@ -396,7 +418,6 @@ public sealed class KpiDailyConfiguration : IEntityTypeConfiguration<KpiDaily>
         builder.HasIndex(x => new { x.TenantId, x.Date, x.Platform }).IsUnique();
     }
 }
-
 public sealed class LlmConfigConfiguration : IEntityTypeConfiguration<LlmConfig>
 {
     public void Configure(EntityTypeBuilder<LlmConfig> builder)
@@ -409,5 +430,18 @@ public sealed class LlmConfigConfiguration : IEntityTypeConfiguration<LlmConfig>
         builder.Property(x => x.BaseUrl).HasMaxLength(512);
         builder.Property(x => x.Temperature).HasColumnType("decimal(3,2)");
         builder.HasIndex(x => new { x.TenantId, x.IsActive });
+    }
+}
+
+public sealed class KpiForecastConfiguration : IEntityTypeConfiguration<KpiForecast>
+{
+    public void Configure(EntityTypeBuilder<KpiForecast> builder)
+    {
+        builder.ToTable("kpi_forecast");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.Metric).HasMaxLength(64).IsRequired();
+        builder.HasIndex(x => new { x.TenantId, x.Platform, x.Metric, x.ForecastDate }).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.Metric, x.ForecastDate });
     }
 }

@@ -25,4 +25,17 @@ public sealed class ContentBrief : AggregateRoot<Guid>, ITenantOwned
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         };
+
+    public void Update(string platform, string brief, DateTimeOffset updatedAt)
+    {
+        Platform = platform;
+        Brief = brief;
+        UpdatedAt = updatedAt;
+    }
+
+    public void MarkStatus(string status, DateTimeOffset at)
+    {
+        Status = status;
+        UpdatedAt = at;
+    }
 }

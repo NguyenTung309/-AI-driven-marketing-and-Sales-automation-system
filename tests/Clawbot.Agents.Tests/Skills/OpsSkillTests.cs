@@ -119,3 +119,57 @@ public sealed class InMemoryClaudeCostTrackerTests
         await act.Should().ThrowAsync<ArgumentNullException>();
     }
 }
+
+public sealed class ZScoreAnomalyDetectorTests
+{
+    [Fact]
+    public async Task Flags_injected_spike_above_threshold()
+    {
+        var sut = new ZScoreAnomalyDetector();
+        var start = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var values = new[] { 10d, 11d, 9d, 10d, 10.5d, 9.5d, 10d, 35d };
+        var series = values.Select((value, index) => (start.AddDays(index), value)).ToList();
+
+        var scored = await sut.ScoreAsync(series, zThreshold: 2.5d, CancellationToken.None);
+
+        scored[^1].IsAnomaly.Should().BeTrue();
+        scored[^1].ZScore.Should().BeGreaterThan(2.5d);
+        scored.Take(scored.Count - 1).Should().OnlyContain(p => !p.IsAnomaly);
+    }
+
+    [Fact]
+    public async Task Ignores_normal_noise_and_zero_variance()
+    {
+        var sut = new ZScoreAnomalyDetector();
+        var start = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var noise = new[] { 10d, 10.2d, 9.8d, 10.1d, 10d, 9.9d, 10.1d };
+        var noiseSeries = noise.Select((value, index) => (start.AddDays(index), value)).ToList();
+        var flatSeries = Enumerable.Repeat(5d, 7)
+            .Select((value, index) => (start.AddDays(index), value))
+            .ToList();
+
+        var noiseScored = await sut.ScoreAsync(noiseSeries, zThreshold: 3d, CancellationToken.None);
+        var flatScored = await sut.ScoreAsync(flatSeries, zThreshold: 3d, CancellationToken.None);
+
+        noiseScored.Concat(flatScored).Should().OnlyContain(p => !p.IsAnomaly);
+    }
+}
+
+public sealed class MlNetForecasterTests
+{
+    [Fact]
+    public async Task Forecast_returns_requested_horizon_with_ordered_bounds()
+    {
+        var sut = new MlNetForecaster();
+        var start = new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero);
+        var history = Enumerable.Range(0, 35)
+            .Select(i => (start.AddDays(i), Value: 100d + (i * 1.5d) + Math.Sin(i / 3d)))
+            .ToList();
+
+        var forecast = await sut.ForecastAsync(history, horizonDays: 7, CancellationToken.None);
+
+        forecast.Should().HaveCount(7);
+        forecast.Select(p => p.At).Should().Equal(Enumerable.Range(1, 7).Select(i => history[^1].Item1.AddDays(i)));
+        forecast.Should().OnlyContain(p => p.LowerBound <= p.Forecast && p.Forecast <= p.UpperBound);
+    }
+}

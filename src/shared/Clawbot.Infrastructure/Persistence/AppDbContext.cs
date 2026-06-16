@@ -6,6 +6,7 @@ using Clawbot.Domain.Analytics;
 using Clawbot.Domain.Channels;
 using Clawbot.Domain.ChatScenarios;
 using Clawbot.Domain.Common;
+using Clawbot.Domain.Competitors;
 using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Content;
 using Clawbot.Domain.Conversations;
@@ -13,11 +14,13 @@ using Clawbot.Domain.Documents;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.Llm;
+using Clawbot.Domain.Notifications;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.SharedKernel.Multitenancy;
+using MassTransit;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -37,6 +40,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Auth.RefreshToken> RefreshTokens => Set<Auth.RefreshToken>();
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     // Contacts
     public DbSet<Contact> Contacts => Set<Contact>();
@@ -63,6 +67,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<AgentConfig> AgentConfigs => Set<AgentConfig>();
     public DbSet<AgentSession> AgentSessions => Set<AgentSession>();
     public DbSet<AgentTrace> AgentTraces => Set<AgentTrace>();
+    public DbSet<ClaudeCostEntry> ClaudeCostLedger => Set<ClaudeCostEntry>();
 
     // Sale Assist
     public DbSet<QuickReplyTemplate> QuickReplyTemplates => Set<QuickReplyTemplate>();
@@ -80,15 +85,22 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<AdsCampaign> AdsCampaigns => Set<AdsCampaign>();
     public DbSet<AdsRule> AdsRules => Set<AdsRule>();
     public DbSet<AdsAction> AdsActions => Set<AdsAction>();
+    public DbSet<AdsCreative> AdsCreatives => Set<AdsCreative>();
+    public DbSet<AdsMetricsDaily> AdsMetricsDailies => Set<AdsMetricsDaily>();
 
     // Analytics
     public DbSet<KpiDaily> KpiDailies => Set<KpiDaily>();
+    public DbSet<KpiForecast> KpiForecasts => Set<KpiForecast>();
 
     // Channel & LLM configs
     public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();
     public DbSet<LlmConfig> LlmConfigs => Set<LlmConfig>();
     // Processed messages (dedup for demo polling)
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
+
+    // Competitors (Research-2)
+    public DbSet<CompetitorSource> CompetitorSources => Set<CompetitorSource>();
+    public DbSet<CompetitorPost> CompetitorPosts => Set<CompetitorPost>();
 
     IConversationSet IAppDbContext.Conversations => new EfConversationSet(Conversations);
 
@@ -107,6 +119,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     {
         base.OnModelCreating(builder);
         builder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+
+        // MassTransit transactional outbox (WS1): event publish enlists in the same SaveChanges
+        // transaction as the aggregate write — exactly-once, no loss on broker outage.
+        // These entities keep canonical PascalCase schema (skipped by ApplySnakeCase).
+        builder.AddInboxStateEntity();
+        builder.AddOutboxMessageEntity();
+        builder.AddOutboxStateEntity();
 
         // Domain aggregates assign their own Guid identifiers in factory methods, so keys are
         // not store-generated. Without this, EF marks navigation-appended children (e.g.
@@ -146,4 +165,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
             e => e.TenantId == (tenantRef.Current != null ? tenantRef.Current.TenantId : Guid.Empty));
     }
 }
+
+
 

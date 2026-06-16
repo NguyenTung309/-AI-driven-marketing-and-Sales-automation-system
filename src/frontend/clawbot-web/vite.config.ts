@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+﻿import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
@@ -14,10 +14,14 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://localhost:5051",
+        target: "http://localhost:5000",
         changeOrigin: true,
       },
-      "/hubs": { target: "http://localhost:5051", ws: true },
+      "/auth": {
+        target: "http://localhost:5000",
+        changeOrigin: true,
+      },
+      "/hubs": { target: "http://localhost:5000", ws: true },
     },
   },
 });

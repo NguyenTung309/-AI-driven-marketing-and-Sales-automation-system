@@ -1,0 +1,211 @@
+import { AxiosError } from "axios";
+import { apiClient } from "./client";
+
+export interface PagedResponse<T> {
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly items: readonly T[];
+}
+
+export interface AdminUser {
+  readonly id: string;
+  readonly email: string;
+  readonly displayName: string;
+  readonly phone: string | null;
+  readonly isActive: boolean;
+  readonly lastLoginAt: string | null;
+}
+
+export interface Role {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string | null;
+  readonly isSystem: boolean;
+}
+
+export interface Permission {
+  readonly id: string;
+  readonly code: string;
+  readonly description: string | null;
+}
+
+export interface ApiKeyItem {
+  readonly id: string;
+  readonly name: string;
+  readonly createdAt: string;
+  readonly expiresAt: string | null;
+  readonly revokedAt: string | null;
+  readonly scopes: readonly string[] | null;
+}
+
+export interface CreatedApiKey {
+  readonly id: string;
+  readonly name: string;
+  readonly plaintextKey: string;
+  readonly expiresAt: string | null;
+}
+
+export interface PancakeConfig {
+  readonly id: string;
+  readonly baseUrl: string;
+  readonly hasAccessToken: boolean;
+  readonly hasWebhookSecret: boolean;
+  readonly signatureHeader: string;
+  readonly signatureAlgo: string;
+  readonly signatureEncoding: string;
+  readonly sendPathTemplate: string;
+  readonly authMode: string;
+  readonly isActive: boolean;
+  readonly updatedAt: string;
+}
+
+export interface PancakeWebhookUrl {
+  readonly webhookUrl: string;
+  readonly tenantSlug: string;
+}
+
+export interface AuditLog {
+  readonly id: string;
+  readonly action: string;
+  readonly resourceType: string;
+  readonly resourceId: string | null;
+  readonly diffJson: string | null;
+  readonly ipAddress: string | null;
+  readonly userAgent: string | null;
+  readonly occurredAt: string;
+}
+
+export interface ListUsersParams {
+  readonly q?: string;
+  readonly page?: number;
+  readonly pageSize?: number;
+}
+
+export async function listAdminUsers(params?: ListUsersParams): Promise<PagedResponse<AdminUser>> {
+  const res = await apiClient.get<PagedResponse<AdminUser>>("/api/admin/users", { params });
+  return res.data;
+}
+
+export async function createAdminUser(body: {
+  readonly email: string;
+  readonly displayName: string;
+  readonly password: string;
+  readonly roles?: readonly string[];
+}): Promise<Pick<AdminUser, "id" | "email" | "displayName">> {
+  const res = await apiClient.post<Pick<AdminUser, "id" | "email" | "displayName">>("/api/admin/users", body);
+  return res.data;
+}
+
+export async function updateAdminUser(
+  id: string,
+  body: { readonly displayName?: string; readonly isActive?: boolean; readonly roles?: readonly string[] }
+): Promise<void> {
+  await apiClient.put(`/api/admin/users/${id}`, body);
+}
+
+export async function setAdminUserActive(id: string, active: boolean): Promise<{ readonly id: string; readonly isActive: boolean }> {
+  const action = active ? "enable" : "disable";
+  const res = await apiClient.post<{ readonly id: string; readonly isActive: boolean }>(`/api/admin/users/${id}/${action}`);
+  return res.data;
+}
+
+export async function resetAdminUserPassword(id: string): Promise<{ readonly message: string }> {
+  const res = await apiClient.post<{ readonly message: string }>(`/api/admin/users/${id}/reset-password`);
+  return res.data;
+}
+
+export async function listRoles(): Promise<readonly Role[]> {
+  const res = await apiClient.get<readonly Role[]>("/api/rbac/roles");
+  return res.data;
+}
+
+export async function createRole(body: { readonly name: string; readonly description?: string | null }): Promise<Role> {
+  const res = await apiClient.post<Role>("/api/rbac/roles", body);
+  return res.data;
+}
+
+export async function updateRole(id: string, body: { readonly name: string; readonly description?: string | null }): Promise<Role> {
+  const res = await apiClient.put<Role>(`/api/rbac/roles/${id}`, body);
+  return res.data;
+}
+
+export async function deleteRole(id: string): Promise<void> {
+  await apiClient.delete(`/api/rbac/roles/${id}`);
+}
+
+export async function listPermissions(): Promise<readonly Permission[]> {
+  const res = await apiClient.get<readonly Permission[]>("/api/rbac/permissions");
+  return res.data;
+}
+
+export async function listRolePermissions(id: string): Promise<readonly Permission[]> {
+  const res = await apiClient.get<readonly Permission[]>(`/api/rbac/roles/${id}/permissions`);
+  return res.data;
+}
+
+export async function setRolePermissions(id: string, permissionIds: readonly string[]): Promise<void> {
+  await apiClient.put(`/api/rbac/roles/${id}/permissions`, { permissionIds });
+}
+
+export async function listApiKeys(): Promise<readonly ApiKeyItem[]> {
+  const res = await apiClient.get<readonly ApiKeyItem[]>("/api/api-keys");
+  return res.data;
+}
+
+export async function createApiKey(body: {
+  readonly name: string;
+  readonly scopes: readonly string[];
+  readonly expiresAt?: string | null;
+}): Promise<CreatedApiKey> {
+  const res = await apiClient.post<CreatedApiKey>("/api/api-keys", body);
+  return res.data;
+}
+
+export async function revokeApiKey(id: string): Promise<void> {
+  await apiClient.delete(`/api/api-keys/${id}`);
+}
+
+export async function getPancakeConfig(): Promise<PancakeConfig | null> {
+  try {
+    const res = await apiClient.get<PancakeConfig>("/api/channels/pancake/config");
+    return res.data;
+  } catch (error) {
+    if (error instanceof AxiosError && error.response?.status === 404) return null;
+    throw error;
+  }
+}
+
+export async function updatePancakeConfig(body: Partial<{
+  readonly baseUrl: string;
+  readonly accessToken: string;
+  readonly webhookSecret: string;
+  readonly signatureHeader: string;
+  readonly signatureAlgo: string;
+  readonly signatureEncoding: string;
+  readonly sendPathTemplate: string;
+  readonly authMode: string;
+  readonly isActive: boolean;
+}>): Promise<PancakeConfig> {
+  const res = await apiClient.put<PancakeConfig>("/api/channels/pancake/config", body);
+  return res.data;
+}
+
+export async function deletePancakeConfig(): Promise<void> {
+  await apiClient.delete("/api/channels/pancake/config");
+}
+
+export async function getPancakeWebhookUrl(): Promise<PancakeWebhookUrl> {
+  const res = await apiClient.get<PancakeWebhookUrl>("/api/channels/pancake/webhook-url");
+  return res.data;
+}
+
+export async function listAuditLogs(params?: {
+  readonly action?: string;
+  readonly resourceType?: string;
+  readonly page?: number;
+  readonly pageSize?: number;
+}): Promise<PagedResponse<AuditLog>> {
+  const res = await apiClient.get<PagedResponse<AuditLog>>("/api/admin/audit-logs", { params });
+  return res.data;
+}

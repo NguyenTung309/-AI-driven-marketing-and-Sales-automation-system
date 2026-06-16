@@ -1,11 +1,11 @@
-import { useEffect, type ReactNode } from "react";
+﻿import { useEffect, type ReactNode } from "react";
 import { loadPermissions, refreshAccessToken } from "@/shared/api/client";
 import { useAuthStore } from "@/shared/auth/authStore";
 
 /**
  * SPEC-11: on app start / F5, hydrate the access token from the refresh cookie ONCE before
  * rendering protected routes. A 401 here (first-time visitor / no cookie) is a normal "anon"
- * state — not an error — so we fall through to /login silently.
+ * state -- not an error -- so we fall through to /login silently.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const status = useAuthStore((s) => s.status);
@@ -24,7 +24,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   if (status === "loading") {
-    return <div className="flex min-h-screen items-center justify-center text-gray-500">Loading…</div>;
+    return <div className="flex min-h-screen items-center justify-center text-gray-500">Loading...</div>;
   }
 
   return <>{children}</>;

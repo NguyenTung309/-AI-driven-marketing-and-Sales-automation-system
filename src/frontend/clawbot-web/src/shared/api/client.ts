@@ -1,22 +1,26 @@
-import axios, { type AxiosRequestConfig, type InternalAxiosRequestConfig } from "axios";
+﻿import axios, { type AxiosRequestConfig, type InternalAxiosRequestConfig } from "axios";
 import { useAuthStore } from "@/shared/auth/authStore";
 
-const baseURL = import.meta.env.VITE_API_BASE_URL ?? "/api";
-
-export const apiClient = axios.create({ baseURL, withCredentials: true });
+export const apiClient = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL ?? "",
+  withCredentials: true,
+});
 
 // Bare client (no response interceptor) for the refresh call itself, so a 401 on /auth/refresh
-// cannot recurse back into the refresh logic. Same baseURL ⇒ identical URL resolution as login.
-const refreshClient = axios.create({ baseURL, withCredentials: true });
+// cannot recurse back into the refresh logic. Same baseURL => identical URL resolution as login.
+const refreshClient = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL ?? "",
+  withCredentials: true,
+});
 
 // SPEC-11: attach the in-memory access token to every request.
 apiClient.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (token) config.headers.Authorization = Bearer ;
   return config;
 });
 
-// SPEC-11: single-flight refresh — concurrent 401s in THIS tab share one /auth/refresh promise
+// SPEC-11: single-flight refresh -- concurrent 401s in THIS tab share one /auth/refresh promise
 // (cross-tab races are absorbed by the server grace-window, D10).
 let refreshPromise: Promise<string | null> | null = null;
 
@@ -62,7 +66,7 @@ apiClient.interceptors.response.use(
       original._retried = true;
       const token = await refreshAccessToken();
       if (token) {
-        original.headers = { ...original.headers, Authorization: `Bearer ${token}` };
+        original.headers = { ...original.headers, Authorization: Bearer  };
         return apiClient(original as InternalAxiosRequestConfig);
       }
       if (window.location.pathname !== "/login") window.location.href = "/login";

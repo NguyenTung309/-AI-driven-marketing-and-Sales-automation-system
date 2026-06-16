@@ -1,6 +1,7 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Security;
+using Clawbot.Api.Middleware;
 using Clawbot.Domain.Security;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -13,8 +14,7 @@ public static class ApiKeysEndpoints
 {
     public static IEndpointRouteBuilder MapApiKeys(this IEndpointRouteBuilder app)
     {
-        // SPEC-11 §6a: API key management requires api-keys:manage (Admin).
-        var group = app.MapGroup("/api/api-keys").RequirePermission("api-keys:manage");
+var group = app.MapGroup("/api/api-keys").RequirePermission("api-keys:manage").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         group.MapGet("/", ListAsync);
         group.MapPost("/", IssueAsync);
@@ -29,9 +29,12 @@ public static class ApiKeysEndpoints
         var keys = await db.ApiKeys
             .Where(k => k.TenantId == tenantId)
             .OrderByDescending(k => k.CreatedAt)
-            .Select(k => new ApiKeyDto(k.Id, k.Name, k.CreatedAt, k.ExpiresAt, k.RevokedAt))
+            .Select(k => new { k.Id, k.Name, k.CreatedAt, k.ExpiresAt, k.RevokedAt, k.ScopesJson })
             .ToListAsync(ct);
-        return Results.Ok(keys);
+
+        return Results.Ok(keys.Select(k => new ApiKeyDto(
+            k.Id, k.Name, k.CreatedAt, k.ExpiresAt, k.RevokedAt,
+            System.Text.Json.JsonSerializer.Deserialize<IReadOnlyList<string>>(k.ScopesJson))));
     }
 
     private static async Task<IResult> IssueAsync(
@@ -46,7 +49,7 @@ public static class ApiKeysEndpoints
 
         var plaintext = GenerateKey();
         var hash = Hash(plaintext);
-        var key = ApiKey.Issue(tenantId, req.Name, hash, clock.UtcNow, req.ExpiresAt);
+        var key = ApiKey.Issue(tenantId, req.Name, hash, clock.UtcNow, req.ExpiresAt, req.Scopes);
         db.ApiKeys.Add(key);
         await db.SaveChangesAsync(ct);
 
@@ -87,3 +90,7 @@ public static class ApiKeysEndpoints
         return Convert.ToHexString(hash);
     }
 }
+
+
+
+
