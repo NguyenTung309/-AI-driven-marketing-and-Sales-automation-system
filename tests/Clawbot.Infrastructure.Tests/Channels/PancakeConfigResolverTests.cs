@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Clawbot.Infrastructure.Tests.Channels;
 
-// M06/M13 — PancakeConfigResolver tenant-DB → appsettings → defaults cascade.
+// M06/M13 � PancakeConfigResolver tenant-DB ? appsettings ? defaults cascade.
 public sealed class PancakeConfigResolverTests
 {
     private static readonly DateTimeOffset Now = new(2026, 6, 2, 0, 0, 0, TimeSpan.Zero);
@@ -81,5 +81,28 @@ public sealed class PancakeConfigResolverTests
         var result = await sut.ResolveAsync(Guid.NewGuid());
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Falls_back_to_env_vars_when_no_db_and_no_section()
+    {
+        using var fx = new TestAppDb();
+        var enc = Substitute.For<IEncryptor>();
+        var envConfig = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["PANCAKE_PAGE_ACCESS_TOKEN"] = "env_page_token",
+                ["PANCAKE_PAGE_ID"] = "env_page_123",
+                ["PANCAKE_WEBHOOK_SECRET"] = "env_secret",
+            })
+            .Build();
+
+        var sut = new PancakeConfigResolver(fx.Db, enc, envConfig, NullLogger<PancakeConfigResolver>.Instance);
+        var result = await sut.ResolveAsync(Guid.NewGuid());
+
+        result.Should().NotBeNull();
+        result!.AccessToken.Should().Be("env_page_token");
+        result.PageId.Should().Be("env_page_123");
+        result.WebhookSecret.Should().Be("env_secret");
     }
 }
