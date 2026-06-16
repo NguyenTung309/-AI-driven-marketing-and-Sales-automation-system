@@ -85,6 +85,9 @@ public sealed class PancakeChannelAdapter(
             throw new InvalidOperationException("Pancake access_token not configured.");
 
         var (threadPart, pagePart) = SplitThread(externalThreadId);
+        // Fallback: if thread ID is not in composite format, resolve page ID from config.
+        if (string.IsNullOrEmpty(pagePart) && !string.IsNullOrEmpty(cfg.PageId))
+            pagePart = cfg.PageId;
         var path = cfg.SendPathTemplate
             .Replace("{page_id}", pagePart, StringComparison.Ordinal)
             .Replace("{thread_id}", threadPart, StringComparison.Ordinal);
