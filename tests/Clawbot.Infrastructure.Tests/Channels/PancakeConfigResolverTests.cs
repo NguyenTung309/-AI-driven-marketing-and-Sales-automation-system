@@ -4,6 +4,7 @@ using Clawbot.SharedKernel.Security;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using NSubstitute;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Clawbot.Infrastructure.Tests.Channels;
@@ -28,7 +29,7 @@ public sealed class PancakeConfigResolverTests
         var enc = Substitute.For<IEncryptor>();
         enc.Decrypt("CIPHER").Returns("PLAIN");
 
-        var sut = new PancakeConfigResolver(fx.Db, enc, Config(new Dictionary<string, string?>()));
+        var sut = new PancakeConfigResolver(fx.Db, enc, Config(new Dictionary<string, string?>()), NullLogger<PancakeConfigResolver>.Instance);
         var result = await sut.ResolveAsync(fx.TenantId);
 
         result.Should().NotBeNull();
@@ -45,7 +46,7 @@ public sealed class PancakeConfigResolverTests
         {
             ["Channels:Pancake:BaseUrl"] = "https://custom.example",
             ["Channels:Pancake:AuthMode"] = "BEARER",
-        }));
+        }), NullLogger<PancakeConfigResolver>.Instance);
 
         var result = await sut.ResolveAsync(Guid.NewGuid());
 
@@ -62,7 +63,7 @@ public sealed class PancakeConfigResolverTests
         var sut = new PancakeConfigResolver(fx.Db, enc, Config(new Dictionary<string, string?>
         {
             ["Channels:Pancake:BaseUrl"] = "https://fallback",
-        }));
+        }), NullLogger<PancakeConfigResolver>.Instance);
 
         var result = await sut.ResolveAsync(Guid.Empty);
 
@@ -75,7 +76,7 @@ public sealed class PancakeConfigResolverTests
     {
         using var fx = new TestAppDb();
         var enc = Substitute.For<IEncryptor>();
-        var sut = new PancakeConfigResolver(fx.Db, enc, Config(new Dictionary<string, string?>()));
+        var sut = new PancakeConfigResolver(fx.Db, enc, Config(new Dictionary<string, string?>()), NullLogger<PancakeConfigResolver>.Instance);
 
         var result = await sut.ResolveAsync(Guid.NewGuid());
 
