@@ -1,5 +1,6 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Clawbot.Agents.Contracts.Docs;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Documents;
 using Clawbot.Api.Middleware;
 using Clawbot.Application.Abstractions;
@@ -16,16 +17,17 @@ public static class DocumentsEndpoints
 {
     public static IEndpointRouteBuilder MapDocuments(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/docs").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+// SPEC-11 §6a: reads need docs:read, mutations (incl. generate) docs:write.
+        var grp = app.MapGroup("/api/docs").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
-        grp.MapPost("/generate", GenerateAsync);
+        grp.MapPost("/generate", GenerateAsync).RequirePermission("docs:write");
 
-        grp.MapGet("/templates", ListTemplatesAsync);
-        grp.MapPost("/templates", CreateTemplateAsync);
-        grp.MapPut("/templates/{id:guid}", UpdateTemplateAsync);
-        grp.MapDelete("/templates/{id:guid}", DeleteTemplateAsync);
+        grp.MapGet("/templates", ListTemplatesAsync).RequirePermission("docs:read");
+        grp.MapPost("/templates", CreateTemplateAsync).RequirePermission("docs:write");
+        grp.MapPut("/templates/{id:guid}", UpdateTemplateAsync).RequirePermission("docs:write");
+        grp.MapDelete("/templates/{id:guid}", DeleteTemplateAsync).RequirePermission("docs:write");
 
-        grp.MapGet("/generated", ListGeneratedAsync);
+grp.MapGet("/generated", ListGeneratedAsync).RequirePermission("docs:read");
         grp.MapGet("/{id:guid}/download", DownloadAsync);
 
         return app;
@@ -43,7 +45,7 @@ public static class DocumentsEndpoints
         var doc = await db.GeneratedDocuments.FirstOrDefaultAsync(d => d.Id == id, ct).ConfigureAwait(false);
         if (doc is null) return Results.NotFound();
         if (doc.IsExpired(clock.UtcNow))
-            return Results.Problem(statusCode: StatusCodes.Status410Gone, detail: "Liên kết tải tài liệu đã hết hạn (7 ngày).");
+            return Results.Problem(statusCode: StatusCodes.Status410Gone, detail: "LiÃªn káº¿t táº£i tÃ i liá»‡u Ä‘Ã£ háº¿t háº¡n (7 ngÃ y).");
 
         doc.MarkOpened(clock.UtcNow);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -113,9 +115,9 @@ public static class DocumentsEndpoints
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(recipient)) return false;
 
-        var expiry = doc.ExpiresAt?.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) ?? "7 ngày";
-        await email.SendAsync(recipient, "Tài liệu từ Học Bá",
-            $"Xin chào, tài liệu của bạn đã sẵn sàng: {fileUrl}\nLiên kết có hiệu lực đến {expiry}.", ct)
+        var expiry = doc.ExpiresAt?.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) ?? "7 ngÃ y";
+        await email.SendAsync(recipient, "TÃ i liá»‡u tá»« Há»c BÃ¡",
+            $"Xin chÃ o, tÃ i liá»‡u cá»§a báº¡n Ä‘Ã£ sáºµn sÃ ng: {fileUrl}\nLiÃªn káº¿t cÃ³ hiá»‡u lá»±c Ä‘áº¿n {expiry}.", ct)
             .ConfigureAwait(false);
 
         doc.MarkSent("email", clock.UtcNow);
@@ -204,3 +206,5 @@ public static class DocumentsEndpoints
         return Results.Ok(items);
     }
 }
+
+

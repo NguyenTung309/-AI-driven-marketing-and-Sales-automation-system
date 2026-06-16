@@ -1,0 +1,16 @@
+# Build outputs
+**/bin/
+**/obj/
+
+# Frontend
+**/node_modules/
+src/frontend/dist/
+
+# IDE / VCS
+.git/
+.vs/
+.vscode/
+**/*.user
+
+# Local env
+deploy/.env

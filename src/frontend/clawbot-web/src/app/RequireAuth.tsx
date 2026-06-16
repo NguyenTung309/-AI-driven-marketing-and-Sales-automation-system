@@ -1,12 +1,12 @@
-import type { ReactElement } from "react";
+﻿import type { ReactElement } from "react";
 import { Navigate } from "react-router-dom";
-import { useAuth } from "@/shared/auth/authState";
+import { useAuthStore } from "@/shared/auth/authStore";
 
-export interface RequireAuthProps {
+interface RequireAuthProps {
   readonly children: ReactElement;
 }
 
 export function RequireAuth({ children }: RequireAuthProps) {
-  const { token } = useAuth();
+  const token = useAuthStore((s) => s.accessToken);
   return token ? children : <Navigate to="/login" replace />;
 }

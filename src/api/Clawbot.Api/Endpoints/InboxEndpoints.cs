@@ -1,3 +1,4 @@
+﻿using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Inbox;
 using Clawbot.Api.Middleware;
 using Clawbot.Infrastructure.Jobs;
@@ -16,14 +17,14 @@ public static class InboxEndpoints
 {
     public static IEndpointRouteBuilder MapInbox(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/inbox").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.ChatPolicy);
+var grp = app.MapGroup("/api/inbox").RequireRateLimiting(RateLimitingExtensions.ChatPolicy);
 
-        grp.MapGet("/conversations", ListAsync);
-        grp.MapGet("/conversations/{id:guid}", GetAsync);
-        grp.MapPost("/conversations/{id:guid}/assign", AssignAsync);
-        grp.MapPost("/conversations/{id:guid}/resolve", ResolveAsync);
-        grp.MapPost("/conversations/{id:guid}/escalate", EscalateAsync);
-        grp.MapPost("/conversations/{id:guid}/messages", SendOutboundAsync);
+        grp.MapGet("/conversations", ListAsync).RequirePermission("conversations:read");
+        grp.MapGet("/conversations/{id:guid}", GetAsync).RequirePermission("conversations:read");
+        grp.MapPost("/conversations/{id:guid}/assign", AssignAsync).RequirePermission("conversations:write");
+        grp.MapPost("/conversations/{id:guid}/resolve", ResolveAsync).RequirePermission("conversations:write");
+        grp.MapPost("/conversations/{id:guid}/escalate", EscalateAsync).RequirePermission("conversations:write");
+        grp.MapPost("/conversations/{id:guid}/messages", SendOutboundAsync).RequirePermission("conversations:write");
 
         return app;
     }
@@ -131,7 +132,7 @@ public static class InboxEndpoints
         await notifier.NotifyConversationUpdatedAsync(tenant.TenantId,
             new InboxConversationEvent(conv.Id, conv.Status, conv.AssignedTo, conv.LastMessageAt), ct).ConfigureAwait(false);
 
-        // Auto-summary on resolve — enqueue as Hangfire background job (non-blocking)
+        // Auto-summary on resolve â€” enqueue as Hangfire background job (non-blocking)
         BackgroundJob.Enqueue<AutoSummaryJob>(j => j.RunAsync(tenant.TenantId, id, CancellationToken.None));
 
         return Results.NoContent();
@@ -177,5 +178,9 @@ public static class InboxEndpoints
     }
 
     private static string Preview(string text) =>
-        text.Length <= 140 ? text : text[..140] + "…";
+        text.Length <= 140 ? text : text[..140] + "â€¦";
 }
+
+
+
+

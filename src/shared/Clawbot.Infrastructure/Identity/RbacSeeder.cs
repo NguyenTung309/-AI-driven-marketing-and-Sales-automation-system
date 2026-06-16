@@ -1,4 +1,4 @@
-using Clawbot.Domain.Agents;
+﻿using Clawbot.Domain.Agents;
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
@@ -11,14 +11,61 @@ using Microsoft.Extensions.Logging;
 namespace Clawbot.Infrastructure.Identity;
 
 /// <summary>
-/// Idempotently provisions Identity roles (Admin/Sale/Marketer/QA/Viewer) and
-/// seeds the role→permission mapping so JWT tokens carry correct perm claims.
+/// SPEC-11 D1/D5 — idempotently provisions the 5 fixed-Id roles into BOTH the Identity
+/// store (AspNetRoles) and the domain roles table (so role_permissions.role_id, which
+/// FKs to roles(id), can carry the same fixed Id the JWT does), then seeds the permission
+/// matrix into permissions + role_permissions.
 /// Custom tenant-scoped Role rows are created per tenant on demand by RolesEndpoints.
 /// </summary>
 public static partial class RbacSeeder
 {
-    public static readonly IReadOnlyList<string> DefaultRoles =
-        new[] { "Admin", "Sale", "Marketer", "QA", "Viewer" };
+    // SPEC-11 §6 — fixed role Ids (constants, never NewGuid).
+    public const string Admin = "Admin";
+    public const string Sale = "Sale";
+    public const string Marketer = "Marketer";
+    public const string QA = "QA";
+    public const string Viewer = "Viewer";
+    public const string SalesLead = "SalesLead";
+
+    public static readonly IReadOnlyDictionary<string, Guid> RoleIds = new Dictionary<string, Guid>
+    {
+        [Admin]     = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+        [Sale]      = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+        [Marketer]  = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+        [QA]        = Guid.Parse("44444444-4444-4444-4444-444444444444"),
+        [Viewer]    = Guid.Parse("55555555-5555-5555-5555-555555555555"),
+        [SalesLead] = Guid.Parse("77777777-7777-7777-7777-777777777777"),
+    };
+
+    public static readonly IReadOnlyList<string> DefaultRoles = RoleIds.Keys.ToArray();
+
+    private static readonly string[] All = [Admin, SalesLead, Sale, Marketer, QA, Viewer];
+
+    // SPEC-11 §6 permission matrix.
+    private static readonly (string Code, string[] Roles)[] Matrix =
+    [
+        ("conversations:read", All),
+        ("conversations:write", [Admin, SalesLead, Sale]),
+        ("leads:read", All),
+        ("leads:write", [Admin, SalesLead, Sale]),
+        ("content:read", All),
+        ("content:write", [Admin, Marketer]),
+        ("ads:read", [Admin, Marketer, QA, Viewer]),
+        ("ads:write", [Admin, Marketer]),
+        ("analytics:read", All),
+        ("kb:read", All),
+        ("kb:write", [Admin, SalesLead, Marketer, QA]),
+        ("docs:read", All),
+        ("docs:write", [Admin, SalesLead, Sale, Marketer]),
+        ("sale-assist:use", [Admin, SalesLead, Sale]),
+        ("chat-scenarios:read", All),
+        ("chat-scenarios:write", [Admin, SalesLead, Marketer, QA]),
+        ("channels:manage", [Admin]),
+        ("api-keys:manage", [Admin]),
+        ("rbac:manage", [Admin]),
+        ("users:manage", [Admin]),
+        ("system:config", [Admin]),
+    ];
 
     // 8 agents (M25). Seeded "running" so the toggle gate allows auto-actions by default.
     private static readonly (string Code, string DisplayName, string AgentType)[] DefaultAgents =
@@ -83,29 +130,96 @@ public static partial class RbacSeeder
         var roleManager = sp.GetRequiredService<RoleManager<AppRole>>();
         var db = sp.GetRequiredService<AppDbContext>();
         var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("RbacSeeder");
+        var now = DateTimeOffset.UtcNow;
 
-        foreach (var name in DefaultRoles)
+        await SeedIdentityRolesAsync(roleManager, logger);
+        var tenantId = await EnsureDefaultTenantAsync(db, now, ct);
+        await SeedDomainRolesAsync(db, tenantId, now, ct);
+        await SeedPermissionsAsync(db, ct);
+        await SeedRolePermissionsAsync(db, ct);
+
+        // Additional per-tenant seeding: agent configs + warm-lead drip sequence
+        await SeedTenantResourcesAsync(db, now, logger, ct);
+
+        var permissionCount = await db.Permissions.CountAsync(ct);
+        LogPermissionCount(logger, permissionCount);
+    }
+
+    private static async Task SeedIdentityRolesAsync(RoleManager<AppRole> roleManager, ILogger logger)
+    {
+        foreach (var (name, id) in RoleIds)
         {
-            if (await roleManager.RoleExistsAsync(name)) continue;
-            var role = new AppRole(name) { Id = Guid.NewGuid() };
-            var result = await roleManager.CreateAsync(role);
+            if (await roleManager.FindByNameAsync(name) is not null) continue;
+            var result = await roleManager.CreateAsync(new AppRole(name) { Id = id });
             if (!result.Succeeded)
+                LogRoleSeedFailed(logger, name, string.Join("; ", result.Errors.Select(e => e.Description)));
+        }
+    }
+
+    private static async Task<Guid> EnsureDefaultTenantAsync(AppDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Slug == DevDataSeeder.TenantSlug, ct);
+        if (tenant is not null) return tenant.Id;
+
+        tenant = Tenant.Create(DevDataSeeder.TenantSlug, "Default Tenant", "free", now);
+        db.Tenants.Add(tenant);
+        await db.SaveChangesAsync(ct);
+        return tenant.Id;
+    }
+
+    private static async Task SeedDomainRolesAsync(AppDbContext db, Guid tenantId, DateTimeOffset now, CancellationToken ct)
+    {
+        // IgnoreQueryFilters: seeding runs outside any HTTP/tenant scope, so the tenant
+        // global filter would otherwise hide existing rows and break idempotency.
+        var existing = await db.RbacRoles.IgnoreQueryFilters().Select(r => r.Id).ToListAsync(ct);
+        var have = existing.ToHashSet();
+        foreach (var (name, id) in RoleIds)
+        {
+            if (have.Contains(id)) continue;
+            db.RbacRoles.Add(Role.Seed(id, tenantId, name, now));
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task SeedPermissionsAsync(AppDbContext db, CancellationToken ct)
+    {
+        var have = (await db.Permissions.Select(p => p.Code).ToListAsync(ct)).ToHashSet();
+        foreach (var code in Matrix.Select(m => m.Code).Distinct())
+        {
+            if (have.Contains(code)) continue;
+            db.Permissions.Add(Permission.Create(code));
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task SeedRolePermissionsAsync(AppDbContext db, CancellationToken ct)
+    {
+        var permIdByCode = await db.Permissions.ToDictionaryAsync(p => p.Code, p => p.Id, ct);
+        var have = (await db.RolePermissions.Select(rp => new { rp.RoleId, rp.PermissionId }).ToListAsync(ct))
+            .Select(x => (x.RoleId, x.PermissionId)).ToHashSet();
+
+        foreach (var (code, roles) in Matrix)
+        {
+            if (!permIdByCode.TryGetValue(code, out var permId)) continue;
+            foreach (var role in roles)
             {
-                LogRoleSeedFailed(logger, name,
-                    string.Join("; ", result.Errors.Select(e => e.Description)));
+                var roleId = RoleIds[role];
+                if (have.Contains((roleId, permId))) continue;
+                db.RolePermissions.Add(RolePermission.Create(roleId, permId));
             }
         }
+        await db.SaveChangesAsync(ct);
+    }
 
-        var permCount = await db.Permissions.CountAsync(ct);
-        LogPermissionCount(logger, permCount);
-
+    private static async Task SeedTenantResourcesAsync(AppDbContext db, DateTimeOffset now, ILogger logger, CancellationToken ct)
+    {
         var tenants = await db.Tenants.IgnoreQueryFilters().ToListAsync(ct);
         var perms = await db.Permissions.ToListAsync(ct);
         var permLookup = perms.ToDictionary(p => p.Code, p => p.Id);
-        var now = DateTimeOffset.UtcNow;
 
         foreach (var tenant in tenants)
         {
+            // Seed role→permission links per tenant
             var domainRoles = await db.RbacRoles
                 .IgnoreQueryFilters()
                 .Where(r => r.TenantId == tenant.Id)
@@ -122,7 +236,6 @@ public static partial class RbacSeeder
                 }
 
                 if (!RolePermissions.TryGetValue(roleName, out var permCodes)) continue;
-
                 var existingLinks = await db.RolePermissions
                     .Where(rp => rp.RoleId == domainRole.Id)
                     .Select(rp => rp.PermissionId)
@@ -136,11 +249,11 @@ public static partial class RbacSeeder
                         continue;
                     }
                     if (existingLinks.Contains(permId)) continue;
-
                     db.RolePermissions.Add(RolePermission.Create(domainRole.Id, permId));
                 }
             }
 
+            // Seed default agent configs
             var existingAgentCodes = await db.AgentConfigs
                 .IgnoreQueryFilters()
                 .Where(a => a.TenantId == tenant.Id)
@@ -154,8 +267,7 @@ public static partial class RbacSeeder
                 db.AgentConfigs.Add(agent);
             }
 
-            // Lead-3: default warm-lead drip sequence (4 steps within 7 days) so warm leads
-            // (30-69) auto-enroll via LeadBecameWarmConsumer. Idempotent by trigger_event.
+            // Lead-3: default warm-lead drip sequence
             var hasWarmDrip = await db.Set<DripSequence>()
                 .IgnoreQueryFilters()
                 .AnyAsync(s => s.TenantId == tenant.Id && s.TriggerEvent == "warm_lead", ct);

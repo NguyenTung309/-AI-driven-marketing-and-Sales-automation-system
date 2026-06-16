@@ -1,4 +1,4 @@
-using Hangfire;
+﻿using Hangfire;
 using Hangfire.SqlServer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,6 +35,7 @@ public static class HangfireModule
 
         services.AddScoped<RetentionPurgeJob>();
         services.AddScoped<DailyKpiRollupJob>();
+        services.AddScoped<RefreshTokenCleanupJob>();
         services.AddScoped<AnomalyAlertJob>();
         services.AddScoped<ForecastPrecomputeJob>();
         services.AddScoped<IWeeklyTrendScanner, GrpcWeeklyTrendScanner>();
@@ -86,7 +87,12 @@ public static class HangfireModule
             "kpi-daily-rollup",
             "kpi",
             j => j.RunAsync(CancellationToken.None),
-            Cron.Daily(0, 30));
+            Cron.Daily(7, 30));
+        recurring.AddOrUpdate<RefreshTokenCleanupJob>(
+            "refresh-token-cleanup",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Daily(3));
         recurring.AddOrUpdate<AnomalyAlertJob>(
             "kpi-anomaly-alert",
             "kpi",
