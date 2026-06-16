@@ -41,7 +41,7 @@ public sealed partial class PancakeConfigResolver(
                     SignatureEncoding: row.SignatureEncoding,
                     SendPathTemplate: row.SendPathTemplate,
                     AuthMode: row.AuthMode,
-                    PageId: string.Empty);
+                    PageId: row.PageId ?? string.Empty);
             }
         }
 
