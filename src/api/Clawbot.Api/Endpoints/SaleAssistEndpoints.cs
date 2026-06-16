@@ -6,6 +6,7 @@ using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Api.Endpoints;
 
@@ -123,3 +124,4 @@ public static class SaleAssistEndpoints
         return Results.NoContent();
     }
 }
+

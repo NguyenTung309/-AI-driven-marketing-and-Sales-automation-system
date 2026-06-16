@@ -31,3 +31,16 @@ export function useSendMessage(convId: string) {
     },
   });
 }
+
+export function useSuggestedReply(convId: string | null, lastMessage: string) {
+  return useQuery<string>({
+    queryKey: ['suggest', convId, lastMessage],
+    queryFn: async () => {
+      const res = await apiClient.post('/sale-assist/draft', { conversationId: convId });
+      const data = res.data;
+      return data.draftText ?? data;
+    },
+    enabled: convId !== null && lastMessage.length > 0,
+    staleTime: 60_000,
+  });
+}
