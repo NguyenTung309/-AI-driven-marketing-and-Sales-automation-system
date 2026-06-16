@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Clawbot.Domain.Channels;
 using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Persistence;
@@ -182,89 +182,89 @@ public sealed partial class PancakePollingService : BackgroundService
                 },
             });
 
-            // Resolve auto-reply text from QuickReplyTemplate
-            string draft;
-            try
-            {
-                var qrt = await db.QuickReplyTemplates
-                    .AsNoTracking()
-                    .Where(q => q.Code == "auto_reply")
-                    .FirstOrDefaultAsync(ct);
-                draft = qrt?.Body ?? "Cáº£m Æ¡n báº¡n Ä‘Ã£ liÃªn há»‡, chÃºng tÃ´i sáº½ pháº£n há»“i sá»›m";
-            }
-            catch
-            {
-                draft = "Cáº£m Æ¡n báº¡n Ä‘Ã£ liÃªn há»‡, chÃºng tÃ´i sáº½ pháº£n há»“i sá»›m";
-            }
-
-            // Trace agent step
-            await _traces.AppendStepAsync(traceId, new DemoTraceStep
-            {
-                Layer = "agent",
-                Status = DemoTraceStepStatus.Success,
-                DurationMs = 100 + new Random().Next(50, 300),
-                Output = new()
-                {
-                    ["agent"] = "AutoReplyAgent",
-                    ["intent"] = "general",
-                    ["confidence"] = 95,
-                    ["action"] = "auto_send",
-                    ["draftLength"] = draft.Length,
-                },
-            });
-
-            // Send reply via Pancake API
-            if (cfg.IsPageTokenConfigured && !string.IsNullOrEmpty(cfg.PancakePageId) && conv.Id is not null)
-            {
-                var sendBaseUrl = string.IsNullOrEmpty(cfg.PancakeBaseUrl) ? DefaultBaseUrl : cfg.PancakeBaseUrl;
-                var apiUrl = $"{sendBaseUrl}/pages/{cfg.PancakePageId}/conversations/{conv.Id}/messages?page_access_token={cfg.PancakePageAccessToken}";
-                var outboundStatus = DemoTraceStepStatus.Success;
-                string? outboundReason = null;
-
-                try
-                {
-                    var sendPayload = new { action = "reply_inbox", message = draft };
-                    var jsonContent = new StringContent(
-                        JsonSerializer.Serialize(sendPayload, JsonOpts),
-                        System.Text.Encoding.UTF8,
-                        "application/json");
-
-                    using var httpReq = new HttpRequestMessage(HttpMethod.Post, apiUrl)
-                    {
-                        Content = jsonContent,
-                    };
-                    using var apiResp = await client.SendAsync(httpReq, ct);
-
-                    if (!apiResp.IsSuccessStatusCode)
-                    {
-                        outboundStatus = DemoTraceStepStatus.Failed;
-                        outboundReason = "pancake_api_error: " + (int)apiResp.StatusCode;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    outboundStatus = DemoTraceStepStatus.Failed;
-                    outboundReason = "api_exception: " + ex.Message;
-                }
-
-                await _traces.AppendStepAsync(traceId, new DemoTraceStep
-                {
-                    Layer = "outbound",
-                    Status = outboundStatus,
-                    DurationMs = 200,
-                    Reason = outboundReason,
-                });
-            }
-            else
-            {
-                await _traces.AppendStepAsync(traceId, new DemoTraceStep
-                {
-                    Layer = "outbound",
-                    Status = DemoTraceStepStatus.Skipped,
-                    Reason = "page_token_not_configured",
-                    Output = new() { ["pageTokenConfigured"] = false, ["suggestedDraft"] = draft },
-                });
-            }
+//             // Resolve auto-reply text from QuickReplyTemplate
+//             string draft;
+//             try
+//             {
+//                 var qrt = await db.QuickReplyTemplates
+//                     .AsNoTracking()
+//                     .Where(q => q.Code == "auto_reply")
+//                     .FirstOrDefaultAsync(ct);
+//                 draft = qrt?.Body ?? "Cảm ơn bạn đã liên hệ, chúng tôi sẽ phản hồi sớm";
+//             }
+//             catch
+//             {
+//                 draft = "Cảm ơn bạn đã liên hệ, chúng tôi sẽ phản hồi sớm";
+//             }
+// 
+//             // Trace agent step
+//             await _traces.AppendStepAsync(traceId, new DemoTraceStep
+//             {
+//                 Layer = "agent",
+//                 Status = DemoTraceStepStatus.Success,
+//                 DurationMs = 100 + new Random().Next(50, 300),
+//                 Output = new()
+//                 {
+//                     ["agent"] = "AutoReplyAgent",
+//                     ["intent"] = "general",
+//                     ["confidence"] = 95,
+//                     ["action"] = "auto_send",
+//                     ["draftLength"] = draft.Length,
+//                 },
+//             });
+// 
+//             // Send reply via Pancake API
+//             if (cfg.IsPageTokenConfigured && !string.IsNullOrEmpty(cfg.PancakePageId) && conv.Id is not null)
+//             {
+//                 var sendBaseUrl = string.IsNullOrEmpty(cfg.PancakeBaseUrl) ? DefaultBaseUrl : cfg.PancakeBaseUrl;
+//                 var apiUrl = $"{sendBaseUrl}/pages/{cfg.PancakePageId}/conversations/{conv.Id}/messages?page_access_token={cfg.PancakePageAccessToken}";
+//                 var outboundStatus = DemoTraceStepStatus.Success;
+//                 string? outboundReason = null;
+// 
+//                 try
+//                 {
+//                     var sendPayload = new { action = "reply_inbox", message = draft };
+//                     var jsonContent = new StringContent(
+//                         JsonSerializer.Serialize(sendPayload, JsonOpts),
+//                         System.Text.Encoding.UTF8,
+//                         "application/json");
+// 
+//                     using var httpReq = new HttpRequestMessage(HttpMethod.Post, apiUrl)
+//                     {
+//                         Content = jsonContent,
+//                     };
+//                     using var apiResp = await client.SendAsync(httpReq, ct);
+// 
+//                     if (!apiResp.IsSuccessStatusCode)
+//                     {
+//                         outboundStatus = DemoTraceStepStatus.Failed;
+//                         outboundReason = "pancake_api_error: " + (int)apiResp.StatusCode;
+//                     }
+//                 }
+//                 catch (Exception ex)
+//                 {
+//                     outboundStatus = DemoTraceStepStatus.Failed;
+//                     outboundReason = "api_exception: " + ex.Message;
+//                 }
+// 
+//                 await _traces.AppendStepAsync(traceId, new DemoTraceStep
+//                 {
+//                     Layer = "outbound",
+//                     Status = outboundStatus,
+//                     DurationMs = 200,
+//                     Reason = outboundReason,
+//                 });
+//             }
+//             else
+//             {
+//                 await _traces.AppendStepAsync(traceId, new DemoTraceStep
+//                 {
+//                     Layer = "outbound",
+//                     Status = DemoTraceStepStatus.Skipped,
+//                     Reason = "page_token_not_configured",
+//                     Output = new() { ["pageTokenConfigured"] = false, ["suggestedDraft"] = draft },
+//                 });
+//             }
 
             await _traces.CompleteTraceAsync(traceId);
         }

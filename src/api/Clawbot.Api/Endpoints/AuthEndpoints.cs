@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Clawbot.Api.Auth;
@@ -24,7 +24,7 @@ public static partial class AuthEndpoints
 
     public static IEndpointRouteBuilder MapAuth(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/auth");
+        var group = app.MapGroup("/api/auth");
 
         group.MapPost("/login", LoginAsync).AllowAnonymous().RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
         group.MapPost("/login/2fa", LoginWithTwoFactorAsync).AllowAnonymous().RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
@@ -61,7 +61,7 @@ public static partial class AuthEndpoints
         }
         if (!check.Succeeded) return Results.Unauthorized();
 
-        // CheckPasswordSignInAsync only validates password + lockout â€” it never reports
+        // CheckPasswordSignInAsync only validates password + lockout — it never reports
         // RequiresTwoFactor (only PasswordSignInAsync does). Check 2FA explicitly so an
         // account with 2FA enabled is challenged instead of being signed in directly.
         if (await users.GetTwoFactorEnabledAsync(user))
@@ -112,7 +112,7 @@ public static partial class AuthEndpoints
         var result = await refreshTokens.RotateAsync(raw, ClientIp(http), ct);
         if (result.Outcome != RotateOutcome.Success)
         {
-            // Invalid (expired/unknown) or Reuse (family already revoked) â†’ clear + 401.
+            // Invalid (expired/unknown) or Reuse (family already revoked) → clear + 401.
             ClearRefreshCookie(http, env);
             return Results.Unauthorized();
         }
@@ -173,7 +173,7 @@ public static partial class AuthEndpoints
         if (!result.Succeeded)
             return Results.BadRequest(result.Errors.Select(e => e.Description));
 
-        // SPEC-11: reset commonly follows a suspected compromise â€” force re-login on every
+        // SPEC-11: reset commonly follows a suspected compromise — force re-login on every
         // device by revoking the whole refresh-token family.
         await refreshTokens.RevokeAllForUserAsync(user.Id, ct);
         return Results.Ok();
@@ -278,7 +278,7 @@ public static partial class AuthEndpoints
     }
 
     // Maps the user's Identity role name to its fixed Id. 0 roles / an unknown role yields
-    // Guid.Empty â†’ backend default-denies any permission-gated endpoint (AC).
+    // Guid.Empty → backend default-denies any permission-gated endpoint (AC).
     private static Guid ResolveRoleId(IEnumerable<string> roleNames)
     {
         foreach (var name in roleNames)
@@ -320,3 +320,4 @@ public static partial class AuthEndpoints
         return !user.LockoutEnd.HasValue || user.LockoutEnd <= DateTimeOffset.UtcNow;
     }
 }
+

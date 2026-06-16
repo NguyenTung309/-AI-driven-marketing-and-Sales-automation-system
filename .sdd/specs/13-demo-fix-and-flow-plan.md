@@ -254,7 +254,7 @@ git commit -m "fix: auto-spam loop + add IngestAsync pipeline + ITenantResolver"
 - Create: src/frontend/clawbot-web/src/features/conversations/useInbox.ts
 - Create: src/frontend/clawbot-web/src/features/conversations/types.ts
 
-- [ ] **Step 1.1: Define types in 	ypes.ts**
+- [x] **Step 1.1: Define types in 	ypes.ts**
 
 ```typescript
 export interface Conversation {
@@ -279,7 +279,7 @@ export interface Message {
 }
 ```
 
-- [ ] **Step 1.2: Build useInbox.ts — TanStack Query + SignalR**
+- [x] **Step 1.2: Build useInbox.ts — TanStack Query + SignalR**
 
 ```typescript
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -320,7 +320,7 @@ export function useSendMessage(convId: string) {
 }
 ```
 
-- [ ] **Step 1.3: Build ConversationList component**
+- [x] **Step 1.3: Build ConversationList component**
 
 `	sx
 interface Props {
@@ -355,7 +355,7 @@ export default function ConversationList({ conversations, selectedId, onSelect }
 }
 ```
 
-- [ ] **Step 1.4: Build ChatPane component**
+- [x] **Step 1.4: Build ChatPane component**
 
 `	sx
 interface Props { messages: Message[] }
@@ -376,7 +376,7 @@ export default function ChatPane({ messages }: Props) {
 }
 ```
 
-- [ ] **Step 1.5: Build MessageInput component**
+- [x] **Step 1.5: Build MessageInput component**
 
 `	sx
 import { useState } from 'react';
@@ -399,7 +399,7 @@ export default function MessageInput({ onSend, disabled }: Props) {
 }
 ```
 
-- [ ] **Step 1.6: Rebuild ConversationsPage**
+- [x] **Step 1.6: Rebuild ConversationsPage**
 
 `	sx
 import { useState } from 'react';
@@ -434,14 +434,14 @@ export default function ConversationsPage() {
 }
 ```
 
-- [ ] **Step 1.7: Verify build**
+- [x] **Step 1.7: Verify build**
 
 ```powershell
 cd src/frontend/clawbot-web
 npm run build
 ```
 
-- [ ] **Step 1.8: Commit**
+- [x] **Step 1.8: Commit**
 
 ---
 
