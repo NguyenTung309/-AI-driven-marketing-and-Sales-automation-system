@@ -62,3 +62,8 @@ export async function verifyTwoFactor(code: string): Promise<void> {
 export async function disableTwoFactor(): Promise<void> {
   await apiClient.post("/auth/2fa/disable");
 }
+
+// POST /auth/logout ? 204 (revokes refresh cookie server-side).
+export async function logout(): Promise<void> {
+  await apiClient.post("/auth/logout");
+}
