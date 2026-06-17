@@ -16,7 +16,6 @@ public sealed class PancakeChannelAdapter(
 {
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
-    // Per-tenant outbound rate limit (M06): token bucket, 120 sends/min/tenant, short queue.
     private static readonly PartitionedRateLimiter<Guid> OutboundLimiter =
         PartitionedRateLimiter.Create<Guid, Guid>(tenantId =>
             RateLimitPartition.GetTokenBucketLimiter(tenantId, _ => new TokenBucketRateLimiterOptions
@@ -28,6 +27,7 @@ public sealed class PancakeChannelAdapter(
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                 AutoReplenishment = true,
             }));
+
     private readonly HttpClient _http = http;
     private readonly IPancakeConfigResolver _resolver = resolver;
     private readonly ITenantAccessor _tenants = tenants;
@@ -72,6 +72,7 @@ public sealed class PancakeChannelAdapter(
         foreach (var evt in payload.Events)
         {
             if (string.IsNullOrEmpty(evt.ThreadId) || string.IsNullOrEmpty(evt.Text)) continue;
+
             var meta = new Dictionary<string, string>(StringComparer.Ordinal);
             if (!string.IsNullOrEmpty(evt.MessageId)) meta["external_message_id"] = evt.MessageId;
             if (!string.IsNullOrEmpty(evt.SenderName)) meta["display_name"] = evt.SenderName;
@@ -90,6 +91,7 @@ public sealed class PancakeChannelAdapter(
                 MessageType: messageType,
                 ParentPostId: messageType == "comment" ? evt.PostId : null));
         }
+
         return Task.FromResult<IReadOnlyList<ChannelMessage>>(list);
     }
 
@@ -109,14 +111,18 @@ public sealed class PancakeChannelAdapter(
             throw new InvalidOperationException("Pancake access_token not configured.");
 
         var (threadPart, pagePart) = SplitThread(externalThreadId);
+        if (string.IsNullOrEmpty(pagePart) && !string.IsNullOrEmpty(cfg.PageId))
+            pagePart = cfg.PageId;
+
         var path = cfg.SendPathTemplate
             .Replace("{page_id}", pagePart, StringComparison.Ordinal)
             .Replace("{thread_id}", threadPart, StringComparison.Ordinal);
         var url = $"{cfg.BaseUrl.TrimEnd('/')}{path}";
         if (string.Equals(cfg.AuthMode, "query", StringComparison.Ordinal))
-            url += (url.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "access_token=" + Uri.EscapeDataString(cfg.AccessToken);
+            url += (url.Contains('?', StringComparison.Ordinal) ? "&" : "?") +
+                   "page_access_token=" + Uri.EscapeDataString(cfg.AccessToken);
 
-        var payload = new SendBody(text);
+        var payload = new SendBody("reply_inbox", text);
         using var req = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = JsonContent.Create(payload, options: JsonOpts),
@@ -137,7 +143,6 @@ public sealed class PancakeChannelAdapter(
 
     private static (string ThreadId, string PageId) SplitThread(string composite)
     {
-        // Convention: "<page_id>:<thread_id>" or just "<thread_id>".
         var idx = composite.IndexOf(':', StringComparison.Ordinal);
         return idx > 0
             ? (composite[(idx + 1)..], composite[..idx])
@@ -157,7 +162,9 @@ public sealed class PancakeChannelAdapter(
         return "text";
     }
 
-    private sealed record SendBody([property: JsonPropertyName("message")] string Message);
+    private sealed record SendBody(
+        [property: JsonPropertyName("action")] string Action,
+        [property: JsonPropertyName("message")] string Message);
 
     private sealed record PancakeWebhookPayload(
         [property: JsonPropertyName("events")] IReadOnlyList<PancakeEvent>? Events);

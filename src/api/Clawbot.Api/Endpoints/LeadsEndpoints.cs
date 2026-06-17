@@ -1,6 +1,8 @@
+using System.Text;
 using Clawbot.Agents.Contracts.Lead;
 using Clawbot.Agents.Core.Lead;
 using Clawbot.Agents.Core.Skills.Ops;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Leads;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
@@ -9,7 +11,6 @@ using Clawbot.Domain.Leads;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
-using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,20 +20,22 @@ public static class LeadsEndpoints
 {
     public static IEndpointRouteBuilder MapLeads(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/leads").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var grp = app.MapGroup("/api/leads").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
-        grp.MapGet("/", ListAsync);
-        grp.MapGet("/export.csv", ExportCsvAsync);
-        grp.MapPost("/import.csv", ImportCsvAsync);
-        grp.MapGet("/{id:guid}", GetAsync);
-        grp.MapPost("/", CreateAsync);
-        grp.MapPost("/create-with-skills", CreateWithSkillsAsync);
-        grp.MapPost("/{id:guid}/activities", RecordActivityAsync);
-        grp.MapPost("/{id:guid}/assign", AssignAsync);
-        grp.MapGet("/forecast", ForecastAsync);
-        grp.MapGet("/{id:guid}/context", ContextPanelAsync);
+        grp.MapGet("/", ListAsync).RequirePermission("leads:read");
+        grp.MapGet("/export.csv", ExportCsvAsync).RequirePermission("leads:read");
+        grp.MapPost("/import.csv", ImportCsvAsync).RequirePermission("leads:write");
+        grp.MapGet("/{id:guid}", GetAsync).RequirePermission("leads:read");
+        grp.MapPost("/", CreateAsync).RequirePermission("leads:write");
+        grp.MapPost("/create-with-skills", CreateWithSkillsAsync).RequirePermission("leads:write");
+        grp.MapPost("/{id:guid}/activities", RecordActivityAsync).RequirePermission("leads:write");
+        grp.MapPost("/{id:guid}/assign", AssignAsync).RequirePermission("leads:write");
+        grp.MapGet("/forecast", ForecastAsync).RequirePermission("leads:read");
+        grp.MapGet("/{id:guid}/context", ContextPanelAsync).RequirePermission("leads:read");
 
-        var rules = app.MapGroup("/api/lead-scoring-rules").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var rules = app.MapGroup("/api/lead-scoring-rules")
+            .RequirePermission("leads:write")
+            .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
         rules.MapGet("/", ListRulesAsync);
         rules.MapPost("/", CreateRuleAsync);
         rules.MapDelete("/{id:guid}", DeactivateRuleAsync);
@@ -147,12 +150,12 @@ public static class LeadsEndpoints
         {
             TenantId = tenant.TenantId.ToString("D"),
             ContactId = body.ContactId.ToString("D"),
-            DisplayName = contact?.DisplayName ?? "",
-            Phone = body.Phone ?? "",
-            Email = body.Email ?? "",
+            DisplayName = contact.DisplayName ?? string.Empty,
+            Phone = body.Phone ?? string.Empty,
+            Email = body.Email ?? string.Empty,
             SourcePlatform = body.SourcePlatform,
-            Locale = contact?.Locale ?? "",
-            Country = ""
+            Locale = contact.Locale ?? string.Empty,
+            Country = string.Empty,
         };
 
         var grpcResponse = await leadClient.CreateWithSkillsAsync(grpcRequest, cancellationToken: ct).ConfigureAwait(false);
@@ -243,7 +246,10 @@ public static class LeadsEndpoints
     }
 
     private static async Task<IResult> DeactivateRuleAsync(
-        Guid id, AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        CancellationToken ct)
     {
         _ = tenants.Require();
         var rule = await db.LeadScoringRules.FirstOrDefaultAsync(r => r.Id == id, ct).ConfigureAwait(false);

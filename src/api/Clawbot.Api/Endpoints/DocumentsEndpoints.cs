@@ -1,6 +1,8 @@
 using Clawbot.Agents.Contracts.Docs;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Documents;
 using Clawbot.Api.Middleware;
+using Clawbot.Api.Services;
 using Clawbot.Domain.Documents;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -18,18 +20,18 @@ public static class DocumentsEndpoints
 
     public static IEndpointRouteBuilder MapDocuments(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/docs").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var grp = app.MapGroup("/api/docs").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
-        grp.MapPost("/generate", GenerateAsync);
-        grp.MapPost("/generate-kit", GenerateKitAsync);
+        grp.MapPost("/generate", GenerateAsync).RequirePermission("docs:write");
+        grp.MapPost("/generate-kit", GenerateKitAsync).RequirePermission("docs:write");
 
-        grp.MapGet("/templates", ListTemplatesAsync);
-        grp.MapPost("/templates", CreateTemplateAsync);
-        grp.MapPut("/templates/{id:guid}", UpdateTemplateAsync);
-        grp.MapDelete("/templates/{id:guid}", DeleteTemplateAsync);
+        grp.MapGet("/templates", ListTemplatesAsync).RequirePermission("docs:read");
+        grp.MapPost("/templates", CreateTemplateAsync).RequirePermission("docs:write");
+        grp.MapPut("/templates/{id:guid}", UpdateTemplateAsync).RequirePermission("docs:write");
+        grp.MapDelete("/templates/{id:guid}", DeleteTemplateAsync).RequirePermission("docs:write");
 
-        grp.MapGet("/generated", ListGeneratedAsync);
-        grp.MapGet("/{id:guid}/download", DownloadAsync);
+        grp.MapGet("/generated", ListGeneratedAsync).RequirePermission("docs:read");
+        grp.MapGet("/{id:guid}/download", DownloadAsync).RequirePermission("docs:read");
 
         app.MapGet("/api/docs/{id:guid}/open.gif", OpenBeaconAsync)
             .AllowAnonymous()
@@ -38,10 +40,9 @@ public static class DocumentsEndpoints
         return app;
     }
 
-    // Docs-1: anonymous 1x1 beacon for email/Zalo read receipts.
     private static async Task<IResult> OpenBeaconAsync(
         Guid id,
-        Clawbot.Api.Services.DocumentOpenReceiptService receipts,
+        DocumentOpenReceiptService receipts,
         HttpContext http,
         CancellationToken ct)
     {
@@ -52,7 +53,6 @@ public static class DocumentsEndpoints
         return Results.File(TransparentGif, "image/gif");
     }
 
-    // Docs-1: serve a generated document link, enforcing the 7-day expiry (410 Gone past it).
     private static async Task<IResult> DownloadAsync(
         Guid id,
         AppDbContext db,
@@ -64,7 +64,7 @@ public static class DocumentsEndpoints
         var doc = await db.GeneratedDocuments.FirstOrDefaultAsync(d => d.Id == id, ct).ConfigureAwait(false);
         if (doc is null) return Results.NotFound();
         if (doc.IsExpired(clock.UtcNow))
-            return Results.Problem(statusCode: StatusCodes.Status410Gone, detail: "Liên kết tải tài liệu đã hết hạn (7 ngày).");
+            return Results.Problem(statusCode: StatusCodes.Status410Gone, detail: "Document download link has expired.");
 
         doc.MarkOpened(clock.UtcNow);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -75,7 +75,7 @@ public static class DocumentsEndpoints
         GenerateDocumentRequest body,
         ITenantAccessor tenants,
         DocsAgent.DocsAgentClient grpc,
-        Clawbot.Api.Services.DocumentDeliveryService delivery,
+        DocumentDeliveryService delivery,
         CancellationToken ct)
     {
         var tenant = tenants.Require();
@@ -109,7 +109,7 @@ public static class DocumentsEndpoints
         GenerateDocumentKitRequest body,
         ITenantAccessor tenants,
         DocsAgent.DocsAgentClient grpc,
-        Clawbot.Api.Services.DocumentDeliveryService delivery,
+        DocumentDeliveryService delivery,
         CancellationToken ct)
     {
         var tenant = tenants.Require();
@@ -166,7 +166,7 @@ public static class DocumentsEndpoints
         IReadOnlyDictionary<string, string>? vars,
         string? sentVia,
         DocsAgent.DocsAgentClient grpc,
-        Clawbot.Api.Services.DocumentDeliveryService delivery,
+        DocumentDeliveryService delivery,
         CancellationToken ct)
     {
         var req = new DocGenerateRequest
@@ -250,7 +250,11 @@ public static class DocumentsEndpoints
     }
 
     private static async Task<IResult> DeleteTemplateAsync(
-        Guid id, AppDbContext db, ITenantAccessor tenants, IClock clock, CancellationToken ct)
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        CancellationToken ct)
     {
         _ = tenants.Require();
         var tpl = await db.DocumentTemplates

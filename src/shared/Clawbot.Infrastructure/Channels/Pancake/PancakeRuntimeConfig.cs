@@ -8,7 +8,8 @@ public sealed record PancakeRuntimeConfig(
     string SignatureAlgo,
     string SignatureEncoding,
     string SendPathTemplate,
-    string AuthMode);
+    string AuthMode,
+    string PageId);
 
 public interface IPancakeConfigResolver
 {

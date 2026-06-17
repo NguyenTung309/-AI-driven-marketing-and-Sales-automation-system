@@ -22,4 +22,17 @@ public sealed class Role : AggregateRoot<Guid>, ITenantOwned
             IsSystem = isSystem,
             CreatedAt = createdAt,
         };
+
+    // SPEC-11 D1: seed a system role with a fixed Id so role_permissions.role_id matches
+    // the Identity AppRole.Id carried in the JWT.
+    public static Role Seed(Guid id, Guid tenantId, string name, DateTimeOffset createdAt) =>
+        new()
+        {
+            Id = id,
+            TenantId = tenantId,
+            Name = name,
+            Description = null,
+            IsSystem = true,
+            CreatedAt = createdAt,
+        };
 }

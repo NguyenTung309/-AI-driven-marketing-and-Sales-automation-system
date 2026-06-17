@@ -55,7 +55,8 @@ public sealed class LocalRunDocumentationTests
 
         var viteConfig = File.ReadAllText(Path.Combine(root, "src", "frontend", "clawbot-web", "vite.config.ts"));
         viteConfig.Should().Contain("port: 15876");
-        viteConfig.Should().Contain("\"/api\": \"http://localhost:15873\"");
+        viteConfig.Should().Contain("\"/api\": {");
+        viteConfig.Should().Contain("target: \"http://localhost:15873\"");
         viteConfig.Should().NotContain("localhost:5000");
         viteConfig.Should().NotContain("localhost:5001");
     }

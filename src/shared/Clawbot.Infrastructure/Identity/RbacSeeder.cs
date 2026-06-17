@@ -11,16 +11,56 @@ using Microsoft.Extensions.Logging;
 namespace Clawbot.Infrastructure.Identity;
 
 /// <summary>
-/// Idempotently provisions Identity roles (Admin/Sale/SalesLead/Marketer/QA/Viewer) and
-/// seeds the role→permission mapping so JWT tokens carry correct perm claims.
-/// Custom tenant-scoped Role rows are created per tenant on demand by RolesEndpoints.
+/// Idempotently provisions fixed Identity/domain roles and seeds the runtime permission matrix.
 /// </summary>
 public static partial class RbacSeeder
 {
-    public static readonly IReadOnlyList<string> DefaultRoles =
-        new[] { "Admin", "Sale", "SalesLead", "Marketer", "QA", "Viewer" };
+    public const string Admin = "Admin";
+    public const string Sale = "Sale";
+    public const string Marketer = "Marketer";
+    public const string QA = "QA";
+    public const string Viewer = "Viewer";
+    public const string SalesLead = "SalesLead";
 
-    // 8 agents (M25). Seeded "running" so the toggle gate allows auto-actions by default.
+    public static readonly IReadOnlyDictionary<string, Guid> RoleIds = new Dictionary<string, Guid>
+    {
+        [Admin] = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+        [Sale] = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+        [Marketer] = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+        [QA] = Guid.Parse("44444444-4444-4444-4444-444444444444"),
+        [Viewer] = Guid.Parse("55555555-5555-5555-5555-555555555555"),
+        [SalesLead] = Guid.Parse("77777777-7777-7777-7777-777777777777"),
+    };
+
+    public static readonly IReadOnlyList<string> DefaultRoles = RoleIds.Keys.ToArray();
+
+    private static readonly string[] All = [Admin, SalesLead, Sale, Marketer, QA, Viewer];
+
+    private static readonly (string Code, string[] Roles)[] Matrix =
+    [
+        ("conversations:read", All),
+        ("conversations:write", [Admin, SalesLead, Sale]),
+        ("leads:read", All),
+        ("leads:write", [Admin, SalesLead, Sale]),
+        ("content:read", All),
+        ("content:write", [Admin, Marketer]),
+        ("ads:read", [Admin, Marketer, QA, Viewer]),
+        ("ads:write", [Admin, Marketer]),
+        ("analytics:read", All),
+        ("kb:read", All),
+        ("kb:write", [Admin, SalesLead, Marketer, QA]),
+        ("docs:read", All),
+        ("docs:write", [Admin, SalesLead, Sale, Marketer]),
+        ("sale-assist:use", [Admin, SalesLead, Sale]),
+        ("chat-scenarios:read", All),
+        ("chat-scenarios:write", [Admin, SalesLead, Marketer, QA]),
+        ("channels:manage", [Admin]),
+        ("api-keys:manage", [Admin]),
+        ("rbac:manage", [Admin]),
+        ("users:manage", [Admin]),
+        ("system:config", [Admin]),
+    ];
+
     private static readonly (string Code, string DisplayName, string AgentType)[] DefaultAgents =
     [
         ("chat-agent", "Agent-Chat", "chat"),
@@ -33,9 +73,9 @@ public static partial class RbacSeeder
         ("ads-agent", "Agent-Ads", "ads"),
     ];
 
-    private static readonly Dictionary<string, string[]> RolePermissions = new()
+    private static readonly Dictionary<string, string[]> LegacyRolePermissions = new()
     {
-        ["Admin"] =
+        [Admin] =
         [
             "inbox.read", "inbox.assign",
             "kb.read", "kb.write", "kb.deploy",
@@ -47,7 +87,7 @@ public static partial class RbacSeeder
             "analytics.read",
             "admin.system", "admin.audit",
         ],
-        ["Sale"] =
+        [Sale] =
         [
             "inbox.read", "inbox.assign",
             "lead.read", "lead.write",
@@ -55,7 +95,7 @@ public static partial class RbacSeeder
             "docs.generate",
             "analytics.read",
         ],
-        ["SalesLead"] =
+        [SalesLead] =
         [
             "inbox.read", "inbox.assign",
             "lead.read", "lead.write",
@@ -63,19 +103,19 @@ public static partial class RbacSeeder
             "docs.generate",
             "analytics.read",
         ],
-        ["Marketer"] =
+        [Marketer] =
         [
             "content.read", "content.write", "content.approve",
             "ads.read", "ads.manage",
             "analytics.read",
         ],
-        ["QA"] =
+        [QA] =
         [
             "kb.read", "kb.write",
             "content.read",
             "analytics.read",
         ],
-        ["Viewer"] =
+        [Viewer] =
         [
             "inbox.read",
             "lead.read",
@@ -91,26 +131,104 @@ public static partial class RbacSeeder
         var roleManager = sp.GetRequiredService<RoleManager<AppRole>>();
         var db = sp.GetRequiredService<AppDbContext>();
         var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("RbacSeeder");
+        var now = DateTimeOffset.UtcNow;
 
-        foreach (var name in DefaultRoles)
+        await SeedIdentityRolesAsync(roleManager, logger);
+        var tenantId = await EnsureDefaultTenantAsync(db, now, ct);
+        await SeedDomainRolesAsync(db, tenantId, now, ct);
+        await SeedPermissionsAsync(db, ct);
+        await SeedRolePermissionsAsync(db, ct);
+        await SeedTenantResourcesAsync(db, now, logger, ct);
+
+        var permissionCount = await db.Permissions.CountAsync(ct);
+        LogPermissionCount(logger, permissionCount);
+    }
+
+    private static async Task SeedIdentityRolesAsync(RoleManager<AppRole> roleManager, ILogger logger)
+    {
+        foreach (var (name, id) in RoleIds)
         {
-            if (await roleManager.RoleExistsAsync(name)) continue;
-            var role = new AppRole(name) { Id = Guid.NewGuid() };
-            var result = await roleManager.CreateAsync(role);
+            if (await roleManager.FindByNameAsync(name) is not null) continue;
+            var result = await roleManager.CreateAsync(new AppRole(name) { Id = id });
             if (!result.Succeeded)
+                LogRoleSeedFailed(logger, name, string.Join("; ", result.Errors.Select(e => e.Description)));
+        }
+    }
+
+    private static async Task<Guid> EnsureDefaultTenantAsync(AppDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Slug == DevDataSeeder.TenantSlug, ct);
+        if (tenant is not null) return tenant.Id;
+
+        tenant = Tenant.Create(DevDataSeeder.TenantSlug, "Default Tenant", "free", now);
+        db.Tenants.Add(tenant);
+        await db.SaveChangesAsync(ct);
+        return tenant.Id;
+    }
+
+    private static async Task SeedDomainRolesAsync(AppDbContext db, Guid tenantId, DateTimeOffset now, CancellationToken ct)
+    {
+        var existing = await db.RbacRoles.IgnoreQueryFilters().Select(r => r.Id).ToListAsync(ct);
+        var have = existing.ToHashSet();
+        foreach (var (name, id) in RoleIds)
+        {
+            if (have.Contains(id)) continue;
+            db.RbacRoles.Add(Role.Seed(id, tenantId, name, now));
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task SeedPermissionsAsync(AppDbContext db, CancellationToken ct)
+    {
+        var codes = Matrix.Select(m => m.Code)
+            .Concat(LegacyRolePermissions.SelectMany(kv => kv.Value))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var have = (await db.Permissions.Select(p => p.Code).ToListAsync(ct)).ToHashSet();
+        foreach (var code in codes)
+        {
+            if (have.Contains(code)) continue;
+            db.Permissions.Add(Permission.Create(code));
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task SeedRolePermissionsAsync(AppDbContext db, CancellationToken ct)
+    {
+        var permIdByCode = await db.Permissions.ToDictionaryAsync(p => p.Code, p => p.Id, ct);
+        var have = (await db.RolePermissions.Select(rp => new { rp.RoleId, rp.PermissionId }).ToListAsync(ct))
+            .Select(x => (x.RoleId, x.PermissionId)).ToHashSet();
+
+        foreach (var (code, roles) in Matrix)
+        {
+            if (!permIdByCode.TryGetValue(code, out var permId)) continue;
+            foreach (var role in roles)
             {
-                LogRoleSeedFailed(logger, name,
-                    string.Join("; ", result.Errors.Select(e => e.Description)));
+                var roleId = RoleIds[role];
+                if (have.Contains((roleId, permId))) continue;
+                db.RolePermissions.Add(RolePermission.Create(roleId, permId));
             }
         }
 
-        var permCount = await db.Permissions.CountAsync(ct);
-        LogPermissionCount(logger, permCount);
+        foreach (var (role, codes) in LegacyRolePermissions)
+        {
+            var roleId = RoleIds[role];
+            foreach (var code in codes)
+            {
+                if (!permIdByCode.TryGetValue(code, out var permId)) continue;
+                if (have.Contains((roleId, permId))) continue;
+                db.RolePermissions.Add(RolePermission.Create(roleId, permId));
+            }
+        }
 
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task SeedTenantResourcesAsync(AppDbContext db, DateTimeOffset now, ILogger logger, CancellationToken ct)
+    {
         var tenants = await db.Tenants.IgnoreQueryFilters().ToListAsync(ct);
         var perms = await db.Permissions.ToListAsync(ct);
         var permLookup = perms.ToDictionary(p => p.Code, p => p.Id);
-        var now = DateTimeOffset.UtcNow;
 
         foreach (var tenant in tenants)
         {
@@ -129,8 +247,7 @@ public static partial class RbacSeeder
                     domainRoles.Add(domainRole);
                 }
 
-                if (!RolePermissions.TryGetValue(roleName, out var permCodes)) continue;
-
+                if (!LegacyRolePermissions.TryGetValue(roleName, out var permCodes)) continue;
                 var existingLinks = await db.RolePermissions
                     .Where(rp => rp.RoleId == domainRole.Id)
                     .Select(rp => rp.PermissionId)
@@ -144,7 +261,6 @@ public static partial class RbacSeeder
                         continue;
                     }
                     if (existingLinks.Contains(permId)) continue;
-
                     db.RolePermissions.Add(RolePermission.Create(domainRole.Id, permId));
                 }
             }
@@ -158,22 +274,20 @@ public static partial class RbacSeeder
             {
                 if (existingAgentCodes.Contains(code)) continue;
                 var agent = AgentConfig.Create(tenant.Id, code, displayName, agentType, "claude", now);
-                agent.Start(); // seeded enabled (running)
+                agent.Start();
                 db.AgentConfigs.Add(agent);
             }
 
-            // Lead-3: default warm-lead drip sequence (4 steps within 7 days) so warm leads
-            // (30-69) auto-enroll via LeadBecameWarmConsumer. Idempotent by trigger_event.
             var hasWarmDrip = await db.Set<DripSequence>()
                 .IgnoreQueryFilters()
                 .AnyAsync(s => s.TenantId == tenant.Id && s.TriggerEvent == "warm_lead", ct);
             if (!hasWarmDrip)
             {
-                var drip = DripSequence.Create(tenant.Id, "Nuôi dưỡng khách ấm", "warm_lead", now);
-                drip.AddStep(1, 1, "pancake", "Chào {lead_name}, cảm ơn bạn đã quan tâm tới Học Bá! Bạn cần tư vấn thêm về khóa học nào ạ?");
-                drip.AddStep(2, 47, "pancake", "{lead_name} ơi, Học Bá đang có ưu đãi học thử miễn phí — bạn có muốn đặt lịch trải nghiệm không?");
-                drip.AddStep(3, 72, "pancake", "Học Bá gửi {lead_name} lộ trình học tiếng Trung cá nhân hóa. Bạn tham khảo thử nhé!");
-                drip.AddStep(4, 48, "pancake", "{lead_name} còn băn khoăn gì về khóa học không? Đội ngũ Học Bá luôn sẵn sàng hỗ trợ bạn.");
+                var drip = DripSequence.Create(tenant.Id, "Warm lead nurture", "warm_lead", now);
+                drip.AddStep(1, 1, "pancake", "Chao {lead_name}, cam on ban da quan tam toi Hoc Ba! Ban can tu van them ve khoa hoc nao?");
+                drip.AddStep(2, 47, "pancake", "{lead_name} oi, Hoc Ba dang co uu dai hoc thu mien phi - ban co muon dat lich trai nghiem khong?");
+                drip.AddStep(3, 72, "pancake", "Hoc Ba gui {lead_name} lo trinh hoc tieng Trung ca nhan hoa. Ban tham khao thu nhe!");
+                drip.AddStep(4, 48, "pancake", "{lead_name} con ban khoan gi ve khoa hoc khong? Doi ngu Hoc Ba luon san sang ho tro ban.");
                 db.Set<DripSequence>().Add(drip);
             }
         }
@@ -195,6 +309,6 @@ public static partial class RbacSeeder
     private static partial void LogPermNotFound(ILogger logger, string code, string roleName);
 
     [LoggerMessage(EventId = 1004, Level = LogLevel.Information,
-        Message = "RbacSeeder: {Count} role→permission links seeded")]
+        Message = "RbacSeeder: {Count} role-permission links seeded")]
     private static partial void LogRolePermsSeeded(ILogger logger, int count);
 }

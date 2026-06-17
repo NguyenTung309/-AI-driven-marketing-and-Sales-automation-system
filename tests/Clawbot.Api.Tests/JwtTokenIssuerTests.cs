@@ -1,5 +1,4 @@
 using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
 using Clawbot.Api.Auth;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
@@ -7,10 +6,10 @@ using Xunit;
 
 namespace Clawbot.Api.Tests;
 
-// M02 — JwtTokenIssuer claim + expiry issuance.
+// M02 / SPEC-11 — JwtTokenIssuer claim + expiry issuance.
 public sealed class JwtTokenIssuerTests
 {
-    private static JwtTokenIssuer Build(int minutes = 60) =>
+    private static JwtTokenIssuer Build(int minutes = 15) =>
         new(Options.Create(new JwtOptions
         {
             Issuer = "clawbot",
@@ -27,36 +26,27 @@ public sealed class JwtTokenIssuerTests
     {
         var userId = Guid.NewGuid();
         var tenantId = Guid.NewGuid();
+        var roleId = Guid.NewGuid();
 
-        var (token, _) = Build().Issue(userId, tenantId, "demo", new[] { "Admin" });
+        var (token, _) = Build().Issue(userId, tenantId, "demo", roleId);
 
         var jwt = Decode(token);
         jwt.Issuer.Should().Be("clawbot");
         jwt.Claims.Should().Contain(c => c.Type == JwtRegisteredClaimNames.Sub && c.Value == userId.ToString());
         jwt.Claims.Should().Contain(c => c.Type == "tenant_id" && c.Value == tenantId.ToString());
         jwt.Claims.Should().Contain(c => c.Type == "tenant_slug" && c.Value == "demo");
-        // Role claim type is remapped on write; assert by value to stay robust.
-        jwt.Claims.Should().Contain(c => c.Value == "Admin");
+        jwt.Claims.Should().Contain(c => c.Type == "role_id" && c.Value == roleId.ToString());
     }
 
     [Fact]
-    public void Includes_permission_claims_when_provided()
+    public void Does_not_emit_perm_or_role_claims()
     {
-        var (token, _) = Build().Issue(Guid.NewGuid(), Guid.NewGuid(), "demo",
-            new[] { "Admin" }, new[] { "kb:read", "kb:write" });
+        var (token, _) = Build().Issue(Guid.NewGuid(), Guid.NewGuid(), "demo", Guid.NewGuid());
 
         var jwt = Decode(token);
-        jwt.Claims.Where(c => c.Type == "perm").Select(c => c.Value)
-           .Should().BeEquivalentTo("kb:read", "kb:write");
-    }
-
-    [Fact]
-    public void Omits_permission_claims_when_null()
-    {
-        var (token, _) = Build().Issue(Guid.NewGuid(), Guid.NewGuid(), "demo", new[] { "Viewer" });
-
-        var jwt = Decode(token);
+        // SPEC-11 D3: permissions are resolved at runtime, not frozen into the token.
         jwt.Claims.Should().NotContain(c => c.Type == "perm");
+        jwt.Claims.Should().NotContain(c => c.Type == "role" || c.Type == "roles");
     }
 
     [Fact]
@@ -65,7 +55,7 @@ public sealed class JwtTokenIssuerTests
         var before = DateTimeOffset.UtcNow;
 
         var (_, expiresAt) = Build(minutes: 30)
-            .Issue(Guid.NewGuid(), Guid.NewGuid(), "demo", Array.Empty<string>());
+            .Issue(Guid.NewGuid(), Guid.NewGuid(), "demo", Guid.NewGuid());
 
         expiresAt.Should().BeCloseTo(before.AddMinutes(30), TimeSpan.FromMinutes(1));
     }

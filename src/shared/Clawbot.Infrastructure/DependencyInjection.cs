@@ -1,5 +1,6 @@
-using Clawbot.Agents.Core.Ads;
+﻿using Clawbot.Agents.Core.Ads;
 using Clawbot.Agents.Core.Lead;
+using Clawbot.Agents.Core.Skills;
 using Clawbot.Agents.Core.Skills.Content;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Application.Abstractions;
@@ -43,6 +44,7 @@ public static class DependencyInjection
 
         services.AddScoped<IAuditContext, HttpAuditContext>();
         services.AddScoped<AuditSaveChangesInterceptor>();
+        services.AddClawbotPiiRedactor(); // AuditSaveChangesInterceptor depends on IPiiRedactor.
         services.AddScoped<Messaging.DomainEventDispatchInterceptor>();
 
         services.AddDbContext<AppDbContext>((sp, opt) =>
@@ -54,12 +56,14 @@ public static class DependencyInjection
         });
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
+         // Identity and Auth    
         services.AddIdentityCore<AppUser>(opt =>
             {
                 opt.User.RequireUniqueEmail = true;
                 opt.Password.RequiredLength = 8;
-                opt.Lockout.MaxFailedAccessAttempts = 5;
-                opt.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+                // SPEC-11: lockout policy from AuthPolicy (code is source of truth).
+                opt.Lockout.MaxFailedAccessAttempts = AuthPolicy.MaxFailedAccessAttempts;
+                opt.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(AuthPolicy.LockoutMinutes);
             })
             .AddRoles<AppRole>()
             .AddEntityFrameworkStores<AppDbContext>()
@@ -70,13 +74,24 @@ public static class DependencyInjection
         services.AddSingleton<IConnectionMultiplexer>(_ =>
             ConnectionMultiplexer.Connect(cfg.GetConnectionString("Redis") ?? "localhost:6379"));
 
+        // SPEC-11 auth services: refresh-token rotation + runtime permission resolution.
+        // PostConfigure forces the timing from AuthPolicy so appsettings cannot drift it.
+        services.Configure<Auth.RefreshTokenOptions>(cfg.GetSection("RefreshToken"));
+        services.PostConfigure<Auth.RefreshTokenOptions>(o =>
+        {
+            o.Days = AuthPolicy.RefreshTokenDays;
+            o.GraceSeconds = AuthPolicy.RefreshGraceSeconds;
+        });
+        services.AddScoped<Auth.IRefreshTokenService, Auth.RefreshTokenService>();
+        services.AddScoped<Auth.IPermissionResolver, Auth.PermissionResolver>();
+
         services.AddMassTransit(bus =>
         {
             bus.AddConsumer<Messaging.ConversationEscalatedConsumer>();
             bus.AddConsumer<Messaging.LeadBecameHotConsumer>();
             bus.AddConsumer<Messaging.LeadBecameWarmConsumer>();
 
-            // WS1: transactional outbox — domain events published during SaveChanges enlist into
+            // WS1: transactional outbox - domain events published during SaveChanges enlist into
             // OutboxMessage within the same transaction, then relay to RabbitMQ (exactly-once,
             // durable across broker outage). Tables created by migration 0015_masstransit_outbox.sql.
             bus.AddEntityFrameworkOutbox<AppDbContext>(o =>
@@ -96,6 +111,7 @@ public static class DependencyInjection
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IIntentClassifier, KeywordIntentClassifier>();
         services.AddScoped<ITenantAccessor, HttpTenantAccessor>();
+        services.AddScoped<ITenantResolver, DemoTenantResolver>();
         services.Configure<EncryptionOptions>(cfg.GetSection("Encryption"));
         services.AddSingleton<IEncryptor, AesEncryptor>();
         services.Configure<PublisherOptions>(cfg.GetSection(PublisherOptions.SectionName));
@@ -107,6 +123,7 @@ public static class DependencyInjection
         services.AddScoped<IKpiAggregator, KpiAggregator>();
         services.AddScoped<ILeadDedupService, EfLeadDedupService>();
         services.AddScoped<IAssignmentPoolSource, EfAssignmentPoolSource>();
+        services.AddClawbotLead(); // ILeadAssignmentService, consumed by LeadsEndpoints.
         services.AddScoped<IPancakeConfigResolver, PancakeConfigResolver>();
 
         services.AddHttpClient<IChannelAdapter, PancakeChannelAdapter>()
@@ -140,7 +157,7 @@ public static class DependencyInjection
             var o = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<QdrantOptions>>().Value;
             return new QdrantClient(o.Host, o.Port, o.UseTls, o.ApiKey);
         });
-        services.AddScoped<IVectorStore, QdrantVectorStore>();
+        services.AddSingleton<IVectorStore, QdrantVectorStore>();
         services.AddSingleton<IContactEmbeddingSync, ContactEmbeddingSync>();
 
         // External-service config modules (Options pattern, no raw cfg[] reads).

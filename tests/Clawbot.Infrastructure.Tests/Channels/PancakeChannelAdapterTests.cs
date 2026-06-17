@@ -62,7 +62,8 @@ public sealed class PancakeChannelAdapterTests
                 SignatureAlgo: "hmac-sha256",
                 SignatureEncoding: "hex",
                 SendPathTemplate: "/send",
-                AuthMode: "query")),
+                AuthMode: "query",
+                PageId: "")),
             TenantAccessor());
 
         var ok = await sut.VerifyWebhookSignatureAsync(
@@ -85,7 +86,8 @@ public sealed class PancakeChannelAdapterTests
                 SignatureAlgo: "hmac-sha256",
                 SignatureEncoding: "hex",
                 SendPathTemplate: "/send",
-                AuthMode: "query")),
+                AuthMode: "query",
+                PageId: "")),
             TenantAccessor());
 
         var ok = await sut.VerifyWebhookSignatureAsync(
@@ -110,7 +112,8 @@ public sealed class PancakeChannelAdapterTests
                 SignatureAlgo: "hmac-sha256",
                 SignatureEncoding: "base64",
                 SendPathTemplate: "/send",
-                AuthMode: "query")),
+                AuthMode: "query",
+                PageId: "")),
             TenantAccessor());
 
         var ok = await sut.VerifyWebhookSignatureAsync(

@@ -1,4 +1,5 @@
-using Clawbot.Agents.Contracts.SaleAssist;
+﻿using Clawbot.Agents.Contracts.SaleAssist;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.SaleAssist;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
@@ -7,6 +8,7 @@ using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Api.Endpoints;
 
@@ -14,7 +16,7 @@ public static class SaleAssistEndpoints
 {
     public static IEndpointRouteBuilder MapSaleAssist(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/sale-assist").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.ChatPolicy);
+var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapPost("/draft", DraftAsync);
         grp.MapPost("/draft-feedback", DraftFeedbackAsync);
@@ -212,3 +214,8 @@ public static class SaleAssistEndpoints
         return Results.Ok(await suggestions.GetSuggestionsAsync(tenantId, ct: ct).ConfigureAwait(false));
     }
 }
+
+
+
+
+

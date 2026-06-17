@@ -1,3 +1,4 @@
+﻿using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.ChatScenarios;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.ChatScenarios;
@@ -8,22 +9,22 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
 
-// M05 — chat_scenarios CRUD + trigger/platform match + success-rate tracker.
+// M05 â€” chat_scenarios CRUD + trigger/platform match + success-rate tracker.
 // Rows are tenant-scoped; AppDbContext applies the global ITenantOwned query filter,
 // so handlers do not filter TenantId explicitly on reads.
 public static class ChatScenariosEndpoints
 {
     public static IEndpointRouteBuilder MapChatScenarios(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/chat-scenarios").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+var grp = app.MapGroup("/api/chat-scenarios").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
-        grp.MapGet("/", ListAsync);
-        grp.MapGet("/{id:guid}", GetAsync);
-        grp.MapPost("/", CreateAsync);
-        grp.MapPut("/{id:guid}", UpdateAsync);
-        grp.MapDelete("/{id:guid}", DeleteAsync);
-        grp.MapPost("/match", MatchAsync);
-        grp.MapPost("/{id:guid}/outcome", RecordOutcomeAsync);
+        grp.MapGet("/", ListAsync).RequirePermission("chat-scenarios:read");
+        grp.MapGet("/{id:guid}", GetAsync).RequirePermission("chat-scenarios:read");
+        grp.MapPost("/", CreateAsync).RequirePermission("chat-scenarios:write");
+        grp.MapPut("/{id:guid}", UpdateAsync).RequirePermission("chat-scenarios:write");
+        grp.MapDelete("/{id:guid}", DeleteAsync).RequirePermission("chat-scenarios:write");
+        grp.MapPost("/match", MatchAsync).RequirePermission("chat-scenarios:read");
+        grp.MapPost("/{id:guid}/outcome", RecordOutcomeAsync).RequirePermission("chat-scenarios:write");
 
         return app;
     }
@@ -155,3 +156,7 @@ public static class ChatScenariosEndpoints
         return Results.Ok(ToDto(scenario));
     }
 }
+
+
+
+

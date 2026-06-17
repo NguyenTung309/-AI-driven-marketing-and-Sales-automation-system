@@ -1,28 +1,27 @@
-using System.Net;
 using System.Globalization;
-using System.Security.Cryptography;
 using System.Security.Claims;
-using System.Text;
+using System.Security.Cryptography;
 using System.Text.Encodings.Web;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Application.Abstractions;
 using Clawbot.Domain.Security;
-using Clawbot.Domain.Tenants;
+using Clawbot.Infrastructure.Auth;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Persistence;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Api.Endpoints;
 
 public static partial class AuthEndpoints
 {
+    private const string RefreshCookie = "refresh_token";
+
     [LoggerMessage(EventId = 2001, Level = LogLevel.Information,
         Message = "Password reset OTP for {Email}: {Otp}")]
     private static partial void LogResetOtpIssued(ILogger logger, string email, string otp);
@@ -33,8 +32,10 @@ public static partial class AuthEndpoints
     {
         var group = app.MapGroup("/auth").RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
 
-        group.MapPost("/login", LoginAsync).AllowAnonymous();
-        group.MapPost("/login/2fa", LoginWithTwoFactorAsync).AllowAnonymous();
+        group.MapPost("/login", LoginAsync).AllowAnonymous().RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
+        group.MapPost("/login/2fa", LoginWithTwoFactorAsync).AllowAnonymous().RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
+        group.MapPost("/refresh", RefreshAsync).AllowAnonymous().RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
+        group.MapPost("/logout", LogoutAsync).AllowAnonymous();
         group.MapPost("/reset/request", RequestResetAsync).AllowAnonymous();
         group.MapPost("/reset/confirm", ConfirmResetAsync).AllowAnonymous();
         group.MapPost("/2fa/enable", EnableTwoFactorAsync).RequireAuthorization();
@@ -48,33 +49,41 @@ public static partial class AuthEndpoints
 
     private static async Task<IResult> LoginAsync(
         LoginRequest req,
+        HttpContext http,
         UserManager<AppUser> users,
         SignInManager<AppUser> signIn,
         AppDbContext db,
         JwtTokenIssuer issuer,
-        HttpContext http,
+        IRefreshTokenService refreshTokens,
+        IHostEnvironment env,
         CancellationToken ct)
     {
         var user = await users.FindByEmailAsync(req.Email);
         if (user is null || !user.IsActive()) return Results.Unauthorized();
 
         var check = await signIn.CheckPasswordSignInAsync(user, req.Password, lockoutOnFailure: true);
-        if (check.IsLockedOut) return Results.Problem("Account locked", statusCode: (int)HttpStatusCode.Locked);
-        if (check.RequiresTwoFactor) return Results.Json(new { requiresTwoFactor = true }, statusCode: 202);
+        if (check.IsLockedOut) return Results.Unauthorized();
         if (!check.Succeeded) return Results.Unauthorized();
 
-        var (token, expires) = await IssueAsync(user, users, db, issuer, ct);
+        // CheckPasswordSignInAsync validates password + lockout only; it never reports
+        // RequiresTwoFactor. Check 2FA explicitly so enabled accounts are challenged.
+        if (await users.GetTwoFactorEnabledAsync(user))
+            return Results.Json(new { requiresTwoFactor = true }, statusCode: 202);
+
+        var result = await IssueSessionAsync(user, http, users, db, issuer, refreshTokens, env, ct);
         await RecordLoginAsync(db, user, http, ct);
-        return Results.Ok(new LoginResponse(token, expires));
+        return result;
     }
 
     private static async Task<IResult> LoginWithTwoFactorAsync(
         TwoFactorLoginRequest req,
+        HttpContext http,
         UserManager<AppUser> users,
         SignInManager<AppUser> signIn,
         AppDbContext db,
         JwtTokenIssuer issuer,
-        HttpContext http,
+        IRefreshTokenService refreshTokens,
+        IHostEnvironment env,
         CancellationToken ct)
     {
         var user = await users.FindByEmailAsync(req.Email);
@@ -86,9 +95,59 @@ public static partial class AuthEndpoints
         var valid = await users.VerifyTwoFactorTokenAsync(user, TokenOptions.DefaultAuthenticatorProvider, req.Code);
         if (!valid) return Results.Unauthorized();
 
-        var (token, expires) = await IssueAsync(user, users, db, issuer, ct);
+        var result = await IssueSessionAsync(user, http, users, db, issuer, refreshTokens, env, ct);
         await RecordLoginAsync(db, user, http, ct);
+        return result;
+    }
+
+    private static async Task<IResult> RefreshAsync(
+        HttpContext http,
+        UserManager<AppUser> users,
+        AppDbContext db,
+        JwtTokenIssuer issuer,
+        IRefreshTokenService refreshTokens,
+        IHostEnvironment env,
+        CancellationToken ct)
+    {
+        var raw = http.Request.Cookies[RefreshCookie];
+        if (string.IsNullOrEmpty(raw))
+        {
+            ClearRefreshCookie(http, env);
+            return Results.Unauthorized();
+        }
+
+        var result = await refreshTokens.RotateAsync(raw, ClientIp(http), ct);
+        if (result.Outcome != RotateOutcome.Success)
+        {
+            ClearRefreshCookie(http, env);
+            return Results.Unauthorized();
+        }
+
+        var user = await users.FindByIdAsync(result.UserId.ToString());
+        if (user is null || !user.IsActive())
+        {
+            await refreshTokens.RevokeAllForUserAsync(result.UserId, ct);
+            ClearRefreshCookie(http, env);
+            return Results.Unauthorized();
+        }
+
+        SetRefreshCookie(http, env, result.RawToken!, result.ExpiresAt);
+        var (token, expires) = await IssueAccessTokenAsync(user, users, db, issuer, ct);
         return Results.Ok(new LoginResponse(token, expires));
+    }
+
+    private static async Task<IResult> LogoutAsync(
+        HttpContext http,
+        IRefreshTokenService refreshTokens,
+        IHostEnvironment env,
+        CancellationToken ct)
+    {
+        var raw = http.Request.Cookies[RefreshCookie];
+        if (!string.IsNullOrEmpty(raw))
+            await refreshTokens.RevokeAsync(raw, ct);
+
+        ClearRefreshCookie(http, env);
+        return Results.NoContent();
     }
 
     private static async Task<IResult> RequestResetAsync(
@@ -105,15 +164,15 @@ public static partial class AuthEndpoints
         var otp = GenerateOtp();
         cache.Set(ResetOtpCacheKey(req.Email, otp), token, ResetOtpTtl);
 
-        LogResetOtpIssued(log, req.Email, otp); // also logged so dev can copy when SMTP unset
-        await email.SendAsync(req.Email, "Đặt lại mật khẩu Học Bá",
-            $"Mã OTP đặt lại mật khẩu của bạn: {otp}. Mã có hiệu lực trong 10 phút.");
+        LogResetOtpIssued(log, req.Email, otp);
+        await email.SendAsync(req.Email, "Dat lai mat khau Hoc Ba",
+            $"Ma OTP dat lai mat khau cua ban: {otp}. Ma co hieu luc trong 10 phut.");
         return Results.Ok();
     }
 
     private static async Task<IResult> ChangePasswordAsync(
         ChangePasswordRequest req,
-        System.Security.Claims.ClaimsPrincipal principal,
+        ClaimsPrincipal principal,
         UserManager<AppUser> users)
     {
         var user = await users.GetUserAsync(principal);
@@ -128,7 +187,9 @@ public static partial class AuthEndpoints
     private static async Task<IResult> ConfirmResetAsync(
         PasswordResetConfirm req,
         UserManager<AppUser> users,
-        IMemoryCache cache)
+        IMemoryCache cache,
+        IRefreshTokenService refreshTokens,
+        CancellationToken ct)
     {
         var user = await users.FindByEmailAsync(req.Email);
         if (user is null) return Results.BadRequest("invalid_token");
@@ -139,10 +200,12 @@ public static partial class AuthEndpoints
             return Results.BadRequest("invalid_or_expired_otp");
 
         var result = await users.ResetPasswordAsync(user, identityToken, req.NewPassword);
-        if (result.Succeeded) cache.Remove(cacheKey);
-        return result.Succeeded
-            ? Results.Ok()
-            : Results.BadRequest(result.Errors.Select(e => e.Description));
+        if (!result.Succeeded)
+            return Results.BadRequest(result.Errors.Select(e => e.Description));
+
+        cache.Remove(cacheKey);
+        await refreshTokens.RevokeAllForUserAsync(user.Id, ct);
+        return Results.Ok();
     }
 
     private static async Task<IResult> EnableTwoFactorAsync(
@@ -189,17 +252,45 @@ public static partial class AuthEndpoints
         return Results.Ok();
     }
 
-    private static IResult Me(ClaimsPrincipal user) =>
-        Results.Ok(new
-        {
-            sub = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub"),
-            tenantId = user.FindFirstValue("tenant_id"),
-            tenantSlug = user.FindFirstValue("tenant_slug"),
-            roles = user.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray(),
-            permissions = user.FindAll("perm").Select(c => c.Value).ToArray(),
-        });
+    private static async Task<IResult> Me(
+        ClaimsPrincipal principal,
+        IPermissionResolver permissions,
+        CancellationToken ct)
+    {
+        var sub = principal.FindFirstValue(ClaimTypes.NameIdentifier) ?? principal.FindFirstValue("sub");
+        var roleId = Guid.TryParse(principal.FindFirstValue("role_id"), out var parsed) ? parsed : Guid.Empty;
+        var roleName = RbacSeeder.RoleIds.FirstOrDefault(kv => kv.Value == roleId).Key;
+        var perms = await permissions.GetPermissionsAsync(roleId, ct);
 
-    private static async Task<(string Token, DateTimeOffset ExpiresAt)> IssueAsync(
+        return Results.Ok(new
+        {
+            sub,
+            tenantId = principal.FindFirstValue("tenant_id"),
+            tenantSlug = principal.FindFirstValue("tenant_slug"),
+            roleId = roleId == Guid.Empty ? null : roleId.ToString(),
+            role = roleName,
+            permissions = perms.OrderBy(p => p).ToArray(),
+        });
+    }
+
+    private static async Task<IResult> IssueSessionAsync(
+        AppUser user,
+        HttpContext http,
+        UserManager<AppUser> users,
+        AppDbContext db,
+        JwtTokenIssuer issuer,
+        IRefreshTokenService refreshTokens,
+        IHostEnvironment env,
+        CancellationToken ct)
+    {
+        var (refreshRaw, refreshExpires) = await refreshTokens.IssueAsync(user.Id, ClientIp(http), ct);
+        SetRefreshCookie(http, env, refreshRaw, refreshExpires);
+
+        var (token, expires) = await IssueAccessTokenAsync(user, users, db, issuer, ct);
+        return Results.Ok(new LoginResponse(token, expires));
+    }
+
+    private static async Task<(string Token, DateTimeOffset ExpiresAt)> IssueAccessTokenAsync(
         AppUser user,
         UserManager<AppUser> users,
         AppDbContext db,
@@ -212,15 +303,34 @@ public static partial class AuthEndpoints
             .Select(t => t.Slug)
             .FirstOrDefaultAsync(ct) ?? "default";
 
-        var perms = await db.RolePermissions
-            .Join(db.RbacRoles, rp => rp.RoleId, r => r.Id, (rp, r) => new { rp.PermissionId, r.Name, r.TenantId })
-            .Where(x => x.TenantId == user.TenantId && roles.Contains(x.Name))
-            .Join(db.Permissions, x => x.PermissionId, p => p.Id, (x, p) => p.Code)
-            .Distinct()
-            .ToListAsync(ct);
-
-        return issuer.Issue(user.Id, user.TenantId, slug, roles, perms);
+        var roleId = ResolveRoleId(roles);
+        return issuer.Issue(user.Id, user.TenantId, slug, roleId);
     }
+
+    private static Guid ResolveRoleId(IEnumerable<string> roleNames)
+    {
+        foreach (var name in roleNames)
+            if (RbacSeeder.RoleIds.TryGetValue(name, out var id))
+                return id;
+        return Guid.Empty;
+    }
+
+    private static void SetRefreshCookie(HttpContext http, IHostEnvironment env, string raw, DateTimeOffset expires) =>
+        http.Response.Cookies.Append(RefreshCookie, raw, BuildCookieOptions(env, expires));
+
+    private static void ClearRefreshCookie(HttpContext http, IHostEnvironment env) =>
+        http.Response.Cookies.Delete(RefreshCookie, BuildCookieOptions(env, expires: null));
+
+    private static CookieOptions BuildCookieOptions(IHostEnvironment env, DateTimeOffset? expires) => new()
+    {
+        HttpOnly = true,
+        Secure = !env.IsDevelopment(),
+        SameSite = SameSiteMode.Strict,
+        Path = "/",
+        Expires = expires,
+    };
+
+    private static string? ClientIp(HttpContext http) => http.Connection.RemoteIpAddress?.ToString();
 
     private static string BuildAuthenticatorUri(UrlEncoder encoder, string email, string sharedKey)
     {
@@ -229,7 +339,8 @@ public static partial class AuthEndpoints
                $"?secret={sharedKey}&issuer={encoder.Encode(issuer)}&digits=6";
     }
 
-    private static string GenerateOtp() => RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
+    private static string GenerateOtp() =>
+        RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
 
     private static string ResetOtpCacheKey(string email, string otp) =>
         $"password-reset:{email.Trim().ToUpperInvariant()}:{otp.Trim()}";
@@ -251,7 +362,7 @@ public static partial class AuthEndpoints
 
     private static bool IsActive(this AppUser user)
     {
-        if (!user.IsActive) return false; // admin-set deactivation flag (M23)
+        if (!user.IsActive) return false;
         if (!user.LockoutEnabled) return true;
         return !user.LockoutEnd.HasValue || user.LockoutEnd <= DateTimeOffset.UtcNow;
     }

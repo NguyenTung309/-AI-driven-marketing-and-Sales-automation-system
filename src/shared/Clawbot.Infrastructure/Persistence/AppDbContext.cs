@@ -14,6 +14,7 @@ using Clawbot.Domain.Documents;
 using Clawbot.Domain.Experiments;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
+using Clawbot.Domain.Llm;
 using Clawbot.Domain.Notifications;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Domain.Security;
@@ -40,6 +41,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<Auth.RefreshToken> RefreshTokens => Set<Auth.RefreshToken>();
     public DbSet<Notification> Notifications => Set<Notification>();
 
     // Contacts
@@ -101,10 +103,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<ExperimentAssignment> ExperimentAssignments => Set<ExperimentAssignment>();
     public DbSet<ExperimentEvent> ExperimentEvents => Set<ExperimentEvent>();
 
-    // Channels
+    // Channels & LLM configs
     public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();
+    public DbSet<LlmConfig> LlmConfigs => Set<LlmConfig>();
+    public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
 
-    // Competitors (Research-2)
+    // Competitors
     public DbSet<CompetitorSource> CompetitorSources => Set<CompetitorSource>();
     public DbSet<CompetitorPost> CompetitorPosts => Set<CompetitorPost>();
 
@@ -115,6 +119,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     private sealed class EfConversationSet(DbSet<Conversation> set) : IConversationSet
     {
         public void Add(Conversation conversation) => set.Add(conversation);
+
+        public Task<Conversation?> FindByThreadAsync(string platform, string externalThreadId, CancellationToken ct = default) =>
+            set.FirstOrDefaultAsync(c => c.Platform == platform && c.ExternalThreadId == externalThreadId, ct);
     }
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -122,17 +129,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
         base.OnModelCreating(builder);
         builder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
 
-        // MassTransit transactional outbox (WS1): event publish enlists in the same SaveChanges
-        // transaction as the aggregate write — exactly-once, no loss on broker outage.
-        // These entities keep canonical PascalCase schema (skipped by ApplySnakeCase).
         builder.AddInboxStateEntity();
         builder.AddOutboxMessageEntity();
         builder.AddOutboxStateEntity();
 
-        // Domain aggregates assign their own Guid identifiers in factory methods, so keys are
-        // not store-generated. Without this, EF marks navigation-appended children (e.g.
-        // Conversation.AppendMessage) as Modified instead of Added on a follow-up SaveChanges,
-        // emitting an UPDATE that affects 0 rows (DbUpdateConcurrencyException).
         foreach (var entity in builder.Model.GetEntityTypes())
         {
             foreach (var key in entity.GetKeys())

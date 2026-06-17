@@ -1,6 +1,8 @@
+using System.Text;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Inbox;
-using Clawbot.Api.Services;
 using Clawbot.Api.Middleware;
+using Clawbot.Api.Services;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
@@ -17,16 +19,16 @@ public static class InboxEndpoints
 {
     public static IEndpointRouteBuilder MapInbox(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/inbox").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.ChatPolicy);
+        var grp = app.MapGroup("/api/inbox").RequireRateLimiting(RateLimitingExtensions.ChatPolicy);
 
-        grp.MapGet("/search", SearchAsync);
-        grp.MapGet("/conversations", ListAsync);
-        grp.MapGet("/conversations/{id:guid}", GetAsync);
-        grp.MapGet("/conversations/{id:guid}/export.csv", ExportCsvAsync);
-        grp.MapPost("/conversations/{id:guid}/assign", AssignAsync);
-        grp.MapPost("/conversations/{id:guid}/resolve", ResolveAsync);
-        grp.MapPost("/conversations/{id:guid}/escalate", EscalateAsync);
-        grp.MapPost("/conversations/{id:guid}/messages", SendOutboundAsync);
+        grp.MapGet("/search", SearchAsync).RequirePermission("conversations:read");
+        grp.MapGet("/conversations", ListAsync).RequirePermission("conversations:read");
+        grp.MapGet("/conversations/{id:guid}", GetAsync).RequirePermission("conversations:read");
+        grp.MapGet("/conversations/{id:guid}/export.csv", ExportCsvAsync).RequirePermission("conversations:read");
+        grp.MapPost("/conversations/{id:guid}/assign", AssignAsync).RequirePermission("conversations:write");
+        grp.MapPost("/conversations/{id:guid}/resolve", ResolveAsync).RequirePermission("conversations:write");
+        grp.MapPost("/conversations/{id:guid}/escalate", EscalateAsync).RequirePermission("conversations:write");
+        grp.MapPost("/conversations/{id:guid}/messages", SendOutboundAsync).RequirePermission("conversations:write");
 
         return app;
     }
@@ -51,14 +53,19 @@ public static class InboxEndpoints
         var total = await query.CountAsync(ct).ConfigureAwait(false);
 
         var rows = await query
-            // M15 lead-score join: surface hot-lead conversations first, then by recency.
             .OrderByDescending(c => db.Leads.Where(l => l.ContactId == c.ContactId).Max(l => (int?)l.Score) ?? 0)
             .ThenByDescending(c => c.LastMessageAt ?? c.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(c => new
             {
-                c.Id, c.Platform, c.ExternalThreadId, c.Status, c.ContactId, c.AssignedTo, c.LastMessageAt,
+                c.Id,
+                c.Platform,
+                c.ExternalThreadId,
+                c.Status,
+                c.ContactId,
+                c.AssignedTo,
+                c.LastMessageAt,
                 LastMessage = c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault(),
             })
             .ToListAsync(ct).ConfigureAwait(false);
@@ -69,9 +76,14 @@ public static class InboxEndpoints
             .ToDictionaryAsync(c => c.Id, c => c.DisplayName, ct).ConfigureAwait(false);
 
         var items = rows.Select(r => new ConversationListItemDto(
-            r.Id, r.Platform, r.ExternalThreadId, r.Status, r.ContactId,
+            r.Id,
+            r.Platform,
+            r.ExternalThreadId,
+            r.Status,
+            r.ContactId,
             r.ContactId.HasValue && contactNames.TryGetValue(r.ContactId.Value, out var n) ? n : null,
-            r.AssignedTo, r.LastMessageAt,
+            r.AssignedTo,
+            r.LastMessageAt,
             r.LastMessage is null ? null : Preview(r.LastMessage),
             UnreadCount: 0)).ToList();
 
@@ -122,7 +134,7 @@ public static class InboxEndpoints
     private static async Task<IResult> ExportCsvAsync(
         Guid id,
         ITenantAccessor tenants,
-        Clawbot.Api.Services.ConversationExportService exporter,
+        ConversationExportService exporter,
         CancellationToken ct)
     {
         var tenant = tenants.Require();
@@ -130,7 +142,7 @@ public static class InboxEndpoints
         if (export is null) return Results.NotFound();
 
         return Results.File(
-            System.Text.Encoding.UTF8.GetBytes(export.Content),
+            Encoding.UTF8.GetBytes(export.Content),
             "text/csv; charset=utf-8",
             export.FileName);
     }
@@ -168,14 +180,17 @@ public static class InboxEndpoints
         await notifier.NotifyConversationUpdatedAsync(tenant.TenantId,
             new InboxConversationEvent(conv.Id, conv.Status, conv.AssignedTo, conv.LastMessageAt), ct).ConfigureAwait(false);
 
-        // Auto-summary on resolve — enqueue as Hangfire background job (non-blocking)
         BackgroundJob.Enqueue<AutoSummaryJob>(j => j.RunAsync(tenant.TenantId, id, CancellationToken.None));
 
         return Results.NoContent();
     }
 
     private static async Task<IResult> EscalateAsync(
-        Guid id, AppDbContext db, ITenantAccessor tenants, IInboxNotifier notifier, CancellationToken ct)
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IInboxNotifier notifier,
+        CancellationToken ct)
     {
         var tenant = tenants.Require();
         var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id, ct).ConfigureAwait(false);
@@ -194,7 +209,7 @@ public static class InboxEndpoints
         ITenantAccessor tenants,
         IInboxNotifier notifier,
         IChannelAdapter adapter,
-        Clawbot.Api.Services.OutboundMessageSafetyService safety,
+        OutboundMessageSafetyService safety,
         IClock clock,
         CancellationToken ct)
     {
@@ -224,5 +239,5 @@ public static class InboxEndpoints
     }
 
     private static string Preview(string text) =>
-        text.Length <= 140 ? text : text[..140] + "…";
+        text.Length <= 140 ? text : text[..140] + "...";
 }

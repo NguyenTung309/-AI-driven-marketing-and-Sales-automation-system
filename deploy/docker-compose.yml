@@ -1,4 +1,4 @@
-services:
+﻿services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: clawbot-sqlserver
@@ -106,13 +106,23 @@ services:
   clawbot-api:
     build:
       context: ..
-      dockerfile: src/Clawbot.Api/Dockerfile
+      dockerfile: src/api/Clawbot.Api/Dockerfile
     container_name: clawbot-api
     ports:
       - "15874:15874"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://0.0.0.0:15874
+      - ConnectionStrings__SqlServer=Server=sqlserver,1433;Database=clawbot;User Id=sa;Password=${MSSQL_SA_PASSWORD:-Clawbot!2026};TrustServerCertificate=True
+      - ConnectionStrings__Redis=redis:6379
+      - ConnectionStrings__RabbitMq=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672
+      - Vector__Qdrant__Host=qdrant
+      # JWT signing key (HS256 needs >=32 bytes). Dev default here; override in staging/prod.
+      - Jwt__SigningKey=${JWT_SIGNING_KEY:-dev-only-jwt-signing-key-change-before-staging-0123456789}
+      # Pancake tokens - doc tu file .env (cung thu muc)
+      - PANCAKE_ACCESS_TOKEN=${PANCAKE_ACCESS_TOKEN:-}
+      - PANCAKE_PAGE_ACCESS_TOKEN=${PANCAKE_PAGE_ACCESS_TOKEN:-}
+      - PANCAKE_PAGE_ID=${PANCAKE_PAGE_ID:-}
     depends_on:
       sqlserver:
         condition: service_healthy
@@ -138,6 +148,13 @@ services:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://0.0.0.0:15873
       - Gateway__Pancake__WebhookSecret=${PANCAKE_WEBHOOK_SECRET:-dev-secret-replace-before-staging}
+      # Must match clawbot-api's Jwt__SigningKey so the gateway can verify forwarded tokens.
+      - Jwt__SigningKey=${JWT_SIGNING_KEY:-dev-only-jwt-signing-key-change-before-staging-0123456789}
+      # Pancake tokens - doc tu file .env (cung thu muc)
+      - PANCAKE_ACCESS_TOKEN=${PANCAKE_ACCESS_TOKEN:-}
+      - PANCAKE_PAGE_ACCESS_TOKEN=${PANCAKE_PAGE_ACCESS_TOKEN:-}
+      - PANCAKE_PAGE_ID=${PANCAKE_PAGE_ID:-}
+      - ReverseProxy__Clusters__backend__Destinations__backend/primary__Address=http://clawbot-api:15874
     depends_on:
       - clawbot-api
     restart: unless-stopped
@@ -152,3 +169,4 @@ volumes:
   qdrant_data:
   minio_data:
   metabase_postgres_data:
+

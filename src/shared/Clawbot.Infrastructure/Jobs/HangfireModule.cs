@@ -35,6 +35,7 @@ public static class HangfireModule
 
         services.AddScoped<RetentionPurgeJob>();
         services.AddScoped<DailyKpiRollupJob>();
+        services.AddScoped<RefreshTokenCleanupJob>();
         services.AddScoped<DailyReportJob>();
         services.AddScoped<AnomalyAlertJob>();
         services.AddScoped<ForecastPrecomputeJob>();
@@ -61,7 +62,6 @@ public static class HangfireModule
         return services;
     }
 
-    // Vietnam is GMT+7 with no DST. Research-1: the weekly trend scan must fire at 07:00 local.
     private static readonly TimeZoneInfo VietnamTimeZone = ResolveVietnamTimeZone();
 
     private static TimeZoneInfo ResolveVietnamTimeZone()
@@ -72,7 +72,7 @@ public static class HangfireModule
             catch (TimeZoneNotFoundException) { }
             catch (InvalidTimeZoneException) { }
         }
-        // Last resort: a fixed +7 offset zone (VN has no DST, so this is exact).
+
         return TimeZoneInfo.CreateCustomTimeZone("VN+7", TimeSpan.FromHours(7), "Vietnam (UTC+7)", "Vietnam (UTC+7)");
     }
 
@@ -90,6 +90,11 @@ public static class HangfireModule
             "kpi",
             j => j.RunAsync(CancellationToken.None),
             Cron.Daily(0, 30));
+        recurring.AddOrUpdate<RefreshTokenCleanupJob>(
+            "refresh-token-cleanup",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Daily(3));
         recurring.AddOrUpdate<DailyReportJob>(
             "daily-report-push",
             "kpi",
@@ -106,7 +111,6 @@ public static class HangfireModule
             "kpi",
             j => j.RunAsync(CancellationToken.None),
             "45 0 * * *");
-        // Research-1: 07:00 Monday Vietnam time (explicit TZ, not the implicit 00:00-UTC coincidence).
         recurring.AddOrUpdate<WeeklyTrendScanJob>(
             "content-weekly-trend-scan",
             "content",
@@ -118,7 +122,6 @@ public static class HangfireModule
             "content",
             j => j.RunAsync(CancellationToken.None),
             "*/5 * * * *");
-        // Ads-1: hourly optimisation pass (was every 4h). Connectors back off on 429 (throttle).
         recurring.AddOrUpdate<AdsRuleEvaluationJob>(
             "ads-rule-evaluation",
             "ads",
@@ -184,7 +187,6 @@ public static class HangfireModule
             "kpi",
             j => j.RunAsync(CancellationToken.None),
             Cron.Daily(1));
-        // Research-2: daily competitor scan at 06:00 Vietnam time.
         recurring.AddOrUpdate<CompetitorScanJob>(
             "competitor-scan",
             "content",
