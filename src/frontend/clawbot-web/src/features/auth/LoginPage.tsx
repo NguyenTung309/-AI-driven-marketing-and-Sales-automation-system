@@ -1,11 +1,9 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { isAxiosError } from "axios";
-import { apiClient, loadPermissions } from "@/shared/api/client";
-import { useAuthStore } from "@/shared/auth/authStore";
+import { useAuth } from "@/shared/auth/authState";
 import { Alert } from "@/shared/ui";
-
-type Step = "credentials" | "twoFactor";
+import { login, loginTwoFactor } from "@/shared/api/auth";
 
 interface FlowNode {
   readonly icon: string;
@@ -40,10 +38,12 @@ function BrandPanel() {
           {FLOW.map((node, i) => (
             <div key={node.label} className="flex items-center flex-1 last:flex-none">
               <div
-                className={lex flex-col items-center gap-2 rounded-xl border backdrop-blur-sm }
+                className={`flex flex-col items-center gap-2 rounded-xl border backdrop-blur-sm ${
+                  node.emphasis ? "bg-white/20 border-white/40 p-6 scale-110" : "bg-white/10 border-white/20 p-4"
+                }`}
               >
                 <span
-                  className={material-symbols-outlined text-on-primary }
+                  className={`material-symbols-outlined text-on-primary ${node.emphasis ? "text-4xl" : "text-3xl"}`}
                   style={node.emphasis ? { fontVariationSettings: "'FILL' 1" } : undefined}
                 >
                   {node.icon}
@@ -57,7 +57,7 @@ function BrandPanel() {
       </div>
 
       <div className="absolute bottom-0 left-0 w-full flex items-center px-8 py-4 z-10 text-on-primary/60">
-        <span className="text-label-sm">&copy; 2024 Học Bá Education. All rights reserved.</span>
+        <span className="text-label-sm">© 2024 Học Bá Education. All rights reserved.</span>
       </div>
     </section>
   );
@@ -70,12 +70,12 @@ const submitBtn =
   "w-full py-4 bg-primary hover:bg-primary-hover text-on-primary font-bold text-label-lg rounded-lg shadow-lg shadow-primary/20 transition-all active:scale-[0.98] tracking-wider disabled:opacity-60 disabled:pointer-events-none";
 
 export default function LoginPage() {
-  const setAuth = useAuthStore((s) => s.setAuth);
+  const { setToken } = useAuth();
   const navigate = useNavigate();
-  const [step, setStep] = useState<Step>("credentials");
-  const [email, setEmail] = useState("");
+  const [identity, setIdentity] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [twoFactor, setTwoFactor] = useState(false);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -88,26 +88,19 @@ export default function LoginPage() {
     }
   }
 
-  // SPEC-11: token in-memory + permissions from /auth/me, then enter the app.
-  async function finishLogin(accessToken: string) {
-    setAuth(accessToken);
-    await loadPermissions();
-    navigate("/", { replace: true });
-  }
-
-  async function onSubmitCredentials(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setLoading(true);
     try {
-      const res = await apiClient.post("/auth/login", { email, password });
-      // 202 => the account has 2FA enabled; collect the authenticator code next.
-      if (res.status === 202 && res.data?.requiresTwoFactor) {
-        setStep("twoFactor");
+      const outcome = await login(identity, password);
+      if (outcome.kind === "twoFactor") {
+        setTwoFactor(true);
         return;
       }
-      await finishLogin(res.data.accessToken as string);
-    } catch (err) {
+      setToken(outcome.accessToken);
+      navigate("/", { replace: true });
+    } catch (err: unknown) {
       onError(err);
     } finally {
       setLoading(false);
@@ -119,10 +112,11 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const res = await apiClient.post("/auth/login/2fa", { email, password, code });
-      await finishLogin(res.data.accessToken as string);
+      const accessToken = await loginTwoFactor(identity, password, code);
+      setToken(accessToken);
+      navigate("/", { replace: true });
     } catch {
-      setError("Mã xác thực không đúng.");
+      setError("Mã xác thực không đúng. Vui lòng thử lại.");
     } finally {
       setLoading(false);
     }
@@ -142,7 +136,7 @@ export default function LoginPage() {
             </div>
           ) : null}
 
-          {step === "twoFactor" ? (
+          {twoFactor ? (
             <form className="space-y-6" onSubmit={onSubmitTwoFactor}>
               <header className="mb-2">
                 <h2 className="text-secondary text-headline-md mb-2">Xác thực 2 bước</h2>
@@ -160,7 +154,7 @@ export default function LoginPage() {
                   value={code}
                   onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
                   placeholder="000000"
-                  className={${fieldInput} tracking-[0.5em] text-center}
+                  className={`${fieldInput} tracking-[0.5em] text-center`}
                 />
               </div>
               <button type="submit" disabled={loading} className={submitBtn}>
@@ -169,13 +163,13 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setStep("credentials");
+                  setTwoFactor(false);
                   setCode("");
                   setError(null);
                 }}
                 className="w-full text-center text-on-surface-variant hover:text-primary text-body-md transition-colors"
               >
-                &larr; Quay lại
+                ← Quay lại
               </button>
             </form>
           ) : (
@@ -187,18 +181,18 @@ export default function LoginPage() {
                 </p>
               </header>
 
-              <form className="space-y-6" onSubmit={onSubmitCredentials}>
+              <form className="space-y-6" onSubmit={onSubmit}>
                 <div className="space-y-2">
-                  <label className="block text-label-lg text-on-surface" htmlFor="email">Email</label>
+                  <label className="block text-label-lg text-on-surface" htmlFor="identity">Tên đăng nhập hoặc Email</label>
                   <div className="relative flex items-center">
                     <span className="material-symbols-outlined absolute left-4 text-on-surface-variant text-[20px]">mail</span>
                     <input
-                      id="email"
-                      name="email"
-                      type="email"
+                      id="identity"
+                      name="identity"
+                      type="text"
                       required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      value={identity}
+                      onChange={(e) => setIdentity(e.target.value)}
                       placeholder="admin@hoc-ba.edu.vn"
                       className={fieldInput}
                     />
@@ -216,8 +210,8 @@ export default function LoginPage() {
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"
-                      className={${fieldInput} pr-12}
+                      placeholder="••••••••"
+                      className={`${fieldInput} pr-12`}
                     />
                     <button
                       type="button"

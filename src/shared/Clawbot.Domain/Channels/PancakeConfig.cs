@@ -13,7 +13,6 @@ public sealed class PancakeConfig : AggregateRoot<Guid>, ITenantOwned
     public string SignatureEncoding { get; private set; } = "hex";
     public string SendPathTemplate { get; private set; } =
         "/pages/{page_id}/conversations/{thread_id}/messages";
-    public string PageId { get; private set; } = string.Empty;
     public string AuthMode { get; private set; } = "query";
     public bool IsActive { get; private set; } = true;
     public DateTimeOffset CreatedAt { get; private set; }

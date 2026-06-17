@@ -4,12 +4,11 @@ using Clawbot.SharedKernel.Security;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using NSubstitute;
-using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Clawbot.Infrastructure.Tests.Channels;
 
-// M06/M13 � PancakeConfigResolver tenant-DB ? appsettings ? defaults cascade.
+// M06/M13 — PancakeConfigResolver tenant-DB → appsettings → defaults cascade.
 public sealed class PancakeConfigResolverTests
 {
     private static readonly DateTimeOffset Now = new(2026, 6, 2, 0, 0, 0, TimeSpan.Zero);
@@ -29,7 +28,7 @@ public sealed class PancakeConfigResolverTests
         var enc = Substitute.For<IEncryptor>();
         enc.Decrypt("CIPHER").Returns("PLAIN");
 
-        var sut = new PancakeConfigResolver(fx.Db, enc, Config(new Dictionary<string, string?>()), NullLogger<PancakeConfigResolver>.Instance);
+        var sut = new PancakeConfigResolver(fx.Db, enc, Config(new Dictionary<string, string?>()));
         var result = await sut.ResolveAsync(fx.TenantId);
 
         result.Should().NotBeNull();
@@ -46,7 +45,7 @@ public sealed class PancakeConfigResolverTests
         {
             ["Channels:Pancake:BaseUrl"] = "https://custom.example",
             ["Channels:Pancake:AuthMode"] = "BEARER",
-        }), NullLogger<PancakeConfigResolver>.Instance);
+        }));
 
         var result = await sut.ResolveAsync(Guid.NewGuid());
 
@@ -63,7 +62,7 @@ public sealed class PancakeConfigResolverTests
         var sut = new PancakeConfigResolver(fx.Db, enc, Config(new Dictionary<string, string?>
         {
             ["Channels:Pancake:BaseUrl"] = "https://fallback",
-        }), NullLogger<PancakeConfigResolver>.Instance);
+        }));
 
         var result = await sut.ResolveAsync(Guid.Empty);
 
@@ -76,33 +75,10 @@ public sealed class PancakeConfigResolverTests
     {
         using var fx = new TestAppDb();
         var enc = Substitute.For<IEncryptor>();
-        var sut = new PancakeConfigResolver(fx.Db, enc, Config(new Dictionary<string, string?>()), NullLogger<PancakeConfigResolver>.Instance);
+        var sut = new PancakeConfigResolver(fx.Db, enc, Config(new Dictionary<string, string?>()));
 
         var result = await sut.ResolveAsync(Guid.NewGuid());
 
         result.Should().BeNull();
-    }
-
-    [Fact]
-    public async Task Falls_back_to_env_vars_when_no_db_and_no_section()
-    {
-        using var fx = new TestAppDb();
-        var enc = Substitute.For<IEncryptor>();
-        var envConfig = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["PANCAKE_PAGE_ACCESS_TOKEN"] = "env_page_token",
-                ["PANCAKE_PAGE_ID"] = "env_page_123",
-                ["PANCAKE_WEBHOOK_SECRET"] = "env_secret",
-            })
-            .Build();
-
-        var sut = new PancakeConfigResolver(fx.Db, enc, envConfig, NullLogger<PancakeConfigResolver>.Instance);
-        var result = await sut.ResolveAsync(Guid.NewGuid());
-
-        result.Should().NotBeNull();
-        result!.AccessToken.Should().Be("env_page_token");
-        result.PageId.Should().Be("env_page_123");
-        result.WebhookSecret.Should().Be("env_secret");
     }
 }

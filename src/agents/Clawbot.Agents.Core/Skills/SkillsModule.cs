@@ -59,16 +59,4 @@ public static class SkillsModule
 
         return services;
     }
-
-    /// <summary>
-    /// Registers only the PII redactor. Hosts that need PII redaction (e.g. the API's
-    /// audit interceptor) but not the full agent skill catalog can call this instead of
-    /// <see cref="AddClawbotSkills"/>. <c>RegexPiiRedactor</c> is internal, so this is the
-    /// only way for other assemblies to wire it.
-    /// </summary>
-    public static IServiceCollection AddClawbotPiiRedactor(this IServiceCollection services)
-    {
-        services.AddSingleton<IPiiRedactor, RegexPiiRedactor>();
-        return services;
-    }
 }

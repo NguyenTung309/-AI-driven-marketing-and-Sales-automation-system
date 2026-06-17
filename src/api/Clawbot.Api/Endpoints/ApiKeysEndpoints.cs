@@ -1,5 +1,4 @@
-﻿using System.Security.Cryptography;
-using Clawbot.Api.Auth;
+using System.Security.Cryptography;
 using Clawbot.Api.Contracts.Security;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Security;
@@ -14,7 +13,7 @@ public static class ApiKeysEndpoints
 {
     public static IEndpointRouteBuilder MapApiKeys(this IEndpointRouteBuilder app)
     {
-var group = app.MapGroup("/api/api-keys").RequirePermission("api-keys:manage").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var group = app.MapGroup("/api/api-keys").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         group.MapGet("/", ListAsync);
         group.MapPost("/", IssueAsync);
@@ -90,7 +89,3 @@ var group = app.MapGroup("/api/api-keys").RequirePermission("api-keys:manage").R
         return Convert.ToHexString(hash);
     }
 }
-
-
-
-

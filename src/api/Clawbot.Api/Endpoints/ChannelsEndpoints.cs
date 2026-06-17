@@ -1,4 +1,3 @@
-﻿using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Channels;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Channels;
@@ -15,7 +14,7 @@ public static class ChannelsEndpoints
 {
     public static IEndpointRouteBuilder MapChannels(this IEndpointRouteBuilder app)
     {
-var grp = app.MapGroup("/api/channels").RequirePermission("channels:manage").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var grp = app.MapGroup("/api/channels/pancake").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/config", GetAsync);
         grp.MapPut("/config", UpsertAsync);
@@ -102,7 +101,3 @@ var grp = app.MapGroup("/api/channels").RequirePermission("channels:manage").Req
             row.SignatureHeader, row.SignatureAlgo, row.SignatureEncoding,
             row.SendPathTemplate, row.AuthMode, row.IsActive, row.UpdatedAt);
 }
-
-
-
-

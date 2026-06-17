@@ -1,4 +1,4 @@
-﻿using Clawbot.Domain.Ads;
+using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
 using Clawbot.Domain.Analytics;
 using Clawbot.Domain.Channels;
@@ -9,7 +9,6 @@ using Clawbot.Domain.Conversations;
 using Clawbot.Domain.Documents;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
-using Clawbot.Domain.Llm;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
@@ -192,7 +191,7 @@ public sealed class KbVersionConfiguration : IEntityTypeConfiguration<KbVersion>
         builder.Property(x => x.Status).HasMaxLength(32);
         builder.HasIndex(x => new { x.KbModuleId, x.Version }).IsUnique();
         // Embedding stored as JSON-serialized float array in NVARCHAR(MAX).
-        // For vector similarity search use Qdrant â€” see IVectorStore.
+        // For vector similarity search use Qdrant — see IVectorStore.
         builder.Property(x => x.Embedding).HasColumnType("nvarchar(max)");
     }
 }
@@ -416,20 +415,6 @@ public sealed class KpiDailyConfiguration : IEntityTypeConfiguration<KpiDaily>
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
         builder.HasIndex(x => new { x.TenantId, x.Date, x.Platform }).IsUnique();
-    }
-}
-public sealed class LlmConfigConfiguration : IEntityTypeConfiguration<LlmConfig>
-{
-    public void Configure(EntityTypeBuilder<LlmConfig> builder)
-    {
-        builder.ToTable("llm_configs");
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Provider).HasMaxLength(32).IsRequired();
-        builder.Property(x => x.ModelId).HasMaxLength(128).IsRequired();
-        builder.Property(x => x.ApiKeyEncrypted).HasColumnType("nvarchar(max)").IsRequired();
-        builder.Property(x => x.BaseUrl).HasMaxLength(512);
-        builder.Property(x => x.Temperature).HasColumnType("decimal(3,2)");
-        builder.HasIndex(x => new { x.TenantId, x.IsActive });
     }
 }
 

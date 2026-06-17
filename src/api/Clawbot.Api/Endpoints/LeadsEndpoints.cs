@@ -1,6 +1,5 @@
-﻿using Clawbot.Agents.Contracts.Lead;
+using Clawbot.Agents.Contracts.Lead;
 using Clawbot.Agents.Core.Lead;
-using Clawbot.Api.Auth;
 using Clawbot.Agents.Core.Skills.Ops;
 using Clawbot.Api.Contracts.Leads;
 using Clawbot.Api.Middleware;
@@ -18,20 +17,18 @@ public static class LeadsEndpoints
 {
     public static IEndpointRouteBuilder MapLeads(this IEndpointRouteBuilder app)
     {
-// SPEC-11 §6a: reads need leads:read, mutations leads:write.
-        var grp = app.MapGroup("/api/leads").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var grp = app.MapGroup("/api/leads").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
-        grp.MapGet("/", ListAsync).RequirePermission("leads:read");
-        grp.MapGet("/{id:guid}", GetAsync).RequirePermission("leads:read");
-        grp.MapPost("/", CreateAsync).RequirePermission("leads:write");
-        grp.MapPost("/create-with-skills", CreateWithSkillsAsync).RequirePermission("leads:write");
-        grp.MapPost("/{id:guid}/activities", RecordActivityAsync).RequirePermission("leads:write");
-        grp.MapPost("/{id:guid}/assign", AssignAsync).RequirePermission("leads:write");
-        grp.MapGet("/forecast", ForecastAsync).RequirePermission("leads:read");
-        grp.MapGet("/{id:guid}/context", ContextPanelAsync).RequirePermission("leads:read");
+        grp.MapGet("/", ListAsync);
+        grp.MapGet("/{id:guid}", GetAsync);
+        grp.MapPost("/", CreateAsync);
+        grp.MapPost("/create-with-skills", CreateWithSkillsAsync);
+        grp.MapPost("/{id:guid}/activities", RecordActivityAsync);
+        grp.MapPost("/{id:guid}/assign", AssignAsync);
+        grp.MapGet("/forecast", ForecastAsync);
+        grp.MapGet("/{id:guid}/context", ContextPanelAsync);
 
-        // §6a: lead-scoring-rules is leads:write across the board.
-        var rules = app.MapGroup("/api/lead-scoring-rules").RequirePermission("leads:write").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var rules = app.MapGroup("/api/lead-scoring-rules").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
         rules.MapGet("/", ListRulesAsync);
         rules.MapPost("/", CreateRuleAsync);
         rules.MapDelete("/{id:guid}", DeactivateRuleAsync);
@@ -329,5 +326,3 @@ public static class LeadsEndpoints
         });
     }
 }
-
-

@@ -5,6 +5,4 @@ namespace Clawbot.Application.Abstractions;
 public interface IConversationSet
 {
     void Add(Conversation conversation);
-
-    Task<Conversation?> FindByThreadAsync(string platform, string externalThreadId, CancellationToken ct = default);
 }
