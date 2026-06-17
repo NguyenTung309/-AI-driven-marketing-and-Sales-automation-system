@@ -1,5 +1,7 @@
 using Clawbot.Agents.Contracts.Chat;
 using Clawbot.Domain.Agents;
+using Clawbot.Domain.ChatScenarios;
+using Clawbot.Domain.Conversations;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Time;
 using Grpc.Core;
@@ -32,6 +34,22 @@ public sealed partial class ChatAgentGrpcService(
         }
         Guid? convId = Guid.TryParse(request.ConversationId, out var cid) ? cid : null;
 
+        Conversation? conversation = null;
+        if (convId.HasValue)
+        {
+            conversation = await _db.Conversations
+                .IgnoreQueryFilters()
+                .Where(c => c.Id == convId.Value && c.TenantId == tenantId)
+                .FirstOrDefaultAsync(context.CancellationToken).ConfigureAwait(false);
+        }
+
+        var sourcePlatform = conversation?.Platform;
+        var matchedScenarioTemplate = await MatchScenarioTemplateAsync(
+            tenantId,
+            request.UserText,
+            sourcePlatform,
+            context.CancellationToken).ConfigureAwait(false);
+
         var history = request.History
             .Select((text, idx) => new CoreChat.ChatTurn(idx % 2 == 0 ? "user" : "assistant", text))
             .ToList();
@@ -41,12 +59,32 @@ public sealed partial class ChatAgentGrpcService(
         _db.AgentSessions.Add(session);
         await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
 
-        CoreChat.ChatAgentReply reply;
+        CoreChat.ChatAgentReply? reply = null;
         try
         {
-            reply = await _agent.ReplyAsync(
-                new CoreChat.ChatAgentRequest(tenantId, convId, KbModuleCode: null, request.UserText, history),
-                context.CancellationToken).ConfigureAwait(false);
+            await foreach (var chunk in _agent.StreamReplyAsync(
+                               new CoreChat.ChatAgentRequest(
+                                   tenantId,
+                                   convId,
+                                   KbModuleCode: null,
+                                   request.UserText,
+                                   history,
+                                   SourcePlatform: sourcePlatform,
+                                   MatchedScenarioTemplate: matchedScenarioTemplate),
+                               context.CancellationToken).ConfigureAwait(false))
+            {
+                if (chunk.Final)
+                {
+                    reply = chunk.Reply;
+                    await responseStream.WriteAsync(new ChatToken { Text = chunk.Text, Final = true }).ConfigureAwait(false);
+                    continue;
+                }
+
+                await responseStream.WriteAsync(new ChatToken { Text = chunk.Text, Final = false }).ConfigureAwait(false);
+            }
+
+            if (reply is null)
+                throw new InvalidOperationException("chat-agent stream completed without final reply");
         }
         catch (Exception ex)
         {
@@ -65,16 +103,28 @@ public sealed partial class ChatAgentGrpcService(
 
         if (convId.HasValue)
         {
-            var conv = await _db.Conversations
-                .IgnoreQueryFilters()
-                .Where(c => c.Id == convId.Value && c.TenantId == tenantId)
-                .FirstOrDefaultAsync(context.CancellationToken).ConfigureAwait(false);
-            conv?.AppendMessage("out", "agent", reply.Text, "text", _clock.UtcNow);
+            conversation?.AppendMessage("out", "agent", reply.Text, "text", _clock.UtcNow);
         }
 
         await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
+    }
 
-        await responseStream.WriteAsync(new ChatToken { Text = reply.Text, Final = true }).ConfigureAwait(false);
+    private async Task<string?> MatchScenarioTemplateAsync(
+        Guid tenantId,
+        string text,
+        string? platform,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var candidates = await _db.ChatScenarios
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(s => s.TenantId == tenantId)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return ChatScenarioMatcher.Match(text, platform, candidates)?.ResponseTemplate;
     }
 
     [LoggerMessage(EventId = 4001, Level = LogLevel.Error, Message = "Chat reply failed tenant={TenantId} conv={ConversationId}")]

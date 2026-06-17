@@ -2,8 +2,10 @@ using System.Net;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Security;
 using Clawbot.Infrastructure.Channels;
+using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -62,7 +64,14 @@ public static partial class WebhookEndpoints
             var messages = await adapter.ParseAsync(body, ct).ConfigureAwait(false);
             foreach (var msg in messages)
             {
-                await ingestor.IngestAsync(tenant.Id, msg, ct).ConfigureAwait(false);
+                var result = await ingestor.IngestAsync(tenant.Id, msg, ct).ConfigureAwait(false);
+                if (!result.Deduplicated
+                    && result.MessageId is { } messageId
+                    && string.Equals(msg.MessageType, "comment", StringComparison.OrdinalIgnoreCase))
+                {
+                    BackgroundJob.Enqueue<CommentAutoReplyJob>(
+                        j => j.RunAsync(tenant.Id, messageId, CancellationToken.None));
+                }
             }
 
             return Results.Accepted();

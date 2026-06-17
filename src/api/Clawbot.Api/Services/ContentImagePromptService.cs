@@ -1,0 +1,52 @@
+using Clawbot.Agents.Core.Skills.Content;
+using Clawbot.Api.Contracts.Content;
+
+namespace Clawbot.Api.Services;
+
+public sealed class ContentImagePromptService(IImagePromptGenerator generator)
+{
+    private static readonly HashSet<string> SupportedPlatforms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "facebook",
+        "instagram",
+        "tiktok",
+        "youtube",
+        "zalo",
+    };
+
+    private readonly IImagePromptGenerator _generator = generator;
+
+    public async Task<GenerateImagePromptResponse> GenerateAsync(
+        GenerateImagePromptRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var brief = request.Brief?.Trim();
+        if (string.IsNullOrWhiteSpace(brief))
+            throw new ArgumentException("brief required", nameof(request));
+
+        var platform = request.Platform?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(platform) || !SupportedPlatforms.Contains(platform))
+            throw new ArgumentException("unsupported platform", nameof(request));
+
+        var style = string.IsNullOrWhiteSpace(request.Style)
+            ? "brand-safe education marketing"
+            : request.Style.Trim();
+        var brandTokens = request.BrandTokens?
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList() ?? [];
+
+        var result = await _generator.GenerateAsync(
+            new ImagePromptRequest(brief, platform, style, brandTokens),
+            ct).ConfigureAwait(false);
+
+        return new GenerateImagePromptResponse(
+            result.Prompt,
+            result.NegativePrompt,
+            result.Hints);
+    }
+}

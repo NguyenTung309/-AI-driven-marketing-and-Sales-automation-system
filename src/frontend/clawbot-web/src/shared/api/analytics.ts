@@ -52,6 +52,10 @@ export interface AgentPerformance {
   readonly completedSessions: number;
   readonly traceCount: number;
   readonly completionRate: number;
+  readonly qualitySamples: number;
+  readonly passedQualitySamples: number;
+  readonly qualityPassRate: number;
+  readonly averageQualityScore: number | null;
 }
 
 export interface AnomalyPoint {

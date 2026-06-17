@@ -52,6 +52,38 @@ export interface AgentCostResponse {
   readonly items: readonly AgentCostItem[];
 }
 
+export interface AgentSettings {
+  readonly code: string;
+  readonly displayName: string;
+  readonly agentType: string;
+  readonly model: string;
+  readonly status: AgentStatus;
+  readonly provider: string;
+  readonly systemPrompt: string;
+  readonly temperature: number;
+  readonly maxTokens: number;
+  readonly skillFiles: readonly string[];
+  readonly kbModules: readonly string[];
+  readonly updatedAt: string;
+}
+
+export interface UpdateAgentSettingsPayload {
+  readonly displayName?: string;
+  readonly model?: string;
+  readonly provider?: string;
+  readonly systemPrompt?: string;
+  readonly temperature?: number;
+  readonly maxTokens?: number;
+  readonly skillFiles?: readonly string[];
+  readonly kbModules?: readonly string[];
+}
+
+export interface AgentSandboxResponse {
+  readonly sessionId: string;
+  readonly reply: string;
+  readonly sentAt: string;
+}
+
 export async function listAgents(): Promise<AgentListResponse> {
   const res = await apiClient.get<AgentListResponse>("/api/agents");
   return res.data;
@@ -71,6 +103,21 @@ export async function getAgentTraces(code: string, page = 1, pageSize = 50): Pro
   const res = await apiClient.get<AgentTraceResponse>(`/api/agents/${encodeURIComponent(code)}/traces`, {
     params: { page, pageSize },
   });
+  return res.data;
+}
+
+export async function getAgentSettings(code: string): Promise<AgentSettings> {
+  const res = await apiClient.get<AgentSettings>(`/api/agents/${encodeURIComponent(code)}/settings`);
+  return res.data;
+}
+
+export async function updateAgentSettings(code: string, payload: UpdateAgentSettingsPayload): Promise<AgentSettings> {
+  const res = await apiClient.put<AgentSettings>(`/api/agents/${encodeURIComponent(code)}/settings`, payload);
+  return res.data;
+}
+
+export async function runAgentSandbox(code: string, message: string): Promise<AgentSandboxResponse> {
+  const res = await apiClient.post<AgentSandboxResponse>(`/api/agents/${encodeURIComponent(code)}/sandbox`, { message });
   return res.data;
 }
 

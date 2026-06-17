@@ -65,28 +65,85 @@ public static partial class DevDataSeeder
             await db.SaveChangesAsync(ct);
         }
 
-        if (await users.FindByEmailAsync(AdminEmail) is not null) return;
-
-        var user = new AppUser
+        var user = await users.FindByEmailAsync(AdminEmail);
+        if (user is null)
         {
-            Id = Guid.NewGuid(),
-            UserName = AdminEmail,
-            Email = AdminEmail,
-            EmailConfirmed = true,
-            TenantId = tenant.Id,
-            DisplayName = "Dev Admin",
-        };
+            user = new AppUser
+            {
+                Id = Guid.NewGuid(),
+                UserName = AdminEmail,
+                Email = AdminEmail,
+                EmailConfirmed = true,
+                TenantId = tenant.Id,
+                DisplayName = "Dev Admin",
+                IsActive = true,
+            };
 
-        var result = await users.CreateAsync(user, AdminPassword);
+            var result = await users.CreateAsync(user, AdminPassword);
+            if (!result.Succeeded)
+            {
+                LogAdminSeedFailed(logger, AdminEmail,
+                    string.Join("; ", result.Errors.Select(e => e.Description)));
+                return;
+            }
+
+            await EnsureAdminRoleAsync(users, user, logger);
+            LogAdminSeeded(logger, AdminEmail);
+            return;
+        }
+
+        user.UserName = AdminEmail;
+        user.Email = AdminEmail;
+        user.EmailConfirmed = true;
+        user.TenantId = tenant.Id;
+        user.DisplayName = string.IsNullOrWhiteSpace(user.DisplayName) ? "Dev Admin" : user.DisplayName;
+        user.IsActive = true;
+
+        var update = await users.UpdateAsync(user);
+        if (!update.Succeeded)
+        {
+            LogAdminSeedFailed(logger, AdminEmail,
+                string.Join("; ", update.Errors.Select(e => e.Description)));
+            return;
+        }
+
+        await EnsureDefaultPasswordAsync(users, user, logger);
+        await EnsureAdminRoleAsync(users, user, logger);
+        LogAdminSeeded(logger, AdminEmail);
+    }
+
+    private static async Task EnsureDefaultPasswordAsync(UserManager<AppUser> users, AppUser user, ILogger logger)
+    {
+        if (await users.CheckPasswordAsync(user, AdminPassword)) return;
+
+        IdentityResult result;
+        if (await users.HasPasswordAsync(user))
+        {
+            var token = await users.GeneratePasswordResetTokenAsync(user);
+            result = await users.ResetPasswordAsync(user, token, AdminPassword);
+        }
+        else
+        {
+            result = await users.AddPasswordAsync(user, AdminPassword);
+        }
+
         if (!result.Succeeded)
         {
             LogAdminSeedFailed(logger, AdminEmail,
                 string.Join("; ", result.Errors.Select(e => e.Description)));
-            return;
         }
+    }
 
-        await users.AddToRoleAsync(user, "Admin");
-        LogAdminSeeded(logger, AdminEmail);
+    private static async Task EnsureAdminRoleAsync(UserManager<AppUser> users, AppUser user, ILogger logger)
+    {
+        if (await users.IsInRoleAsync(user, RbacSeeder.Admin)) return;
+
+        var result = await users.AddToRoleAsync(user, RbacSeeder.Admin);
+        if (!result.Succeeded)
+        {
+            LogAdminSeedFailed(logger, AdminEmail,
+                string.Join("; ", result.Errors.Select(e => e.Description)));
+        }
     }
 
     /// <summary>

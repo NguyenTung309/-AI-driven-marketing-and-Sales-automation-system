@@ -41,4 +41,20 @@ public sealed class AgentConfig : AggregateRoot<Guid>, ITenantOwned
     public void Start() { Status = "running"; }
     public void Stop()  { Status = "stopped"; }
     public void MarkError() { Status = "error"; }
+
+    public void UpdateSettings(
+        string displayName,
+        string model,
+        string skillFilesJson,
+        string kbModulesJson,
+        string configJson,
+        DateTimeOffset updatedAt)
+    {
+        DisplayName = displayName;
+        Model = model;
+        SkillFilesJson = skillFilesJson;
+        KbModulesJson = kbModulesJson;
+        ConfigJson = configJson;
+        UpdatedAt = updatedAt;
+    }
 }

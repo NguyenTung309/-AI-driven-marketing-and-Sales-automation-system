@@ -1,12 +1,27 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AxiosError } from "axios";
 import { AppShell } from "@/shared/layout/AppShell";
-import { Card, DataTable, StatusPill, ToggleSwitch, type Column } from "@/shared/ui";
-import { getMe, disableTwoFactor } from "@/shared/api/auth";
+import { Alert, Button, Card, DataTable, StatusPill, ToggleSwitch, type Column } from "@/shared/ui";
+import { disableTwoFactor, getMe } from "@/shared/api/auth";
+import {
+  getProfile,
+  listLoginHistory,
+  updateProfile,
+  uploadProfileAvatar,
+  type LoginHistoryItem,
+  type UserProfile,
+} from "@/shared/api/profile";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { TwoFactorSetupDialog } from "./TwoFactorSetupDialog";
 
 type ProfileTab = "info" | "permissions" | "security";
+
+interface ProfileForm {
+  readonly displayName: string;
+  readonly phone: string;
+  readonly dateOfBirth: string;
+}
 
 const TABS: readonly { readonly key: ProfileTab; readonly label: string }[] = [
   { key: "info", label: "Thông tin cơ bản" },
@@ -14,62 +29,93 @@ const TABS: readonly { readonly key: ProfileTab; readonly label: string }[] = [
   { key: "security", label: "Nhật ký bảo mật" },
 ];
 
-// Fallback khi /auth/me chưa trả permissions.
 const FALLBACK_PERMS: readonly string[] = [
   "Truy cập báo cáo KPI",
   "Cấu hình khuôn mẫu Prompt",
   "Quản lý Kho tri thức",
 ];
 
-interface LoginLog {
-  readonly id: string;
-  readonly time: string;
-  readonly ip: string;
-  readonly device: string;
-}
-
-// NOTE: chưa có API login-history per-user → mock. (audit-logs là admin-scope, khác mục đích.)
-const LOGIN_LOGS: readonly LoginLog[] = [
-  { id: "1", time: "15:30 10/10/2026", ip: "192.168.1.5", device: "Chrome - Windows" },
-  { id: "2", time: "10:15 09/10/2026", ip: "192.168.1.5", device: "Firefox - macOS" },
-  { id: "3", time: "08:45 08/10/2026", ip: "203.113.1.2", device: "Safari - iPhone" },
-];
-
-const LOG_COLUMNS: readonly Column<LoginLog>[] = [
-  { key: "time", header: "Thời gian", render: (r) => r.time },
-  { key: "ip", header: "IP Truy cập", render: (r) => <span className="font-mono">{r.ip}</span> },
-  { key: "device", header: "Thiết bị / Trình duyệt", render: (r) => r.device },
-  { key: "status", header: "Trạng thái", className: "text-right", render: () => <StatusPill tone="success">Thành công</StatusPill> },
-];
-
 const fieldInput =
   "w-full px-4 py-3 border border-outline-variant rounded text-body-lg focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all";
+
+function errorMessage(error: unknown): string {
+  if (!error) return "";
+  if (error instanceof AxiosError) {
+    const data = error.response?.data as { error?: string; title?: string; detail?: string; message?: string } | string[] | string | undefined;
+    if (Array.isArray(data)) return data.join(", ");
+    if (typeof data === "string") return data;
+    return data?.message ?? data?.error ?? data?.title ?? data?.detail ?? error.message;
+  }
+  if (error instanceof Error) return error.message;
+  return "Không xử lý được yêu cầu. Vui lòng thử lại.";
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function initials(profile: UserProfile | undefined): string {
+  const source = profile?.displayName || profile?.email || "NA";
+  const chars = source
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+  return chars || "NA";
+}
+
+function profileSourceKey(profile: UserProfile | undefined): string {
+  if (!profile) return "empty";
+  return [profile.id, profile.displayName, profile.phone ?? "", profile.dateOfBirth ?? ""].join("|");
+}
+
+function profileToForm(profile: UserProfile | undefined): ProfileForm {
+  return {
+    displayName: profile?.displayName ?? "",
+    phone: profile?.phone ?? "",
+    dateOfBirth: profile?.dateOfBirth ?? "",
+  };
+}
 
 function Field({
   label,
   value,
   disabled = false,
   type = "text",
+  onChange,
 }: {
   readonly label: string;
   readonly value: string;
   readonly disabled?: boolean;
   readonly type?: string;
+  readonly onChange?: (value: string) => void;
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-label-lg text-on-surface">{label}</label>
-      <div className="relative">
-        <input
-          type={type}
-          defaultValue={value}
-          disabled={disabled}
-          className={`${fieldInput} ${disabled ? "bg-surface-container-low text-on-surface-variant cursor-not-allowed" : ""}`}
-        />
-        {disabled ? (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] text-on-surface-variant">lock</span>
-        ) : null}
-      </div>
+      <label className="text-label-lg text-on-surface">
+        {label}
+        <div className="relative mt-1">
+          <input
+            type={type}
+            value={value}
+            disabled={disabled}
+            onChange={(event) => onChange?.(event.target.value)}
+            className={`${fieldInput} ${disabled ? "bg-surface-container-low text-on-surface-variant cursor-not-allowed" : ""}`}
+          />
+          {disabled ? (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] text-on-surface-variant">lock</span>
+          ) : null}
+        </div>
+      </label>
     </div>
   );
 }
@@ -80,21 +126,22 @@ function TwoFactorRow() {
 
   async function toggle(next: boolean) {
     if (next) {
-      setSetupOpen(true); // activated only after verify
-    } else {
-      try {
-        await disableTwoFactor();
-      } finally {
-        setOn(false);
-      }
+      setSetupOpen(true);
+      return;
+    }
+
+    try {
+      await disableTwoFactor();
+    } finally {
+      setOn(false);
     }
   }
 
   return (
     <>
-      <div className="p-6 bg-surface-container-low rounded-xl border border-dashed border-outline-variant flex items-center justify-between">
+      <div className="flex items-center justify-between rounded-xl border border-dashed border-outline-variant bg-surface-container-low p-6">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-white flex items-center justify-center shadow-sm">
+          <div className="flex size-12 items-center justify-center rounded-full bg-white shadow-sm">
             <span className="material-symbols-outlined text-primary">security</span>
           </div>
           <div>
@@ -114,32 +161,51 @@ function TwoFactorRow() {
   );
 }
 
-function InfoTab() {
+function InfoTab({
+  email,
+  form,
+  onFormChange,
+  onSave,
+  saving,
+  canSave,
+  notice,
+  error,
+}: {
+  readonly email: string;
+  readonly form: ProfileForm;
+  readonly onFormChange: (patch: Partial<ProfileForm>) => void;
+  readonly onSave: () => void;
+  readonly saving: boolean;
+  readonly canSave: boolean;
+  readonly notice: string | null;
+  readonly error: unknown;
+}) {
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-6">
-        <Field label="Họ và tên" value="Nguyễn Văn A" />
-        <Field label="Địa chỉ Email" value="admin@hoc-ba.edu.vn" type="email" disabled />
-        <Field label="Số điện thoại Zalo" value="0987654321" />
+      {notice ? <Alert tone="success">{notice}</Alert> : null}
+      {error ? <Alert tone="error">{errorMessage(error)}</Alert> : null}
+      <div className="grid grid-cols-1 gap-x-6 gap-y-6 md:grid-cols-2">
+        <Field label="Họ và tên" value={form.displayName} onChange={(displayName) => onFormChange({ displayName })} />
+        <Field label="Địa chỉ Email" value={email} type="email" disabled />
+        <Field label="Số điện thoại Zalo" value={form.phone} onChange={(phone) => onFormChange({ phone })} />
         <Field label="Phòng ban / Bộ phận" value="Phân hệ Quản trị & Điều hành" disabled />
-        <Field label="Ngày sinh" value="1990-01-01" type="date" />
+        <Field label="Ngày sinh" value={form.dateOfBirth} type="date" onChange={(dateOfBirth) => onFormChange({ dateOfBirth })} />
         <div className="flex flex-col gap-1">
-          <label className="text-label-lg text-on-surface">Vị trí công tác</label>
-          <select className={`${fieldInput} bg-white`}>
-            <option>Cơ sở chính - TP. Hồ Chí Minh</option>
-            <option>Cơ sở 2 - Hà Nội</option>
-            <option>Cơ sở 3 - Đà Nẵng</option>
-          </select>
+          <label className="text-label-lg text-on-surface">
+            Vị trí công tác
+            <select className={`${fieldInput} mt-1 bg-white`} defaultValue="main">
+              <option value="main">Cơ sở chính - TP. Hồ Chí Minh</option>
+              <option value="hn">Cơ sở 2 - Hà Nội</option>
+              <option value="dn">Cơ sở 3 - Đà Nẵng</option>
+            </select>
+          </label>
         </div>
       </div>
       <div className="flex justify-end">
-        <button
-          type="button"
-          className="px-8 py-4 bg-primary text-on-primary font-bold text-label-lg rounded shadow-lg hover:bg-primary-hover active:scale-95 transition-all flex items-center gap-2"
-        >
+        <Button type="button" className="px-8 py-4 shadow-lg active:scale-95" onClick={onSave} disabled={saving || !canSave}>
           <span className="material-symbols-outlined">save</span>
-          LƯU THÔNG TIN CÁ NHÂN
-        </button>
+          {saving ? "ĐANG LƯU..." : "LƯU THÔNG TIN CÁ NHÂN"}
+        </Button>
       </div>
       <TwoFactorRow />
     </div>
@@ -150,29 +216,99 @@ function PermissionsTab({ perms }: { readonly perms: readonly string[] }) {
   const list = perms.length > 0 ? perms : FALLBACK_PERMS;
   return (
     <div className="flex flex-col gap-6">
-      <h4 className="font-bold text-on-surface text-body-lg">Danh sách quyền hạn được cấp ({list.length})</h4>
+      <h4 className="text-body-lg font-bold text-on-surface">Danh sách quyền hạn được cấp ({list.length})</h4>
       <div className="space-y-4">
-        {list.map((p) => (
-          <div key={p} className="flex items-center gap-4">
-            <input type="checkbox" checked disabled readOnly className="w-5 h-5 rounded border-outline-variant text-primary cursor-not-allowed" />
-            <span className="text-body-lg text-on-surface font-mono">{p}</span>
+        {list.map((permission) => (
+          <div key={permission} className="flex items-center gap-4">
+            <input type="checkbox" checked disabled readOnly className="size-5 cursor-not-allowed rounded border-outline-variant text-primary" />
+            <span className="font-mono text-body-lg text-on-surface">{permission}</span>
           </div>
         ))}
       </div>
-      <p className="text-body-md text-on-surface-variant/70 italic">
-        Quyền hạn do Hệ thống cấp phát (theo vai trò). Vui lòng liên hệ Admin để thay đổi.
+      <p className="text-body-md italic text-on-surface-variant/70">
+        Quyền hạn do hệ thống cấp phát theo vai trò. Vui lòng liên hệ Admin để thay đổi.
       </p>
     </div>
   );
 }
 
+const LOG_COLUMNS: readonly Column<LoginHistoryItem>[] = [
+  { key: "occurredAt", header: "Thời gian", render: (row) => formatDateTime(row.occurredAt) },
+  { key: "ipAddress", header: "IP Truy cập", render: (row) => <span className="font-mono">{row.ipAddress ?? "Không rõ"}</span> },
+  { key: "userAgent", header: "Thiết bị / Trình duyệt", render: (row) => row.userAgent ?? "Không rõ" },
+  { key: "status", header: "Trạng thái", className: "text-right", render: () => <StatusPill tone="success">Thành công</StatusPill> },
+];
+
+function SecurityTab({
+  rows,
+  loading,
+  error,
+}: {
+  readonly rows: readonly LoginHistoryItem[];
+  readonly loading: boolean;
+  readonly error: unknown;
+}) {
+  if (loading) return <div className="rounded-lg border border-outline bg-white p-6 text-body-md text-on-surface-variant">Đang tải nhật ký bảo mật...</div>;
+  if (error) return <Alert tone="error">{errorMessage(error)}</Alert>;
+  if (!rows.length) return <div className="rounded-lg border border-outline bg-white p-6 text-body-md text-on-surface-variant">Chưa có lần đăng nhập nào được ghi nhận.</div>;
+  return <DataTable columns={LOG_COLUMNS} rows={rows} rowKey={(row) => row.id} />;
+}
+
 export default function ProfilePage() {
+  const queryClient = useQueryClient();
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const [tab, setTab] = useState<ProfileTab>("info");
   const [pwOpen, setPwOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+  const [profileDraft, setProfileDraft] = useState<{ readonly sourceKey: string; readonly form: ProfileForm } | null>(null);
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: getMe });
+  const profileQuery = useQuery({ queryKey: ["profile"], queryFn: getProfile });
+  const loginHistoryQuery = useQuery({
+    queryKey: ["profile", "login-history"],
+    queryFn: () => listLoginHistory({ page: 1, pageSize: 20 }),
+    enabled: tab === "security",
+  });
 
-  const roleBadge = me?.roles?.[0] ?? "Quản trị viên hệ thống";
+  const profile = profileQuery.data;
+  const sourceKey = profileSourceKey(profile);
+  const serverForm = profileToForm(profile);
+  const profileForm = profileDraft?.sourceKey === sourceKey ? profileDraft.form : serverForm;
+
+  const saveProfileMutation = useMutation({
+    mutationFn: () =>
+      updateProfile({
+        displayName: profileForm.displayName.trim(),
+        phone: profileForm.phone.trim() || null,
+        dateOfBirth: profileForm.dateOfBirth || null,
+      }),
+    onSuccess: async () => {
+      setProfileDraft(null);
+      setNotice("Đã lưu thông tin cá nhân.");
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
+    },
+  });
+
+  const uploadAvatarMutation = useMutation({
+    mutationFn: uploadProfileAvatar,
+    onSuccess: async () => {
+      setNotice("Đã cập nhật ảnh đại diện.");
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
+    },
+  });
+
+  const roleBadge = profile?.roles?.[0] ?? me?.roles?.[0] ?? "Quản trị viên hệ thống";
   const perms = me?.permissions ?? [];
+  const avatarLabel = initials(profile);
+  const avatarUrl = profile?.avatarUrl ?? null;
+  const showAvatar = Boolean(avatarUrl && failedAvatarUrl !== avatarUrl);
+  const displayName = profile?.displayName || profileForm.displayName || "Tài khoản Học Bá";
+  const activeTenant = profile?.tenantSlug ?? me?.tenantSlug;
+  const loginHistory = loginHistoryQuery.data?.items ?? [];
+  const infoError = profileQuery.error ?? saveProfileMutation.error ?? uploadAvatarMutation.error;
+
+  const roleCount = profile?.roles?.length ?? me?.roles?.length ?? 0;
+  const canSave = profileForm.displayName.trim().length > 0 && !saveProfileMutation.isPending;
 
   return (
     <AppShell title="Cài đặt tài khoản">
@@ -181,47 +317,67 @@ export default function ProfilePage() {
         <p className="text-body-lg text-on-surface-variant">Quản lý thông tin cá nhân và cấu hình bảo mật hệ thống.</p>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-10 gap-6 items-start">
-        <div className="lg:col-span-3 flex flex-col gap-6">
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-10">
+        <div className="flex flex-col gap-6 lg:col-span-3">
           <Card className="flex flex-col items-center">
             <div className="relative mb-6">
-              <div className="w-32 h-32 rounded-full border-4 border-surface-container bg-primary text-on-primary flex items-center justify-center text-4xl font-bold">
-                NA
+              <div className="flex size-32 items-center justify-center overflow-hidden rounded-full border-4 border-surface-container bg-primary text-4xl font-bold text-on-primary">
+                {showAvatar ? (
+                  <img
+                    src={avatarUrl!}
+                    alt=""
+                    className="size-full object-cover"
+                    onError={() => setFailedAvatarUrl(avatarUrl)}
+                  />
+                ) : (
+                  avatarLabel
+                )}
               </div>
               <button
                 type="button"
                 aria-label="Đổi ảnh đại diện"
-                className="absolute bottom-1 right-1 w-10 h-10 bg-primary text-on-primary rounded-full flex items-center justify-center border-4 border-white hover:scale-110 transition-transform shadow-lg"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={uploadAvatarMutation.isPending}
+                className="absolute bottom-1 right-1 flex size-10 items-center justify-center rounded-full border-4 border-white bg-primary text-on-primary shadow-lg transition-transform hover:scale-110 disabled:pointer-events-none disabled:opacity-60"
               >
                 <span className="material-symbols-outlined text-[18px]">photo_camera</span>
               </button>
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) uploadAvatarMutation.mutate(file);
+                  event.target.value = "";
+                }}
+              />
             </div>
-            <div className="text-center mb-8">
-              <h3 className="text-headline-md font-bold text-on-surface mb-1">Nguyễn Văn A</h3>
-              <div className="inline-flex items-center px-3 py-1 bg-primary/10 text-primary rounded font-bold text-label-lg mb-2">
-                {roleBadge}
-              </div>
+            <div className="mb-8 text-center">
+              <h3 className="mb-1 text-headline-md font-bold text-on-surface">{displayName}</h3>
+              <div className="mb-2 inline-flex items-center rounded bg-primary/10 px-3 py-1 text-label-lg font-bold text-primary">{roleBadge}</div>
               <div className="flex items-center justify-center gap-1 text-body-md text-on-surface-variant">
-                <span className="w-2 h-2 rounded-full bg-success" />
-                <span>{me?.tenantSlug ? `Tenant: ${me.tenantSlug}` : "Đang hoạt động"}</span>
+                <span className="size-2 rounded-full bg-success" />
+                <span>{activeTenant ? `Tenant: ${activeTenant}` : "Đang hoạt động"}</span>
               </div>
             </div>
             <button
               type="button"
               onClick={() => setPwOpen(true)}
-              className="w-full py-3 px-4 border border-primary text-primary font-bold text-label-lg rounded bg-white hover:bg-primary/5 transition-colors flex items-center justify-center gap-2"
+              className="flex w-full items-center justify-center gap-2 rounded border border-primary bg-white px-4 py-3 text-label-lg font-bold text-primary transition-colors hover:bg-primary/5"
             >
               <span className="material-symbols-outlined text-[20px]">lock_reset</span>
               ĐỔI MẬT KHẨU
             </button>
           </Card>
 
-          <div className="bg-surface-container-lowest rounded-lg p-card-padding border border-outline border-l-4 border-l-primary">
-            <h4 className="text-label-lg text-on-surface-variant uppercase mb-4">Thống kê hoạt động</h4>
+          <div className="rounded-lg border border-outline border-l-4 border-l-primary bg-surface-container-lowest p-card-padding">
+            <h4 className="mb-4 text-label-lg uppercase text-on-surface-variant">Thống kê hoạt động</h4>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-body-md text-on-surface-variant">Vai trò</p>
-                <p className="font-bold text-on-surface">{me?.roles?.length ?? 0}</p>
+                <p className="font-bold text-on-surface">{roleCount}</p>
               </div>
               <div>
                 <p className="text-body-md text-on-surface-variant">Quyền hạn</p>
@@ -232,31 +388,57 @@ export default function ProfilePage() {
         </div>
 
         <div className="lg:col-span-7">
-          <div className="bg-surface-container-lowest rounded-lg border border-outline overflow-hidden">
-            <div className="flex border-b border-outline px-6 pt-4 gap-2">
-              {TABS.map((t) => (
+          <div className="overflow-hidden rounded-lg border border-outline bg-surface-container-lowest">
+            <div className="flex gap-2 overflow-x-auto border-b border-outline px-6 pt-4">
+              {TABS.map((item) => (
                 <button
-                  key={t.key}
+                  key={item.key}
                   type="button"
-                  onClick={() => setTab(t.key)}
-                  className={`px-4 py-4 font-bold text-label-lg transition-colors ${
-                    tab === t.key ? "text-primary border-b-2 border-primary" : "text-on-surface-variant hover:text-primary"
+                  onClick={() => setTab(item.key)}
+                  className={`shrink-0 px-4 py-4 text-label-lg font-bold transition-colors ${
+                    tab === item.key ? "border-b-2 border-primary text-primary" : "text-on-surface-variant hover:text-primary"
                   }`}
                 >
-                  {t.label}
+                  {item.label}
                 </button>
               ))}
             </div>
             <div className="p-6">
-              {tab === "info" ? <InfoTab /> : null}
+              {tab === "info" ? (
+                <InfoTab
+                  email={profile?.email ?? ""}
+                  form={profileForm}
+                  onFormChange={(patch) => {
+                    setNotice(null);
+                    setProfileDraft((current) => {
+                      const base = current?.sourceKey === sourceKey ? current.form : profileForm;
+                      return { sourceKey, form: { ...base, ...patch } };
+                    });
+                  }}
+                  onSave={() => saveProfileMutation.mutate()}
+                  saving={saveProfileMutation.isPending}
+                  canSave={canSave}
+                  notice={notice}
+                  error={infoError}
+                />
+              ) : null}
               {tab === "permissions" ? <PermissionsTab perms={perms} /> : null}
-              {tab === "security" ? <DataTable columns={LOG_COLUMNS} rows={LOGIN_LOGS} rowKey={(r) => r.id} /> : null}
+              {tab === "security" ? (
+                <SecurityTab rows={loginHistory} loading={loginHistoryQuery.isLoading} error={loginHistoryQuery.error} />
+              ) : null}
             </div>
           </div>
         </div>
       </div>
 
-      <ChangePasswordDialog open={pwOpen} onClose={() => setPwOpen(false)} />
+      <ChangePasswordDialog
+        open={pwOpen}
+        onClose={() => setPwOpen(false)}
+        onChanged={() => {
+          setNotice("Đã cập nhật mật khẩu.");
+          setTab("info");
+        }}
+      />
     </AppShell>
   );
 }

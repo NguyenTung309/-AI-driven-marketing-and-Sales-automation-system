@@ -8,7 +8,7 @@ public interface IIntentClassifier : ISkill
 }
 
 // Baseline heuristic. Vendor swap target: vinai/phobert-base-v2 via HF Inference or ONNX.
-internal sealed class KeywordIntentClassifier : IIntentClassifier
+public sealed class KeywordIntentClassifier : IIntentClassifier
 {
     private static readonly (string Label, string[] Keywords)[] Rules =
     {

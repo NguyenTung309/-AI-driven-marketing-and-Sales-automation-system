@@ -1,9 +1,11 @@
-﻿using Clawbot.Agents.Contracts.Lead;
+using System.Text;
+using Clawbot.Agents.Contracts.Lead;
 using Clawbot.Agents.Core.Lead;
-using Clawbot.Api.Auth;
 using Clawbot.Agents.Core.Skills.Ops;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Leads;
 using Clawbot.Api.Middleware;
+using Clawbot.Api.Services;
 using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Leads;
 using Clawbot.Infrastructure.Persistence;
@@ -18,10 +20,11 @@ public static class LeadsEndpoints
 {
     public static IEndpointRouteBuilder MapLeads(this IEndpointRouteBuilder app)
     {
-// SPEC-11 §6a: reads need leads:read, mutations leads:write.
         var grp = app.MapGroup("/api/leads").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/", ListAsync).RequirePermission("leads:read");
+        grp.MapGet("/export.csv", ExportCsvAsync).RequirePermission("leads:read");
+        grp.MapPost("/import.csv", ImportCsvAsync).RequirePermission("leads:write");
         grp.MapGet("/{id:guid}", GetAsync).RequirePermission("leads:read");
         grp.MapPost("/", CreateAsync).RequirePermission("leads:write");
         grp.MapPost("/create-with-skills", CreateWithSkillsAsync).RequirePermission("leads:write");
@@ -30,8 +33,9 @@ public static class LeadsEndpoints
         grp.MapGet("/forecast", ForecastAsync).RequirePermission("leads:read");
         grp.MapGet("/{id:guid}/context", ContextPanelAsync).RequirePermission("leads:read");
 
-        // §6a: lead-scoring-rules is leads:write across the board.
-        var rules = app.MapGroup("/api/lead-scoring-rules").RequirePermission("leads:write").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var rules = app.MapGroup("/api/lead-scoring-rules")
+            .RequirePermission("leads:write")
+            .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
         rules.MapGet("/", ListRulesAsync);
         rules.MapPost("/", CreateRuleAsync);
         rules.MapDelete("/{id:guid}", DeactivateRuleAsync);
@@ -63,6 +67,29 @@ public static class LeadsEndpoints
             .ToListAsync(ct).ConfigureAwait(false);
 
         return Results.Ok(rows);
+    }
+
+    private static async Task<IResult> ExportCsvAsync(
+        ITenantAccessor tenants,
+        LeadCsvService service,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var export = await service.ExportCsvAsync(tenantId, ct).ConfigureAwait(false);
+        return Results.File(Encoding.UTF8.GetBytes(export.Content), "text/csv; charset=utf-8", export.FileName);
+    }
+
+    private static async Task<IResult> ImportCsvAsync(
+        HttpRequest request,
+        ITenantAccessor tenants,
+        LeadCsvService service,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        using var reader = new StreamReader(request.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var csv = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+        var result = await service.ImportCsvAsync(tenantId, csv, ct).ConfigureAwait(false);
+        return Results.Ok(result);
     }
 
     private static async Task<IResult> GetAsync(Guid id, AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
@@ -123,12 +150,12 @@ public static class LeadsEndpoints
         {
             TenantId = tenant.TenantId.ToString("D"),
             ContactId = body.ContactId.ToString("D"),
-            DisplayName = contact?.DisplayName ?? "",
-            Phone = body.Phone ?? "",
-            Email = body.Email ?? "",
+            DisplayName = contact.DisplayName ?? string.Empty,
+            Phone = body.Phone ?? string.Empty,
+            Email = body.Email ?? string.Empty,
             SourcePlatform = body.SourcePlatform,
-            Locale = contact?.Locale ?? "",
-            Country = ""
+            Locale = contact.Locale ?? string.Empty,
+            Country = string.Empty,
         };
 
         var grpcResponse = await leadClient.CreateWithSkillsAsync(grpcRequest, cancellationToken: ct).ConfigureAwait(false);
@@ -219,7 +246,10 @@ public static class LeadsEndpoints
     }
 
     private static async Task<IResult> DeactivateRuleAsync(
-        Guid id, AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        CancellationToken ct)
     {
         _ = tenants.Require();
         var rule = await db.LeadScoringRules.FirstOrDefaultAsync(r => r.Id == id, ct).ConfigureAwait(false);
@@ -230,9 +260,9 @@ public static class LeadsEndpoints
     }
 
     private static async Task<IResult> ForecastAsync(
-        [FromServices] AppDbContext db,
-        [FromServices] ITenantAccessor tenants,
-        [FromServices] IForecaster forecaster,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IForecaster forecaster,
         [FromQuery] int horizonDays = 7,
         CancellationToken ct = default)
     {
@@ -329,5 +359,3 @@ public static class LeadsEndpoints
         });
     }
 }
-
-

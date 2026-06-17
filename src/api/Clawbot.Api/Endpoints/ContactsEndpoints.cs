@@ -1,20 +1,44 @@
 using Clawbot.Api.Middleware;
+using Clawbot.Api.Services;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
+using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
 
 public static class ContactsEndpoints
 {
+    private static readonly JsonSerializerOptions ExportJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true,
+    };
+
     public static IEndpointRouteBuilder MapContacts(this IEndpointRouteBuilder app)
     {
         var grp = app.MapGroup("/api/contacts").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
+        grp.MapGet("/{id:guid}/export.json", ExportDataAsync);
         grp.MapPost("/merge", MergeContactsAsync);
 
         return grp;
+    }
+
+    private static async Task<IResult> ExportDataAsync(
+        Guid id,
+        ContactDataExportService service,
+        ITenantAccessor tenants,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var result = await service.ExportAsync(tenantId, id, ct).ConfigureAwait(false);
+        if (result is null)
+            return Results.NotFound(new { error = "contact not found" });
+
+        var json = JsonSerializer.Serialize(result.Export, ExportJsonOptions);
+        return Results.File(Encoding.UTF8.GetBytes(json), "application/json; charset=utf-8", result.FileName);
     }
 
     private static async Task<IResult> MergeContactsAsync(

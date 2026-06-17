@@ -110,6 +110,21 @@ public sealed class InMemoryClaudeCostTrackerTests
     }
 
     [Fact]
+    public async Task Does_not_record_entry_that_would_exceed_monthly_cap()
+    {
+        var sut = new InMemoryClaudeCostTracker();
+        var tenant = Guid.NewGuid();
+        var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        await sut.RecordAsync(Entry(tenant, 199m, month), CancellationToken.None);
+        await sut.RecordAsync(Entry(tenant, 2m, month.AddDays(1)), CancellationToken.None);
+
+        var summary = await sut.SummaryAsync(tenant, month, CancellationToken.None);
+        summary.MonthToDateUsd.Should().Be(199m);
+        summary.PercentUsed.Should().BeApproximately(199f / 200f, 0.0001f);
+    }
+
+    [Fact]
     public async Task Record_null_throws()
     {
         var sut = new InMemoryClaudeCostTracker();

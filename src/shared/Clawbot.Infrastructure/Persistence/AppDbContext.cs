@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Clawbot.Application.Abstractions;
 using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
@@ -11,6 +11,7 @@ using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Content;
 using Clawbot.Domain.Conversations;
 using Clawbot.Domain.Documents;
+using Clawbot.Domain.Experiments;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.Llm;
@@ -31,6 +32,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     : IdentityDbContext<AppUser, AppRole, Guid>(options), IAppDbContext
 {
     private readonly ITenantAccessor _tenants = tenants;
+    private Guid CurrentTenantId => _tenants.Current?.TenantId ?? Guid.Empty;
 
     // Tenants & Security
     public DbSet<Tenant> Tenants => Set<Tenant>();
@@ -51,11 +53,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<Message> Messages => Set<Message>();
 
     // Leads
-    public DbSet<DripEnrollment> DripEnrollments => Set<DripEnrollment>();
-    public DbSet<DripSequence> DripSequences => Set<DripSequence>();
     public DbSet<Lead> Leads => Set<Lead>();
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
     public DbSet<LeadScoringRule> LeadScoringRules => Set<LeadScoringRule>();
+    public DbSet<DripSequence> DripSequences => Set<DripSequence>();
+    public DbSet<DripSequenceStep> DripSequenceSteps => Set<DripSequenceStep>();
+    public DbSet<DripEnrollment> DripEnrollments => Set<DripEnrollment>();
 
     // Knowledge Base
     public DbSet<KbModule> KbModules => Set<KbModule>();
@@ -94,13 +97,18 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<KpiDaily> KpiDailies => Set<KpiDaily>();
     public DbSet<KpiForecast> KpiForecasts => Set<KpiForecast>();
 
-    // Channel & LLM configs
+    // Experiments / A-B testing
+    public DbSet<Experiment> Experiments => Set<Experiment>();
+    public DbSet<ExperimentVariant> ExperimentVariants => Set<ExperimentVariant>();
+    public DbSet<ExperimentAssignment> ExperimentAssignments => Set<ExperimentAssignment>();
+    public DbSet<ExperimentEvent> ExperimentEvents => Set<ExperimentEvent>();
+
+    // Channels & LLM configs
     public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();
     public DbSet<LlmConfig> LlmConfigs => Set<LlmConfig>();
-    // Processed messages (dedup for demo polling)
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
 
-    // Competitors (Research-2)
+    // Competitors
     public DbSet<CompetitorSource> CompetitorSources => Set<CompetitorSource>();
     public DbSet<CompetitorPost> CompetitorPosts => Set<CompetitorPost>();
 
@@ -112,7 +120,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     {
         public void Add(Conversation conversation) => set.Add(conversation);
 
-        // Global query filters (tenant isolation + soft delete) apply automatically â€” no manual tenant_id filter.
         public Task<Conversation?> FindByThreadAsync(string platform, string externalThreadId, CancellationToken ct = default) =>
             set.FirstOrDefaultAsync(c => c.Platform == platform && c.ExternalThreadId == externalThreadId, ct);
     }
@@ -122,17 +129,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
         base.OnModelCreating(builder);
         builder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
 
-        // MassTransit transactional outbox (WS1): event publish enlists in the same SaveChanges
-        // transaction as the aggregate write — exactly-once, no loss on broker outage.
-        // These entities keep canonical PascalCase schema (skipped by ApplySnakeCase).
         builder.AddInboxStateEntity();
         builder.AddOutboxMessageEntity();
         builder.AddOutboxStateEntity();
 
-        // Domain aggregates assign their own Guid identifiers in factory methods, so keys are
-        // not store-generated. Without this, EF marks navigation-appended children (e.g.
-        // Conversation.AppendMessage) as Modified instead of Added on a follow-up SaveChanges,
-        // emitting an UPDATE that affects 0 rows (DbUpdateConcurrencyException).
         foreach (var entity in builder.Model.GetEntityTypes())
         {
             foreach (var key in entity.GetKeys())
@@ -162,11 +162,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
     private void ApplyTenantFilter<TEntity>(ModelBuilder builder) where TEntity : class, ITenantOwned
     {
-        var tenantRef = _tenants;
-        builder.Entity<TEntity>().HasQueryFilter(
-            e => e.TenantId == (tenantRef.Current != null ? tenantRef.Current.TenantId : Guid.Empty));
+        builder.Entity<TEntity>().HasQueryFilter(e => e.TenantId == CurrentTenantId);
     }
 }
-
-
-

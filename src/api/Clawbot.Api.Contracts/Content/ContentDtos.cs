@@ -35,6 +35,17 @@ public sealed record GenerateContentItemRequest(
 
 public sealed record GenerateContentItemResponse(IReadOnlyList<ContentItemDto> Items);
 
+public sealed record GenerateImagePromptRequest(
+    string? Brief,
+    string? Platform,
+    string? Style,
+    IReadOnlyList<string>? BrandTokens);
+
+public sealed record GenerateImagePromptResponse(
+    string Prompt,
+    string NegativePrompt,
+    IReadOnlyDictionary<string, string> Hints);
+
 public sealed record UpdateContentItemRequest(string Body, string? AssetsJson);
 
 public sealed record RejectContentItemRequest(string? Reason);

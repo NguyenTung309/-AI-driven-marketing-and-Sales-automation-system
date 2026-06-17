@@ -1,6 +1,8 @@
-﻿using Clawbot.Api.Auth;
+using System.Text;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Inbox;
 using Clawbot.Api.Middleware;
+using Clawbot.Api.Services;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
@@ -17,10 +19,12 @@ public static class InboxEndpoints
 {
     public static IEndpointRouteBuilder MapInbox(this IEndpointRouteBuilder app)
     {
-var grp = app.MapGroup("/api/inbox").RequireRateLimiting(RateLimitingExtensions.ChatPolicy);
+        var grp = app.MapGroup("/api/inbox").RequireRateLimiting(RateLimitingExtensions.ChatPolicy);
 
+        grp.MapGet("/search", SearchAsync).RequirePermission("conversations:read");
         grp.MapGet("/conversations", ListAsync).RequirePermission("conversations:read");
         grp.MapGet("/conversations/{id:guid}", GetAsync).RequirePermission("conversations:read");
+        grp.MapGet("/conversations/{id:guid}/export.csv", ExportCsvAsync).RequirePermission("conversations:read");
         grp.MapPost("/conversations/{id:guid}/assign", AssignAsync).RequirePermission("conversations:write");
         grp.MapPost("/conversations/{id:guid}/resolve", ResolveAsync).RequirePermission("conversations:write");
         grp.MapPost("/conversations/{id:guid}/escalate", EscalateAsync).RequirePermission("conversations:write");
@@ -49,14 +53,19 @@ var grp = app.MapGroup("/api/inbox").RequireRateLimiting(RateLimitingExtensions.
         var total = await query.CountAsync(ct).ConfigureAwait(false);
 
         var rows = await query
-            // M15 lead-score join: surface hot-lead conversations first, then by recency.
             .OrderByDescending(c => db.Leads.Where(l => l.ContactId == c.ContactId).Max(l => (int?)l.Score) ?? 0)
             .ThenByDescending(c => c.LastMessageAt ?? c.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(c => new
             {
-                c.Id, c.Platform, c.ExternalThreadId, c.Status, c.ContactId, c.AssignedTo, c.LastMessageAt,
+                c.Id,
+                c.Platform,
+                c.ExternalThreadId,
+                c.Status,
+                c.ContactId,
+                c.AssignedTo,
+                c.LastMessageAt,
                 LastMessage = c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault(),
             })
             .ToListAsync(ct).ConfigureAwait(false);
@@ -67,9 +76,14 @@ var grp = app.MapGroup("/api/inbox").RequireRateLimiting(RateLimitingExtensions.
             .ToDictionaryAsync(c => c.Id, c => c.DisplayName, ct).ConfigureAwait(false);
 
         var items = rows.Select(r => new ConversationListItemDto(
-            r.Id, r.Platform, r.ExternalThreadId, r.Status, r.ContactId,
+            r.Id,
+            r.Platform,
+            r.ExternalThreadId,
+            r.Status,
+            r.ContactId,
             r.ContactId.HasValue && contactNames.TryGetValue(r.ContactId.Value, out var n) ? n : null,
-            r.AssignedTo, r.LastMessageAt,
+            r.AssignedTo,
+            r.LastMessageAt,
             r.LastMessage is null ? null : Preview(r.LastMessage),
             UnreadCount: 0)).ToList();
 
@@ -97,6 +111,40 @@ var grp = app.MapGroup("/api/inbox").RequireRateLimiting(RateLimitingExtensions.
         return Results.Ok(new ConversationDetailDto(
             conv.Id, conv.Platform, conv.ExternalThreadId, conv.Status, conv.ContactId,
             contactName, conv.AssignedTo, conv.LastMessageAt, conv.CreatedAt, messages));
+    }
+
+    private static async Task<IResult> SearchAsync(
+        InboxSearchService search,
+        ITenantAccessor tenants,
+        [FromQuery] string? q,
+        [FromQuery] string? status,
+        [FromQuery] string? platform,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(q))
+            return Results.BadRequest(new { error = "query_required" });
+
+        var tenantId = tenants.Require().TenantId;
+        var result = await search.SearchAsync(tenantId, q, status, platform, page, pageSize, ct).ConfigureAwait(false);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> ExportCsvAsync(
+        Guid id,
+        ITenantAccessor tenants,
+        ConversationExportService exporter,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var export = await exporter.ExportCsvAsync(tenant.TenantId, id, ct).ConfigureAwait(false);
+        if (export is null) return Results.NotFound();
+
+        return Results.File(
+            Encoding.UTF8.GetBytes(export.Content),
+            "text/csv; charset=utf-8",
+            export.FileName);
     }
 
     private static async Task<IResult> AssignAsync(
@@ -132,14 +180,17 @@ var grp = app.MapGroup("/api/inbox").RequireRateLimiting(RateLimitingExtensions.
         await notifier.NotifyConversationUpdatedAsync(tenant.TenantId,
             new InboxConversationEvent(conv.Id, conv.Status, conv.AssignedTo, conv.LastMessageAt), ct).ConfigureAwait(false);
 
-        // Auto-summary on resolve â€” enqueue as Hangfire background job (non-blocking)
         BackgroundJob.Enqueue<AutoSummaryJob>(j => j.RunAsync(tenant.TenantId, id, CancellationToken.None));
 
         return Results.NoContent();
     }
 
     private static async Task<IResult> EscalateAsync(
-        Guid id, AppDbContext db, ITenantAccessor tenants, IInboxNotifier notifier, CancellationToken ct)
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IInboxNotifier notifier,
+        CancellationToken ct)
     {
         var tenant = tenants.Require();
         var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id, ct).ConfigureAwait(false);
@@ -158,6 +209,7 @@ var grp = app.MapGroup("/api/inbox").RequireRateLimiting(RateLimitingExtensions.
         ITenantAccessor tenants,
         IInboxNotifier notifier,
         IChannelAdapter adapter,
+        OutboundMessageSafetyService safety,
         IClock clock,
         CancellationToken ct)
     {
@@ -166,6 +218,15 @@ var grp = app.MapGroup("/api/inbox").RequireRateLimiting(RateLimitingExtensions.
 
         var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id, ct).ConfigureAwait(false);
         if (conv is null) return Results.NotFound();
+
+        try
+        {
+            await safety.EnsureAllowedAsync(body.Content, ct).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
 
         await adapter.SendAsync(conv.ExternalThreadId, body.Content, ct).ConfigureAwait(false);
         var msg = conv.AppendMessage("out", "user", body.Content, body.ContentType, clock.UtcNow);
@@ -178,9 +239,5 @@ var grp = app.MapGroup("/api/inbox").RequireRateLimiting(RateLimitingExtensions.
     }
 
     private static string Preview(string text) =>
-        text.Length <= 140 ? text : text[..140] + "â€¦";
+        text.Length <= 140 ? text : text[..140] + "...";
 }
-
-
-
-

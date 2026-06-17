@@ -8,6 +8,7 @@ on:
 
 env:
   DOTNET_VERSION: "8.0.x"
+  NODE_VERSION: "20.x"
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
@@ -25,11 +26,30 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: src/frontend/clawbot-web/package-lock.json
+
       - name: Restore
         run: dotnet restore Clawbot.sln
 
       - name: Build
         run: dotnet build Clawbot.sln --no-restore --configuration Release
+
+      - name: Frontend Install
+        working-directory: src/frontend/clawbot-web
+        run: npm ci
+
+      - name: Frontend Lint
+        working-directory: src/frontend/clawbot-web
+        run: npm run lint
+
+      - name: Frontend Build
+        working-directory: src/frontend/clawbot-web
+        run: npm run build
 
       - name: Unit Tests (no Docker)
         run: >
@@ -41,14 +61,39 @@ jobs:
           --collect:"XPlat Code Coverage"
           --results-directory ./TestResults
 
+      - name: Migration Static Guard
+        shell: pwsh
+        run: ./deploy/ci/verify-migrations.ps1
+
+      - name: Identity DDL Preflight
+        shell: pwsh
+        run: ./deploy/ci/verify-identity-ddl.ps1
+
+      - name: KB Seed Authoring Smoke Test
+        shell: pwsh
+        run: ./deploy/seed/generate-kb-seed.ps1 -SmokeTest
+
+      - name: Pancake Ops Script Dry Run
+        shell: pwsh
+        env:
+          PANCAKE_BASE_URL: https://pancake.vn/api/v1
+          PANCAKE_ACCESS_TOKEN: dry-run-access-token
+          PANCAKE_PAGE_ID: dry-run-page
+          PANCAKE_TENANT_SLUG: hoc-ba
+          CLAWBOT_PUBLIC_BASE_URL: https://api.example.test
+          PANCAKE_WEBHOOK_SECRET: dry-run-webhook-secret
+          PANCAKE_WEBHOOK_PAYLOAD: '{"type":"COMMENT","message":"dry run","post_id":"post-1","comment_id":"comment-1"}'
+        run: |
+          ./deploy/pancake-webhook-subscribe.ps1 -DryRun
+          ./deploy/pancake-webhook-replay.ps1 -DryRun
+
+      - name: Go-live Readiness Report
+        shell: pwsh
+        run: ./deploy/ci/verify-go-live-readiness.ps1 -ReportOnly -SkipDockerProbe
+
       - name: Integration Tests (Testcontainers)
-        run: >
-          dotnet test tests/Clawbot.Integration.Tests/Clawbot.Integration.Tests.csproj
-          --no-build
-          --configuration Release
-          --logger "trx;LogFileName=integration-results.trx"
-          --collect:"XPlat Code Coverage"
-          --results-directory ./TestResults
+        shell: pwsh
+        run: ./deploy/ci/verify-testcontainers.ps1 -RunIntegrationTests
 
       - name: Upload Test Results
         if: always()
@@ -71,3 +116,7 @@ jobs:
             echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
             cat CoverageReport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
           fi
+
+      - name: Coverage Gate
+        shell: pwsh
+        run: ./deploy/ci/enforce-coverage.ps1 -CoverageRoot TestResults -MinimumLineCoverage 30

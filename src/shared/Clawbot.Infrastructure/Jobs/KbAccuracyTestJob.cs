@@ -15,7 +15,7 @@ public sealed partial class KbAccuracyTestJob(
     IContentNotifier notifier,
     ILogger<KbAccuracyTestJob> logger)
 {
-    private const decimal Threshold = 0.85m;
+    private const decimal Threshold = 85m;
 
     private readonly AppDbContext _db = db;
     private readonly IContentNotifier _notifier = notifier;
@@ -39,7 +39,7 @@ public sealed partial class KbAccuracyTestJob(
                 Platform: "kb",
                 Metric: row.Code,
                 Severity: "warning",
-                Message: $"KB module {row.Code} accuracy {row.Score:P0} is below the 85% threshold.",
+                Message: $"KB module {row.Code} accuracy {row.Score:0.##}% is below the 85% threshold.",
                 OccurredAt: DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
             LogLowAccuracy(_logger, row.Code, row.Score);
         }
@@ -47,7 +47,7 @@ public sealed partial class KbAccuracyTestJob(
         LogChecked(_logger, below.Count);
     }
 
-    [LoggerMessage(EventId = 5301, Level = LogLevel.Warning, Message = "KB module {Code} accuracy {Score:P0} below threshold")]
+    [LoggerMessage(EventId = 5301, Level = LogLevel.Warning, Message = "KB module {Code} accuracy {Score:0.##}% below threshold")]
     private static partial void LogLowAccuracy(ILogger logger, string code, decimal score);
 
     [LoggerMessage(EventId = 5302, Level = LogLevel.Information, Message = "KB accuracy check flagged {Count} deployed module(s)")]

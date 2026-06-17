@@ -4,11 +4,12 @@ using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Time;
 using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
+using System.Text.RegularExpressions;
 using CoreDocs = Clawbot.Agents.Core.Docs;
 
 namespace Clawbot.AgentService.Services;
 
-public sealed class DocsAgentGrpcService(
+public sealed partial class DocsAgentGrpcService(
     CoreDocs.DocsAgent agent,
     CoreDocs.IDocumentStorage storage,
     AppDbContext db,
@@ -65,7 +66,15 @@ public sealed class DocsAgentGrpcService(
                 TryAddVar(vars, "contact_phone", contact.Phone);
                 TryAddVar(vars, "contact_email", contact.Email);
             }
+
+            var conversationVars = await ExtractConversationVarsAsync(tenantId, contactId.Value, ct).ConfigureAwait(false);
+            TryAddVar(vars, "contact_name", conversationVars.Name);
+            TryAddVar(vars, "customer_name", conversationVars.Name);
+            TryAddVar(vars, "contact_phone", conversationVars.Phone);
+            TryAddVar(vars, "contact_email", conversationVars.Email);
         }
+
+        await AddKnowledgeVarsAsync(tenantId, vars, ct).ConfigureAwait(false);
 
         var renderRequest = new CoreDocs.DocsRenderRequest(
             tenantId, template.Code, template.DocType, template.TemplateHtml, vars, branding);
@@ -106,4 +115,110 @@ public sealed class DocsAgentGrpcService(
         if (!string.IsNullOrWhiteSpace(value) && !vars.ContainsKey(key))
             vars[key] = value;
     }
+
+    private async Task AddKnowledgeVarsAsync(Guid tenantId, Dictionary<string, string> vars, CancellationToken ct)
+    {
+        if (vars.ContainsKey("knowledge") && vars.ContainsKey("kb_content") && vars.ContainsKey("kb_module_codes"))
+            return;
+
+        var deployedVersions = await _db.KbModules.IgnoreQueryFilters()
+            .Where(m => m.TenantId == tenantId && m.DeletedAt == null && m.Status == "active")
+            .Join(_db.KbVersions.IgnoreQueryFilters().Where(v => v.Status == "deployed"),
+                m => m.Id,
+                v => v.KbModuleId,
+                (m, v) => new
+                {
+                    m.Code,
+                    m.Name,
+                    v.Version,
+                    v.ContentMd,
+                    v.DeployedAt,
+                    v.CreatedAt,
+                })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var latestByModule = deployedVersions
+            .GroupBy(v => v.Code, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g
+                .OrderByDescending(v => v.Version)
+                .ThenByDescending(v => v.DeployedAt ?? v.CreatedAt)
+                .First())
+            .OrderBy(v => v.Code, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (latestByModule.Count == 0)
+            return;
+
+        var knowledge = string.Join(
+            "\n\n",
+            latestByModule.Select(v => $"## {v.Name} ({v.Code})\n{v.ContentMd.Trim()}"));
+        var moduleCodes = string.Join(",", latestByModule.Select(v => v.Code));
+
+        TryAddVar(vars, "knowledge", knowledge);
+        TryAddVar(vars, "kb_content", knowledge);
+        TryAddVar(vars, "kb_module_codes", moduleCodes);
+    }
+
+    private async Task<ConversationVars> ExtractConversationVarsAsync(Guid tenantId, Guid contactId, CancellationToken ct)
+    {
+        var messages = await _db.Conversations.IgnoreQueryFilters()
+            .Where(c => c.TenantId == tenantId && c.ContactId == contactId && c.DeletedAt == null)
+            .Join(_db.Messages.IgnoreQueryFilters(),
+                c => c.Id,
+                m => m.ConversationId,
+                (_, m) => m)
+            .Select(m => new { m.SentAt, Text = m.OriginalContent ?? m.Content })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return ExtractConversationVars(messages
+            .OrderByDescending(m => m.SentAt)
+            .Take(20)
+            .Select(m => m.Text));
+    }
+
+    private static ConversationVars ExtractConversationVars(IEnumerable<string> texts)
+    {
+        string? name = null;
+        string? phone = null;
+        string? email = null;
+
+        foreach (var text in texts.Where(t => !string.IsNullOrWhiteSpace(t)))
+        {
+            phone ??= NormalizePhone(PhoneRegex().Match(text));
+            email ??= NormalizeMatch(EmailRegex().Match(text));
+            name ??= NormalizeName(NameRegex().Match(text));
+
+            if (name is not null && phone is not null && email is not null)
+                break;
+        }
+
+        return new ConversationVars(name, phone, email);
+    }
+
+    private static string? NormalizePhone(Match match)
+    {
+        if (!match.Success) return null;
+        var digits = new string(match.Value.Where(char.IsDigit).ToArray());
+        return digits.Length >= 9 ? digits : null;
+    }
+
+    private static string? NormalizeMatch(Match match) =>
+        match.Success ? match.Value.Trim() : null;
+
+    private static string? NormalizeName(Match match)
+    {
+        if (!match.Success) return null;
+        var name = match.Groups["name"].Value.Trim(' ', '.', ',', ';', ':', '-', '!');
+        return name.Length >= 2 ? name : null;
+    }
+
+    [GeneratedRegex(@"(?<!\d)(?:\+?84|0)(?:[\s.\-]?\d){8,10}(?!\d)", RegexOptions.CultureInvariant)]
+    private static partial Regex PhoneRegex();
+
+    [GeneratedRegex(@"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex EmailRegex();
+
+    [GeneratedRegex(@"(?:ten|tên|em la|em là|minh la|mình là|toi la|tôi là)\s+(?<name>[A-Za-zÀ-ỹ][A-Za-zÀ-ỹ\s]{1,60})", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex NameRegex();
+
+    private sealed record ConversationVars(string? Name, string? Phone, string? Email);
 }

@@ -17,6 +17,8 @@ public interface ILeadDeduplicator : ISkill
 // Layers on top of EfLeadDedupService (exact phone/email match) — this handles fuzzy.
 internal sealed class QdrantLeadDeduplicator : ILeadDeduplicator
 {
+    private const float SimilarityThreshold = 0.92f;
+
     // Versioned by embedder dimension — must match ContactEmbeddingSync's collection name.
     private readonly string _collection;
     private readonly IEmbeddingProvider _embedding;
@@ -50,7 +52,7 @@ internal sealed class QdrantLeadDeduplicator : ILeadDeduplicator
                 !string.Equals(tid, tenantId.ToString("D", CultureInfo.InvariantCulture), StringComparison.Ordinal))
                 continue;
 
-            if (m.Score < 0.70f) continue;
+            if (m.Score < SimilarityThreshold) continue;
 
             if (m.Metadata.TryGetValue("contact_id", out var cid) &&
                 Guid.TryParse(cid, out var contactId))

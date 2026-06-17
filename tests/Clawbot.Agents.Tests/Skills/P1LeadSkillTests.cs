@@ -147,13 +147,13 @@ public sealed class QdrantLeadDeduplicatorTests
         store.SearchAsync("contacts_v384", Arg.Any<ReadOnlyMemory<float>>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new List<VectorMatch>
             {
-                new(contactId.ToString("D"), 0.85f,
+                new(contactId.ToString("D"), 0.92f,
                     new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
                         ["tenant_id"] = tenantId.ToString("D"),
                         ["contact_id"] = contactId.ToString("D")
                     }),
-                new(Guid.NewGuid().ToString("D"), 0.60f,  // below threshold
+                new(Guid.NewGuid().ToString("D"), 0.91f,  // below threshold
                     new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
                         ["tenant_id"] = tenantId.ToString("D"),
@@ -175,7 +175,7 @@ public sealed class QdrantLeadDeduplicatorTests
 
         result.Should().ContainSingle();
         result[0].CandidateContactId.Should().Be(contactId);
-        result[0].Similarity.Should().Be(0.85f);
+        result[0].Similarity.Should().Be(0.92f);
     }
 }
 

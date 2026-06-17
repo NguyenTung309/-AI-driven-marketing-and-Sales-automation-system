@@ -109,10 +109,10 @@
       dockerfile: src/api/Clawbot.Api/Dockerfile
     container_name: clawbot-api
     ports:
-      - "5051:5051"
+      - "15874:15874"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - ASPNETCORE_URLS=http://0.0.0.0:5051
+      - ASPNETCORE_URLS=http://0.0.0.0:15874
       - ConnectionStrings__SqlServer=Server=sqlserver,1433;Database=clawbot;User Id=sa;Password=${MSSQL_SA_PASSWORD:-Clawbot!2026};TrustServerCertificate=True
       - ConnectionStrings__Redis=redis:6379
       - ConnectionStrings__RabbitMq=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672
@@ -132,7 +132,7 @@
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5051/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:15874/health/ready"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -143,10 +143,10 @@
       dockerfile: src/gateway/Clawbot.Gateway/Dockerfile
     container_name: clawbot-gateway
     ports:
-      - "5050:5050"
+      - "15873:15873"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - ASPNETCORE_URLS=http://0.0.0.0:5050
+      - ASPNETCORE_URLS=http://0.0.0.0:15873
       - Gateway__Pancake__WebhookSecret=${PANCAKE_WEBHOOK_SECRET:-dev-secret-replace-before-staging}
       # Must match clawbot-api's Jwt__SigningKey so the gateway can verify forwarded tokens.
       - Jwt__SigningKey=${JWT_SIGNING_KEY:-dev-only-jwt-signing-key-change-before-staging-0123456789}
@@ -154,12 +154,12 @@
       - PANCAKE_ACCESS_TOKEN=${PANCAKE_ACCESS_TOKEN:-}
       - PANCAKE_PAGE_ACCESS_TOKEN=${PANCAKE_PAGE_ACCESS_TOKEN:-}
       - PANCAKE_PAGE_ID=${PANCAKE_PAGE_ID:-}
-      - ReverseProxy__Clusters__backend__Destinations__backend/primary__Address=http://clawbot-api:5051
+      - ReverseProxy__Clusters__backend__Destinations__backend/primary__Address=http://clawbot-api:15874
     depends_on:
       - clawbot-api
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5050/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:15873/health/live"]
       interval: 30s
       timeout: 10s
       retries: 3

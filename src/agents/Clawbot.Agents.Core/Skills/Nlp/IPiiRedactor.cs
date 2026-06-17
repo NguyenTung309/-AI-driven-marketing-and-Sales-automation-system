@@ -13,7 +13,7 @@ public interface IPiiRedactor : ISkill
 
 // Baseline regex redactor for VN phone + email + 12-digit CCCD/ID.
 // Vendor swap target: microsoft/presidio analyzer+anonymizer REST sidecar.
-internal sealed partial class RegexPiiRedactor : IPiiRedactor
+public sealed partial class RegexPiiRedactor : IPiiRedactor
 {
     [GeneratedRegex(@"(?<![\d])(0[35789]\d{8})(?![\d])", RegexOptions.CultureInvariant)]
     private static partial Regex PhoneRegex();

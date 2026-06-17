@@ -13,6 +13,17 @@ public sealed record GenerateDocumentResponse(
     int SizeBytes,
     long LatencyMs);
 
+public sealed record GenerateDocumentKitRequest(
+    IReadOnlyList<string>? TemplateCodes,
+    Guid? ContactId,
+    IReadOnlyDictionary<string, string>? Vars,
+    string? SentVia);
+
+public sealed record GenerateDocumentKitResponse(
+    IReadOnlyList<GenerateDocumentResponse> Documents,
+    int TotalSizeBytes,
+    long TotalLatencyMs);
+
 public sealed record DocumentTemplateDto(
     Guid Id,
     string Code,

@@ -34,7 +34,12 @@ internal sealed class InMemoryClaudeCostTracker : IClaudeCostTracker
     {
         ArgumentNullException.ThrowIfNull(entry);
         var key = (entry.TenantId, entry.At.Year, entry.At.Month);
-        _ledger.AddOrUpdate(key, entry.UsdCost, (_, existing) => existing + entry.UsdCost);
+        _ledger.AddOrUpdate(
+            key,
+            entry.UsdCost > DefaultCapUsd ? 0m : entry.UsdCost,
+            (_, existing) => existing + entry.UsdCost > DefaultCapUsd
+                ? existing
+                : existing + entry.UsdCost);
         return Task.CompletedTask;
     }
 

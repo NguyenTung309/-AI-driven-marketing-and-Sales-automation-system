@@ -1,6 +1,7 @@
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.Leads.Events;
 using FluentAssertions;
+using System.Text.Json;
 using Xunit;
 
 namespace Clawbot.Domain.Tests.Leads;
@@ -97,5 +98,27 @@ public sealed class LeadTests
         lead.Activities.Should().HaveCount(2);
         lead.Activities.Should().OnlyContain(a => a.ActivityType == "score_adjust");
         lead.LastActivityAt.Should().Be(at);
+    }
+
+    [Fact]
+    public void AdjustScore_records_score_change_reason_metadata()
+    {
+        var lead = NewLead();
+        var at = new DateTimeOffset(2026, 6, 16, 9, 0, 0, TimeSpan.Zero);
+
+        lead.AdjustScore(35, "asked price and shared phone", at);
+
+        var activity = lead.Activities.Should().ContainSingle().Subject;
+        activity.Notes.Should().Be("asked price and shared phone");
+
+        using var doc = JsonDocument.Parse(activity.MetaJson);
+        var root = doc.RootElement;
+        root.GetProperty("previousScore").GetInt32().Should().Be(0);
+        root.GetProperty("newScore").GetInt32().Should().Be(35);
+        root.GetProperty("delta").GetInt32().Should().Be(35);
+        root.GetProperty("requestedDelta").GetInt32().Should().Be(35);
+        root.GetProperty("previousStage").GetString().Should().Be("cold");
+        root.GetProperty("newStage").GetString().Should().Be("warm");
+        root.GetProperty("reason").GetString().Should().Be("asked price and shared phone");
     }
 }
