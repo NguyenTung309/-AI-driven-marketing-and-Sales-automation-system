@@ -64,7 +64,7 @@ public static class ProfileEndpoints
         IFormFile file,
         UserManager<AppUser> users,
         ClaimsPrincipal principal,
-        IDocumentStorage storage,
+        [FromServices] IDocumentStorage storage,
         CancellationToken ct)
     {
         var user = await users.GetUserAsync(principal);

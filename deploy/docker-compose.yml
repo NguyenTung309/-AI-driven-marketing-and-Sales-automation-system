@@ -154,6 +154,7 @@
       - PANCAKE_ACCESS_TOKEN=${PANCAKE_ACCESS_TOKEN:-}
       - PANCAKE_PAGE_ACCESS_TOKEN=${PANCAKE_PAGE_ACCESS_TOKEN:-}
       - PANCAKE_PAGE_ID=${PANCAKE_PAGE_ID:-}
+      - ReverseProxy__Clusters__backend__Destinations__backend/primary__Address=http://clawbot-api:5051
     depends_on:
       - clawbot-api
     restart: unless-stopped

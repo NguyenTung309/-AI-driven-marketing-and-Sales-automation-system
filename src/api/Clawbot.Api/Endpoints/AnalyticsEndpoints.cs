@@ -32,8 +32,8 @@ public static class AnalyticsEndpoints
 
     // M25 — per-agent Claude cost from the ledger (agent nào tốn nhất, trung bình/cuộc).
     private static async Task<IResult> AgentCostAsync(
-        AppDbContext db,
-        ITenantAccessor tenants,
+        [FromServices] AppDbContext db,
+        [FromServices] ITenantAccessor tenants,
         [FromQuery] string? from,
         [FromQuery] string? to,
         CancellationToken ct)
@@ -64,8 +64,8 @@ public static class AnalyticsEndpoints
     }
 
     private static async Task<IResult> GetOmnichannelAsync(
-        AnalyticsAggregationService analytics,
-        ITenantAccessor tenants,
+        [FromServices] AnalyticsAggregationService analytics,
+        [FromServices] ITenantAccessor tenants,
         [FromQuery] string? from,
         [FromQuery] string? to,
         CancellationToken ct)
@@ -81,8 +81,8 @@ public static class AnalyticsEndpoints
 
     // Report-1: per-metric delta vs prior period (compare=dod|wow).
     private static async Task<IResult> GetOmnichannelDeltaAsync(
-        AnalyticsAggregationService analytics,
-        ITenantAccessor tenants,
+        [FromServices] AnalyticsAggregationService analytics,
+        [FromServices] ITenantAccessor tenants,
         [FromQuery] string? from,
         [FromQuery] string? to,
         [FromQuery] string? compare,
@@ -98,8 +98,8 @@ public static class AnalyticsEndpoints
     }
 
     private static async Task<IResult> GetFunnelAsync(
-        AnalyticsAggregationService analytics,
-        ITenantAccessor tenants,
+        [FromServices] AnalyticsAggregationService analytics,
+        [FromServices] ITenantAccessor tenants,
         [FromQuery] string? from,
         [FromQuery] string? to,
         [FromQuery] string? platform,
@@ -115,8 +115,8 @@ public static class AnalyticsEndpoints
     }
 
     private static async Task<IResult> GetAgentPerformanceAsync(
-        AnalyticsAggregationService analytics,
-        ITenantAccessor tenants,
+        [FromServices] AnalyticsAggregationService analytics,
+        [FromServices] ITenantAccessor tenants,
         [FromQuery] string? from,
         [FromQuery] string? to,
         CancellationToken ct)
@@ -131,8 +131,8 @@ public static class AnalyticsEndpoints
     }
 
     private static async Task<IResult> GetAnomaliesAsync(
-        ITenantAccessor tenants,
-        ReportAgent.ReportAgentClient reportAgent,
+        [FromServices] ITenantAccessor tenants,
+        [FromServices] ReportAgent.ReportAgentClient reportAgent,
         [FromQuery] string metric,
         [FromQuery] string? platform,
         [FromQuery] double zThreshold = 3d,
@@ -168,9 +168,10 @@ public static class AnalyticsEndpoints
         }
     }
 
+    // FIX CHÍ MẠNG Ở ĐÂY: Ép .NET nhận diện rõ ràng nguồn Service và nguồn Query String
     private static async Task<IResult> GetForecastAsync(
-        AnalyticsAggregationService analytics,
-        ITenantAccessor tenants,
+        [FromServices] AnalyticsAggregationService analytics,
+        [FromServices] ITenantAccessor tenants,
         [FromQuery] string metric,
         [FromQuery] string? platform,
         [FromQuery] int horizon = 7,
@@ -187,8 +188,8 @@ public static class AnalyticsEndpoints
     }
 
     private static async Task<IResult> ExportAsync(
-        AnalyticsAggregationService analytics,
-        ITenantAccessor tenants,
+        [FromServices] AnalyticsAggregationService analytics,
+        [FromServices] ITenantAccessor tenants,
         [FromQuery] string? format,
         [FromQuery] string? from,
         [FromQuery] string? to,
@@ -234,4 +235,3 @@ public static class AnalyticsEndpoints
             ? parsed
             : null;
 }
-

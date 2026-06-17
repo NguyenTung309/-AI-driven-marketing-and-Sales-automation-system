@@ -154,7 +154,7 @@ public static class DependencyInjection
             var o = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<QdrantOptions>>().Value;
             return new QdrantClient(o.Host, o.Port, o.UseTls, o.ApiKey);
         });
-        services.AddScoped<IVectorStore, QdrantVectorStore>();
+        services.AddSingleton<IVectorStore, QdrantVectorStore>();
         services.AddSingleton<IContactEmbeddingSync, ContactEmbeddingSync>();
 
         // External-service config modules (Options pattern, no raw cfg[] reads).

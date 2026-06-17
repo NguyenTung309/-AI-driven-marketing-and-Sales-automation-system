@@ -230,9 +230,9 @@ public static class LeadsEndpoints
     }
 
     private static async Task<IResult> ForecastAsync(
-        AppDbContext db,
-        ITenantAccessor tenants,
-        IForecaster forecaster,
+        [FromServices] AppDbContext db,
+        [FromServices] ITenantAccessor tenants,
+        [FromServices] IForecaster forecaster,
         [FromQuery] int horizonDays = 7,
         CancellationToken ct = default)
     {

@@ -51,6 +51,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<Message> Messages => Set<Message>();
 
     // Leads
+    public DbSet<DripEnrollment> DripEnrollments => Set<DripEnrollment>();
+    public DbSet<DripSequence> DripSequences => Set<DripSequence>();
     public DbSet<Lead> Leads => Set<Lead>();
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
     public DbSet<LeadScoringRule> LeadScoringRules => Set<LeadScoringRule>();
