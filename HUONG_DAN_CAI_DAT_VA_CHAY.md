@@ -51,7 +51,12 @@ run-all.bat --dry-run
 - MinIO console: `http://localhost:9001` (`minio` / `minio12345`)
 - Metabase: `http://localhost:3000`
 
-Luu y: repo hien chua co default tenant/user seed. Neu frontend hien man login nhung chua dang nhap duoc, stack van da chay; can seed tenant + admin user rieng cho moi truong dev.
+Tai moi truong `Development`, API tu dong seed default tenant va dev admin khi khoi dong:
+
+- Email: `admin@clawbot.local`
+- Password: `Admin@12345`
+
+Neu frontend hien man login nhung dang nhap that bai, kiem tra cua so `ClawBot API :15874` truoc: seed chi chay sau khi API backend ket noi duoc database va khoi dong thanh cong.
 
 ## 4. Chay thu cong neu khong dung bat
 

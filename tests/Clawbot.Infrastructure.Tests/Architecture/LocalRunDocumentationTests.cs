@@ -27,6 +27,10 @@ public sealed class LocalRunDocumentationTests
         guide.Should().Contain("http://localhost:15875");
         guide.Should().NotContain("http://localhost:5000");
         guide.Should().NotContain("http://localhost:5001");
+        guide.Should().Contain("admin@clawbot.local");
+        guide.Should().Contain("Admin@12345");
+        guide.Should().Contain("tu dong seed default tenant");
+        guide.Should().NotContain("repo hien chua co default tenant/user seed");
         guide.Should().Contain("deploy/.env.example");
         guide.Should().Contain("deploy/.env");
         guide.Should().Contain("Docker/Testcontainers");
