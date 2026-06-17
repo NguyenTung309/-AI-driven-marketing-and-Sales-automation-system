@@ -1,0 +1,8 @@
+﻿            search={ctx.search}
+            onSearchChange={ctx.setSearch}
+            onCreateUser={ctx.openCreateUser}
+            onEditUser={ctx.openEditUser}
+            onToggleActive={(id, active) => ctx.activeMutation.mutate({ id, active })}
+            onResetPassword={(id) => ctx.resetPasswordMutation.mutate(id)}
+            isActivePending={ctx.activeMutation.isPending}
+            isResetPending={ctx.resetPasswordMutation.isPending}

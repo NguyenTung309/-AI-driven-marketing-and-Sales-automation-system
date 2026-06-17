@@ -1,4 +1,4 @@
-﻿using Clawbot.Domain.Agents;
+using Clawbot.Domain.Agents;
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging;
 namespace Clawbot.Infrastructure.Identity;
 
 /// <summary>
-/// SPEC-11 D1/D5 — idempotently provisions the 5 fixed-Id roles into BOTH the Identity
+/// SPEC-11 D1/D5 � idempotently provisions the 5 fixed-Id roles into BOTH the Identity
 /// store (AspNetRoles) and the domain roles table (so role_permissions.role_id, which
 /// FKs to roles(id), can carry the same fixed Id the JWT does), then seeds the permission
 /// matrix into permissions + role_permissions.
@@ -19,7 +19,7 @@ namespace Clawbot.Infrastructure.Identity;
 /// </summary>
 public static partial class RbacSeeder
 {
-    // SPEC-11 §6 — fixed role Ids (constants, never NewGuid).
+    // SPEC-11 �6 � fixed role Ids (constants, never NewGuid).
     public const string Admin = "Admin";
     public const string Sale = "Sale";
     public const string Marketer = "Marketer";
@@ -41,7 +41,7 @@ public static partial class RbacSeeder
 
     private static readonly string[] All = [Admin, SalesLead, Sale, Marketer, QA, Viewer];
 
-    // SPEC-11 §6 permission matrix.
+    // SPEC-11 �6 permission matrix.
     private static readonly (string Code, string[] Roles)[] Matrix =
     [
         ("conversations:read", All),
@@ -65,6 +65,8 @@ public static partial class RbacSeeder
         ("rbac:manage", [Admin]),
         ("users:manage", [Admin]),
         ("system:config", [Admin]),
+        ("admin.system", [Admin]),
+        ("admin.audit", [Admin]),
     ];
 
     // 8 agents (M25). Seeded "running" so the toggle gate allows auto-actions by default.
@@ -219,7 +221,7 @@ public static partial class RbacSeeder
 
         foreach (var tenant in tenants)
         {
-            // Seed role→permission links per tenant
+            // Seed role?permission links per tenant
             var domainRoles = await db.RbacRoles
                 .IgnoreQueryFilters()
                 .Where(r => r.TenantId == tenant.Id)
@@ -273,11 +275,11 @@ public static partial class RbacSeeder
                 .AnyAsync(s => s.TenantId == tenant.Id && s.TriggerEvent == "warm_lead", ct);
             if (!hasWarmDrip)
             {
-                var drip = DripSequence.Create(tenant.Id, "Nuôi dưỡng khách ấm", "warm_lead", now);
-                drip.AddStep(1, 1, "pancake", "Chào {lead_name}, cảm ơn bạn đã quan tâm tới Học Bá! Bạn cần tư vấn thêm về khóa học nào ạ?");
-                drip.AddStep(2, 47, "pancake", "{lead_name} ơi, Học Bá đang có ưu đãi học thử miễn phí — bạn có muốn đặt lịch trải nghiệm không?");
-                drip.AddStep(3, 72, "pancake", "Học Bá gửi {lead_name} lộ trình học tiếng Trung cá nhân hóa. Bạn tham khảo thử nhé!");
-                drip.AddStep(4, 48, "pancake", "{lead_name} còn băn khoăn gì về khóa học không? Đội ngũ Học Bá luôn sẵn sàng hỗ trợ bạn.");
+                var drip = DripSequence.Create(tenant.Id, "Nu�i du?ng kh�ch ?m", "warm_lead", now);
+                drip.AddStep(1, 1, "pancake", "Ch�o {lead_name}, c?m on b?n d� quan t�m t?i H?c B�! B?n c?n tu v?n th�m v? kh�a h?c n�o ??");
+                drip.AddStep(2, 47, "pancake", "{lead_name} oi, H?c B� dang c� uu d�i h?c th? mi?n ph� � b?n c� mu?n d?t l?ch tr?i nghi?m kh�ng?");
+                drip.AddStep(3, 72, "pancake", "H?c B� g?i {lead_name} l? tr�nh h?c ti?ng Trung c� nh�n h�a. B?n tham kh?o th? nh�!");
+                drip.AddStep(4, 48, "pancake", "{lead_name} c�n ban khoan g� v? kh�a h?c kh�ng? �?i ngu H?c B� lu�n s?n s�ng h? tr? b?n.");
                 db.Set<DripSequence>().Add(drip);
             }
         }
@@ -299,6 +301,6 @@ public static partial class RbacSeeder
     private static partial void LogPermNotFound(ILogger logger, string code, string roleName);
 
     [LoggerMessage(EventId = 1004, Level = LogLevel.Information,
-        Message = "RbacSeeder: {Count} role→permission links seeded")]
+        Message = "RbacSeeder: {Count} role?permission links seeded")]
     private static partial void LogRolePermsSeeded(ILogger logger, int count);
 }

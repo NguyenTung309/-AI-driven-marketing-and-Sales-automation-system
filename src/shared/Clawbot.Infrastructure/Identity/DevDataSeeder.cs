@@ -21,6 +21,8 @@ public static partial class DevDataSeeder
     public const string TenantSlug = "default";
     public const string AdminEmail = "admin@clawbot.local";
     public const string AdminPassword = "Admin@12345";
+    public const string SaleEmail = "sale@clawbot.local";
+    public const string SalePassword = "Sale@12345";
 
     /// <summary>
     /// Creates the database and EF schema if they do not yet exist. Builds a standalone
@@ -90,6 +92,49 @@ public static partial class DevDataSeeder
     }
 
     /// <summary>
+    /// Idempotently provisions a demo sales account for development testing.
+    /// </summary>
+    public static async Task SeedSaleAsync(IServiceProvider services, CancellationToken ct = default)
+    {
+        using var scope = services.CreateScope();
+        var sp = scope.ServiceProvider;
+        var db = sp.GetRequiredService<AppDbContext>();
+        var users = sp.GetRequiredService<UserManager<AppUser>>();
+        var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("DevDataSeeder");
+
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Slug == TenantSlug, ct);
+        if (tenant is null)
+        {
+            tenant = Tenant.Create(TenantSlug, "Default Tenant", "free", DateTimeOffset.UtcNow);
+            db.Tenants.Add(tenant);
+            await db.SaveChangesAsync(ct);
+        }
+
+        if (await users.FindByEmailAsync(SaleEmail) is not null) return;
+
+        var user = new AppUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = SaleEmail,
+            Email = SaleEmail,
+            EmailConfirmed = true,
+            TenantId = tenant.Id,
+            DisplayName = "Dev Sale",
+        };
+
+        var result = await users.CreateAsync(user, SalePassword);
+        if (!result.Succeeded)
+        {
+            LogSaleSeedFailed(logger, SaleEmail,
+                string.Join("; ", result.Errors.Select(e => e.Description)));
+            return;
+        }
+
+        await users.AddToRoleAsync(user, "Sale");
+        LogSaleSeeded(logger, SaleEmail);
+    }
+
+    /// <summary>
     /// Seeds a default auto_reply QuickReplyTemplate so demo auto-reply works
     /// out of the box without manual configuration.
     /// </summary>
@@ -136,10 +181,18 @@ public static partial class DevDataSeeder
     private static partial void LogAdminSeedFailed(ILogger logger, string email, string errors);
 
     [LoggerMessage(EventId = 1103, Level = LogLevel.Information,
+        Message = "DevDataSeeder: seeded test sale {Email}")]
+    private static partial void LogSaleSeeded(ILogger logger, string email);
+
+    [LoggerMessage(EventId = 1104, Level = LogLevel.Warning,
+        Message = "DevDataSeeder: failed to seed sale {Email}: {Errors}")]
+    private static partial void LogSaleSeedFailed(ILogger logger, string email, string errors);
+
+    [LoggerMessage(EventId = 1105, Level = LogLevel.Information,
         Message = "DevDataSeeder: seeded auto_reply QuickReplyTemplate")]
     private static partial void LogAutoReplySeeded(ILogger logger);
 
-    [LoggerMessage(EventId = 1104, Level = LogLevel.Warning,
+    [LoggerMessage(EventId = 1106, Level = LogLevel.Warning,
         Message = "DevDataSeeder: no tenant found, skipped auto_reply seeding")]
     private static partial void LogNoTenantForAutoReply(ILogger logger);
 }

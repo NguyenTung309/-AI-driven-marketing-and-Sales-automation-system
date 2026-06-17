@@ -231,6 +231,7 @@ await RbacSeeder.SeedAsync(app.Services).ConfigureAwait(false);
 if (app.Environment.IsDevelopment())
 {
     await DevDataSeeder.SeedAdminAsync(app.Services).ConfigureAwait(false);
+    await DevDataSeeder.SeedSaleAsync(app.Services).ConfigureAwait(false);
     await DevDataSeeder.SeedAutoReplyTemplateAsync(app.Services).ConfigureAwait(false);
 }
 

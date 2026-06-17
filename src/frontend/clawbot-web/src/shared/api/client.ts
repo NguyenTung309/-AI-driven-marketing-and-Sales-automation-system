@@ -16,7 +16,7 @@ const refreshClient = axios.create({
 // SPEC-11: attach the in-memory access token to every request.
 apiClient.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;
-  if (token) config.headers.Authorization = Bearer ;
+  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
@@ -66,7 +66,7 @@ apiClient.interceptors.response.use(
       original._retried = true;
       const token = await refreshAccessToken();
       if (token) {
-        original.headers = { ...original.headers, Authorization: Bearer  };
+        original.headers = { ...original.headers, Authorization: `Bearer ${token}` };
         return apiClient(original as InternalAxiosRequestConfig);
       }
       if (window.location.pathname !== "/login") window.location.href = "/login";

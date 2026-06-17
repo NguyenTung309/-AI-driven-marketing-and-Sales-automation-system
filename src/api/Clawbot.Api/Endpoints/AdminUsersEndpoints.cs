@@ -1,3 +1,4 @@
+using Clawbot.Api.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Application.Abstractions;
 using Clawbot.Infrastructure.Identity;
@@ -5,6 +6,7 @@ using Clawbot.SharedKernel.Multitenancy;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+
 
 namespace Clawbot.Api.Endpoints;
 
@@ -17,7 +19,7 @@ public static class AdminUsersEndpoints
     public static IEndpointRouteBuilder MapAdminUsers(this IEndpointRouteBuilder app)
     {
         var grp = app.MapGroup("/api/admin/users")
-            .RequireAuthorization("perm:admin.system")
+            .RequirePermission("admin.system")
             .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/", ListAsync);

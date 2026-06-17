@@ -16,11 +16,29 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Host.UseSerilog();
 
-// 2. Add YARP reverse proxy
+// 2. Add CORS
+var allowedOrigins = builder.Configuration
+    .GetSection("Gateway:AllowedOrigins")
+    .Get<string[]>()
+    ?? ["http://localhost:5173"];
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("gateway-cors", policy =>
+    {
+        policy
+            .WithOrigins(allowedOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
+
+// 3. Add YARP reverse proxy
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
-// 3. Configure GatewayOptions from appsettings.json
+// 4. Configure GatewayOptions from appsettings.json
 builder.Services.Configure<GatewayOptions>(builder.Configuration.GetSection("Gateway"));
 
 // SPEC-11 D4: Gateway only VERIFIES the JWT (signature + lifetime) and forwards — no DB/Redis,
@@ -63,7 +81,7 @@ builder.Services
 builder.Services.AddAuthorization(options =>
     options.AddPolicy("authenticated", p => p.RequireAuthenticatedUser()));
 
-// 4. Add rate limiting
+// 5. Add rate limiting
 builder.Services.AddRateLimiter(options =>
 {
     var gatewayOptions = builder.Configuration.GetSection("Gateway").Get<GatewayOptions>()
@@ -91,25 +109,28 @@ builder.Services.AddRateLimiter(options =>
 var app = builder.Build();
 
 // Configure HTTP request pipeline
-// Order matters: TraceId -> HMAC -> RateLimiter -> ReverseProxy
+// Order matters: CORS -> TraceId -> HMAC -> RateLimiter -> AuthN/AuthZ -> ReverseProxy
 
-// 1. TraceId middleware (first, always)
+// 1. CORS — must be first so preflight OPTIONS requests are handled before auth
+app.UseCors("gateway-cors");
+
+// 2. TraceId middleware
 app.UseMiddleware<TraceIdMiddleware>();
 
-// 2. HMAC validation middleware (before routing)
+// 3. HMAC validation middleware (before routing)
 app.UseMiddleware<PancakeHmacMiddleware>();
 
-// 3. Rate limiting
+// 4. Rate limiting
 app.UseRateLimiter();
 
-// 4. AuthN/AuthZ — verify JWT before proxying routes that declare an AuthorizationPolicy.
+// 5. AuthN/AuthZ — verify JWT before proxying routes that declare an AuthorizationPolicy.
 app.UseAuthentication();
 app.UseAuthorization();
 
-// 5. Gateway-local health endpoint (not proxied)
+// 6. Gateway-local health endpoint (not proxied)
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 
-// 6. Map reverse proxy
+// 7. Map reverse proxy
 app.MapReverseProxy();
 
 app.Run();
