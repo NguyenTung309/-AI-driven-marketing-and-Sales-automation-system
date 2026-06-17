@@ -1,9 +1,9 @@
 using System.Text;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Kb;
-using Clawbot.Agents.Core.Rag;
 using Clawbot.Api.Contracts.KnowledgeBase;
 using Clawbot.Api.Middleware;
+using Clawbot.Api.Services;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -301,8 +301,7 @@ public static class KbEndpoints
         AppDbContext db,
         ITenantAccessor tenants,
         IClock clock,
-        IRagRetriever rag,
-        IClaudeChatClient claude,
+        KbTestRunnerService testRunner,
         CancellationToken ct)
     {
         var tenantId = tenants.Require().TenantId;
@@ -323,21 +322,7 @@ public static class KbEndpoints
         var results = new List<KbTestCaseResult>();
         foreach (var testCase in cases)
         {
-            var chunks = await rag.RetrieveAsync(
-                new RagRequest(tenantId, owns.Code, testCase.Question, 3), ct);
-
-            var context = string.Join("\n---\n", chunks.Select(c => c.Snippet));
-            var evalPrompt = $"Context:\n{context}\n\nQuestion: {testCase.Question}\n" +
-                $"Expected answer: {testCase.ExpectedAnswer}\n\n" +
-                "Does the context contain information to answer the question correctly? " +
-                "Reply with only JSON: {\"passed\":true/false,\"reason\":\"...\"}";
-
-            var reply = await claude.CompleteAsync(
-                "You are a KB accuracy evaluator. Check if the retrieved context supports the expected answer.",
-                Array.Empty<ChatTurn>(), evalPrompt, ct);
-
-            var passed = reply.Text.Contains("\"passed\":true", StringComparison.OrdinalIgnoreCase);
-            results.Add(new KbTestCaseResult(testCase.Id, testCase.Question, passed, null));
+            results.Add(await testRunner.EvaluateAsync(tenantId, owns.Code, testCase, ct));
         }
 
         var passedCount = results.Count(r => r.Passed);

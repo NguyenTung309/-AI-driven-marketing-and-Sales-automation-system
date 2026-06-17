@@ -419,17 +419,18 @@ function AgentTable({ agents, costs }: { readonly agents: readonly AgentPerforma
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline p-card-padding">
         <div>
           <h2 className="text-headline-sm text-secondary">Bảng dữ liệu hiệu suất Agent</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">Sessions, trace, completion và token cost.</p>
+          <p className="mt-1 text-body-md text-on-surface-variant">Sessions, chất lượng trả lời, trace và token cost.</p>
         </div>
         <StatusPill tone="neutral">{agents.length} agent</StatusPill>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-[760px] w-full border-collapse text-left">
+        <table className="min-w-[900px] w-full border-collapse text-left">
           <thead className="bg-surface-variant text-label-sm uppercase text-secondary">
             <tr>
               <th className="px-4 py-3 font-bold">Tên Agent</th>
               <th className="px-4 py-3 font-bold">Tổng tác vụ</th>
               <th className="px-4 py-3 font-bold">Xử lý TB</th>
+              <th className="px-4 py-3 font-bold">Chất lượng</th>
               <th className="px-4 py-3 font-bold">Token tiêu thụ</th>
               <th className="px-4 py-3 font-bold">Tỉ lệ lỗi</th>
             </tr>
@@ -448,6 +449,18 @@ function AgentTable({ agents, costs }: { readonly agents: readonly AgentPerforma
                   </td>
                   <td className="px-4 py-4 align-top font-mono text-mono-status text-secondary">{formatNumber(agent.sessions)}</td>
                   <td className="px-4 py-4 align-top font-mono text-mono-status text-secondary">{formatPct(agent.completionRate * 100)}</td>
+                  <td className="px-4 py-4 align-top">
+                    <div className="font-mono text-mono-status text-secondary">
+                      {agent.qualitySamples ? formatPct(agent.qualityPassRate * 100) : "—"}
+                    </div>
+                    <div className="mt-1 text-label-sm text-on-surface-variant">
+                      {agent.qualitySamples
+                        ? `${formatNumber(agent.passedQualitySamples)}/${formatNumber(agent.qualitySamples)} mẫu${
+                            agent.averageQualityScore == null ? "" : ` · score ${agent.averageQualityScore.toFixed(2)}`
+                          }`
+                        : "Chưa có mẫu quality"}
+                    </div>
+                  </td>
                   <td className="px-4 py-4 align-top text-body-md text-secondary">
                     {cost ? `${formatNumber(cost.inputTokens + cost.outputTokens)} token · ${formatUsd(cost.usd)}` : `${formatNumber(agent.traceCount)} trace`}
                   </td>
@@ -585,6 +598,10 @@ export default function AnalyticsReportsPage() {
   const replyRate = rate(agg.replies, agg.dms);
   const conversionRate = rate(agg.conversions, agg.leads);
   const apiError = omnichannelQuery.error ?? deltaQuery.error ?? funnelQuery.error ?? agentsQuery.error ?? costsQuery.error;
+  const qualitySamples = agents.reduce((sum, agent) => sum + agent.qualitySamples, 0);
+  const averageQualityPassRate = qualitySamples
+    ? agents.reduce((sum, agent) => sum + agent.qualityPassRate * agent.qualitySamples, 0) / qualitySamples
+    : null;
 
   const metrics = [
     {
@@ -696,10 +713,10 @@ export default function AnalyticsReportsPage() {
           <section className="grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               icon="fact_check"
-              label="Độ chính xác trung bình"
-              value={formatPct(agents.length ? (agents.reduce((sum, agent) => sum + agent.completionRate, 0) / agents.length) * 100 : 0)}
-              meta="completionRate trung bình"
-              tone="success"
+              label="Chất lượng trung bình"
+              value={averageQualityPassRate == null ? "—" : formatPct(averageQualityPassRate * 100)}
+              meta={qualitySamples ? `${formatNumber(qualitySamples)} quality samples` : "Chưa có mẫu quality"}
+              tone={averageQualityPassRate == null ? "neutral" : averageQualityPassRate >= 0.85 ? "success" : "warning"}
             />
             <MetricCard icon="speed" label="Tác vụ hoàn tất" value={formatNumber(agents.reduce((sum, agent) => sum + agent.completedSessions, 0))} meta="completedSessions" tone="success" />
             <MetricCard icon="toll" label="Chi phí token" value={formatUsd(costs.reduce((sum, cost) => sum + cost.usd, 0))} meta="Claude cost ledger" tone="warning" />

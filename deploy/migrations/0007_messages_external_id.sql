@@ -4,7 +4,3 @@
 
 ALTER TABLE messages
     ADD external_message_id NVARCHAR(256) NULL;
-
-CREATE UNIQUE INDEX ix_messages_external_id
-    ON messages (tenant_id, external_message_id)
-    WHERE external_message_id IS NOT NULL;

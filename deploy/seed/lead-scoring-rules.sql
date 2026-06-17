@@ -1,6 +1,22 @@
 -- Lead scoring rules seed (idempotent MERGE per tenant)
 -- Default rules for ClawBot CRM — weights calibrated for Chinese-language tutoring center.
 
+SET XACT_ABORT ON;
+SET NOCOUNT ON;
+
+DECLARE @tenant_slug NVARCHAR(64) = N'demo';   -- <-- CHANGE to the target tenant slug
+DECLARE @tenant_id UNIQUEIDENTIFIER = (SELECT id FROM tenants WHERE slug = @tenant_slug);
+
+IF @tenant_id IS NULL
+BEGIN
+    RAISERROR(N'Tenant slug "%s" not found. Seed aborted.', 16, 1, @tenant_slug);
+    RETURN;
+END;
+
+BEGIN TRANSACTION;
+
+DECLARE @expected_rows INT = 16;
+
 MERGE INTO lead_scoring_rules AS target
 USING (VALUES
     -- Pricing intent
@@ -26,9 +42,54 @@ USING (VALUES
     ('sends_payment',   NULL,       50, 'Customer sends payment or proof of transfer'),
     ('confirms_enroll', NULL,       50, 'Customer confirms enrollment')
 ) AS source (event_code, platform, weight, description)
-ON target.event_code = source.event_code
+ON target.tenant_id = @tenant_id
+    AND target.event_code = source.event_code
     AND (target.platform = source.platform OR (target.platform IS NULL AND source.platform IS NULL))
     AND target.is_active = 1
+WHEN MATCHED THEN
+    UPDATE SET
+        weight = source.weight,
+        description = source.description,
+        updated_at = SYSDATETIMEOFFSET()
 WHEN NOT MATCHED THEN
     INSERT (id, tenant_id, event_code, platform, weight, description, is_active, created_at, updated_at)
     VALUES (NEWID(), @tenant_id, source.event_code, source.platform, source.weight, source.description, 1, SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET());
+
+DECLARE @actual_rows INT;
+
+SELECT @actual_rows = COUNT(*)
+FROM lead_scoring_rules
+WHERE tenant_id = @tenant_id
+  AND is_active = 1
+  AND (
+      (event_code = N'sends_dm' AND platform IN (N'facebook', N'zalo', N'tiktok'))
+      OR (
+          platform IS NULL
+          AND event_code IN (
+              N'asks_price',
+              N'asks_discount',
+              N'shares_phone',
+              N'shares_email',
+              N'books_trial',
+              N'attends_trial',
+              N'asks_schedule',
+              N'asks_curriculum',
+              N'comments_post',
+              N'unsubscribe',
+              N'no_reply_7d',
+              N'sends_payment',
+              N'confirms_enroll'
+          )
+      )
+  );
+
+IF @actual_rows <> @expected_rows
+BEGIN
+    ROLLBACK TRANSACTION;
+    RAISERROR(N'Expected %d lead_scoring_rules rows for tenant "%s"; found %d. Seed aborted.', 16, 1, @expected_rows, @tenant_slug, @actual_rows);
+    RETURN;
+END;
+
+COMMIT TRANSACTION;
+
+PRINT N'lead_scoring_rules seed applied for tenant: ' + @tenant_slug;

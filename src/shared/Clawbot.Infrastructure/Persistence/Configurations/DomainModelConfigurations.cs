@@ -7,6 +7,7 @@ using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Content;
 using Clawbot.Domain.Conversations;
 using Clawbot.Domain.Documents;
+using Clawbot.Domain.Experiments;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.SaleAssist;
@@ -29,6 +30,12 @@ public sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.Property(x => x.Slug).HasMaxLength(64).IsRequired();
         builder.Property(x => x.DisplayName).HasMaxLength(256).IsRequired();
         builder.Property(x => x.PlanName).HasColumnName("plan_name").HasMaxLength(32).IsRequired();
+        builder.Property(x => x.BrandName).HasMaxLength(256);
+        builder.Property(x => x.LogoUrl).HasMaxLength(512);
+        builder.Property(x => x.PrimaryColor).HasMaxLength(16);
+        builder.Property(x => x.AccentColor).HasMaxLength(16);
+        builder.Property(x => x.SupportName).HasMaxLength(256);
+        builder.Property(x => x.WidgetGreeting).HasMaxLength(1024);
         builder.HasIndex(x => x.Slug).IsUnique();
     }
 }
@@ -165,6 +172,47 @@ public sealed class LeadScoringRuleConfiguration : IEntityTypeConfiguration<Lead
         builder.Property(x => x.EventCode).HasMaxLength(64).IsRequired();
         builder.Property(x => x.Platform).HasMaxLength(32);
         builder.HasIndex(x => new { x.TenantId, x.EventCode });
+    }
+}
+
+public sealed class DripSequenceConfiguration : IEntityTypeConfiguration<DripSequence>
+{
+    public void Configure(EntityTypeBuilder<DripSequence> builder)
+    {
+        builder.ToTable("drip_sequences");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Name).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.TriggerEvent).HasMaxLength(64).IsRequired();
+        builder.HasMany(x => x.Steps).WithOne().HasForeignKey(s => s.SequenceId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(x => new { x.TenantId, x.IsActive });
+        builder.HasIndex(x => new { x.TenantId, x.TriggerEvent });
+    }
+}
+
+public sealed class DripSequenceStepConfiguration : IEntityTypeConfiguration<DripSequenceStep>
+{
+    public void Configure(EntityTypeBuilder<DripSequenceStep> builder)
+    {
+        builder.ToTable("drip_sequence_steps");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Channel).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.TemplateBody).IsRequired();
+        builder.HasIndex(x => new { x.SequenceId, x.StepOrder }).IsUnique();
+    }
+}
+
+public sealed class DripEnrollmentConfiguration : IEntityTypeConfiguration<DripEnrollment>
+{
+    public void Configure(EntityTypeBuilder<DripEnrollment> builder)
+    {
+        builder.ToTable("drip_enrollments");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        builder.HasOne<DripSequence>().WithMany().HasForeignKey(x => x.SequenceId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<Lead>().WithMany().HasForeignKey(x => x.LeadId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasIndex(x => new { x.SequenceId, x.LeadId }).IsUnique();
+        builder.HasIndex(x => new { x.Status, x.NextSendAt });
+        builder.HasIndex(x => new { x.TenantId, x.Status });
     }
 }
 
@@ -415,6 +463,66 @@ public sealed class KpiDailyConfiguration : IEntityTypeConfiguration<KpiDaily>
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
         builder.HasIndex(x => new { x.TenantId, x.Date, x.Platform }).IsUnique();
+    }
+}
+
+public sealed class ExperimentConfiguration : IEntityTypeConfiguration<Experiment>
+{
+    public void Configure(EntityTypeBuilder<Experiment> builder)
+    {
+        builder.ToTable("experiments");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.TargetType).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.Name).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        builder.HasMany(x => x.Variants).WithOne().HasForeignKey(x => x.ExperimentId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.TargetType, x.TargetId, x.Status });
+    }
+}
+
+public sealed class ExperimentVariantConfiguration : IEntityTypeConfiguration<ExperimentVariant>
+{
+    public void Configure(EntityTypeBuilder<ExperimentVariant> builder)
+    {
+        builder.ToTable("experiment_variants");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Code).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.Name).HasMaxLength(256).IsRequired();
+        builder.HasOne<Experiment>().WithMany(x => x.Variants).HasForeignKey(x => x.ExperimentId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<ChatScenario>().WithMany().HasForeignKey(x => x.ChatScenarioId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<KbVersion>().WithMany().HasForeignKey(x => x.KbVersionId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasIndex(x => new { x.ExperimentId, x.Code }).IsUnique();
+    }
+}
+
+public sealed class ExperimentAssignmentConfiguration : IEntityTypeConfiguration<ExperimentAssignment>
+{
+    public void Configure(EntityTypeBuilder<ExperimentAssignment> builder)
+    {
+        builder.ToTable("experiment_assignments");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.SubjectKey).HasMaxLength(256).IsRequired();
+        builder.HasOne<Experiment>().WithMany().HasForeignKey(x => x.ExperimentId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<ExperimentVariant>().WithMany().HasForeignKey(x => x.VariantId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasIndex(x => new { x.TenantId, x.ExperimentId, x.SubjectKey }).IsUnique();
+        builder.HasIndex(x => new { x.ExperimentId, x.VariantId });
+    }
+}
+
+public sealed class ExperimentEventConfiguration : IEntityTypeConfiguration<ExperimentEvent>
+{
+    public void Configure(EntityTypeBuilder<ExperimentEvent> builder)
+    {
+        builder.ToTable("experiment_events");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.SubjectKey).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.EventType).HasMaxLength(32).IsRequired();
+        builder.HasOne<Experiment>().WithMany().HasForeignKey(x => x.ExperimentId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<ExperimentVariant>().WithMany().HasForeignKey(x => x.VariantId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasIndex(x => new { x.TenantId, x.ExperimentId, x.EventType, x.OccurredAt });
+        builder.HasIndex(x => new { x.ExperimentId, x.VariantId, x.SubjectKey });
     }
 }
 

@@ -1,4 +1,5 @@
 using Clawbot.Domain.Common;
+using System.Text.Json;
 
 namespace Clawbot.Domain.Leads;
 
@@ -36,6 +37,7 @@ public sealed class Lead : AggregateRoot<Guid>, ITenantOwned
 
     public void AdjustScore(int delta, string reason, DateTimeOffset at)
     {
+        var previousScore = Score;
         var previousStage = Stage;
         Score = Math.Max(0, Score + delta);
         Stage = Score switch
@@ -44,7 +46,18 @@ public sealed class Lead : AggregateRoot<Guid>, ITenantOwned
             >= 30 => "warm",
             _     => "cold",
         };
-        _activities.Add(LeadActivity.Create(TenantId, Id, "score_adjust", reason, at));
+
+        var metaJson = JsonSerializer.Serialize(new
+        {
+            previousScore,
+            newScore = Score,
+            delta = Score - previousScore,
+            requestedDelta = delta,
+            previousStage,
+            newStage = Stage,
+            reason,
+        });
+        _activities.Add(LeadActivity.Create(TenantId, Id, "score_adjust", reason, at, metaJson));
         LastActivityAt = at;
 
         // Raise on upward stage transition only (consumed by Lead-2 auto-assign+notify / Lead-3 drip-enroll).

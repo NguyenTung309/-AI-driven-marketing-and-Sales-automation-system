@@ -1,8 +1,6 @@
-using System.Globalization;
 using Clawbot.Agents.Contracts.Docs;
 using Clawbot.Api.Contracts.Documents;
 using Clawbot.Api.Middleware;
-using Clawbot.Application.Abstractions;
 using Clawbot.Domain.Documents;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -14,11 +12,16 @@ namespace Clawbot.Api.Endpoints;
 
 public static class DocumentsEndpoints
 {
+    private static readonly string[] DefaultKitTemplateCodes = ["ONBOARDING-KIT", "BROCHURE-HSK", "SLIDE-DEMO-5"];
+    private static readonly byte[] TransparentGif =
+        Convert.FromBase64String("R0lGODlhAQABAPAAAP///wAAACH5BAAAAAAALAAAAAABAAEAAAICRAEAOw==");
+
     public static IEndpointRouteBuilder MapDocuments(this IEndpointRouteBuilder app)
     {
         var grp = app.MapGroup("/api/docs").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapPost("/generate", GenerateAsync);
+        grp.MapPost("/generate-kit", GenerateKitAsync);
 
         grp.MapGet("/templates", ListTemplatesAsync);
         grp.MapPost("/templates", CreateTemplateAsync);
@@ -28,7 +31,25 @@ public static class DocumentsEndpoints
         grp.MapGet("/generated", ListGeneratedAsync);
         grp.MapGet("/{id:guid}/download", DownloadAsync);
 
+        app.MapGet("/api/docs/{id:guid}/open.gif", OpenBeaconAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+
         return app;
+    }
+
+    // Docs-1: anonymous 1x1 beacon for email/Zalo read receipts.
+    private static async Task<IResult> OpenBeaconAsync(
+        Guid id,
+        Clawbot.Api.Services.DocumentOpenReceiptService receipts,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        await receipts.RecordOpenAsync(id, ct).ConfigureAwait(false);
+        http.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+        http.Response.Headers.Pragma = "no-cache";
+        http.Response.Headers.Expires = "0";
+        return Results.File(TransparentGif, "image/gif");
     }
 
     // Docs-1: serve a generated document link, enforcing the 7-day expiry (410 Gone past it).
@@ -54,42 +75,25 @@ public static class DocumentsEndpoints
         GenerateDocumentRequest body,
         ITenantAccessor tenants,
         DocsAgent.DocsAgentClient grpc,
-        AppDbContext db,
-        IEmailSender email,
-        IClock clock,
+        Clawbot.Api.Services.DocumentDeliveryService delivery,
         CancellationToken ct)
     {
         var tenant = tenants.Require();
         if (string.IsNullOrWhiteSpace(body.TemplateCode))
             return Results.BadRequest(new { error = "templateCode required" });
 
-        var req = new DocGenerateRequest
-        {
-            TenantId = tenant.TenantId.ToString(),
-            ContactId = body.ContactId?.ToString() ?? string.Empty,
-            TemplateCode = body.TemplateCode,
-            SentVia = body.SentVia ?? string.Empty,
-        };
-        if (body.Vars is not null)
-        {
-            foreach (var kv in body.Vars)
-                req.Vars[kv.Key] = kv.Value;
-        }
-
         try
         {
-            var resp = await grpc.GenerateAsync(req, cancellationToken: ct);
-
-            // Docs-1: gated send. Email goes via SMTP (config-gated, no-op when unset); Zalo send
-            // is pending the Pancake outbound spike, so it is recorded but not dispatched here.
-            if (!string.IsNullOrWhiteSpace(body.SentVia)
-                && string.Equals(body.SentVia, "email", StringComparison.OrdinalIgnoreCase))
-            {
-                await TrySendByEmailAsync(db, email, clock, Guid.Parse(resp.DocumentId), resp.FileUrl, ct).ConfigureAwait(false);
-            }
-
-            return Results.Ok(new GenerateDocumentResponse(
-                Guid.Parse(resp.DocumentId), resp.FileUrl, resp.FileHash, resp.SizeBytes, resp.LatencyMs));
+            var response = await GenerateOneAsync(
+                tenant.TenantId,
+                body.TemplateCode,
+                body.ContactId,
+                body.Vars,
+                body.SentVia,
+                grpc,
+                delivery,
+                ct).ConfigureAwait(false);
+            return Results.Ok(response);
         }
         catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
         {
@@ -101,26 +105,92 @@ public static class DocumentsEndpoints
         }
     }
 
-    private static async Task<bool> TrySendByEmailAsync(
-        AppDbContext db, IEmailSender email, IClock clock, Guid documentId, string fileUrl, CancellationToken ct)
+    private static async Task<IResult> GenerateKitAsync(
+        GenerateDocumentKitRequest body,
+        ITenantAccessor tenants,
+        DocsAgent.DocsAgentClient grpc,
+        Clawbot.Api.Services.DocumentDeliveryService delivery,
+        CancellationToken ct)
     {
-        var doc = await db.GeneratedDocuments.FirstOrDefaultAsync(d => d.Id == documentId, ct).ConfigureAwait(false);
-        if (doc?.ContactId is null) return false;
+        var tenant = tenants.Require();
+        var templateCodes = NormalizeKitTemplateCodes(body.TemplateCodes);
+        if (templateCodes.Length == 0)
+            return Results.BadRequest(new { error = "templateCodes required" });
 
-        var recipient = await db.Contacts
-            .Where(c => c.Id == doc.ContactId)
-            .Select(c => c.Email)
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(recipient)) return false;
+        try
+        {
+            var documents = new List<GenerateDocumentResponse>(templateCodes.Length);
+            foreach (var templateCode in templateCodes)
+            {
+                documents.Add(await GenerateOneAsync(
+                    tenant.TenantId,
+                    templateCode,
+                    body.ContactId,
+                    body.Vars,
+                    body.SentVia,
+                    grpc,
+                    delivery,
+                    ct).ConfigureAwait(false));
+            }
 
-        var expiry = doc.ExpiresAt?.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) ?? "7 ngày";
-        await email.SendAsync(recipient, "Tài liệu từ Học Bá",
-            $"Xin chào, tài liệu của bạn đã sẵn sàng: {fileUrl}\nLiên kết có hiệu lực đến {expiry}.", ct)
-            .ConfigureAwait(false);
+            return Results.Ok(new GenerateDocumentKitResponse(
+                documents,
+                documents.Sum(d => d.SizeBytes),
+                documents.Sum(d => d.LatencyMs)));
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
+        {
+            return Results.NotFound(new { error = ex.Status.Detail });
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.InvalidArgument)
+        {
+            return Results.BadRequest(new { error = ex.Status.Detail });
+        }
+    }
 
-        doc.MarkSent("email", clock.UtcNow);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return true;
+    private static string[] NormalizeKitTemplateCodes(IReadOnlyList<string>? templateCodes)
+    {
+        var values = templateCodes is { Count: > 0 } ? templateCodes : DefaultKitTemplateCodes;
+        return values
+            .Select(code => code.Trim())
+            .Where(code => code.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToArray();
+    }
+
+    private static async Task<GenerateDocumentResponse> GenerateOneAsync(
+        Guid tenantId,
+        string templateCode,
+        Guid? contactId,
+        IReadOnlyDictionary<string, string>? vars,
+        string? sentVia,
+        DocsAgent.DocsAgentClient grpc,
+        Clawbot.Api.Services.DocumentDeliveryService delivery,
+        CancellationToken ct)
+    {
+        var req = new DocGenerateRequest
+        {
+            TenantId = tenantId.ToString(),
+            ContactId = contactId?.ToString() ?? string.Empty,
+            TemplateCode = templateCode,
+            SentVia = sentVia ?? string.Empty,
+        };
+        if (vars is not null)
+        {
+            foreach (var kv in vars)
+                req.Vars[kv.Key] = kv.Value;
+        }
+
+        var resp = await grpc.GenerateAsync(req, cancellationToken: ct);
+        var documentId = Guid.Parse(resp.DocumentId);
+
+        if (!string.IsNullOrWhiteSpace(sentVia))
+        {
+            await delivery.TrySendAsync(documentId, sentVia, ct).ConfigureAwait(false);
+        }
+
+        return new GenerateDocumentResponse(documentId, resp.FileUrl, resp.FileHash, resp.SizeBytes, resp.LatencyMs);
     }
 
     private static async Task<IResult> ListTemplatesAsync(AppDbContext db, ITenantAccessor tenants, CancellationToken ct)

@@ -81,6 +81,19 @@ export interface GenerateContentItemPayload {
   readonly briefText?: string | null;
 }
 
+export interface GenerateImagePromptPayload {
+  readonly brief?: string | null;
+  readonly platform?: string | null;
+  readonly style?: string | null;
+  readonly brandTokens?: readonly string[] | null;
+}
+
+export interface GenerateImagePromptResponse {
+  readonly prompt: string;
+  readonly negativePrompt: string;
+  readonly hints: Readonly<Record<string, string>>;
+}
+
 export interface UpdateContentItemPayload {
   readonly body: string;
   readonly assetsJson?: string | null;
@@ -139,6 +152,11 @@ export async function scanContentTrends(week?: string): Promise<TrendScanRespons
 
 export async function generateContentItems(payload: GenerateContentItemPayload): Promise<{ readonly items: readonly ContentItem[] }> {
   const res = await apiClient.post<{ readonly items: readonly ContentItem[] }>("/api/content/items/generate", payload);
+  return res.data;
+}
+
+export async function generateImagePrompt(payload: GenerateImagePromptPayload): Promise<GenerateImagePromptResponse> {
+  const res = await apiClient.post<GenerateImagePromptResponse>("/api/content/image-prompts", payload);
   return res.data;
 }
 

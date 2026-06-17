@@ -1,26 +1,64 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
+import { Alert } from "@/shared/ui/Alert";
 import { Button } from "@/shared/ui/Button";
 import { Card } from "@/shared/ui/Card";
 import { MetricCard } from "@/shared/ui/MetricCard";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import { WorkflowNode } from "@/shared/ui/WorkflowNode";
+import { AgentConfigDrawer } from "./AgentConfigDrawer";
 import {
   disableAgent,
   enableAgent,
+  getAgentSettings,
   getAgentCost,
   getAgentTraces,
   listAgents,
+  runAgentSandbox,
+  updateAgentSettings,
   type AgentCostItem,
   type AgentListItem,
+  type AgentSettings,
   type AgentStatus,
   type AgentTraceItem,
+  type UpdateAgentSettingsPayload,
 } from "@/shared/api/agents";
 
 const EMPTY_AGENTS: readonly AgentListItem[] = [];
 const EMPTY_COSTS: readonly AgentCostItem[] = [];
 const EMPTY_TRACES: readonly AgentTraceItem[] = [];
+
+type AgentConfigTab = "prompt" | "model" | "tools";
+
+interface AgentSettingsForm {
+  readonly displayName: string;
+  readonly model: string;
+  readonly provider: string;
+  readonly systemPrompt: string;
+  readonly temperature: number;
+  readonly maxTokens: number;
+  readonly skillFiles: readonly string[];
+  readonly kbModules: readonly string[];
+}
+
+interface SandboxMessage {
+  readonly id: string;
+  readonly side: "bot" | "user";
+  readonly text: string;
+  readonly time: string;
+}
+
+const DEFAULT_SANDBOX_MESSAGES: readonly SandboxMessage[] = [
+  { id: "sandbox-seed", side: "bot", text: "Chào bạn! Tôi có thể giúp gì cho bạn?", time: "now" },
+];
+
+const DEFAULT_AGENT_PROMPTS: Record<string, string> = {
+  chat: "# Role: Chuyên viên tư vấn khách hàng\n# Task: Hỗ trợ học viên và phụ huynh về chương trình Học Bá\n# Tone: Chuyên nghiệp, thân thiện",
+  content: "# Role: Chuyên viên nội dung giáo dục\n# Task: Tạo nội dung đa kênh đúng định vị Học Bá\n# Tone: Rõ ràng, hữu ích, truyền cảm hứng",
+  lead: "# Role: Chuyên viên đánh giá lead\n# Task: Phân loại, chấm điểm và đề xuất bước chăm sóc tiếp theo\n# Tone: Chính xác, ngắn gọn",
+  report: "# Role: Chuyên viên phân tích hiệu suất\n# Task: Tổng hợp số liệu, phát hiện bất thường và đề xuất hành động\n# Tone: Súc tích, có bằng chứng",
+};
 
 function normalize(value: string): string {
   return value.trim().toLowerCase();
@@ -83,6 +121,28 @@ function agentTypeLabel(type: string): string {
   return type || "Agent";
 }
 
+function defaultPromptFor(agent: AgentListItem | null): string {
+  if (!agent) return DEFAULT_AGENT_PROMPTS.chat;
+  return DEFAULT_AGENT_PROMPTS[normalize(agent.agentType)] ?? DEFAULT_AGENT_PROMPTS.chat;
+}
+
+function nowLabel(): string {
+  return new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit" }).format(new Date());
+}
+
+function buildSettingsPayload(form: AgentSettingsForm): UpdateAgentSettingsPayload {
+  return {
+    displayName: form.displayName,
+    model: form.model,
+    provider: form.provider,
+    systemPrompt: form.systemPrompt,
+    temperature: form.temperature,
+    maxTokens: form.maxTokens,
+    skillFiles: form.skillFiles,
+    kbModules: form.kbModules,
+  };
+}
+
 function exportTraceCsv(agent: AgentListItem | null, traces: readonly AgentTraceItem[]) {
   const rows = [
     ["occurred_at", "agent", "phase", "message", "session_id"],
@@ -105,6 +165,7 @@ function AgentNode({
   cost,
   selected,
   onSelect,
+  onConfigure,
   onToggle,
   pending,
 }: {
@@ -112,6 +173,7 @@ function AgentNode({
   readonly cost: AgentCostItem | null;
   readonly selected: boolean;
   readonly onSelect: () => void;
+  readonly onConfigure: () => void;
   readonly onToggle: () => void;
   readonly pending: boolean;
 }) {
@@ -145,7 +207,17 @@ function AgentNode({
           <span>Chi phí</span>
           <span>{cost ? formatCurrency(cost.usd) : "$0.00"}</span>
         </div>
-        <div className="pt-2">
+        <div className="grid grid-cols-2 gap-2 pt-2">
+          <button
+            className="w-full rounded border border-outline bg-white px-3 py-1.5 text-body-md font-bold text-secondary transition-colors hover:border-primary hover:text-primary"
+            onClick={(event) => {
+              event.stopPropagation();
+              onConfigure();
+            }}
+            type="button"
+          >
+            Cấu hình
+          </button>
           <button
             className={[
               "w-full rounded px-3 py-1.5 text-body-md font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60",
@@ -256,11 +328,38 @@ export default function AgentDashboardPage() {
   const agents = agentsQuery.data?.items ?? EMPTY_AGENTS;
   const costs = costQuery.data?.items ?? EMPTY_COSTS;
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [configAgentCode, setConfigAgentCode] = useState<string | null>(null);
+  const [configTab, setConfigTab] = useState<AgentConfigTab>("prompt");
+  const [settingsDraft, setSettingsDraft] = useState<Partial<UpdateAgentSettingsPayload>>({});
+  const [sandboxInput, setSandboxInput] = useState("");
+  const [sandboxMessages, setSandboxMessages] = useState<readonly SandboxMessage[]>(DEFAULT_SANDBOX_MESSAGES);
   const selectedAgent = useMemo(() => {
     if (!agents.length) return null;
     return agents.find((agent) => agent.code === selectedCode) ?? agents[0];
   }, [agents, selectedCode]);
+  const configAgent = useMemo(() => agents.find((agent) => agent.code === configAgentCode) ?? null, [agents, configAgentCode]);
   const selectedCost = selectedAgent ? costForAgent(costs, selectedAgent.code) : null;
+
+  const settingsQuery = useQuery({
+    queryKey: ["agents", configAgentCode, "settings"],
+    queryFn: () => getAgentSettings(configAgentCode ?? ""),
+    enabled: Boolean(configAgentCode),
+  });
+  const settings: AgentSettings | undefined = settingsQuery.data;
+  const settingsForm: AgentSettingsForm = useMemo(
+    () => ({
+      displayName: settingsDraft.displayName ?? settings?.displayName ?? configAgent?.displayName ?? "",
+      model: settingsDraft.model ?? settings?.model ?? configAgent?.model ?? "claude",
+      provider: settingsDraft.provider ?? settings?.provider ?? "claude",
+      systemPrompt: settingsDraft.systemPrompt ?? settings?.systemPrompt ?? defaultPromptFor(configAgent),
+      temperature: settingsDraft.temperature ?? settings?.temperature ?? 0.4,
+      maxTokens: settingsDraft.maxTokens ?? settings?.maxTokens ?? 2048,
+      skillFiles: settingsDraft.skillFiles ?? settings?.skillFiles ?? [],
+      kbModules: settingsDraft.kbModules ?? settings?.kbModules ?? [],
+    }),
+    [configAgent, settings, settingsDraft],
+  );
 
   const tracesQuery = useQuery({
     queryKey: ["agents", selectedAgent?.code, "traces"],
@@ -284,6 +383,63 @@ export default function AgentDashboardPage() {
       await queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
   });
+
+  const settingsMutation = useMutation({
+    mutationFn: () => {
+      if (!configAgentCode) throw new Error("missing_agent_code");
+      return updateAgentSettings(configAgentCode, buildSettingsPayload(settingsForm));
+    },
+    onSuccess: async (saved) => {
+      setNotice(`Đã lưu cấu hình ${saved.displayName}.`);
+      setSettingsDraft({});
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["agents"] }),
+        queryClient.invalidateQueries({ queryKey: ["agents", saved.code, "settings"] }),
+      ]);
+    },
+  });
+
+  const sandboxMutation = useMutation({
+    mutationFn: ({ code, message }: { readonly code: string; readonly message: string }) => runAgentSandbox(code, message),
+    onSuccess: async (response) => {
+      setSandboxMessages((current) => [
+        ...current,
+        { id: response.sessionId, side: "bot", text: response.reply, time: formatDateTime(response.sentAt) },
+      ]);
+      await queryClient.invalidateQueries({ queryKey: ["agents", configAgentCode, "traces"] });
+    },
+    onError: () => {
+      setSandboxMessages((current) => [
+        ...current,
+        { id: `sandbox-error-${Date.now()}`, side: "bot", text: "Không chạy được sandbox. Kiểm tra backend hoặc quyền truy cập.", time: nowLabel() },
+      ]);
+    },
+  });
+
+  function openAgentConfig(agent: AgentListItem) {
+    setSelectedCode(agent.code);
+    setConfigAgentCode(agent.code);
+    setConfigTab("prompt");
+    setSettingsDraft({});
+    setSandboxInput("");
+    setSandboxMessages(DEFAULT_SANDBOX_MESSAGES);
+  }
+
+  function closeAgentConfig() {
+    setConfigAgentCode(null);
+    setSettingsDraft({});
+    setSandboxInput("");
+    setSandboxMessages(DEFAULT_SANDBOX_MESSAGES);
+  }
+
+  function sendSandboxMessage(messageOverride?: string) {
+    if (!configAgentCode) return;
+    const message = (messageOverride ?? sandboxInput).trim();
+    if (!message) return;
+    setSandboxMessages((current) => [...current, { id: `sandbox-user-${Date.now()}`, side: "user", text: message, time: nowLabel() }]);
+    setSandboxInput("");
+    sandboxMutation.mutate({ code: configAgentCode, message });
+  }
 
   const runningAgents = agents.filter((agent) => normalize(agent.status) === "running");
   const errorCount = agents.filter((agent) => normalize(agent.status) === "error").length;
@@ -314,6 +470,12 @@ export default function AgentDashboardPage() {
           </Button>
         </div>
       </div>
+
+      {notice ? (
+        <div className="mb-gutter">
+          <Alert tone="success">{notice}</Alert>
+        </div>
+      ) : null}
 
       <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
@@ -362,6 +524,7 @@ export default function AgentDashboardPage() {
                     agent={agent}
                     cost={costForAgent(costs, agent.code)}
                     key={agent.code}
+                    onConfigure={() => openAgentConfig(agent)}
                     onSelect={() => setSelectedCode(agent.code)}
                     onToggle={() => setStatusMutation.mutate(agent)}
                     pending={setStatusMutation.isPending}
@@ -406,6 +569,10 @@ export default function AgentDashboardPage() {
                 <span className="text-secondary">{formatDateTime(selectedAgent?.lastRunAt ?? null)}</span>
               </div>
             </div>
+            <Button className="mt-5 w-full" disabled={!selectedAgent} onClick={() => selectedAgent && openAgentConfig(selectedAgent)} type="button">
+              <span className="material-symbols-outlined text-[18px]">settings</span>
+              Cấu hình agent
+            </Button>
           </Card>
 
           <Card>
@@ -441,6 +608,25 @@ export default function AgentDashboardPage() {
           </Card>
         </aside>
       </section>
+
+      {configAgent ? (
+        <AgentConfigDrawer
+          agent={configAgent}
+          form={settingsForm}
+          onClose={closeAgentConfig}
+          onDraftChange={(patch) => setSettingsDraft((current) => ({ ...current, ...patch }))}
+          onSandboxInputChange={setSandboxInput}
+          onSave={() => settingsMutation.mutate()}
+          onSendSandbox={sendSandboxMessage}
+          onTabChange={setConfigTab}
+          sandboxInput={sandboxInput}
+          sandboxMessages={sandboxMessages}
+          sandboxPending={sandboxMutation.isPending}
+          saving={settingsMutation.isPending}
+          settingsLoading={settingsQuery.isLoading}
+          tab={configTab}
+        />
+      ) : null}
     </AppShell>
   );
 }

@@ -58,7 +58,11 @@ public sealed record AgentPerformanceDto(
     int Sessions,
     int CompletedSessions,
     int TraceCount,
-    decimal CompletionRate);
+    decimal CompletionRate,
+    int QualitySamples,
+    int PassedQualitySamples,
+    decimal QualityPassRate,
+    decimal? AverageQualityScore);
 
 public sealed record AnomalyDto(
     string Date,

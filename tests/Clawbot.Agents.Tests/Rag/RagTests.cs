@@ -1,7 +1,11 @@
 using System.Globalization;
+using System.Text.Json;
+using Clawbot.Agents.Core.Kb;
 using Clawbot.Agents.Core.Rag;
+using Clawbot.Domain.KnowledgeBase;
 using Clawbot.SharedKernel.Vectors;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Xunit;
 
@@ -159,5 +163,33 @@ public sealed class QdrantRagRetrieverTests
         chunks.Should().ContainSingle();
         chunks[0].KbModuleCode.Should().BeEmpty();
         chunks[0].Snippet.Should().BeEmpty();
+    }
+}
+
+public sealed class KbDeployServiceTests
+{
+    [Fact]
+    public async Task EmbedAndUpsertAsync_stores_sql_embedding_json_and_upserts_qdrant_chunks()
+    {
+        var tenantId = Guid.NewGuid();
+        var version = KbVersion.Create(Guid.NewGuid(), 1, "HSK course content", DateTimeOffset.UtcNow);
+        var embedder = Substitute.For<IEmbeddingProvider>();
+        embedder.Dimension.Returns(2);
+        embedder.EmbedAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ReadOnlyMemory<float>(new[] { 0.25f, 0.75f }));
+        var store = Substitute.For<IVectorStore>();
+        store.UpsertAsync(Arg.Any<string>(), Arg.Any<IEnumerable<VectorRecord>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var sut = new KbDeployService(embedder, store, NullLogger<KbDeployService>.Instance);
+
+        var count = await sut.EmbedAndUpsertAsync(version, "HSK", tenantId, CancellationToken.None);
+
+        count.Should().Be(1);
+        version.Embedding.Should().NotBeNullOrWhiteSpace();
+        JsonSerializer.Deserialize<float[]>(version.Embedding!).Should().Equal(0.25f, 0.75f);
+        await store.Received(1).UpsertAsync(
+            "kb_v2",
+            Arg.Is<IEnumerable<VectorRecord>>(records => records.Single().Metadata["module_code"] == "HSK"),
+            Arg.Any<CancellationToken>());
     }
 }

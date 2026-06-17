@@ -45,4 +45,38 @@ public sealed class HangfireModuleTests
             "45 0 * * *",
             Arg.Any<RecurringJobOptions>());
     }
+
+    [Fact]
+    public void ScheduleClawbotJobs_schedules_daily_report_push_at_0730_vietnam_time()
+    {
+        var recurring = Substitute.For<IRecurringJobManager>();
+        using var services = new ServiceCollection()
+            .AddSingleton(recurring)
+            .BuildServiceProvider();
+
+        Clawbot.Infrastructure.Jobs.HangfireModule.ScheduleClawbotJobs(services);
+
+        recurring.Received().AddOrUpdate(
+            "daily-report-push",
+            Arg.Any<Job>(),
+            "30 7 * * *",
+            Arg.Is<RecurringJobOptions>(o => o.TimeZone.BaseUtcOffset == TimeSpan.FromHours(7)));
+    }
+
+    [Fact]
+    public void ScheduleClawbotJobs_schedules_ads_rule_evaluation_hourly()
+    {
+        var recurring = Substitute.For<IRecurringJobManager>();
+        using var services = new ServiceCollection()
+            .AddSingleton(recurring)
+            .BuildServiceProvider();
+
+        Clawbot.Infrastructure.Jobs.HangfireModule.ScheduleClawbotJobs(services);
+
+        recurring.Received().AddOrUpdate(
+            "ads-rule-evaluation",
+            Arg.Any<Job>(),
+            "0 * * * *",
+            Arg.Any<RecurringJobOptions>());
+    }
 }

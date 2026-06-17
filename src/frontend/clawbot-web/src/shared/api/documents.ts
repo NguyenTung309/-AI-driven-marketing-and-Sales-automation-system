@@ -37,6 +37,19 @@ export interface GenerateDocumentResponse {
   readonly latencyMs: number;
 }
 
+export interface GenerateDocumentKitPayload {
+  readonly templateCodes?: readonly string[] | null;
+  readonly contactId?: string | null;
+  readonly vars?: Record<string, string> | null;
+  readonly sentVia?: string | null;
+}
+
+export interface GenerateDocumentKitResponse {
+  readonly documents: readonly GenerateDocumentResponse[];
+  readonly totalSizeBytes: number;
+  readonly totalLatencyMs: number;
+}
+
 export interface DocumentTemplatePayload {
   readonly code: string;
   readonly docType: string;
@@ -68,6 +81,11 @@ export async function listGeneratedDocuments(): Promise<readonly GeneratedDocume
 
 export async function generateDocument(payload: GenerateDocumentPayload): Promise<GenerateDocumentResponse> {
   const res = await apiClient.post<GenerateDocumentResponse>("/api/docs/generate", payload);
+  return res.data;
+}
+
+export async function generateDocumentKit(payload: GenerateDocumentKitPayload): Promise<GenerateDocumentKitResponse> {
+  const res = await apiClient.post<GenerateDocumentKitResponse>("/api/docs/generate-kit", payload);
   return res.data;
 }
 

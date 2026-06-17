@@ -1,6 +1,7 @@
 using Clawbot.Agents.Contracts.SaleAssist;
 using Clawbot.Api.Contracts.SaleAssist;
 using Clawbot.Api.Middleware;
+using Clawbot.Api.Services;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -16,6 +17,7 @@ public static class SaleAssistEndpoints
         var grp = app.MapGroup("/api/sale-assist").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.ChatPolicy);
 
         grp.MapPost("/draft", DraftAsync);
+        grp.MapPost("/draft-feedback", DraftFeedbackAsync);
         grp.MapPost("/summary", SummarizeAsync);
 
         grp.MapGet("/quick-replies", ListQuickRepliesAsync);
@@ -65,6 +67,27 @@ public static class SaleAssistEndpoints
         }, cancellationToken: ct);
         sw.Stop();
         return Results.Ok(new SaleAssistDraftResponse(resp.DraftText, resp.SuggestedAction, resp.LeadScore, sw.ElapsedMilliseconds));
+    }
+
+    private static async Task<IResult> DraftFeedbackAsync(
+        SaleAssistDraftFeedbackRequest body,
+        ITenantAccessor tenants,
+        SaleAssistDraftFeedbackService feedback,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        try
+        {
+            return Results.Ok(await feedback.RecordAsync(tenant.TenantId, body, ct).ConfigureAwait(false));
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return Results.NotFound(new { error = ex.Message });
+        }
     }
 
     private static async Task<IResult> SummarizeAsync(
@@ -181,31 +204,11 @@ public static class SaleAssistEndpoints
     }
 
     private static async Task<IResult> UpsellSuggestionsAsync(
-        AppDbContext db,
         ITenantAccessor tenants,
+        SaleAssistUpsellSuggestionService suggestions,
         CancellationToken ct)
     {
         var tenantId = tenants.Require().TenantId;
-
-        var hotLeads = await db.Leads
-            .IgnoreQueryFilters()
-            .Where(l => l.TenantId == tenantId && l.Stage == "hot" && l.DeletedAt == null)
-            .OrderByDescending(l => l.Score)
-            .Take(20)
-            .Select(l => new
-            {
-                l.Id,
-                l.Score,
-                l.LastActivityAt,
-                Contact = l.ContactId != null ? new
-                {
-                    Name = db.Contacts.Where(c => c.Id == l.ContactId).Select(c => c.DisplayName).FirstOrDefault(),
-                    Phone = db.Contacts.Where(c => c.Id == l.ContactId).Select(c => c.Phone).FirstOrDefault(),
-                } : null,
-                Suggestion = "Offer advanced course package or premium subscription",
-            })
-            .ToListAsync(ct);
-
-        return Results.Ok(new { hot_leads = hotLeads, count = hotLeads.Count });
+        return Results.Ok(await suggestions.GetSuggestionsAsync(tenantId, ct: ct).ConfigureAwait(false));
     }
 }

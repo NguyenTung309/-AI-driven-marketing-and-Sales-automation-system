@@ -10,12 +10,19 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  build: {
+    rolldownOptions: {
+      checks: {
+        invalidAnnotation: false,
+      },
+    },
+  },
   server: {
-    port: 5173,
+    port: 15876,
     proxy: {
-      "/api": "http://localhost:5000",
-      "/auth": "http://localhost:5000",
-      "/hubs": { target: "http://localhost:5000", ws: true },
+      "/api": "http://localhost:15873",
+      "/auth": "http://localhost:15873",
+      "/hubs": { target: "http://localhost:15873", ws: true },
     },
   },
 });

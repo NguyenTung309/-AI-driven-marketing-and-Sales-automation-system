@@ -13,15 +13,19 @@
 -- =============================================================
 
 SET NOCOUNT ON;
+SET XACT_ABORT ON;
 
 DECLARE @tenant_slug NVARCHAR(64) = N'demo';   -- <-- CHANGE to the target tenant slug
 DECLARE @tenant_id UNIQUEIDENTIFIER = (SELECT id FROM tenants WHERE slug = @tenant_slug);
+DECLARE @expected_rows INT = 50;
 
 IF @tenant_id IS NULL
 BEGIN
     RAISERROR(N'Tenant slug "%s" not found. Seed aborted.', 16, 1, @tenant_slug);
     RETURN;
 END
+
+BEGIN TRANSACTION;
 
 MERGE INTO chat_scenarios AS target
 USING (VALUES
@@ -99,5 +103,22 @@ WHEN MATCHED THEN
 WHEN NOT MATCHED THEN
     INSERT (tenant_id, code, group_name, trigger_text, response_template, tone_voice, platforms)
     VALUES (@tenant_id, source.code, source.group_name, source.trigger_text, source.response_template, source.tone_voice, source.platforms);
+
+DECLARE @actual_rows INT;
+
+SELECT @actual_rows = COUNT(*)
+FROM chat_scenarios
+WHERE tenant_id = @tenant_id
+  AND code BETWEEN N'KB-001' AND N'KB-050'
+  AND code LIKE N'KB-[0-9][0-9][0-9]';
+
+IF @actual_rows <> @expected_rows
+BEGIN
+    ROLLBACK TRANSACTION;
+    RAISERROR(N'Expected %d chat_scenarios rows for tenant "%s"; found %d. Seed aborted.', 16, 1, @expected_rows, @tenant_slug, @actual_rows);
+    RETURN;
+END
+
+COMMIT TRANSACTION;
 
 PRINT N'Seeded chat_scenarios for tenant ' + CAST(@tenant_id AS NVARCHAR(64)) + N' (KB-001..KB-050).';

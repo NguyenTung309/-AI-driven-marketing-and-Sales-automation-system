@@ -7,6 +7,7 @@
 */
 
 SET NOCOUNT ON;
+SET XACT_ABORT ON;
 
 DECLARE @tenant_slug NVARCHAR(64) = N'demo';   -- <-- CHANGE to the target tenant slug
 DECLARE @tenant_id UNIQUEIDENTIFIER = (SELECT id FROM tenants WHERE slug = @tenant_slug);
@@ -17,6 +18,10 @@ BEGIN
     RAISERROR(N'Tenant slug "%s" not found. Seed aborted.', 16, 1, @tenant_slug);
     RETURN;
 END;
+
+BEGIN TRANSACTION;
+
+DECLARE @expected_rows INT = 5;
 
 DECLARE @briefs TABLE (
     platform NVARCHAR(32) NOT NULL,
@@ -43,5 +48,26 @@ WHEN MATCHED THEN
 WHEN NOT MATCHED THEN
     INSERT (id, tenant_id, platform, brief, status, created_by, created_at, updated_at)
     VALUES (NEWID(), @tenant_id, source.platform, source.brief, N'pending', NULL, @now, @now);
+
+DECLARE @actual_rows INT;
+
+SELECT @actual_rows = COUNT(*)
+FROM content_briefs AS seeded
+WHERE seeded.tenant_id = @tenant_id
+  AND EXISTS (
+      SELECT 1
+      FROM @briefs AS expected
+      WHERE expected.platform = seeded.platform
+        AND expected.brief = seeded.brief
+  );
+
+IF @actual_rows <> @expected_rows
+BEGIN
+    ROLLBACK TRANSACTION;
+    RAISERROR(N'Expected %d content_briefs rows for tenant "%s"; found %d. Seed aborted.', 16, 1, @expected_rows, @tenant_slug, @actual_rows);
+    RETURN;
+END;
+
+COMMIT TRANSACTION;
 
 PRINT N'content_briefs seed applied for tenant: ' + @tenant_slug;

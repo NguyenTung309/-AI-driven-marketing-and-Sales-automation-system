@@ -7,6 +7,19 @@ export interface SaleAssistDraftResponse {
   readonly latencyMs: number;
 }
 
+export interface SaleAssistDraftFeedbackPayload {
+  readonly conversationId: string;
+  readonly draftText: string;
+  readonly finalText?: string | null;
+  readonly outcome: "sent" | "edited" | "discarded";
+}
+
+export interface SaleAssistDraftFeedbackResponse {
+  readonly sessionId: string;
+  readonly edited: boolean;
+  readonly recordedAt: string;
+}
+
 export interface SaleAssistSummaryResponse {
   readonly summary: string;
   readonly latencyMs: number;
@@ -29,13 +42,16 @@ export interface SaleAssistDailySummary {
 
 export interface SaleAssistHotLead {
   readonly id: string;
+  readonly conversationId: string | null;
   readonly score: number;
   readonly lastActivityAt: string | null;
   readonly contact: {
     readonly name: string | null;
     readonly phone: string | null;
   } | null;
+  readonly eligible: boolean;
   readonly suggestion: string;
+  readonly reason: string;
 }
 
 export interface SaleAssistUpsellSuggestionsResponse {
@@ -66,6 +82,11 @@ export interface UpdateQuickReplyPayload {
 
 export async function generateSaleAssistDraft(conversationId: string): Promise<SaleAssistDraftResponse> {
   const res = await apiClient.post<SaleAssistDraftResponse>("/api/sale-assist/draft", { conversationId });
+  return res.data;
+}
+
+export async function recordSaleAssistDraftFeedback(payload: SaleAssistDraftFeedbackPayload): Promise<SaleAssistDraftFeedbackResponse> {
+  const res = await apiClient.post<SaleAssistDraftFeedbackResponse>("/api/sale-assist/draft-feedback", payload);
   return res.data;
 }
 

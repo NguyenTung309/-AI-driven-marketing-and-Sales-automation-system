@@ -3,11 +3,13 @@ using Clawbot.Agents.Core.Lead;
 using Clawbot.Agents.Core.Skills.Ops;
 using Clawbot.Api.Contracts.Leads;
 using Clawbot.Api.Middleware;
+using Clawbot.Api.Services;
 using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Leads;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
+using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -20,6 +22,8 @@ public static class LeadsEndpoints
         var grp = app.MapGroup("/api/leads").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/", ListAsync);
+        grp.MapGet("/export.csv", ExportCsvAsync);
+        grp.MapPost("/import.csv", ImportCsvAsync);
         grp.MapGet("/{id:guid}", GetAsync);
         grp.MapPost("/", CreateAsync);
         grp.MapPost("/create-with-skills", CreateWithSkillsAsync);
@@ -60,6 +64,29 @@ public static class LeadsEndpoints
             .ToListAsync(ct).ConfigureAwait(false);
 
         return Results.Ok(rows);
+    }
+
+    private static async Task<IResult> ExportCsvAsync(
+        ITenantAccessor tenants,
+        LeadCsvService service,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var export = await service.ExportCsvAsync(tenantId, ct).ConfigureAwait(false);
+        return Results.File(Encoding.UTF8.GetBytes(export.Content), "text/csv; charset=utf-8", export.FileName);
+    }
+
+    private static async Task<IResult> ImportCsvAsync(
+        HttpRequest request,
+        ITenantAccessor tenants,
+        LeadCsvService service,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        using var reader = new StreamReader(request.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var csv = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+        var result = await service.ImportCsvAsync(tenantId, csv, ct).ConfigureAwait(false);
+        return Results.Ok(result);
     }
 
     private static async Task<IResult> GetAsync(Guid id, AppDbContext db, ITenantAccessor tenants, CancellationToken ct)

@@ -11,14 +11,14 @@ using Microsoft.Extensions.Logging;
 namespace Clawbot.Infrastructure.Identity;
 
 /// <summary>
-/// Idempotently provisions Identity roles (Admin/Sale/Marketer/QA/Viewer) and
+/// Idempotently provisions Identity roles (Admin/Sale/SalesLead/Marketer/QA/Viewer) and
 /// seeds the role→permission mapping so JWT tokens carry correct perm claims.
 /// Custom tenant-scoped Role rows are created per tenant on demand by RolesEndpoints.
 /// </summary>
 public static partial class RbacSeeder
 {
     public static readonly IReadOnlyList<string> DefaultRoles =
-        new[] { "Admin", "Sale", "Marketer", "QA", "Viewer" };
+        new[] { "Admin", "Sale", "SalesLead", "Marketer", "QA", "Viewer" };
 
     // 8 agents (M25). Seeded "running" so the toggle gate allows auto-actions by default.
     private static readonly (string Code, string DisplayName, string AgentType)[] DefaultAgents =
@@ -48,6 +48,14 @@ public static partial class RbacSeeder
             "admin.system", "admin.audit",
         ],
         ["Sale"] =
+        [
+            "inbox.read", "inbox.assign",
+            "lead.read", "lead.write",
+            "content.read",
+            "docs.generate",
+            "analytics.read",
+        ],
+        ["SalesLead"] =
         [
             "inbox.read", "inbox.assign",
             "lead.read", "lead.write",

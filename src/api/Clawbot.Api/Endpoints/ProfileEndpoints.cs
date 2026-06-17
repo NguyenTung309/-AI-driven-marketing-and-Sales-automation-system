@@ -1,10 +1,11 @@
-using System.Globalization;
 using System.Security.Claims;
 using Clawbot.Agents.Core.Docs;
 using Clawbot.Api.Middleware;
 using Clawbot.Infrastructure.Identity;
+using Clawbot.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
 
@@ -20,6 +21,7 @@ public static class ProfileEndpoints
         grp.MapGet("/", GetAsync);
         grp.MapPut("/", UpdateAsync);
         grp.MapPost("/avatar", UploadAvatarAsync).DisableAntiforgery();
+        grp.MapGet("/login-history", LoginHistoryAsync);
 
         return grp;
     }
@@ -84,5 +86,40 @@ public static class ProfileEndpoints
         user.AvatarUrl = url;
         await users.UpdateAsync(user);
         return Results.Ok(new { avatarUrl = url });
+    }
+
+    private static async Task<IResult> LoginHistoryAsync(
+        UserManager<AppUser> users,
+        ClaimsPrincipal principal,
+        AppDbContext db,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
+    {
+        var user = await users.GetUserAsync(principal);
+        if (user is null) return Results.Unauthorized();
+
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 50);
+        var query = db.AuditLogs
+            .Where(log => log.TenantId == user.TenantId && log.UserId == user.Id && log.Action == "auth.login");
+
+        var total = await query.CountAsync(ct);
+        var rows = await query
+            .OrderByDescending(log => log.OccurredAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct);
+
+        var items = rows.Select(log => new
+        {
+            log.Id,
+            log.OccurredAt,
+            ipAddress = log.IpAddress?.ToString(),
+            userAgent = log.UserAgent,
+            status = "success",
+        });
+
+        return Results.Ok(new { total, page, pageSize, items });
     }
 }

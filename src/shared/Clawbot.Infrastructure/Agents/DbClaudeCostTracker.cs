@@ -22,6 +22,12 @@ public sealed class DbClaudeCostTracker(IServiceScopeFactory scopeFactory) : ICl
         ArgumentNullException.ThrowIfNull(entry);
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var monthToDate = await MonthToDateAsync(db, entry.TenantId, entry.At, ct).ConfigureAwait(false);
+        if (monthToDate + entry.UsdCost > DefaultCapUsd)
+        {
+            return;
+        }
+
         db.ClaudeCostLedger.Add(ClaudeCostEntry.Create(
             entry.TenantId, entry.AgentCode, entry.Model,
             entry.InputTokens, entry.OutputTokens, entry.UsdCost, entry.At));
@@ -30,15 +36,27 @@ public sealed class DbClaudeCostTracker(IServiceScopeFactory scopeFactory) : ICl
 
     public async Task<CostSummary> SummaryAsync(Guid tenantId, DateTimeOffset month, CancellationToken ct)
     {
-        var start = new DateTimeOffset(month.Year, month.Month, 1, 0, 0, 0, TimeSpan.Zero);
-        var end = start.AddMonths(1);
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var mtd = await db.ClaudeCostLedger
-            .IgnoreQueryFilters()
-            .Where(c => c.TenantId == tenantId && c.CreatedAt >= start && c.CreatedAt < end)
-            .SumAsync(c => (decimal?)c.Usd, ct).ConfigureAwait(false) ?? 0m;
+        var mtd = await MonthToDateAsync(db, tenantId, month, ct).ConfigureAwait(false);
         var percent = DefaultCapUsd > 0 ? (float)(mtd / DefaultCapUsd) : 0f;
         return new CostSummary(tenantId, mtd, DefaultCapUsd, percent);
+    }
+
+    private static async Task<decimal> MonthToDateAsync(
+        AppDbContext db,
+        Guid tenantId,
+        DateTimeOffset month,
+        CancellationToken ct)
+    {
+        var start = new DateTimeOffset(month.Year, month.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var end = start.AddMonths(1);
+        var costs = await db.ClaudeCostLedger
+            .IgnoreQueryFilters()
+            .Where(c => c.TenantId == tenantId && c.CreatedAt >= start && c.CreatedAt < end)
+            .Select(c => c.Usd)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return costs.Sum();
     }
 }

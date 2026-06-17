@@ -2,6 +2,7 @@ using Clawbot.Agents.Core.Rag;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.SharedKernel.Vectors;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace Clawbot.Agents.Core.Kb;
 
@@ -17,6 +18,9 @@ public sealed partial class KbDeployService(
 
         var collection = $"kb_v{embedder.Dimension}";
         var records = new List<VectorRecord>(chunks.Count);
+
+        var versionEmbedding = await embedder.EmbedAsync(version.ContentMd, ct).ConfigureAwait(false);
+        version.SetEmbeddingJson(JsonSerializer.Serialize(versionEmbedding.ToArray()));
 
         foreach (var (idx, chunk) in chunks.Select((c, i) => (i, c)))
         {

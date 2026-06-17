@@ -346,7 +346,7 @@ children.push(makeTable(
 ));
 
 children.push(h2('5.3 Phase 2 — 22 utility/library-backed skill — giải thích từng skill'));
-children.push(para('Mỗi skill có C# adapter interface trong src/agents/Clawbot.Agents.Core/Skills/{Nlp,Lead,Content,Ops}/. Stub hiện throw NotImplementedException; concrete impl theo SPEC.'));
+children.push(para('Mỗi skill có C# adapter interface trong src/agents/Clawbot.Agents.Core/Skills/{Nlp,Lead,Content,Ops}/. Các adapter mặc định đã được đăng ký bằng implementation cụ thể; tích hợp ngoài vẫn config-gated/fallback theo SPEC.'));
 
 children.push(h3('NLP — 6 skill (Clawbot.Agents.Core.Skills.Nlp.*)'));
 children.push(makeTable(
@@ -404,10 +404,10 @@ children.push(makeTable(
 
 children.push(h2('5.4 Wiring DI'));
 [
-  'Mỗi skill: interface I<Name> + DTO record + internal sealed stub class.',
+  'Mỗi skill: interface I<Name> + DTO record + internal sealed implementation/fallback class.',
   'SkillsModule.AddClawbotSkills() đăng ký 22 service singleton.',
   'AgentService/Program.cs gọi builder.Services.AddClawbotSkills() khi start.',
-  'Stub hiện throw NotImplementedException; concrete impl theo SPEC riêng cho từng skill.',
+  'SkillsModule.AddClawbotSkills() đăng ký implementation mặc định cho từng skill; service cần API key hoặc vendor ngoài degrade/fallback theo cấu hình.',
 ].forEach(t => children.push(bullet(t)));
 
 children.push(pageBreak());

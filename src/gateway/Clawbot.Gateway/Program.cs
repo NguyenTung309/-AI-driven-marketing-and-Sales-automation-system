@@ -60,6 +60,7 @@ app.UseMiddleware<PancakeHmacMiddleware>();
 app.UseRateLimiter();
 
 // 4. Map reverse proxy
+app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.MapReverseProxy();
 
 app.Run();

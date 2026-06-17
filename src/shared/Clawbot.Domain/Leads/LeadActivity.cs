@@ -13,7 +13,13 @@ public sealed class LeadActivity : Entity<Guid>, ITenantOwned
 
     private LeadActivity() { }
 
-    internal static LeadActivity Create(Guid tenantId, Guid leadId, string activityType, string notes, DateTimeOffset occurredAt) =>
+    internal static LeadActivity Create(
+        Guid tenantId,
+        Guid leadId,
+        string activityType,
+        string notes,
+        DateTimeOffset occurredAt,
+        string? metaJson = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -21,6 +27,7 @@ public sealed class LeadActivity : Entity<Guid>, ITenantOwned
             LeadId = leadId,
             ActivityType = activityType,
             Notes = notes,
+            MetaJson = string.IsNullOrWhiteSpace(metaJson) ? "{}" : metaJson,
             OccurredAt = occurredAt,
         };
 }

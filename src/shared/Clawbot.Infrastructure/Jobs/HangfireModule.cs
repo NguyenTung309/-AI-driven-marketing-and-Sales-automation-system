@@ -35,6 +35,7 @@ public static class HangfireModule
 
         services.AddScoped<RetentionPurgeJob>();
         services.AddScoped<DailyKpiRollupJob>();
+        services.AddScoped<DailyReportJob>();
         services.AddScoped<AnomalyAlertJob>();
         services.AddScoped<ForecastPrecomputeJob>();
         services.AddScoped<IWeeklyTrendScanner, GrpcWeeklyTrendScanner>();
@@ -48,9 +49,11 @@ public static class HangfireModule
         services.AddScoped<AdsDaypartResumeJob>();
         services.AddScoped<WeeklyAdsReportJob>();
         services.AddScoped<AutoSummaryJob>();
+        services.AddScoped<CommentAutoReplyJob>();
         services.AddScoped<HealthCheckJob>();
         services.AddScoped<OutOfHoursAutoReplyJob>();
         services.AddScoped<DripSequenceJob>();
+        services.AddScoped<IIdleEscalationRecipientResolver, SalesLeadIdleEscalationRecipientResolver>();
         services.AddScoped<IdleConversationAlertJob>();
         services.AddScoped<LeadFollowUpJob>();
         services.AddScoped<KbAccuracyTestJob>();
@@ -87,6 +90,12 @@ public static class HangfireModule
             "kpi",
             j => j.RunAsync(CancellationToken.None),
             Cron.Daily(0, 30));
+        recurring.AddOrUpdate<DailyReportJob>(
+            "daily-report-push",
+            "kpi",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Daily(7, 30),
+            new RecurringJobOptions { TimeZone = VietnamTimeZone });
         recurring.AddOrUpdate<AnomalyAlertJob>(
             "kpi-anomaly-alert",
             "kpi",

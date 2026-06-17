@@ -98,16 +98,16 @@ FK action: SQL Server cấm multi-path cascade → dùng NO ACTION ở nhánh co
 5.1 8 AI Agent — gRPC service
 5.2 Phase 1 — 9 prompt/process knowledge skill
 5.3 Phase 2 — 22 utility/library-backed skill — giải thích từng skill
-Mỗi skill có C# adapter interface trong src/agents/Clawbot.Agents.Core/Skills/{Nlp,Lead,Content,Ops}/. Stub hiện throw NotImplementedException; concrete impl theo SPEC.
+Mỗi skill có C# adapter interface trong src/agents/Clawbot.Agents.Core/Skills/{Nlp,Lead,Content,Ops}/. Các adapter mặc định đã được đăng ký bằng implementation cụ thể; tích hợp ngoài vẫn config-gated/fallback theo SPEC.
 NLP — 6 skill (Clawbot.Agents.Core.Skills.Nlp.*)
 Lead Intelligence — 4 skill (Clawbot.Agents.Core.Skills.Lead.*)
 Content Marketing — 6 skill (Clawbot.Agents.Core.Skills.Content.*)
 Ops / Cross-cutting — 6 skill (Clawbot.Agents.Core.Skills.Ops.*)
 5.4 Wiring DI
-Mỗi skill: interface I<Name> + DTO record + internal sealed stub class.
+Mỗi skill: interface I<Name> + DTO record + internal sealed implementation/fallback class.
 SkillsModule.AddClawbotSkills() đăng ký 22 service singleton.
 AgentService/Program.cs gọi builder.Services.AddClawbotSkills() khi start.
-Stub hiện throw NotImplementedException; concrete impl theo SPEC riêng cho từng skill.
+SkillsModule.AddClawbotSkills() đăng ký implementation mặc định cho từng skill; service cần API key hoặc vendor ngoài degrade/fallback theo cấu hình.
 6. SDD Artifacts (.sdd/)
 Theo PDF "Spec-Driven & Agent-Driven Development" 2026. Artifact luôn dưới .sdd/, là contract giữa human intent và agent execution.
 6.1 Cấu trúc .sdd/
@@ -294,7 +294,7 @@ Hạng mục | Việc cần làm
 JWT Signing Key | Đổi Jwt:SigningKey ≥32 ký tự random; lưu secret manager / env var
 AES Key | Đổi Encryption:Base64Key 32 bytes random thực sự
 SQL Server SA password | Đổi MSSQL_SA_PASSWORD trong .env
-Webhook HMAC verify | Implement VerifyWebhookSignatureAsync cho 5 channel
+Webhook HMAC verify | VerifyWebhookSignatureAsync cho Pancake unified webhook; per-channel native HMAC chỉ là fallback nếu bỏ broker
 HTTPS / TLS 1.3 | Kestrel SSL cert HOẶC reverse proxy nginx/Caddy
 Rate limit | ASP.NET RateLimiter cho /auth/* và /webhooks/*
 PII retention | Purge job: messages.content > 30 ngày qua pii-redaction skill
@@ -302,11 +302,11 @@ Claude cost cap | Anthropic console hard cap $200/tháng + soft alert 80%
 Prompt injection | Mọi inbound qua prompt-injection-defender skill
 Tuần | Giai đoạn | Người thật | AI Agent | Deliverable
 T1 | KB + Infra | P1 VPS/Docker. P3 export log. | — | Stack live, KB draft
-T2 | KB hoàn thiện | P3+P4. P1 connect Zalo+FB. | Agent-Code | KB v1
+T2 | KB hoàn thiện | P3+P4. P1 tạo Pancake tenant/account. | Agent-Code | KB v1
 T3 | 50 kịch bản | P3 viết. P4 validate. | Agent-Chat: test KB | KB ≥85%, 50 scenarios
-T4 | Chat live Zalo+FB | P3 monitor. P4 QA. | Agent-Chat 24/7 | Chatbot Zalo+FB live
+T4 | Chat live qua Pancake | P3 monitor. P4 QA. | Agent-Chat 24/7 | Chatbot Pancake unified live
 T5 | Sale Assist | P3 setup. P4 test draft. | Agent-SaleAssist | Sale Assist live
-T6 | TikTok+IG+YT | P1 connect API. P2 routing. | Agent-Chat: 3 kênh | 5 kênh live
+T6 | Pancake omnichannel hardening | P1 capture live webhook. P2 verify reply/DM semantics. | Agent-Chat: Pancake unified broker | 5-channel broker verified
 T7 | Lead+Marketing | P5 dashboard. P3 drip. | Agent-Lead | Pipeline tự động
 T8 | Content MKT | P2 trend. P4 QA. | Agent-Research + Content | Content 5 platform
 T9 | Document auto | P3 template. P4 QA PDF. | Agent-Docs | Tài liệu <30s

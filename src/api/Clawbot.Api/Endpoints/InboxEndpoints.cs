@@ -1,4 +1,5 @@
 using Clawbot.Api.Contracts.Inbox;
+using Clawbot.Api.Services;
 using Clawbot.Api.Middleware;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Persistence;
@@ -18,8 +19,10 @@ public static class InboxEndpoints
     {
         var grp = app.MapGroup("/api/inbox").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.ChatPolicy);
 
+        grp.MapGet("/search", SearchAsync);
         grp.MapGet("/conversations", ListAsync);
         grp.MapGet("/conversations/{id:guid}", GetAsync);
+        grp.MapGet("/conversations/{id:guid}/export.csv", ExportCsvAsync);
         grp.MapPost("/conversations/{id:guid}/assign", AssignAsync);
         grp.MapPost("/conversations/{id:guid}/resolve", ResolveAsync);
         grp.MapPost("/conversations/{id:guid}/escalate", EscalateAsync);
@@ -98,6 +101,40 @@ public static class InboxEndpoints
             contactName, conv.AssignedTo, conv.LastMessageAt, conv.CreatedAt, messages));
     }
 
+    private static async Task<IResult> SearchAsync(
+        InboxSearchService search,
+        ITenantAccessor tenants,
+        [FromQuery] string? q,
+        [FromQuery] string? status,
+        [FromQuery] string? platform,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(q))
+            return Results.BadRequest(new { error = "query_required" });
+
+        var tenantId = tenants.Require().TenantId;
+        var result = await search.SearchAsync(tenantId, q, status, platform, page, pageSize, ct).ConfigureAwait(false);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> ExportCsvAsync(
+        Guid id,
+        ITenantAccessor tenants,
+        Clawbot.Api.Services.ConversationExportService exporter,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var export = await exporter.ExportCsvAsync(tenant.TenantId, id, ct).ConfigureAwait(false);
+        if (export is null) return Results.NotFound();
+
+        return Results.File(
+            System.Text.Encoding.UTF8.GetBytes(export.Content),
+            "text/csv; charset=utf-8",
+            export.FileName);
+    }
+
     private static async Task<IResult> AssignAsync(
         Guid id,
         AssignConversationRequest body,
@@ -157,6 +194,7 @@ public static class InboxEndpoints
         ITenantAccessor tenants,
         IInboxNotifier notifier,
         IChannelAdapter adapter,
+        Clawbot.Api.Services.OutboundMessageSafetyService safety,
         IClock clock,
         CancellationToken ct)
     {
@@ -165,6 +203,15 @@ public static class InboxEndpoints
 
         var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id, ct).ConfigureAwait(false);
         if (conv is null) return Results.NotFound();
+
+        try
+        {
+            await safety.EnsureAllowedAsync(body.Content, ct).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
 
         await adapter.SendAsync(conv.ExternalThreadId, body.Content, ct).ConfigureAwait(false);
         var msg = conv.AppendMessage("out", "user", body.Content, body.ContentType, clock.UtcNow);

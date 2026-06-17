@@ -1,5 +1,5 @@
 -- =============================================================
--- ClawBot — M17 document_templates seed (QUOTE-V1, ONBOARDING-KIT)
+-- ClawBot — M17 document_templates seed (QUOTE-V1, ONBOARDING-KIT, BROCHURE-HSK, SLIDE-DEMO-5)
 -- Branded document templates for a Chinese-language course (HSK) tenant.
 -- Idempotent: MERGE on (tenant_id, code). Re-running updates existing rows in place.
 --
@@ -12,6 +12,7 @@
 -- =============================================================
 
 SET NOCOUNT ON;
+SET XACT_ABORT ON;
 
 DECLARE @tenant_slug NVARCHAR(64) = N'demo';   -- <-- CHANGE to the target tenant slug
 DECLARE @tenant_id UNIQUEIDENTIFIER = (SELECT id FROM tenants WHERE slug = @tenant_slug);
@@ -21,6 +22,10 @@ BEGIN
     RAISERROR(N'Tenant slug "%s" not found. Seed aborted.', 16, 1, @tenant_slug);
     RETURN;
 END
+
+BEGIN TRANSACTION;
+
+DECLARE @expected_rows INT = 4;
 
 MERGE INTO document_templates AS target
 USING (VALUES
@@ -61,7 +66,49 @@ Kênh hỗ trợ: {{ support_channel }}
 Tài liệu học tập sẽ được gửi qua email trước buổi đầu tiên.
 
 Chúc bạn học tập hiệu quả và sớm chinh phục mục tiêu tiếng Trung của mình!',
-     N'{"student_name":"Tên học viên","class_name":"Tên lớp","level":"Trình độ","schedule":"Lịch học","teacher_name":"Tên giáo viên","start_date":"Ngày khai giảng","support_channel":"Kênh hỗ trợ"}')
+     N'{"student_name":"Tên học viên","class_name":"Tên lớp","level":"Trình độ","schedule":"Lịch học","teacher_name":"Tên giáo viên","start_date":"Ngày khai giảng","support_channel":"Kênh hỗ trợ"}'),
+
+    (N'BROCHURE-HSK', N'brochure',
+     N'BROCHURE CHƯƠNG TRÌNH HSK
+
+Trung tâm: {{ center_name }}
+Chương trình: {{ program_name }}
+Trình độ phù hợp: {{ levels }}
+Đối tượng học viên: {{ audience }}
+
+Điểm nổi bật:
+- Lộ trình cá nhân hóa theo mục tiêu HSK.
+- Giáo viên theo sát phát âm, ngữ pháp và phản xạ hội thoại.
+- Bài kiểm tra định kỳ giúp đo tiến bộ rõ ràng.
+- Tài liệu luyện đề và từ vựng theo từng cấp độ.
+
+Khai giảng: {{ intake_date }}
+Hình thức học: {{ format }}
+Học phí tham khảo: {{ price_range }}
+
+Đăng ký tư vấn: {{ sale_phone }} hoặc {{ contact_url }}',
+     N'{"center_name":"Tên trung tâm","program_name":"Tên chương trình","levels":"HSK1-HSK6","audience":"Đối tượng học viên","intake_date":"Ngày khai giảng","format":"Online/Offline","price_range":"Khoảng học phí","sale_phone":"SĐT tư vấn","contact_url":"Link đăng ký"}'),
+
+    (N'SLIDE-DEMO-5', N'slide',
+     N'SLIDE 1 — VẤN ĐỀ
+{{ pain_point }}
+
+SLIDE 2 — MỤC TIÊU HỌC TẬP
+{{ learning_goal }}
+
+SLIDE 3 — LỘ TRÌNH 5 BUỔI DEMO
+Buổi 1: {{ session_1 }}
+Buổi 2: {{ session_2 }}
+Buổi 3: {{ session_3 }}
+Buổi 4: {{ session_4 }}
+Buổi 5: {{ session_5 }}
+
+SLIDE 4 — KẾT QUẢ KỲ VỌNG
+{{ expected_outcome }}
+
+SLIDE 5 — BƯỚC TIẾP THEO
+{{ next_step }}',
+     N'{"pain_point":"Vấn đề của học viên","learning_goal":"Mục tiêu học tập","session_1":"Nội dung buổi 1","session_2":"Nội dung buổi 2","session_3":"Nội dung buổi 3","session_4":"Nội dung buổi 4","session_5":"Nội dung buổi 5","expected_outcome":"Kết quả kỳ vọng","next_step":"CTA / bước tiếp theo"}')
 ) AS source (code, doc_type, template_html, fields_json)
 ON target.tenant_id = @tenant_id AND target.code = source.code
 WHEN MATCHED THEN
@@ -74,5 +121,21 @@ WHEN NOT MATCHED THEN
     INSERT (id, tenant_id, code, doc_type, template_html, fields_json, created_at, updated_at)
     VALUES (NEWID(), @tenant_id, source.code, source.doc_type, source.template_html, source.fields_json,
             SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET());
+
+DECLARE @actual_rows INT;
+
+SELECT @actual_rows = COUNT(*)
+FROM document_templates
+WHERE tenant_id = @tenant_id
+  AND code IN (N'QUOTE-V1', N'ONBOARDING-KIT', N'BROCHURE-HSK', N'SLIDE-DEMO-5');
+
+IF @actual_rows <> @expected_rows
+BEGIN
+    ROLLBACK TRANSACTION;
+    RAISERROR(N'Expected %d document_templates rows for tenant "%s"; found %d. Seed aborted.', 16, 1, @expected_rows, @tenant_slug, @actual_rows);
+    RETURN;
+END;
+
+COMMIT TRANSACTION;
 
 PRINT N'document_templates seed applied for tenant: ' + @tenant_slug;

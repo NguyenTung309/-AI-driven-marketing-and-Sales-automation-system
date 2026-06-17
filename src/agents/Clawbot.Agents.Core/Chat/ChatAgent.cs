@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Clawbot.Agents.Core.Rag;
 using Clawbot.Agents.Core.Skills.Lead;
@@ -15,7 +16,8 @@ public sealed record ChatAgentRequest(
     string UserText,
     IReadOnlyList<ChatTurn> History,
     string? SenderHandle = null,
-    string? SourcePlatform = null);
+    string? SourcePlatform = null,
+    string? MatchedScenarioTemplate = null);
 
 public sealed record ChatAgentReply(
     string Text,
@@ -31,6 +33,8 @@ public sealed record ChatAgentReply(
     bool ToxicityBlocked = false,
     bool SpamFlagged = false,
     bool Escalate = false);
+
+public sealed record ChatAgentStreamChunk(string Text, bool Final, ChatAgentReply? Reply = null);
 
 public sealed class ChatAgent(
     IRagRetriever rag,
@@ -98,6 +102,16 @@ public sealed class ChatAgent(
                 ToxicityBlocked: true);
         }
 
+        var costSummary = await _cost.SummaryAsync(request.TenantId, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+        if (IsCostCapReached(costSummary))
+        {
+            started.Stop();
+            return new ChatAgentReply(
+                "Đã đạt hạn mức chi phí AI tháng này. Đang chuyển tới nhân viên hỗ trợ.",
+                Array.Empty<RagChunk>(), 0, 0, 0m, started.ElapsedMilliseconds,
+                Intent: "cost_cap", Blocked: true, BlockReason: "cost_cap_exceeded");
+        }
+
         // C3: Inbound spam detection — flag (no auto-reply block, but mark)
         var spamSignal = await _spam.EvaluateAsync(request.UserText, request.SenderHandle, request.SourcePlatform, ct).ConfigureAwait(false);
 
@@ -111,7 +125,7 @@ public sealed class ChatAgent(
             new RagRequest(request.TenantId, request.KbModuleCode, redacted.RedactedText, TopK: 4),
             ct).ConfigureAwait(false);
 
-        var system = BuildSystemPrompt(chunks, intentResult.Label, langResult.LanguageCode);
+        var system = BuildSystemPrompt(chunks, intentResult.Label, langResult.LanguageCode, request.MatchedScenarioTemplate);
         var reply = await _claude.CompleteAsync(system, request.History, redacted.RedactedText, ct).ConfigureAwait(false);
 
         // C2: Outbound toxicity scan — block/regenerate if Claude output is toxic
@@ -145,7 +159,127 @@ public sealed class ChatAgent(
             Escalate: escalate);
     }
 
-    private static string BuildSystemPrompt(IReadOnlyList<RagChunk> chunks, string intent, string languageCode)
+    public async IAsyncEnumerable<ChatAgentStreamChunk> StreamReplyAsync(
+        ChatAgentRequest request,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var started = System.Diagnostics.Stopwatch.StartNew();
+
+        if (!await _toggle.IsAutoActionEnabledAsync(request.TenantId, "chat", ct).ConfigureAwait(false))
+        {
+            started.Stop();
+            yield return Final(new ChatAgentReply(
+                string.Empty, Array.Empty<RagChunk>(), 0, 0, 0m, started.ElapsedMilliseconds,
+                Intent: "disabled", Blocked: true, BlockReason: "agent_disabled"));
+            yield break;
+        }
+
+        var verdict = await _injection.InspectAsync(request.UserText, ct).ConfigureAwait(false);
+        if (verdict.IsMalicious)
+        {
+            started.Stop();
+            yield return Final(new ChatAgentReply(
+                "Tôi không thể xử lý yêu cầu này. Đang chuyển tới nhân viên hỗ trợ.",
+                Array.Empty<RagChunk>(), 0, 0, 0m, started.ElapsedMilliseconds,
+                Intent: "blocked", Blocked: true, BlockReason: string.Join("; ", verdict.Reasons)));
+            yield break;
+        }
+
+        var inboundToxic = await _toxicity.IsBlockedAsync(request.UserText, _toxicityOptions.InboundBlockThreshold, ct).ConfigureAwait(false);
+        if (inboundToxic)
+        {
+            started.Stop();
+            yield return Final(new ChatAgentReply(
+                "Tin nhắn của bạn chứa nội dung không phù hợp. Đang chuyển tới nhân viên hỗ trợ.",
+                Array.Empty<RagChunk>(), 0, 0, 0m, started.ElapsedMilliseconds,
+                Intent: "toxic_blocked", Blocked: true, BlockReason: "toxicity",
+                ToxicityBlocked: true));
+            yield break;
+        }
+
+        var costSummary = await _cost.SummaryAsync(request.TenantId, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+        if (IsCostCapReached(costSummary))
+        {
+            started.Stop();
+            yield return Final(new ChatAgentReply(
+                "Đã đạt hạn mức chi phí AI tháng này. Đang chuyển tới nhân viên hỗ trợ.",
+                Array.Empty<RagChunk>(), 0, 0, 0m, started.ElapsedMilliseconds,
+                Intent: "cost_cap", Blocked: true, BlockReason: "cost_cap_exceeded"));
+            yield break;
+        }
+
+        var spamSignal = await _spam.EvaluateAsync(request.UserText, request.SenderHandle, request.SourcePlatform, ct).ConfigureAwait(false);
+        var redacted = await _pii.RedactAsync(request.UserText, ct).ConfigureAwait(false);
+        var intentResult = await _intent.ClassifyAsync(redacted.RedactedText, locale: null, ct).ConfigureAwait(false);
+        var langResult = await _language.DetectAsync(redacted.RedactedText, ct).ConfigureAwait(false);
+        var chunks = await _rag.RetrieveAsync(
+            new RagRequest(request.TenantId, request.KbModuleCode, redacted.RedactedText, TopK: 4),
+            ct).ConfigureAwait(false);
+
+        var system = BuildSystemPrompt(chunks, intentResult.Label, langResult.LanguageCode, request.MatchedScenarioTemplate);
+        var text = new StringBuilder();
+        var inputTokens = 0;
+        var outputTokens = 0;
+        var usdCost = 0m;
+
+        await foreach (var chunk in _claude.StreamAsync(system, request.History, redacted.RedactedText, ct).ConfigureAwait(false))
+        {
+            if (chunk.Final)
+            {
+                inputTokens = chunk.InputTokens;
+                outputTokens = chunk.OutputTokens;
+                usdCost = chunk.UsdCost;
+                continue;
+            }
+
+            text.Append(chunk.Text);
+            yield return new ChatAgentStreamChunk(chunk.Text, Final: false);
+        }
+
+        var replyText = text.ToString();
+        var outboundToxic = await _toxicity.IsBlockedAsync(replyText, _toxicityOptions.OutboundBlockThreshold, ct).ConfigureAwait(false);
+        if (outboundToxic)
+        {
+            started.Stop();
+            yield return Final(new ChatAgentReply(
+                "Đang chuyển tới nhân viên hỗ trợ.",
+                Array.Empty<RagChunk>(), inputTokens, outputTokens, usdCost,
+                started.ElapsedMilliseconds, Intent: intentResult.Label,
+                Blocked: true, BlockReason: "outbound_toxicity",
+                Language: langResult.LanguageCode, ToxicityBlocked: true));
+            yield break;
+        }
+
+        await _cost.RecordAsync(new CostEntry(
+            request.TenantId, "chat-agent", "claude",
+            inputTokens, outputTokens, usdCost, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+
+        var escalate = string.Equals(intentResult.Label, "escalation", StringComparison.OrdinalIgnoreCase)
+            || chunks.Count == 0
+            || (chunks.Count > 0 && chunks.Max(c => c.Score) < 0.35f);
+
+        started.Stop();
+        yield return Final(new ChatAgentReply(replyText, chunks,
+            inputTokens, outputTokens, usdCost, started.ElapsedMilliseconds,
+            Intent: intentResult.Label, Blocked: false, BlockReason: null,
+            Language: langResult.LanguageCode,
+            ToxicityBlocked: false,
+            SpamFlagged: spamSignal.IsSpam,
+            Escalate: escalate), text: string.Empty);
+    }
+
+    private static ChatAgentStreamChunk Final(ChatAgentReply reply, string? text = null) =>
+        new(text ?? reply.Text, Final: true, reply);
+
+    private static bool IsCostCapReached(CostSummary? summary) =>
+        summary is { CapUsd: > 0m } && summary.MonthToDateUsd >= summary.CapUsd;
+
+    private static string BuildSystemPrompt(
+        IReadOnlyList<RagChunk> chunks,
+        string intent,
+        string languageCode,
+        string? matchedScenarioTemplate)
     {
         var sb = new StringBuilder(DefaultSystemPrompt.Length + 256);
         sb.AppendLine(DefaultSystemPrompt);
@@ -165,6 +299,13 @@ public sealed class ChatAgent(
                 _ => languageCode
             };
             sb.AppendLine(CultureInfo.InvariantCulture, $"Reply in {langName}.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(matchedScenarioTemplate))
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Matched chat scenario template");
+            sb.AppendLine(matchedScenarioTemplate.Trim());
         }
 
         if (chunks.Count == 0) return sb.ToString();

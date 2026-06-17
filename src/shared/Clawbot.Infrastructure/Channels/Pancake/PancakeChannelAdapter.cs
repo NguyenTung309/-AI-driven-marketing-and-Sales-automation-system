@@ -76,14 +76,19 @@ public sealed class PancakeChannelAdapter(
             if (!string.IsNullOrEmpty(evt.MessageId)) meta["external_message_id"] = evt.MessageId;
             if (!string.IsNullOrEmpty(evt.SenderName)) meta["display_name"] = evt.SenderName;
             if (!string.IsNullOrEmpty(evt.PageId)) meta["page_id"] = evt.PageId;
+            if (!string.IsNullOrEmpty(evt.Type)) meta["event_type"] = evt.Type;
 
+            var messageType = NormalizeMessageType(evt.Type);
+            var externalThreadId = string.IsNullOrEmpty(evt.PageId) ? evt.ThreadId : $"{evt.PageId}:{evt.ThreadId}";
             list.Add(new ChannelMessage(
                 Channel: evt.Platform ?? "pancake",
-                ExternalThreadId: evt.ThreadId,
+                ExternalThreadId: externalThreadId,
                 ExternalUserId: evt.SenderId ?? string.Empty,
                 Text: evt.Text,
                 SentAt: evt.SentAt ?? DateTimeOffset.UtcNow,
-                Metadata: meta));
+                Metadata: meta,
+                MessageType: messageType,
+                ParentPostId: messageType == "comment" ? evt.PostId : null));
         }
         return Task.FromResult<IReadOnlyList<ChannelMessage>>(list);
     }
@@ -139,6 +144,19 @@ public sealed class PancakeChannelAdapter(
             : (composite, string.Empty);
     }
 
+    private static string NormalizeMessageType(string? type)
+    {
+        if (string.Equals(type, "COMMENT", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(type, "comment", StringComparison.OrdinalIgnoreCase))
+            return "comment";
+
+        if (string.Equals(type, "DM", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(type, "DIRECT_MESSAGE", StringComparison.OrdinalIgnoreCase))
+            return "dm";
+
+        return "text";
+    }
+
     private sealed record SendBody([property: JsonPropertyName("message")] string Message);
 
     private sealed record PancakeWebhookPayload(
@@ -152,5 +170,7 @@ public sealed class PancakeChannelAdapter(
         [property: JsonPropertyName("sender_id")] string? SenderId,
         [property: JsonPropertyName("sender_name")] string? SenderName,
         [property: JsonPropertyName("text")] string? Text,
+        [property: JsonPropertyName("type")] string? Type,
+        [property: JsonPropertyName("post_id")] string? PostId,
         [property: JsonPropertyName("sent_at")] DateTimeOffset? SentAt);
 }

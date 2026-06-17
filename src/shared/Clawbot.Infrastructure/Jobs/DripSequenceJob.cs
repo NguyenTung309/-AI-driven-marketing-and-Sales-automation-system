@@ -1,5 +1,6 @@
 using Clawbot.Domain.Leads;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Time;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +10,7 @@ namespace Clawbot.Infrastructure.Jobs;
 
 public sealed partial class DripSequenceJob(
     AppDbContext db,
+    IChannelAdapter adapter,
     IClock clock,
     ILogger<DripSequenceJob> logger)
 {
@@ -63,12 +65,35 @@ public sealed partial class DripSequenceJob(
                         .FirstOrDefaultAsync(c => c.Id == lead.ContactId.Value, ct)
                     : null;
 
+                var conversation = lead.ContactId.HasValue
+                    ? await db.Conversations.IgnoreQueryFilters()
+                        .Where(c => c.TenantId == lead.TenantId
+                            && c.ContactId == lead.ContactId.Value
+                            && c.DeletedAt == null
+                            && c.Status != "resolved")
+                        .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
+                        .FirstOrDefaultAsync(ct)
+                    : null;
+                if (conversation is null)
+                {
+                    enrollment.Cancel();
+                    continue;
+                }
+
                 // Build personalized message
                 var body = step.TemplateBody
                     .Replace("{lead_name}", contact?.DisplayName ?? "bạn", StringComparison.Ordinal);
 
                 // Send via channel adapter
                 LogSending(logger, enrollment.Id, step.Channel, currentStepIdx);
+                if (!string.Equals(step.Channel, adapter.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    enrollment.Cancel();
+                    continue;
+                }
+
+                await adapter.SendAsync(conversation.ExternalThreadId, body, ct).ConfigureAwait(false);
+                conversation.AppendMessage("out", "agent", body, "text", now);
 
                 // Advance to next step
                 var nextStepIdx = currentStepIdx + 1;

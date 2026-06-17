@@ -11,6 +11,7 @@ using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Content;
 using Clawbot.Domain.Conversations;
 using Clawbot.Domain.Documents;
+using Clawbot.Domain.Experiments;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.Notifications;
@@ -30,6 +31,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     : IdentityDbContext<AppUser, AppRole, Guid>(options), IAppDbContext
 {
     private readonly ITenantAccessor _tenants = tenants;
+    private Guid CurrentTenantId => _tenants.Current?.TenantId ?? Guid.Empty;
 
     // Tenants & Security
     public DbSet<Tenant> Tenants => Set<Tenant>();
@@ -52,6 +54,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<Lead> Leads => Set<Lead>();
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
     public DbSet<LeadScoringRule> LeadScoringRules => Set<LeadScoringRule>();
+    public DbSet<DripSequence> DripSequences => Set<DripSequence>();
+    public DbSet<DripSequenceStep> DripSequenceSteps => Set<DripSequenceStep>();
+    public DbSet<DripEnrollment> DripEnrollments => Set<DripEnrollment>();
 
     // Knowledge Base
     public DbSet<KbModule> KbModules => Set<KbModule>();
@@ -89,6 +94,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     // Analytics
     public DbSet<KpiDaily> KpiDailies => Set<KpiDaily>();
     public DbSet<KpiForecast> KpiForecasts => Set<KpiForecast>();
+
+    // Experiments / A-B testing
+    public DbSet<Experiment> Experiments => Set<Experiment>();
+    public DbSet<ExperimentVariant> ExperimentVariants => Set<ExperimentVariant>();
+    public DbSet<ExperimentAssignment> ExperimentAssignments => Set<ExperimentAssignment>();
+    public DbSet<ExperimentEvent> ExperimentEvents => Set<ExperimentEvent>();
 
     // Channels
     public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();
@@ -151,8 +162,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
     private void ApplyTenantFilter<TEntity>(ModelBuilder builder) where TEntity : class, ITenantOwned
     {
-        var tenantRef = _tenants;
-        builder.Entity<TEntity>().HasQueryFilter(
-            e => e.TenantId == (tenantRef.Current != null ? tenantRef.Current.TenantId : Guid.Empty));
+        builder.Entity<TEntity>().HasQueryFilter(e => e.TenantId == CurrentTenantId);
     }
 }

@@ -94,11 +94,13 @@ public static class DependencyInjection
         });
 
         services.AddSingleton<IClock, SystemClock>();
+        services.AddSingleton<IIntentClassifier, KeywordIntentClassifier>();
         services.AddScoped<ITenantAccessor, HttpTenantAccessor>();
         services.Configure<EncryptionOptions>(cfg.GetSection("Encryption"));
         services.AddSingleton<IEncryptor, AesEncryptor>();
         services.Configure<PublisherOptions>(cfg.GetSection(PublisherOptions.SectionName));
         services.AddSingleton<IGoldenHourResolver, DefaultGoldenHourResolver>();
+        services.AddClawbotLead(); // Lead-2: least-busy assignment for API endpoints + hot-lead consumer
 
         services.AddCompetitorMonitor(); // Research-2: competitor feed scanner (typed HttpClient)
         services.AddScoped<IChannelMessageIngestor, ChannelMessageIngestor>();
@@ -119,6 +121,7 @@ public static class DependencyInjection
         // Ads connectors
         services.Configure<MetaAdsOptions>(cfg.GetSection(MetaAdsOptions.SectionName));
         services.Configure<TikTokAdsOptions>(cfg.GetSection(TikTokAdsOptions.SectionName));
+        services.AddSingleton<IAdsPlatformThrottle, AdsPlatformThrottle>();
         services.AddHttpClient<IAdsPlatformConnector, MetaAdsConnector>()
             .AddPolicyHandler(HttpResiliencePolicies.Retry())
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())

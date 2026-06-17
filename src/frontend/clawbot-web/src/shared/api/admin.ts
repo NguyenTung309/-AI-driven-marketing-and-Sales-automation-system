@@ -1,5 +1,6 @@
 import { AxiosError } from "axios";
 import { apiClient } from "./client";
+import type { TenantBranding } from "./publicWidget";
 
 export interface PagedResponse<T> {
   readonly total: number;
@@ -64,6 +65,15 @@ export interface PancakeWebhookUrl {
   readonly webhookUrl: string;
   readonly tenantSlug: string;
 }
+
+export type TenantBrandingUpdate = Partial<{
+  readonly brandName: string | null;
+  readonly logoUrl: string | null;
+  readonly primaryColor: string;
+  readonly accentColor: string;
+  readonly supportName: string | null;
+  readonly widgetGreeting: string | null;
+}>;
 
 export interface AuditLog {
   readonly id: string;
@@ -197,6 +207,16 @@ export async function deletePancakeConfig(): Promise<void> {
 
 export async function getPancakeWebhookUrl(): Promise<PancakeWebhookUrl> {
   const res = await apiClient.get<PancakeWebhookUrl>("/api/channels/pancake/webhook-url");
+  return res.data;
+}
+
+export async function getTenantBranding(): Promise<TenantBranding> {
+  const res = await apiClient.get<TenantBranding>("/api/admin/tenant/branding");
+  return res.data;
+}
+
+export async function updateTenantBranding(body: TenantBrandingUpdate): Promise<TenantBranding> {
+  const res = await apiClient.put<TenantBranding>("/api/admin/tenant/branding", body);
   return res.data;
 }
 

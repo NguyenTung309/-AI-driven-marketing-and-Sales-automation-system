@@ -11,6 +11,7 @@ import {
   deleteRole,
   getPancakeConfig,
   getPancakeWebhookUrl,
+  getTenantBranding,
   listAdminUsers,
   listApiKeys,
   listAuditLogs,
@@ -23,6 +24,7 @@ import {
   setRolePermissions,
   updateAdminUser,
   updatePancakeConfig,
+  updateTenantBranding,
   updateRole,
   type AdminUser,
   type ApiKeyItem,
@@ -52,6 +54,15 @@ const DEFAULT_PANCAKE_FORM = {
   sendPathTemplate: "/api/v1/conversations/{conversationId}/messages",
   authMode: "bearer",
   isActive: false,
+};
+
+const DEFAULT_BRANDING_FORM = {
+  brandName: "",
+  logoUrl: "",
+  primaryColor: "#d32f2f",
+  accentColor: "#f59e0b",
+  supportName: "",
+  widgetGreeting: "",
 };
 
 function formatDateTime(value: string | null | undefined): string {
@@ -208,6 +219,7 @@ export default function AdminConsolePage() {
   const [keyModalOpen, setKeyModalOpen] = useState(false);
   const [keyForm, setKeyForm] = useState({ name: "", scopes: "admin.system", expiresAt: "" });
   const [createdKey, setCreatedKey] = useState<CreatedApiKey | null>(null);
+  const [brandingDraft, setBrandingDraft] = useState<Partial<typeof DEFAULT_BRANDING_FORM>>({});
   const [pancakeDraft, setPancakeDraft] = useState<Partial<typeof DEFAULT_PANCAKE_FORM>>({});
 
   const usersQuery = useQuery({
@@ -225,6 +237,11 @@ export default function AdminConsolePage() {
   const apiKeysQuery = useQuery({
     queryKey: ["admin", "api-keys"],
     queryFn: listApiKeys,
+  });
+  const brandingQuery = useQuery({
+    queryKey: ["admin", "tenant-branding"],
+    queryFn: getTenantBranding,
+    enabled: tab === "integrations",
   });
   const pancakeQuery = useQuery({
     queryKey: ["admin", "pancake-config"],
@@ -265,6 +282,7 @@ export default function AdminConsolePage() {
     rolesQuery.error ??
     permissionsQuery.error ??
     apiKeysQuery.error ??
+    brandingQuery.error ??
     pancakeQuery.error ??
     webhookQuery.error ??
     auditQuery.error;
@@ -304,6 +322,23 @@ export default function AdminConsolePage() {
     };
   }, [pancakeQuery.data]);
   const pancakeForm = useMemo(() => ({ ...pancakeBaseForm, ...pancakeDraft }), [pancakeBaseForm, pancakeDraft]);
+  const brandingBaseForm = useMemo(() => {
+    const branding = brandingQuery.data;
+    return {
+      ...DEFAULT_BRANDING_FORM,
+      ...(branding
+        ? {
+            brandName: branding.brandName,
+            logoUrl: branding.logoUrl ?? "",
+            primaryColor: branding.primaryColor,
+            accentColor: branding.accentColor,
+            supportName: branding.supportName,
+            widgetGreeting: branding.widgetGreeting,
+          }
+        : {}),
+    };
+  }, [brandingQuery.data]);
+  const brandingForm = useMemo(() => ({ ...brandingBaseForm, ...brandingDraft }), [brandingBaseForm, brandingDraft]);
 
   const invalidateAdmin = () => {
     void queryClient.invalidateQueries({ queryKey: ["admin"] });
@@ -402,6 +437,23 @@ export default function AdminConsolePage() {
     },
   });
 
+  const brandingMutation = useMutation({
+    mutationFn: () =>
+      updateTenantBranding({
+        brandName: brandingForm.brandName.trim() || null,
+        logoUrl: brandingForm.logoUrl.trim() || null,
+        primaryColor: brandingForm.primaryColor.trim(),
+        accentColor: brandingForm.accentColor.trim(),
+        supportName: brandingForm.supportName.trim() || null,
+        widgetGreeting: brandingForm.widgetGreeting.trim() || null,
+      }),
+    onSuccess: () => {
+      setNotice("Đã lưu thương hiệu tenant.");
+      setBrandingDraft({});
+      invalidateAdmin();
+    },
+  });
+
   const pancakeMutation = useMutation({
     mutationFn: () =>
       updatePancakeConfig({
@@ -475,6 +527,10 @@ export default function AdminConsolePage() {
     setPancakeDraft((current) => ({ ...current, ...patch }));
   }
 
+  function updateBrandingForm(patch: Partial<typeof DEFAULT_BRANDING_FORM>) {
+    setBrandingDraft((current) => ({ ...current, ...patch }));
+  }
+
   const actionPending =
     userMutation.isPending ||
     activeMutation.isPending ||
@@ -484,6 +540,7 @@ export default function AdminConsolePage() {
     permissionsMutation.isPending ||
     keyMutation.isPending ||
     revokeKeyMutation.isPending ||
+    brandingMutation.isPending ||
     pancakeMutation.isPending ||
     deletePancakeMutation.isPending;
 
@@ -806,7 +863,60 @@ export default function AdminConsolePage() {
       ) : null}
 
       {tab === "integrations" ? (
-        <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1fr)_420px]">
+        <section className="space-y-gutter">
+          <Card>
+            <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-headline-sm text-secondary">Thương hiệu tenant</h2>
+                <p className="mt-1 text-body-md text-on-surface-variant">Tên, logo và màu hiển thị trên public widget/support page.</p>
+              </div>
+              <div className="flex items-center gap-2 rounded border border-outline bg-surface px-3 py-2">
+                <span className="size-5 rounded" style={{ backgroundColor: brandingForm.primaryColor }} />
+                <span className="size-5 rounded" style={{ backgroundColor: brandingForm.accentColor }} />
+              </div>
+            </div>
+            {brandingMutation.error ? <Alert tone="error">{errorMessage(brandingMutation.error)}</Alert> : null}
+            <form
+              className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                brandingMutation.mutate();
+              }}
+            >
+              <Field label="Tên thương hiệu">
+                <input className={inputClass} value={brandingForm.brandName} onChange={(event) => updateBrandingForm({ brandName: event.target.value })} />
+              </Field>
+              <Field label="Tên hỗ trợ">
+                <input className={inputClass} value={brandingForm.supportName} onChange={(event) => updateBrandingForm({ supportName: event.target.value })} />
+              </Field>
+              <Field label="Logo URL">
+                <input className={inputClass} value={brandingForm.logoUrl} onChange={(event) => updateBrandingForm({ logoUrl: event.target.value })} />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Màu chính">
+                  <input className={`${inputClass} h-11 p-1`} type="color" value={brandingForm.primaryColor} onChange={(event) => updateBrandingForm({ primaryColor: event.target.value })} />
+                </Field>
+                <Field label="Màu nhấn">
+                  <input className={`${inputClass} h-11 p-1`} type="color" value={brandingForm.accentColor} onChange={(event) => updateBrandingForm({ accentColor: event.target.value })} />
+                </Field>
+              </div>
+              <Field label="Lời chào widget">
+                <textarea
+                  className={`${inputClass} min-h-24`}
+                  value={brandingForm.widgetGreeting}
+                  onChange={(event) => updateBrandingForm({ widgetGreeting: event.target.value })}
+                />
+              </Field>
+              <div className="flex items-end justify-end">
+                <Button type="submit" disabled={brandingMutation.isPending || brandingQuery.isFetching}>
+                  <span className="material-symbols-outlined text-[18px]">palette</span>
+                  Lưu thương hiệu
+                </Button>
+              </div>
+            </form>
+          </Card>
+
+          <div className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1fr)_420px]">
           <Card>
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -918,6 +1028,7 @@ export default function AdminConsolePage() {
               <p>Các kênh ads/lookalike đang dùng `/api/ads`; phần này chỉ quản lý kết nối Pancake.</p>
             </div>
           </Card>
+          </div>
         </section>
       ) : null}
 

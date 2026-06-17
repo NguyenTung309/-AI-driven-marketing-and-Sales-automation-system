@@ -1,4 +1,6 @@
 using System.Net;
+using System.Globalization;
+using System.Security.Cryptography;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -6,6 +8,7 @@ using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Application.Abstractions;
+using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Persistence;
@@ -13,6 +16,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Api.Endpoints;
@@ -20,8 +24,10 @@ namespace Clawbot.Api.Endpoints;
 public static partial class AuthEndpoints
 {
     [LoggerMessage(EventId = 2001, Level = LogLevel.Information,
-        Message = "Password reset token for {Email}: {Token}")]
-    private static partial void LogResetTokenIssued(ILogger logger, string email, string token);
+        Message = "Password reset OTP for {Email}: {Otp}")]
+    private static partial void LogResetOtpIssued(ILogger logger, string email, string otp);
+
+    private static readonly TimeSpan ResetOtpTtl = TimeSpan.FromMinutes(10);
 
     public static IEndpointRouteBuilder MapAuth(this IEndpointRouteBuilder app)
     {
@@ -46,6 +52,7 @@ public static partial class AuthEndpoints
         SignInManager<AppUser> signIn,
         AppDbContext db,
         JwtTokenIssuer issuer,
+        HttpContext http,
         CancellationToken ct)
     {
         var user = await users.FindByEmailAsync(req.Email);
@@ -57,6 +64,7 @@ public static partial class AuthEndpoints
         if (!check.Succeeded) return Results.Unauthorized();
 
         var (token, expires) = await IssueAsync(user, users, db, issuer, ct);
+        await RecordLoginAsync(db, user, http, ct);
         return Results.Ok(new LoginResponse(token, expires));
     }
 
@@ -66,6 +74,7 @@ public static partial class AuthEndpoints
         SignInManager<AppUser> signIn,
         AppDbContext db,
         JwtTokenIssuer issuer,
+        HttpContext http,
         CancellationToken ct)
     {
         var user = await users.FindByEmailAsync(req.Email);
@@ -78,12 +87,14 @@ public static partial class AuthEndpoints
         if (!valid) return Results.Unauthorized();
 
         var (token, expires) = await IssueAsync(user, users, db, issuer, ct);
+        await RecordLoginAsync(db, user, http, ct);
         return Results.Ok(new LoginResponse(token, expires));
     }
 
     private static async Task<IResult> RequestResetAsync(
         PasswordResetRequest req,
         UserManager<AppUser> users,
+        IMemoryCache cache,
         IEmailSender email,
         ILogger<Program> log)
     {
@@ -91,9 +102,12 @@ public static partial class AuthEndpoints
         if (user is null) return Results.Ok(); // Avoid email enumeration.
 
         var token = await users.GeneratePasswordResetTokenAsync(user);
-        LogResetTokenIssued(log, req.Email, token); // also logged so dev can copy when SMTP unset
+        var otp = GenerateOtp();
+        cache.Set(ResetOtpCacheKey(req.Email, otp), token, ResetOtpTtl);
+
+        LogResetOtpIssued(log, req.Email, otp); // also logged so dev can copy when SMTP unset
         await email.SendAsync(req.Email, "Đặt lại mật khẩu Học Bá",
-            $"Mã đặt lại mật khẩu của bạn: {token}");
+            $"Mã OTP đặt lại mật khẩu của bạn: {otp}. Mã có hiệu lực trong 10 phút.");
         return Results.Ok();
     }
 
@@ -113,12 +127,19 @@ public static partial class AuthEndpoints
 
     private static async Task<IResult> ConfirmResetAsync(
         PasswordResetConfirm req,
-        UserManager<AppUser> users)
+        UserManager<AppUser> users,
+        IMemoryCache cache)
     {
         var user = await users.FindByEmailAsync(req.Email);
         if (user is null) return Results.BadRequest("invalid_token");
 
-        var result = await users.ResetPasswordAsync(user, req.Token, req.NewPassword);
+        var cacheKey = ResetOtpCacheKey(req.Email, req.Token);
+        var identityToken = cache.Get<string>(cacheKey);
+        if (string.IsNullOrWhiteSpace(identityToken))
+            return Results.BadRequest("invalid_or_expired_otp");
+
+        var result = await users.ResetPasswordAsync(user, identityToken, req.NewPassword);
+        if (result.Succeeded) cache.Remove(cacheKey);
         return result.Succeeded
             ? Results.Ok()
             : Results.BadRequest(result.Errors.Select(e => e.Description));
@@ -206,6 +227,26 @@ public static partial class AuthEndpoints
         const string issuer = "ClawBot";
         return $"otpauth://totp/{encoder.Encode(issuer)}:{encoder.Encode(email)}" +
                $"?secret={sharedKey}&issuer={encoder.Encode(issuer)}&digits=6";
+    }
+
+    private static string GenerateOtp() => RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
+
+    private static string ResetOtpCacheKey(string email, string otp) =>
+        $"password-reset:{email.Trim().ToUpperInvariant()}:{otp.Trim()}";
+
+    private static async Task RecordLoginAsync(AppDbContext db, AppUser user, HttpContext http, CancellationToken ct)
+    {
+        var userAgent = http.Request.Headers.UserAgent.ToString();
+        db.AuditLogs.Add(AuditLog.Create(
+            user.TenantId,
+            user.Id,
+            "auth.login",
+            "user",
+            user.Id,
+            DateTimeOffset.UtcNow,
+            ip: http.Connection.RemoteIpAddress,
+            userAgent: string.IsNullOrWhiteSpace(userAgent) ? null : userAgent));
+        await db.SaveChangesAsync(ct);
     }
 
     private static bool IsActive(this AppUser user)

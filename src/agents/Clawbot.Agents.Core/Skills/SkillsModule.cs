@@ -8,7 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Clawbot.Agents.Core.Skills;
 
 // DI registration for all 22 ClawBot skills.
-// Stubs throw NotImplementedException — wire concrete impls per skill SPEC.
+// Registers the default concrete adapters; external integrations remain config-gated.
 // See .sdd/skills/_index.md for the full catalog.
 public static class SkillsModule
 {
