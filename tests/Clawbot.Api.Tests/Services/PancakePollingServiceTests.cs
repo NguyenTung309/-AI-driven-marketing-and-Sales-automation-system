@@ -57,7 +57,7 @@ public sealed class PancakePollingServiceTests
     }
 
     [Fact]
-    public async Task ProcessedMessage_ShouldSetProperties()
+    public void ProcessedMessage_ShouldSetProperties()
     {
         var msg = new ProcessedMessage("zalo", "ext-123", "conv-456");
         Assert.Equal("zalo", msg.Platform);

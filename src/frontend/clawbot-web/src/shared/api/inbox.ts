@@ -74,6 +74,16 @@ export async function listConversations(params?: ListConversationsParams): Promi
   return res.data;
 }
 
+export async function searchConversations(
+  q: string,
+  params?: Omit<ListConversationsParams, "q">,
+): Promise<ConversationListResponse> {
+  const res = await apiClient.get<ConversationListResponse>("/api/inbox/search", {
+    params: { ...params, q },
+  });
+  return res.data;
+}
+
 export async function getConversation(id: string): Promise<ConversationDetail> {
   const res = await apiClient.get<ConversationDetail>(`/api/inbox/conversations/${id}`);
   return res.data;

@@ -1,0 +1,53 @@
+{
+  "tenantSlug": "<tenant-slug>",
+  "modules": [
+    {
+      "code": "KB-01",
+      "name": "Giao trinh HSK 1-6",
+      "description": "<fill approved scope, level structure, and update cadence>",
+      "ownerRole": "Giam doc hoc thuat",
+      "contentMd": "<paste approved KB markdown for HSK 1-6, TOCFL, YCT, curriculum comparison>",
+      "testCases": []
+    },
+    {
+      "code": "KB-02",
+      "name": "Lo trinh hoc",
+      "description": "<fill approved learner goals and route ownership>",
+      "ownerRole": "Truong bo phan dao tao",
+      "contentMd": "<paste approved KB markdown for travel, work, HSK3, HSK5, hobby, children routes>",
+      "testCases": []
+    },
+    {
+      "code": "KB-03",
+      "name": "Bang gia va uu dai",
+      "description": "<fill approved pricing policy and update cadence>",
+      "ownerRole": "Giam doc kinh doanh",
+      "contentMd": "<paste approved KB markdown for prices, discounts, referral, family combos, trial lesson>",
+      "testCases": []
+    },
+    {
+      "code": "KB-04",
+      "name": "FAQ tu van",
+      "description": "<fill approved sales FAQ scope>",
+      "ownerRole": "Team sale + QA",
+      "contentMd": "<paste approved KB markdown for FAQ from Zalo/Facebook/chat logs>",
+      "testCases": []
+    },
+    {
+      "code": "KB-05",
+      "name": "Giao vien",
+      "description": "<fill approved teacher profile policy>",
+      "ownerRole": "HR + Hoc thuat",
+      "contentMd": "<paste approved KB markdown for teacher profiles, style, schedule, matching rules>",
+      "testCases": []
+    },
+    {
+      "code": "KB-06",
+      "name": "Dac thu nen tang",
+      "description": "<fill approved channel tone policy>",
+      "ownerRole": "Content team + QA",
+      "contentMd": "<paste approved KB markdown for Zalo, TikTok, Instagram, Facebook, YouTube tone>",
+      "testCases": []
+    }
+  ]
+}

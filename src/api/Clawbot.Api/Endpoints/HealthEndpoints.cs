@@ -1,6 +1,4 @@
-using Clawbot.Infrastructure.Persistence;
-using Clawbot.SharedKernel.Channels;
-using Microsoft.EntityFrameworkCore;
+using Clawbot.Api.Services;
 
 namespace Clawbot.Api.Endpoints;
 
@@ -12,19 +10,12 @@ public static class HealthEndpoints
         app.MapGet("/health/ready", () => Results.Ok(new { status = "ready" })).AllowAnonymous();
 
         app.MapGet("/health/channels/pancake", async (
-            AppDbContext db,
-            CancellationToken ct) =>
-        {
-            var count = await db.PancakeConfigs
-                .IgnoreQueryFilters()
-                .CountAsync(ct);
-            return Results.Ok(new
-            {
-                status = "ok",
-                configured_tenants = count,
-                adapter = "PancakeChannelAdapter",
-            });
-        }).AllowAnonymous();
+            ChannelHealthService health,
+            CancellationToken ct) => Results.Ok(await health.GetPancakeAsync(ct).ConfigureAwait(false))).AllowAnonymous();
+
+        app.MapGet("/health/replication", async (
+            ReplicationHealthService health,
+            CancellationToken ct) => Results.Ok(await health.GetAsync(ct).ConfigureAwait(false))).AllowAnonymous();
 
         return app;
     }

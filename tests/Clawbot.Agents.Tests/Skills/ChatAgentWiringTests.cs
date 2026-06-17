@@ -122,6 +122,62 @@ public sealed class ChatAgentWiringTests
     }
 
     [Fact]
+    public async Task Matched_scenario_template_is_injected_into_system_prompt()
+    {
+        var claude = Substitute.For<IClaudeChatClient>();
+        claude.CompleteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var sys = ci.ArgAt<string>(0);
+                sys.Should().Contain("## Matched chat scenario template");
+                sys.Should().Contain("Tra loi hoc phi HSK4 trong 2 cau.");
+                return new ClaudeReply("Da gui hoc phi.", 100, 50, 0.001m);
+            });
+
+        var sut = CreateAgent(claude: claude);
+        var reply = await sut.ReplyAsync(new ChatAgentRequest(
+            Guid.NewGuid(),
+            null,
+            null,
+            "hoc phi HSK4 bao nhieu?",
+            Array.Empty<ChatTurn>(),
+            MatchedScenarioTemplate: "Tra loi hoc phi HSK4 trong 2 cau."));
+
+        reply.Blocked.Should().BeFalse();
+        await claude.Received(1).CompleteAsync(
+            Arg.Any<string>(),
+            Arg.Any<IReadOnlyList<ChatTurn>>(),
+            "hoc phi HSK4 bao nhieu?",
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Cost_cap_blocks_claude_call_before_generation()
+    {
+        var tenant = Guid.NewGuid();
+        var claude = Substitute.For<IClaudeChatClient>();
+        var cost = Substitute.For<IClaudeCostTracker>();
+        cost.SummaryAsync(tenant, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(new CostSummary(tenant, 200m, 200m, 1f));
+        var sut = CreateAgent(claude: claude, cost: cost);
+
+        var reply = await sut.ReplyAsync(new ChatAgentRequest(
+            tenant,
+            Guid.NewGuid(),
+            null,
+            "Can you answer pricing?",
+            Array.Empty<ChatTurn>()));
+
+        reply.Blocked.Should().BeTrue();
+        reply.BlockReason.Should().Be("cost_cap_exceeded");
+        await claude.DidNotReceive().CompleteAsync(
+            Arg.Any<string>(),
+            Arg.Any<IReadOnlyList<ChatTurn>>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Outbound_toxicity_blocks_reply()
     {
         var tox = Substitute.For<IToxicityFilter>();
@@ -206,6 +262,12 @@ public sealed class ChatAgentWiringTests
     private static IClaudeCostTracker SafeCost()
     {
         var cost = Substitute.For<IClaudeCostTracker>();
+        cost.SummaryAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var tenantId = ci.ArgAt<Guid>(0);
+                return new CostSummary(tenantId, 0m, 200m, 0f);
+            });
         return cost;
     }
 }

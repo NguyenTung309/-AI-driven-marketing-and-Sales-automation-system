@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "minTestCasesPerModule": 20,
+  "requiredModules": [
+    {
+      "code": "KB-01",
+      "name": "Giao trinh HSK 1-6",
+      "ownerRole": "Giam doc hoc thuat"
+    },
+    {
+      "code": "KB-02",
+      "name": "Lo trinh hoc",
+      "ownerRole": "Truong bo phan dao tao"
+    },
+    {
+      "code": "KB-03",
+      "name": "Bang gia va uu dai",
+      "ownerRole": "Giam doc kinh doanh"
+    },
+    {
+      "code": "KB-04",
+      "name": "FAQ tu van",
+      "ownerRole": "Team sale + QA"
+    },
+    {
+      "code": "KB-05",
+      "name": "Giao vien",
+      "ownerRole": "HR + Hoc thuat"
+    },
+    {
+      "code": "KB-06",
+      "name": "Dac thu nen tang",
+      "ownerRole": "Content team + QA"
+    }
+  ]
+}

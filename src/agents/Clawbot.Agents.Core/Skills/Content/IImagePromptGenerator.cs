@@ -14,7 +14,7 @@ public interface IImagePromptGenerator : ISkill
     Task<ImagePromptResult> GenerateAsync(ImagePromptRequest request, CancellationToken ct);
 }
 
-internal sealed partial class ClaudeImagePromptGenerator(IClaudeChatClient claude) : IImagePromptGenerator
+public sealed partial class ClaudeImagePromptGenerator(IClaudeChatClient claude) : IImagePromptGenerator
 {
     public string Name => "image-prompt-generation";
 

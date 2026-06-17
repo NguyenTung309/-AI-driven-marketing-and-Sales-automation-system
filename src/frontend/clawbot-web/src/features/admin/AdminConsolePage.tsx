@@ -1,6 +1,7 @@
 ﻿import { Alert, Button, StatusPill } from "@/shared/ui";
 import { AppShell } from "@/shared/layout/AppShell";
 import {
+
   MetricTile,
   TabButton,
   UsersPanel,
@@ -16,6 +17,7 @@ import { useAdminConsole } from "./hooks/useAdminConsole";
 
 export default function AdminConsolePage() {
   const ctx = useAdminConsole();
+
 
   return (
     <AppShell title="Hệ thống & phân quyền">
@@ -127,6 +129,7 @@ export default function AdminConsolePage() {
         />
       ) : null}
 
+
       {ctx.tab === "integrations" ? (
         <IntegrationsPanel
           pancakeQuery={ctx.pancakeQuery}
@@ -139,6 +142,7 @@ export default function AdminConsolePage() {
             if (ctx.webhookQuery.data?.webhookUrl)
               void navigator.clipboard?.writeText(ctx.webhookQuery.data.webhookUrl);
             ctx.setNotice("Đã sao chép URL webhook.");
+
           }}
           isSavePending={ctx.pancakeMutation.isPending}
           isDisconnectPending={ctx.deletePancakeMutation.isPending}

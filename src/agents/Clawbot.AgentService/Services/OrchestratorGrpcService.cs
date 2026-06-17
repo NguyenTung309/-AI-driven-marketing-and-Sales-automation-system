@@ -1,5 +1,6 @@
 using Clawbot.Agents.Contracts.Orchestrator;
 using Clawbot.Agents.Core.Orchestrator;
+using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 
 namespace Clawbot.AgentService.Services;
@@ -19,10 +20,29 @@ public sealed class OrchestratorGrpcService(PlanningOrchestrator orchestrator) :
         return Task.FromResult(response);
     }
 
-    public override Task Trace(TraceRequest request, IServerStreamWriter<TraceEvent> responseStream, ServerCallContext context)
+    public override async Task Trace(TraceRequest request, IServerStreamWriter<TraceEvent> responseStream, ServerCallContext context)
     {
-        // TODO(student): stream live trace events from the orchestrator.
-        _ = request;
-        return Task.CompletedTask;
+        var traces = orchestrator.GetTrace(request.SessionId);
+        if (traces.Count == 0)
+        {
+            await responseStream.WriteAsync(new TraceEvent
+            {
+                Phase = "missing",
+                Message = $"No orchestrator trace found for session {request.SessionId}.",
+                At = Timestamp.FromDateTime(DateTime.UtcNow),
+            });
+            return;
+        }
+
+        foreach (var trace in traces)
+        {
+            await responseStream.WriteAsync(new TraceEvent
+            {
+                TaskId = trace.TaskId,
+                Phase = trace.Phase,
+                Message = trace.Message,
+                At = Timestamp.FromDateTime(trace.At.UtcDateTime),
+            });
+        }
     }
 }

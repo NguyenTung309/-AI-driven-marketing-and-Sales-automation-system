@@ -1,22 +1,34 @@
-﻿import { createBrowserRouter } from "react-router-dom";
-import AdminConsolePage from "@/features/admin/AdminConsolePage";
-import LoginPage from "@/features/auth/LoginPage";
-import ForgotPasswordPage from "@/features/auth/ForgotPasswordPage";
-import AgentDashboardPage from "@/features/agents/AgentDashboardPage";
-import DashboardPage from "@/features/dashboard/DashboardPage";
-import ConversationsPage from "@/features/conversations/ConversationsPage";
-import ContentWorkspacePage from "@/features/content/ContentWorkspacePage";
-import DocumentsPage from "@/features/documents/DocumentsPage";
-import AnalyticsReportsPage from "@/features/analytics/AnalyticsReportsPage";
-import KnowledgeBasePage from "@/features/kb/KnowledgeBasePage";
-import LeadsPage from "@/features/leads/LeadsPage";
-import NotificationsPage from "@/features/notifications/NotificationsPage";
-import ProfilePage from "@/features/profile/ProfilePage";
+import { createBrowserRouter } from "react-router-dom";
+import {
+  AdminConsolePage,
+  AgentDashboardPage,
+  AnalyticsReportsPage,
+  ContentWorkspacePage,
+  ConversationsPage,
+  DashboardPage,
+  DocumentsPage,
+  ForgotPasswordPage,
+  KnowledgeBasePage,
+  LeadsPage,
+  LoginPage,
+  NotificationsPage,
+  PixelAgentsOfficePage,
+  ProfilePage,
+  PromptConfigurationPage,
+  SupportFaqPage,
+  TaskLogsPage,
+  TokenManagementPage,
+  WidgetDemoPage,
+} from "./lazyPages";
 import { RequireAuth } from "./RequireAuth";
 
 export const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
   { path: "/forgot-password", element: <ForgotPasswordPage /> },
+  { path: "/support", element: <SupportFaqPage /> },
+  { path: "/support/:tenantSlug", element: <SupportFaqPage /> },
+  { path: "/chat-widget", element: <WidgetDemoPage /> },
+  { path: "/chat-widget/:tenantSlug", element: <WidgetDemoPage /> },
   {
     path: "/",
     element: (
@@ -86,6 +98,38 @@ export const router = createBrowserRouter([
     element: (
       <RequireAuth>
         <AgentDashboardPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/agents-office",
+    element: (
+      <RequireAuth>
+        <PixelAgentsOfficePage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/logs",
+    element: (
+      <RequireAuth>
+        <TaskLogsPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/tokens",
+    element: (
+      <RequireAuth>
+        <TokenManagementPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/prompts",
+    element: (
+      <RequireAuth>
+        <PromptConfigurationPage />
       </RequireAuth>
     ),
   },

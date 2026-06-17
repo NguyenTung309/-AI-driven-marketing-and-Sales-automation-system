@@ -96,7 +96,7 @@ DI wiring: `Clawbot.Agents.Core.Skills.SkillsModule.AddClawbotSkills()` → call
 ### Nhóm A — Omnichannel Inbox & Routing
 | UC | Agent | Table | Implemented in |
 |---|---|---|---|
-| UC-A01 | Channel adapter | `messages`, `conversations` | `Clawbot.Infrastructure.Channels.PancakeChannelAdapter` (Zalo only — 🔲 4 channel còn lại) |
+| UC-A01 | Channel adapter | `messages`, `conversations` | `Clawbot.Infrastructure.Channels.PancakeChannelAdapter` as Pancake unified broker for the target channels; live tenant payload remains ops verification |
 | UC-A02 | Agent-Chat | `chat_scenarios` | 🔲 backlog |
 | UC-A03 | Agent-Chat | `chat_scenarios` | 🔲 backlog |
 | UC-A04 | Agent-Chat | `messages` | 🔲 backlog |
@@ -226,7 +226,7 @@ Bảng đổi tên / refactor: `knowledge_items` → tách thành `kb_modules` +
 
 | # | Gap | Mức ảnh hưởng | Hành động |
 |---|---|---|---|
-| G1 | Chỉ có 1/5 channel adapter (Pancake/Zalo). Còn FB Graph, TikTok Business, IG, YT chưa có | Cao | Backlog T6 (theo roadmap doc) |
+| G1 | Native per-platform adapters superseded by the Pancake unified broker strategy | Thấp | Keep native adapters as fallback only if Pancake is dropped; current blocker is live Pancake payload/credentials, not code backlog |
 | G2 | Chưa có Semantic Kernel + RAG wire | Cao | Stub `IVectorStore` → cần triển khai trong `PgVectorStore`/`QdrantVectorStore` |
 | G3 | AspNet Identity chưa thay bằng custom RBAC tenant-scoped | TB | Migrate roles vào bảng `roles` mới; giữ `AppUser/AppRole` cho session |
 | G4 | Chưa có scheduled job runner (Hangfire/Quartz) | TB | Cần cho drip, nurture, daily KPI |

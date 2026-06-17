@@ -8,6 +8,7 @@ import {
   deleteDocumentTemplate,
   documentDownloadUrl,
   generateDocument,
+  generateDocumentKit,
   listDocumentTemplates,
   listGeneratedDocuments,
   updateDocumentTemplate,
@@ -306,12 +307,14 @@ function GeneratePanel({
   varsText,
   sentVia,
   generating,
+  generatingKit,
   error,
   onTemplateCode,
   onContactId,
   onVarsText,
   onSentVia,
   onGenerate,
+  onGenerateKit,
 }: {
   readonly templates: readonly DocumentTemplate[];
   readonly templateCode: string;
@@ -319,13 +322,16 @@ function GeneratePanel({
   readonly varsText: string;
   readonly sentVia: string;
   readonly generating: boolean;
+  readonly generatingKit: boolean;
   readonly error: unknown;
   readonly onTemplateCode: (value: string) => void;
   readonly onContactId: (value: string) => void;
   readonly onVarsText: (value: string) => void;
   readonly onSentVia: (value: string) => void;
   readonly onGenerate: () => void;
+  readonly onGenerateKit: () => void;
 }) {
+  const busy = generating || generatingKit;
   return (
     <Card>
       <div className="mb-4">
@@ -379,10 +385,16 @@ function GeneratePanel({
           placeholder={"contact_name=Nguyễn Minh Anh\ncourse_name=HSK 4 cấp tốc\nprice=4.500.000đ"}
         />
       </label>
-      <Button type="button" className="mt-4" onClick={onGenerate} disabled={generating || !templateCode}>
-        <span className="material-symbols-outlined text-[18px]">{sentVia === "email" ? "outgoing_mail" : "picture_as_pdf"}</span>
-        {generating ? "Đang xử lý..." : sentVia === "email" ? "Generate & gửi email" : "Generate tài liệu"}
-      </Button>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button type="button" onClick={onGenerate} disabled={busy || !templateCode}>
+          <span className="material-symbols-outlined text-[18px]">{sentVia === "email" ? "outgoing_mail" : "picture_as_pdf"}</span>
+          {generating ? "Đang xử lý..." : sentVia === "email" ? "Generate & gửi email" : "Generate tài liệu"}
+        </Button>
+        <Button type="button" variant="outline" onClick={onGenerateKit} disabled={busy}>
+          <span className="material-symbols-outlined text-[18px]">inventory_2</span>
+          {generatingKit ? "Đang tạo kit..." : "Generate kit"}
+        </Button>
+      </div>
     </Card>
   );
 }
@@ -596,6 +608,29 @@ export default function DocumentsPage() {
     },
   });
 
+  const generateKitMutation = useMutation({
+    mutationFn: () => {
+      const vars = parseVars(varsText);
+      return generateDocumentKit({
+        contactId: contactId.trim() || null,
+        vars,
+        sentVia: sentVia || null,
+      });
+    },
+    onSuccess: async (response) => {
+      const first = response.documents[0];
+      if (first) {
+        setSelectedDocId(first.documentId);
+        setPreviewMode("document");
+      }
+      setNotice({
+        tone: "success",
+        message: `Đã generate kit ${response.documents.length} tài liệu (${formatBytes(response.totalSizeBytes)}, ${response.totalLatencyMs}ms).`,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["documents", "generated"] });
+    },
+  });
+
   function selectTemplate(template: DocumentTemplate) {
     setSelectedTemplateId(template.id);
     setDraft(templateToDraft(template));
@@ -631,9 +666,17 @@ export default function DocumentsPage() {
               <span className="material-symbols-outlined text-[18px]">refresh</span>
               Làm mới
             </Button>
-            <Button type="button" onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending || !(generateTemplateCode || draft.code)}>
+            <Button
+              type="button"
+              onClick={() => generateMutation.mutate()}
+              disabled={generateMutation.isPending || generateKitMutation.isPending || !(generateTemplateCode || draft.code)}
+            >
               <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
               Generate PDF
+            </Button>
+            <Button type="button" variant="outline" onClick={() => generateKitMutation.mutate()} disabled={generateMutation.isPending || generateKitMutation.isPending}>
+              <span className="material-symbols-outlined text-[18px]">inventory_2</span>
+              Generate kit
             </Button>
           </div>
         </div>
@@ -694,12 +737,14 @@ export default function DocumentsPage() {
               varsText={varsText}
               sentVia={sentVia}
               generating={generateMutation.isPending}
-              error={generateMutation.error}
+              generatingKit={generateKitMutation.isPending}
+              error={generateMutation.error ?? generateKitMutation.error}
               onTemplateCode={setGenerateTemplateCode}
               onContactId={setContactId}
               onVarsText={setVarsText}
               onSentVia={setSentVia}
               onGenerate={() => generateMutation.mutate()}
+              onGenerateKit={() => generateKitMutation.mutate()}
             />
           </div>
 

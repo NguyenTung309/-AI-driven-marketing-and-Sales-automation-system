@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NSubstitute;
 
 namespace Clawbot.Infrastructure.Tests;
@@ -60,6 +61,14 @@ internal sealed class TestAppDb : IDisposable
 internal sealed class SqliteFriendlyModelCustomizer(ModelCustomizerDependencies dependencies)
     : RelationalModelCustomizer(dependencies)
 {
+    private static readonly ValueConverter<DateTimeOffset, long> DateTimeOffsetConverter =
+        new(v => v.UtcTicks, v => new DateTimeOffset(new DateTime(v, DateTimeKind.Utc)));
+
+    private static readonly ValueConverter<DateTimeOffset?, long?> NullableDateTimeOffsetConverter =
+        new(
+            v => v.HasValue ? v.Value.UtcTicks : null,
+            v => v.HasValue ? new DateTimeOffset(new DateTime(v.Value, DateTimeKind.Utc)) : null);
+
     public override void Customize(ModelBuilder modelBuilder, DbContext context)
     {
         base.Customize(modelBuilder, context);
@@ -68,6 +77,15 @@ internal sealed class SqliteFriendlyModelCustomizer(ModelCustomizerDependencies 
         {
             foreach (var property in entityType.GetProperties())
             {
+                if (property.ClrType == typeof(DateTimeOffset))
+                {
+                    property.SetValueConverter(DateTimeOffsetConverter);
+                }
+                else if (property.ClrType == typeof(DateTimeOffset?))
+                {
+                    property.SetValueConverter(NullableDateTimeOffsetConverter);
+                }
+
                 if (property.GetColumnType() is not null)
                 {
                     property.SetColumnType(null);

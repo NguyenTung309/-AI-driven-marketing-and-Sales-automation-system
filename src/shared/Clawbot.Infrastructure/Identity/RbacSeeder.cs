@@ -11,15 +11,12 @@ using Microsoft.Extensions.Logging;
 namespace Clawbot.Infrastructure.Identity;
 
 /// <summary>
-/// SPEC-11 D1/D5 — idempotently provisions the 5 fixed-Id roles into BOTH the Identity
-/// store (AspNetRoles) and the domain roles table (so role_permissions.role_id, which
-/// FKs to roles(id), can carry the same fixed Id the JWT does), then seeds the permission
-/// matrix into permissions + role_permissions.
-/// Custom tenant-scoped Role rows are created per tenant on demand by RolesEndpoints.
+
+/// Idempotently provisions fixed Identity/domain roles and seeds the runtime permission matrix.
 /// </summary>
 public static partial class RbacSeeder
 {
-    // SPEC-11 §6 — fixed role Ids (constants, never NewGuid).
+
     public const string Admin = "Admin";
     public const string Sale = "Sale";
     public const string Marketer = "Marketer";
@@ -29,11 +26,11 @@ public static partial class RbacSeeder
 
     public static readonly IReadOnlyDictionary<string, Guid> RoleIds = new Dictionary<string, Guid>
     {
-        [Admin]     = Guid.Parse("11111111-1111-1111-1111-111111111111"),
-        [Sale]      = Guid.Parse("22222222-2222-2222-2222-222222222222"),
-        [Marketer]  = Guid.Parse("33333333-3333-3333-3333-333333333333"),
-        [QA]        = Guid.Parse("44444444-4444-4444-4444-444444444444"),
-        [Viewer]    = Guid.Parse("55555555-5555-5555-5555-555555555555"),
+        [Admin] = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+        [Sale] = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+        [Marketer] = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+        [QA] = Guid.Parse("44444444-4444-4444-4444-444444444444"),
+        [Viewer] = Guid.Parse("55555555-5555-5555-5555-555555555555"),
         [SalesLead] = Guid.Parse("77777777-7777-7777-7777-777777777777"),
     };
 
@@ -41,7 +38,7 @@ public static partial class RbacSeeder
 
     private static readonly string[] All = [Admin, SalesLead, Sale, Marketer, QA, Viewer];
 
-    // SPEC-11 §6 permission matrix.
+
     private static readonly (string Code, string[] Roles)[] Matrix =
     [
         ("conversations:read", All),
@@ -69,7 +66,6 @@ public static partial class RbacSeeder
         ("admin.audit", [Admin]),
     ];
 
-    // 8 agents (M25). Seeded "running" so the toggle gate allows auto-actions by default.
     private static readonly (string Code, string DisplayName, string AgentType)[] DefaultAgents =
     [
         ("chat-agent", "Agent-Chat", "chat"),
@@ -82,9 +78,9 @@ public static partial class RbacSeeder
         ("ads-agent", "Agent-Ads", "ads"),
     ];
 
-    private static readonly Dictionary<string, string[]> RolePermissions = new()
+    private static readonly Dictionary<string, string[]> LegacyRolePermissions = new()
     {
-        ["Admin"] =
+        [Admin] =
         [
             "inbox.read", "inbox.assign",
             "kb.read", "kb.write", "kb.deploy",
@@ -96,7 +92,7 @@ public static partial class RbacSeeder
             "analytics.read",
             "admin.system", "admin.audit",
         ],
-        ["Sale"] =
+        [Sale] =
         [
             "inbox.read", "inbox.assign",
             "lead.read", "lead.write",
@@ -104,19 +100,27 @@ public static partial class RbacSeeder
             "docs.generate",
             "analytics.read",
         ],
-        ["Marketer"] =
+        [SalesLead] =
+        [
+            "inbox.read", "inbox.assign",
+            "lead.read", "lead.write",
+            "content.read",
+            "docs.generate",
+            "analytics.read",
+        ],
+        [Marketer] =
         [
             "content.read", "content.write", "content.approve",
             "ads.read", "ads.manage",
             "analytics.read",
         ],
-        ["QA"] =
+        [QA] =
         [
             "kb.read", "kb.write",
             "content.read",
             "analytics.read",
         ],
-        ["Viewer"] =
+        [Viewer] =
         [
             "inbox.read",
             "lead.read",
@@ -139,8 +143,6 @@ public static partial class RbacSeeder
         await SeedDomainRolesAsync(db, tenantId, now, ct);
         await SeedPermissionsAsync(db, ct);
         await SeedRolePermissionsAsync(db, ct);
-
-        // Additional per-tenant seeding: agent configs + warm-lead drip sequence
         await SeedTenantResourcesAsync(db, now, logger, ct);
 
         var permissionCount = await db.Permissions.CountAsync(ct);
@@ -171,8 +173,6 @@ public static partial class RbacSeeder
 
     private static async Task SeedDomainRolesAsync(AppDbContext db, Guid tenantId, DateTimeOffset now, CancellationToken ct)
     {
-        // IgnoreQueryFilters: seeding runs outside any HTTP/tenant scope, so the tenant
-        // global filter would otherwise hide existing rows and break idempotency.
         var existing = await db.RbacRoles.IgnoreQueryFilters().Select(r => r.Id).ToListAsync(ct);
         var have = existing.ToHashSet();
         foreach (var (name, id) in RoleIds)
@@ -185,8 +185,12 @@ public static partial class RbacSeeder
 
     private static async Task SeedPermissionsAsync(AppDbContext db, CancellationToken ct)
     {
+        var codes = Matrix.Select(m => m.Code)
+            .Concat(LegacyRolePermissions.SelectMany(kv => kv.Value))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
         var have = (await db.Permissions.Select(p => p.Code).ToListAsync(ct)).ToHashSet();
-        foreach (var code in Matrix.Select(m => m.Code).Distinct())
+        foreach (var code in codes)
         {
             if (have.Contains(code)) continue;
             db.Permissions.Add(Permission.Create(code));
@@ -210,6 +214,18 @@ public static partial class RbacSeeder
                 db.RolePermissions.Add(RolePermission.Create(roleId, permId));
             }
         }
+
+        foreach (var (role, codes) in LegacyRolePermissions)
+        {
+            var roleId = RoleIds[role];
+            foreach (var code in codes)
+            {
+                if (!permIdByCode.TryGetValue(code, out var permId)) continue;
+                if (have.Contains((roleId, permId))) continue;
+                db.RolePermissions.Add(RolePermission.Create(roleId, permId));
+            }
+        }
+
         await db.SaveChangesAsync(ct);
     }
 
@@ -221,7 +237,7 @@ public static partial class RbacSeeder
 
         foreach (var tenant in tenants)
         {
-            // Seed role?permission links per tenant
+            
             var domainRoles = await db.RbacRoles
                 .IgnoreQueryFilters()
                 .Where(r => r.TenantId == tenant.Id)
@@ -237,7 +253,7 @@ public static partial class RbacSeeder
                     domainRoles.Add(domainRole);
                 }
 
-                if (!RolePermissions.TryGetValue(roleName, out var permCodes)) continue;
+                if (!LegacyRolePermissions.TryGetValue(roleName, out var permCodes)) continue;
                 var existingLinks = await db.RolePermissions
                     .Where(rp => rp.RoleId == domainRole.Id)
                     .Select(rp => rp.PermissionId)
@@ -255,7 +271,6 @@ public static partial class RbacSeeder
                 }
             }
 
-            // Seed default agent configs
             var existingAgentCodes = await db.AgentConfigs
                 .IgnoreQueryFilters()
                 .Where(a => a.TenantId == tenant.Id)
@@ -265,21 +280,22 @@ public static partial class RbacSeeder
             {
                 if (existingAgentCodes.Contains(code)) continue;
                 var agent = AgentConfig.Create(tenant.Id, code, displayName, agentType, "claude", now);
-                agent.Start(); // seeded enabled (running)
+                agent.Start();
                 db.AgentConfigs.Add(agent);
             }
 
-            // Lead-3: default warm-lead drip sequence
             var hasWarmDrip = await db.Set<DripSequence>()
                 .IgnoreQueryFilters()
                 .AnyAsync(s => s.TenantId == tenant.Id && s.TriggerEvent == "warm_lead", ct);
             if (!hasWarmDrip)
             {
-                var drip = DripSequence.Create(tenant.Id, "Nuôi du?ng khách ?m", "warm_lead", now);
-                drip.AddStep(1, 1, "pancake", "Chào {lead_name}, c?m on b?n dã quan tâm t?i H?c Bá! B?n c?n tu v?n thêm v? khóa h?c nào ??");
-                drip.AddStep(2, 47, "pancake", "{lead_name} oi, H?c Bá dang có uu dãi h?c th? mi?n phí — b?n có mu?n d?t l?ch tr?i nghi?m không?");
-                drip.AddStep(3, 72, "pancake", "H?c Bá g?i {lead_name} l? trình h?c ti?ng Trung cá nhân hóa. B?n tham kh?o th? nhé!");
-                drip.AddStep(4, 48, "pancake", "{lead_name} còn ban khoan gì v? khóa h?c không? Ð?i ngu H?c Bá luôn s?n sàng h? tr? b?n.");
+
+                var drip = DripSequence.Create(tenant.Id, "Warm lead nurture", "warm_lead", now);
+                drip.AddStep(1, 1, "pancake", "Chao {lead_name}, cam on ban da quan tam toi Hoc Ba! Ban can tu van them ve khoa hoc nao?");
+                drip.AddStep(2, 47, "pancake", "{lead_name} oi, Hoc Ba dang co uu dai hoc thu mien phi - ban co muon dat lich trai nghiem khong?");
+                drip.AddStep(3, 72, "pancake", "Hoc Ba gui {lead_name} lo trinh hoc tieng Trung ca nhan hoa. Ban tham khao thu nhe!");
+                drip.AddStep(4, 48, "pancake", "{lead_name} con ban khoan gi ve khoa hoc khong? Doi ngu Hoc Ba luon san sang ho tro ban.");
+
                 db.Set<DripSequence>().Add(drip);
             }
         }
@@ -301,6 +317,8 @@ public static partial class RbacSeeder
     private static partial void LogPermNotFound(ILogger logger, string code, string roleName);
 
     [LoggerMessage(EventId = 1004, Level = LogLevel.Information,
-        Message = "RbacSeeder: {Count} role?permission links seeded")]
+
+        Message = "RbacSeeder: {Count} role-permission links seeded")]
+
     private static partial void LogRolePermsSeeded(ILogger logger, int count);
 }

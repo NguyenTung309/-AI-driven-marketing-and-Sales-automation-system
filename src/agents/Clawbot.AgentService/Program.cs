@@ -22,7 +22,7 @@ builder.Services.AddGrpc();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddClawbotTelemetry(builder.Configuration, "clawbot-agent");
-builder.Services.AddSingleton<AgentRegistry>(_ => new AgentRegistry(Array.Empty<IAgent>()));
+builder.Services.AddSingleton<AgentRegistry>(_ => DefaultAgentRegistry.Create());
 builder.Services.AddSingleton<PlanningOrchestrator>();
 builder.Services.AddClawbotSkills(builder.Configuration);
 // M25: persist Claude cost to claude_cost_ledger (overrides in-memory tracker from the skills module).

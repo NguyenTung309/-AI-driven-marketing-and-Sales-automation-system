@@ -8,7 +8,8 @@ namespace Clawbot.Infrastructure.Ads;
 public sealed partial class TikTokAdsConnector(
     HttpClient http,
     IOptions<TikTokAdsOptions> options,
-    ILogger<TikTokAdsConnector> logger) : IAdsPlatformConnector
+    ILogger<TikTokAdsConnector> logger,
+    IAdsPlatformThrottle throttle) : IAdsPlatformConnector
 {
     public string Platform => "tiktok";
 
@@ -19,23 +20,26 @@ public sealed partial class TikTokAdsConnector(
         if (!_options.Enabled || string.IsNullOrWhiteSpace(_options.AccessToken))
             return null;
 
-        try
+        return await throttle.RunAsync(Platform, async throttleCt =>
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(throttleCt);
+                timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
 
-            var url = $"{_options.Endpoint}/report/integrated/get?advertiser_id={Uri.EscapeDataString(_options.AdvertiserId)}&campaign_ids=[\"{externalCampaignId}\"]&data_level=CAMPAIGN&dimensions=[\"campaign_id\"]&metrics=[\"cpc\",\"impression\",\"click\",\"spend\",\"frequency\",\"ctr\"]";
-            using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(url, UriKind.Absolute));
-            request.Headers.Add("Access-Token", _options.AccessToken);
-            using var response = await http.SendAsync(request, timeout.Token).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-            return ParseMetrics(body);
-        }
-        catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
-        {
-            LogFetchFailed(logger, externalCampaignId, ex);
-            return null;
-        }
+                var url = $"{_options.Endpoint}/report/integrated/get?advertiser_id={Uri.EscapeDataString(_options.AdvertiserId)}&campaign_ids=[\"{externalCampaignId}\"]&data_level=CAMPAIGN&dimensions=[\"campaign_id\"]&metrics=[\"cpc\",\"impression\",\"click\",\"spend\",\"frequency\",\"ctr\"]";
+                using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(url, UriKind.Absolute));
+                request.Headers.Add("Access-Token", _options.AccessToken);
+                using var response = await http.SendAsync(request, timeout.Token).ConfigureAwait(false);
+                var body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+                return ParseMetrics(body);
+            }
+            catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
+            {
+                LogFetchFailed(logger, externalCampaignId, ex);
+                return null;
+            }
+        }, ct).ConfigureAwait(false);
     }
 
     public async Task<bool> ApplyActionAsync(string externalCampaignId, string action, decimal? newBudget, CancellationToken ct = default)
@@ -43,41 +47,44 @@ public sealed partial class TikTokAdsConnector(
         if (!_options.Enabled || string.IsNullOrWhiteSpace(_options.AccessToken))
             return false;
 
-        try
+        return await throttle.RunAsync(Platform, async throttleCt =>
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
-
-            var status = action switch
+            try
             {
-                "pause" => "CAMPAIGN_STATUS_DISABLE",
-                "scale_up" or "scale_down" => "CAMPAIGN_STATUS_ENABLE",
-                _ => null,
-            };
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(throttleCt);
+                timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
 
-            var url = $"{_options.Endpoint}/campaign/update?advertiser_id={Uri.EscapeDataString(_options.AdvertiserId)}";
-            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(url, UriKind.Absolute));
-            request.Headers.Add("Access-Token", _options.AccessToken);
+                var status = action switch
+                {
+                    "pause" => "CAMPAIGN_STATUS_DISABLE",
+                    "scale_up" or "scale_down" => "CAMPAIGN_STATUS_ENABLE",
+                    _ => null,
+                };
 
-            var body = new Dictionary<string, object> { ["campaign_id"] = externalCampaignId };
-            if (status is not null)
-                body["operation_status"] = status;
-            if (newBudget.HasValue)
-                body["budget"] = newBudget.Value;
+                var url = $"{_options.Endpoint}/campaign/update?advertiser_id={Uri.EscapeDataString(_options.AdvertiserId)}";
+                using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(url, UriKind.Absolute));
+                request.Headers.Add("Access-Token", _options.AccessToken);
 
-            request.Content = new StringContent(
-                JsonSerializer.Serialize(body),
-                System.Text.Encoding.UTF8,
-                "application/json");
+                var body = new Dictionary<string, object> { ["campaign_id"] = externalCampaignId };
+                if (status is not null)
+                    body["operation_status"] = status;
+                if (newBudget.HasValue)
+                    body["budget"] = newBudget.Value;
 
-            using var response = await http.SendAsync(request, timeout.Token).ConfigureAwait(false);
-            return response.IsSuccessStatusCode;
-        }
-        catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
-        {
-            LogActionFailed(logger, action, externalCampaignId, ex);
-            return false;
-        }
+                request.Content = new StringContent(
+                    JsonSerializer.Serialize(body),
+                    System.Text.Encoding.UTF8,
+                    "application/json");
+
+                using var response = await http.SendAsync(request, timeout.Token).ConfigureAwait(false);
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
+            {
+                LogActionFailed(logger, action, externalCampaignId, ex);
+                return false;
+            }
+        }, ct).ConfigureAwait(false);
     }
 
     public Task<string?> BuildLookalikeAsync(IReadOnlyList<string> seedContactKeys, CancellationToken ct = default) =>

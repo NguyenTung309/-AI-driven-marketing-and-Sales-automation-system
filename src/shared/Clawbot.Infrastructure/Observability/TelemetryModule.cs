@@ -13,6 +13,16 @@ namespace Clawbot.Infrastructure.Observability;
 // audit-clean version is pinned — NuGetAudit gate flagged OTLP 1.9.0 (GHSA-4625-4j76-fww9).
 public static class TelemetryModule
 {
+    internal const string HttpServerRequestDurationInstrumentName = "http.server.request.duration";
+    internal const double HttpServerDurationSloSeconds = 30d;
+
+    private static readonly double[] HttpServerDurationHistogramBoundariesSeconds =
+    {
+        0.005d, 0.01d, 0.025d, 0.05d, 0.075d, 0.1d,
+        0.25d, 0.5d, 0.75d, 1d, 2.5d, 5d, 7.5d,
+        10d, 15d, HttpServerDurationSloSeconds, 60d
+    };
+
     public static IServiceCollection AddClawbotTelemetry(
         this IServiceCollection services, IConfiguration cfg, string serviceName)
     {
@@ -28,10 +38,19 @@ public static class TelemetryModule
             })
             .WithMetrics(m =>
             {
-                m.AddAspNetCoreInstrumentation().AddHttpClientInstrumentation().AddRuntimeInstrumentation();
+                m.AddAspNetCoreInstrumentation()
+                    .AddHttpClientInstrumentation()
+                    .AddRuntimeInstrumentation()
+                    .AddView(
+                        HttpServerRequestDurationInstrumentName,
+                        CreateHttpServerDurationHistogramConfiguration());
+
                 if (consoleExport) m.AddConsoleExporter();
             });
 
         return services;
     }
+
+    internal static ExplicitBucketHistogramConfiguration CreateHttpServerDurationHistogramConfiguration() =>
+        new() { Boundaries = HttpServerDurationHistogramBoundariesSeconds };
 }

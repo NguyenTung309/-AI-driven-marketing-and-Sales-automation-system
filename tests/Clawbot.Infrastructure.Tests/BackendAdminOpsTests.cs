@@ -1,3 +1,4 @@
+using Clawbot.Agents.Core.Skills.Ops;
 using Clawbot.Domain.Agents;
 using Clawbot.Domain.Notifications;
 using Clawbot.Infrastructure.Agents;
@@ -59,6 +60,21 @@ public sealed class BackendAdminOpsTests
         // Sum client-side: SQLite SUM over decimal-as-TEXT drifts to float.
         var entries = await t.Db.ClaudeCostLedger.IgnoreQueryFilters().ToListAsync();
         entries.Sum(e => e.Usd).Should().Be(0.03m);
+    }
+
+    [Fact]
+    public async Task DbClaudeCostTracker_does_not_record_entry_that_would_exceed_monthly_cap()
+    {
+        using var t = new TestAppDb();
+        var sut = new DbClaudeCostTracker(ScopeFactoryFor(t.Db));
+        var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        await sut.RecordAsync(new CostEntry(t.TenantId, "chat", "claude", 100, 50, 199m, month), CancellationToken.None);
+        await sut.RecordAsync(new CostEntry(t.TenantId, "chat", "claude", 100, 50, 2m, month.AddDays(1)), CancellationToken.None);
+
+        var entries = await t.Db.ClaudeCostLedger.IgnoreQueryFilters().ToListAsync();
+        entries.Should().ContainSingle();
+        entries.Sum(e => e.Usd).Should().Be(199m);
     }
 
     [Fact]

@@ -543,6 +543,11 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
                   <StatusPill tone={scoreTone(lead.score)}>{lead.score}</StatusPill>
                 </div>
                 <p className="mt-1 text-label-sm text-on-surface-variant">{formatRelative(lead.lastActivityAt)}</p>
+                {lead.eligible ? (
+                  <p className="mt-2 text-label-sm font-semibold text-on-surface">{lead.suggestion}</p>
+                ) : (
+                  <p className="mt-2 text-label-sm text-on-surface-variant">{lead.reason}</p>
+                )}
               </div>
             ))}
           </div>

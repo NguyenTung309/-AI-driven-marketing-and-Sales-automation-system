@@ -24,7 +24,7 @@ public sealed class ToxicityOptions
 
 // Heuristic baseline: VI/EN profanity lexicon + caps/emoji-flood signals.
 // Optional detoxify/Perspective sidecar when Skills:Toxicity:SidecarUrl is set.
-internal sealed class DetoxifyToxicityFilter : IToxicityFilter
+public sealed class DetoxifyToxicityFilter : IToxicityFilter
 {
     public string Name => "toxicity-filter";
 

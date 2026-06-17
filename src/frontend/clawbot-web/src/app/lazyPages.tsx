@@ -1,0 +1,21 @@
+import { lazy } from "react";
+
+export const AdminConsolePage = lazy(() => import("@/features/admin/AdminConsolePage"));
+export const LoginPage = lazy(() => import("@/features/auth/LoginPage"));
+export const ForgotPasswordPage = lazy(() => import("@/features/auth/ForgotPasswordPage"));
+export const AgentDashboardPage = lazy(() => import("@/features/agents/AgentDashboardPage"));
+export const PixelAgentsOfficePage = lazy(() => import("@/features/agents/PixelAgentsOfficePage"));
+export const DashboardPage = lazy(() => import("@/features/dashboard/DashboardPage"));
+export const ConversationsPage = lazy(() => import("@/features/conversations/ConversationsPage"));
+export const ContentWorkspacePage = lazy(() => import("@/features/content/ContentWorkspacePage"));
+export const DocumentsPage = lazy(() => import("@/features/documents/DocumentsPage"));
+export const AnalyticsReportsPage = lazy(() => import("@/features/analytics/AnalyticsReportsPage"));
+export const KnowledgeBasePage = lazy(() => import("@/features/kb/KnowledgeBasePage"));
+export const LeadsPage = lazy(() => import("@/features/leads/LeadsPage"));
+export const TaskLogsPage = lazy(() => import("@/features/logs/TaskLogsPage"));
+export const NotificationsPage = lazy(() => import("@/features/notifications/NotificationsPage"));
+export const ProfilePage = lazy(() => import("@/features/profile/ProfilePage"));
+export const PromptConfigurationPage = lazy(() => import("@/features/prompts/PromptConfigurationPage"));
+export const SupportFaqPage = lazy(() => import("@/features/public/SupportFaqPage"));
+export const WidgetDemoPage = lazy(() => import("@/features/public/WidgetDemoPage"));
+export const TokenManagementPage = lazy(() => import("@/features/tokens/TokenManagementPage"));

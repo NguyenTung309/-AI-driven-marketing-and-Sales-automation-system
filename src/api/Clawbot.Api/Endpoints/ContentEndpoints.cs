@@ -31,6 +31,7 @@ public static class ContentEndpoints
         grp.MapPost("/trends/scan", ScanTrendsAsync);
 
         grp.MapPost("/items/generate", GenerateItemAsync);
+        grp.MapPost("/image-prompts", GenerateImagePromptAsync);
         grp.MapGet("/queue", QueueAsync);
         grp.MapPut("/items/{id:guid}", UpdateItemAsync);
         grp.MapDelete("/items/{id:guid}", DeleteItemAsync);
@@ -172,6 +173,22 @@ public static class ContentEndpoints
         catch (RpcException ex)
         {
             return MapGrpcError(ex, http);
+        }
+    }
+
+    private static async Task<IResult> GenerateImagePromptAsync(
+        GenerateImagePromptRequest body,
+        Clawbot.Api.Services.ContentImagePromptService service,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        try
+        {
+            return Results.Ok(await service.GenerateAsync(body, ct).ConfigureAwait(false));
+        }
+        catch (ArgumentException ex)
+        {
+            return Error(http, StatusCodes.Status400BadRequest, "content.image_prompt_invalid", ex.Message);
         }
     }
 

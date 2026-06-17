@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Text.Json;
 using Clawbot.Api.Contracts.Analytics;
+using Clawbot.Domain.Agents;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Time;
 using Microsoft.EntityFrameworkCore;
@@ -103,18 +105,32 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
             .ToListAsync(ct).ConfigureAwait(false);
 
         return sessions
-            .GroupBy(s => s.AgentId)
+            .GroupBy(s => new { s.AgentId, AgentName = ResolveAgentName(s) })
             .Select(g =>
             {
                 var sessionsCount = g.Count();
                 var completed = g.Count(s => s.Status == "completed");
+                var quality = g
+                    .SelectMany(s => s.Traces)
+                    .Select(TryParseQualityTrace)
+                    .Where(q => q is not null)
+                    .Select(q => q!.Value)
+                    .ToList();
+                var qualityScores = quality
+                    .Where(q => q.Score.HasValue)
+                    .Select(q => q.Score!.Value)
+                    .ToList();
                 return new AgentPerformanceDto(
-                    g.Key,
-                    g.Key?.ToString() ?? "unassigned",
+                    g.Key.AgentId,
+                    g.Key.AgentName,
                     sessionsCount,
                     completed,
                     g.Sum(s => s.Traces.Count),
-                    Rate(completed, sessionsCount));
+                    Rate(completed, sessionsCount),
+                    quality.Count,
+                    quality.Count(q => q.Passed),
+                    Rate(quality.Count(q => q.Passed), quality.Count),
+                    qualityScores.Count == 0 ? null : Math.Round(qualityScores.Average(), 4));
             })
             .OrderByDescending(r => r.Sessions)
             .ThenBy(r => r.AgentName, StringComparer.OrdinalIgnoreCase)
@@ -213,6 +229,49 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
 
     private static decimal Rate(int numerator, int denominator) =>
         denominator == 0 ? 0m : Math.Round((decimal)numerator / denominator, 4);
+
+    private static string ResolveAgentName(AgentSession session) =>
+        session.Traces
+            .Select(t => t.AgentName)
+            .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name))
+        ?? session.AgentId?.ToString()
+        ?? "unassigned";
+
+    private static QualityTrace? TryParseQualityTrace(AgentTrace trace)
+    {
+        if (!string.Equals(trace.Phase, "quality", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(trace.Message))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(trace.Message);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("passed", out var passedElement) ||
+                passedElement.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+            {
+                return null;
+            }
+
+            decimal? score = null;
+            if (root.TryGetProperty("score", out var scoreElement) &&
+                scoreElement.ValueKind == JsonValueKind.Number &&
+                scoreElement.TryGetDecimal(out var parsedScore))
+            {
+                score = parsedScore;
+            }
+
+            return new QualityTrace(passedElement.GetBoolean(), score);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private readonly record struct QualityTrace(bool Passed, decimal? Score);
 
     private static decimal? AverageNullable(IEnumerable<decimal?> values)
     {

@@ -11,6 +11,7 @@ public sealed partial class IdleConversationAlertJob(
     AppDbContext db,
     IInboxNotifier notifier,
     INotificationPublisher publisher,
+    IIdleEscalationRecipientResolver escalationRecipients,
     ILogger<IdleConversationAlertJob> logger)
 {
     private static readonly TimeSpan IdleThreshold = TimeSpan.FromMinutes(5);
@@ -59,8 +60,8 @@ public sealed partial class IdleConversationAlertJob(
             LogSkipped(logger, "no idle conversations");
         }
 
-        // Tier-2: conversations crossing 10 min → escalate to Sales Lead (tenant broadcast,
-        // UserId null) so a manager picks it up when the assigned sale hasn't responded.
+        // Tier-2: conversations crossing 10 min → escalate to Sales Lead users so a manager
+        // picks it up when the assigned sale hasn't responded.
         var escalateOlderThan = now - EscalateThreshold;
         var escalateNewerThan = now - EscalateBand;
         var escalations = await db.Conversations
@@ -75,13 +76,24 @@ public sealed partial class IdleConversationAlertJob(
 
         foreach (var conv in escalations)
         {
-            await publisher.PublishAsync(new NotificationRequest(
-                conv.TenantId, null, "idle_escalation", "Hội thoại chờ quá 10 phút — cần Trưởng phòng KD",
-                Severity: "error",
-                Body: "Một hội thoại đã chờ hơn 10 phút mà chưa được xử lý — vui lòng phân công lại.",
-                Link: $"/conversations/{conv.Id}"), ct);
+            var recipients = await escalationRecipients.ResolveAsync(conv.TenantId, ct);
+            if (recipients.Count == 0)
+            {
+                await PublishEscalationAsync(conv.TenantId, null, conv.Id, ct);
+                continue;
+            }
+
+            foreach (var userId in recipients.Distinct())
+                await PublishEscalationAsync(conv.TenantId, userId, conv.Id, ct);
         }
     }
+
+    private Task PublishEscalationAsync(Guid tenantId, Guid? userId, Guid conversationId, CancellationToken ct) =>
+        publisher.PublishAsync(new NotificationRequest(
+            tenantId, userId, "idle_escalation", "Hội thoại chờ quá 10 phút — cần Trưởng phòng KD",
+            Severity: "error",
+            Body: "Một hội thoại đã chờ hơn 10 phút mà chưa được xử lý — vui lòng phân công lại.",
+            Link: $"/conversations/{conversationId}"), ct);
 
     [LoggerMessage(EventId = 12001, Level = LogLevel.Debug,
         Message = "IdleConversationAlert skipped: {Reason}")]

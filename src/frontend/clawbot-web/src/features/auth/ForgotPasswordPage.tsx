@@ -6,7 +6,7 @@ import { requestPasswordReset, confirmPasswordReset } from "@/shared/api/auth";
 type Step = "request" | "otp" | "reset" | "success";
 
 const OTP_LENGTH = 6;
-const OTP_TTL_SECONDS = 166; // ~02:46 as in the design
+const OTP_TTL_SECONDS = 600;
 
 function StepHeader({ icon, title, desc }: { readonly icon: string; readonly title: string; readonly desc: React.ReactNode }) {
   return (
@@ -35,15 +35,28 @@ function OtpInputs({ value, onChange }: { readonly value: string; readonly onCha
   const refs = useRef<Array<HTMLInputElement | null>>([]);
 
   function setDigit(index: number, digit: string) {
-    const clean = digit.replace(/\D/g, "").slice(-1);
-    const next = value.split("");
-    next[index] = clean;
+    const clean = digit.replace(/\D/g, "");
+    const next = Array.from({ length: OTP_LENGTH }, (_, i) => refs.current[i]?.value ?? value[i] ?? "");
+    if (clean.length > 1) {
+      clean.slice(0, OTP_LENGTH - index).split("").forEach((char, offset) => {
+        next[index + offset] = char;
+      });
+      onChange(next.join("").slice(0, OTP_LENGTH));
+      refs.current[Math.min(index + clean.length, OTP_LENGTH - 1)]?.focus();
+      return;
+    }
+    next[index] = clean.slice(-1);
     onChange(next.join("").slice(0, OTP_LENGTH));
-    if (clean && index < OTP_LENGTH - 1) refs.current[index + 1]?.focus();
+    if (next[index] && index < OTP_LENGTH - 1) refs.current[index + 1]?.focus();
   }
 
   function onKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Backspace" && !value[index] && index > 0) refs.current[index - 1]?.focus();
+  }
+
+  function onPaste(index: number, e: React.ClipboardEvent<HTMLInputElement>) {
+    e.preventDefault();
+    setDigit(index, e.clipboardData.getData("text"));
   }
 
   return (
@@ -61,6 +74,7 @@ function OtpInputs({ value, onChange }: { readonly value: string; readonly onCha
           value={value[i] ?? ""}
           onChange={(e) => setDigit(i, e.target.value)}
           onKeyDown={(e) => onKeyDown(i, e)}
+          onPaste={(e) => onPaste(i, e)}
           className="w-12 h-12 text-center text-headline-sm font-bold border border-outline rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
         />
       ))}
@@ -84,6 +98,7 @@ export default function ForgotPasswordPage() {
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [requestPending, setRequestPending] = useState(false);
 
   useEffect(() => {
     if (step !== "otp" || seconds <= 0) return;
@@ -100,14 +115,17 @@ export default function ForgotPasswordPage() {
   async function submitRequest(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    // Backend returns 200 even for unknown emails (anti-enumeration); always advance.
+    setRequestPending(true);
     try {
       await requestPasswordReset(email);
+      setOtp("");
+      setSeconds(OTP_TTL_SECONDS);
+      setStep("otp");
     } catch {
-      /* network error is non-fatal here; let user proceed to enter the token */
+      setError("Không gửi được mã xác nhận. Vui lòng kiểm tra kết nối và thử lại.");
+    } finally {
+      setRequestPending(false);
     }
-    setSeconds(OTP_TTL_SECONDS);
-    setStep("otp");
   }
 
   function submitOtp(e: React.FormEvent) {
@@ -116,9 +134,23 @@ export default function ForgotPasswordPage() {
       setError("Vui lòng nhập đủ 6 chữ số.");
       return;
     }
-    // No server-side OTP verify endpoint: the value is carried as the reset token to /auth/reset/confirm.
     setError(null);
     setStep("reset");
+  }
+
+  async function resendOtp() {
+    if (!email || requestPending) return;
+    setError(null);
+    setRequestPending(true);
+    try {
+      await requestPasswordReset(email);
+      setOtp("");
+      setSeconds(OTP_TTL_SECONDS);
+    } catch {
+      setError("Không gửi lại được mã xác nhận. Vui lòng thử lại.");
+    } finally {
+      setRequestPending(false);
+    }
   }
 
   async function submitReset(e: React.FormEvent) {
@@ -167,8 +199,8 @@ export default function ForgotPasswordPage() {
             </div>
             {error ? <p className="text-error text-body-md">{error}</p> : null}
             <div className="pt-4 space-y-4">
-              <button type="submit" className={submitBtn}>
-                <span>Gửi mã xác nhận</span>
+              <button type="submit" className={submitBtn} disabled={requestPending}>
+                <span>{requestPending ? "Đang gửi mã..." : "Gửi mã xác nhận"}</span>
                 <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
               </button>
               <Link to="/login" className={backLink}>
@@ -205,10 +237,11 @@ export default function ForgotPasswordPage() {
                 Chưa nhận được mã?{" "}
                 <button
                   type="button"
-                  onClick={() => setSeconds(OTP_TTL_SECONDS)}
+                  onClick={resendOtp}
+                  disabled={requestPending}
                   className="text-primary font-semibold underline underline-offset-4 hover:text-primary-hover ml-1"
                 >
-                  Gửi lại mã
+                  {requestPending ? "Đang gửi..." : "Gửi lại mã"}
                 </button>
               </p>
             </div>

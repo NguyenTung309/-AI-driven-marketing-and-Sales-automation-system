@@ -1,14 +1,46 @@
+using System.Text.Json;
 using Clawbot.Api.Middleware;
+using Clawbot.Domain.Agents;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
+using Clawbot.SharedKernel.Time;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
 
 // M25 — agent control & observability over the existing AgentConfig (`agents` table).
+public sealed record AgentSettingsResponse(
+    string Code,
+    string DisplayName,
+    string AgentType,
+    string Model,
+    string Status,
+    string Provider,
+    string SystemPrompt,
+    double Temperature,
+    int MaxTokens,
+    IReadOnlyList<string> SkillFiles,
+    IReadOnlyList<string> KbModules,
+    DateTimeOffset UpdatedAt);
+
+public sealed record AgentSettingsRequest(
+    string? DisplayName,
+    string? Model,
+    string? Provider,
+    string? SystemPrompt,
+    double? Temperature,
+    int? MaxTokens,
+    IReadOnlyList<string>? SkillFiles,
+    IReadOnlyList<string>? KbModules);
+
+public sealed record AgentSandboxRequest(string Message);
+public sealed record AgentSandboxResponse(Guid SessionId, string Reply, DateTimeOffset SentAt);
+
 public static class AgentsEndpoints
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     public static IEndpointRouteBuilder MapAgents(this IEndpointRouteBuilder app)
     {
         var grp = app.MapGroup("/api/agents").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
@@ -16,6 +48,9 @@ public static class AgentsEndpoints
         grp.MapGet("/", ListAsync);
         grp.MapPost("/{code}/enable", EnableAsync);
         grp.MapPost("/{code}/disable", DisableAsync);
+        grp.MapGet("/{code}/settings", SettingsAsync);
+        grp.MapPut("/{code}/settings", UpdateSettingsAsync);
+        grp.MapPost("/{code}/sandbox", SandboxAsync);
         grp.MapGet("/{code}/traces", TracesAsync);
 
         return grp;
@@ -56,6 +91,76 @@ public static class AgentsEndpoints
         return Results.Ok(new { agent.Code, agent.Status });
     }
 
+    private static async Task<IResult> SettingsAsync(string code, AppDbContext db, ITenantAccessor tenants, CancellationToken ct = default)
+    {
+        _ = tenants.Require();
+        var agent = await db.AgentConfigs.FirstOrDefaultAsync(a => a.Code == code, ct);
+        return agent is null ? Results.NotFound() : Results.Ok(ToSettings(agent));
+    }
+
+    private static async Task<IResult> UpdateSettingsAsync(
+        string code,
+        AgentSettingsRequest req,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        CancellationToken ct = default)
+    {
+        _ = tenants.Require();
+        var agent = await db.AgentConfigs.FirstOrDefaultAsync(a => a.Code == code, ct);
+        if (agent is null) return Results.NotFound();
+
+        var displayName = NormalizeText(req.DisplayName, agent.DisplayName, maxLength: 256);
+        var model = NormalizeText(req.Model, agent.Model, maxLength: 128);
+        if (string.IsNullOrWhiteSpace(displayName)) return Results.BadRequest(new { error = "display_name_required" });
+        if (string.IsNullOrWhiteSpace(model)) return Results.BadRequest(new { error = "model_required" });
+
+        var config = ReadRuntimeConfig(agent.ConfigJson);
+        config.Provider = NormalizeText(req.Provider, config.Provider, maxLength: 64);
+        config.SystemPrompt = (req.SystemPrompt ?? config.SystemPrompt).Trim();
+        config.Temperature = req.Temperature.HasValue ? Math.Clamp(req.Temperature.Value, 0, 2) : config.Temperature;
+        config.MaxTokens = req.MaxTokens.HasValue ? Math.Clamp(req.MaxTokens.Value, 128, 32000) : config.MaxTokens;
+
+        agent.UpdateSettings(
+            displayName,
+            model,
+            SerializeList(req.SkillFiles, agent.SkillFilesJson),
+            SerializeList(req.KbModules, agent.KbModulesJson),
+            JsonSerializer.Serialize(config, JsonOptions),
+            clock.UtcNow);
+
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(ToSettings(agent));
+    }
+
+    private static async Task<IResult> SandboxAsync(
+        string code,
+        AgentSandboxRequest req,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        CancellationToken ct = default)
+    {
+        var tenant = tenants.Require();
+        if (string.IsNullOrWhiteSpace(req.Message)) return Results.BadRequest(new { error = "message_required" });
+
+        var agent = await db.AgentConfigs.FirstOrDefaultAsync(a => a.Code == code, ct);
+        if (agent is null) return Results.NotFound();
+
+        var now = clock.UtcNow;
+        var config = ReadRuntimeConfig(agent.ConfigJson);
+        var session = AgentSession.Start(tenant.TenantId, agent.Id, null, "Agent configuration sandbox", now);
+        session.AppendTrace("sandbox", agent.DisplayName, "input", req.Message.Trim(), now);
+
+        var reply = BuildSandboxReply(agent, config, req.Message.Trim());
+        session.AppendTrace("sandbox", agent.DisplayName, "reply", reply, now.AddMilliseconds(1));
+        session.Finish(now.AddMilliseconds(2));
+        db.AgentSessions.Add(session);
+
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new AgentSandboxResponse(session.Id, reply, now.AddMilliseconds(1)));
+    }
+
     private static Task<IResult> EnableAsync(string code, AppDbContext db, ITenantAccessor tenants, CancellationToken ct = default)
         => SetStatusAsync(code, true, db, tenants, ct);
 
@@ -90,5 +195,98 @@ public static class AgentsEndpoints
             .ToListAsync(ct);
 
         return Results.Ok(new { total, page, pageSize, items });
+    }
+
+    private static AgentSettingsResponse ToSettings(AgentConfig agent)
+    {
+        var config = ReadRuntimeConfig(agent.ConfigJson);
+        return new AgentSettingsResponse(
+            agent.Code,
+            agent.DisplayName,
+            agent.AgentType,
+            agent.Model,
+            agent.Status,
+            config.Provider,
+            config.SystemPrompt,
+            config.Temperature,
+            config.MaxTokens,
+            DeserializeList(agent.SkillFilesJson),
+            DeserializeList(agent.KbModulesJson),
+            agent.UpdatedAt);
+    }
+
+    private static string NormalizeText(string? value, string fallback, int maxLength)
+    {
+        var text = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+        return text.Length <= maxLength ? text : text[..maxLength];
+    }
+
+    private static string SerializeList(IReadOnlyList<string>? requested, string fallbackJson)
+    {
+        var values = requested is null ? DeserializeList(fallbackJson) : requested;
+        var cleaned = values
+            .Select(item => item.Trim())
+            .Where(item => item.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(30)
+            .ToArray();
+        return JsonSerializer.Serialize(cleaned, JsonOptions);
+    }
+
+    private static string[] DeserializeList(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(json, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static AgentRuntimeConfig ReadRuntimeConfig(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new AgentRuntimeConfig();
+        try
+        {
+            return JsonSerializer.Deserialize<AgentRuntimeConfig>(json, JsonOptions) ?? new AgentRuntimeConfig();
+        }
+        catch (JsonException)
+        {
+            return new AgentRuntimeConfig();
+        }
+    }
+
+    private static string BuildSandboxReply(AgentConfig agent, AgentRuntimeConfig config, string message)
+    {
+        var promptHint = string.IsNullOrWhiteSpace(config.SystemPrompt)
+            ? "chưa có system prompt tùy chỉnh"
+            : $"đang dùng system prompt {Math.Min(config.SystemPrompt.Length, 120)} ký tự";
+        return $"{agent.DisplayName} đã nhận tin nhắn thử nghiệm \"{message}\". Provider {config.Provider}, model {agent.Model}, temperature {config.Temperature:0.##}, max {config.MaxTokens} tokens; {promptHint}.";
+    }
+
+    private sealed class AgentRuntimeConfig
+    {
+        public string Provider { get; set; } = "claude";
+        public string SystemPrompt { get; set; } = string.Empty;
+        public double Temperature { get; set; } = 0.4;
+        public int MaxTokens { get; set; } = 2048;
+        public AgentTokenQuotaConfig TokenQuota { get; set; } = new();
+        public string RouterTier { get; set; } = string.Empty;
+        public AgentTokenAlertConfig TokenAlerts { get; set; } = new();
+    }
+
+    private sealed class AgentTokenQuotaConfig
+    {
+        public int MonthlyQuotaTokens { get; set; }
+        public int AlertPercent { get; set; }
+    }
+
+    private sealed class AgentTokenAlertConfig
+    {
+        public bool Enabled { get; set; } = true;
+        public int LowBalanceThresholdTokens { get; set; } = 500_000;
     }
 }

@@ -1,15 +1,18 @@
-﻿using System.Net;
+using System.Globalization;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text.Encodings.Web;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Application.Abstractions;
+using Clawbot.Domain.Security;
 using Clawbot.Infrastructure.Auth;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -20,8 +23,10 @@ public static partial class AuthEndpoints
     private const string RefreshCookie = "refresh_token";
 
     [LoggerMessage(EventId = 2001, Level = LogLevel.Information,
-        Message = "Password reset token for {Email}: {Token}")]
-    private static partial void LogResetTokenIssued(ILogger logger, string email, string token);
+        Message = "Password reset OTP for {Email}: {Otp}")]
+    private static partial void LogResetOtpIssued(ILogger logger, string email, string otp);
+
+    private static readonly TimeSpan ResetOtpTtl = TimeSpan.FromMinutes(10);
 
     public static IEndpointRouteBuilder MapAuth(this IEndpointRouteBuilder app)
     {
@@ -57,19 +62,17 @@ public static partial class AuthEndpoints
         if (user is null || !user.IsActive()) return Results.Unauthorized();
 
         var check = await signIn.CheckPasswordSignInAsync(user, req.Password, lockoutOnFailure: true);
-        if (check.IsLockedOut)
-        {
-            return Results.Unauthorized();
-        }
+        if (check.IsLockedOut) return Results.Unauthorized();
         if (!check.Succeeded) return Results.Unauthorized();
 
-        // CheckPasswordSignInAsync only validates password + lockout - it never reports
-        // RequiresTwoFactor (only PasswordSignInAsync does). Check 2FA explicitly so an
-        // account with 2FA enabled is challenged instead of being signed in directly.
+        // CheckPasswordSignInAsync validates password + lockout only; it never reports
+        // RequiresTwoFactor. Check 2FA explicitly so enabled accounts are challenged.
         if (await users.GetTwoFactorEnabledAsync(user))
             return Results.Json(new { requiresTwoFactor = true }, statusCode: 202);
 
-        return await IssueSessionAsync(user, http, users, db, issuer, refreshTokens, env, ct);
+        var result = await IssueSessionAsync(user, http, users, db, issuer, refreshTokens, env, ct);
+        await RecordLoginAsync(db, user, http, ct);
+        return result;
     }
 
     private static async Task<IResult> LoginWithTwoFactorAsync(
@@ -92,7 +95,9 @@ public static partial class AuthEndpoints
         var valid = await users.VerifyTwoFactorTokenAsync(user, TokenOptions.DefaultAuthenticatorProvider, req.Code);
         if (!valid) return Results.Unauthorized();
 
-        return await IssueSessionAsync(user, http, users, db, issuer, refreshTokens, env, ct);
+        var result = await IssueSessionAsync(user, http, users, db, issuer, refreshTokens, env, ct);
+        await RecordLoginAsync(db, user, http, ct);
+        return result;
     }
 
     private static async Task<IResult> RefreshAsync(
@@ -114,12 +119,10 @@ public static partial class AuthEndpoints
         var result = await refreshTokens.RotateAsync(raw, ClientIp(http), ct);
         if (result.Outcome != RotateOutcome.Success)
         {
-            // Invalid (expired/unknown) or Reuse (family already revoked) -> clear + 401.
             ClearRefreshCookie(http, env);
             return Results.Unauthorized();
         }
 
-        // Re-check the account is still usable; otherwise revoke and bounce to login.
         var user = await users.FindByIdAsync(result.UserId.ToString());
         if (user is null || !user.IsActive())
         {
@@ -139,7 +142,6 @@ public static partial class AuthEndpoints
         IHostEnvironment env,
         CancellationToken ct)
     {
-        // Idempotent: no cookie / already-revoked token still returns 204.
         var raw = http.Request.Cookies[RefreshCookie];
         if (!string.IsNullOrEmpty(raw))
             await refreshTokens.RevokeAsync(raw, ct);
@@ -151,6 +153,7 @@ public static partial class AuthEndpoints
     private static async Task<IResult> RequestResetAsync(
         PasswordResetRequest req,
         UserManager<AppUser> users,
+        IMemoryCache cache,
         IEmailSender email,
         ILogger<Program> log)
     {
@@ -158,15 +161,18 @@ public static partial class AuthEndpoints
         if (user is null) return Results.Ok(); // Avoid email enumeration.
 
         var token = await users.GeneratePasswordResetTokenAsync(user);
-        LogResetTokenIssued(log, req.Email, token); // also logged so dev can copy when SMTP unset
-        await email.SendAsync(req.Email, "Đặt lại mật khẩu Học Bá",
-            $"Mã đặt lại mật khẩu của bạn: {token}");
+        var otp = GenerateOtp();
+        cache.Set(ResetOtpCacheKey(req.Email, otp), token, ResetOtpTtl);
+
+        LogResetOtpIssued(log, req.Email, otp);
+        await email.SendAsync(req.Email, "Dat lai mat khau Hoc Ba",
+            $"Ma OTP dat lai mat khau cua ban: {otp}. Ma co hieu luc trong 10 phut.");
         return Results.Ok();
     }
 
     private static async Task<IResult> ChangePasswordAsync(
         ChangePasswordRequest req,
-        System.Security.Claims.ClaimsPrincipal principal,
+        ClaimsPrincipal principal,
         UserManager<AppUser> users)
     {
         var user = await users.GetUserAsync(principal);
@@ -181,18 +187,23 @@ public static partial class AuthEndpoints
     private static async Task<IResult> ConfirmResetAsync(
         PasswordResetConfirm req,
         UserManager<AppUser> users,
+        IMemoryCache cache,
         IRefreshTokenService refreshTokens,
         CancellationToken ct)
     {
         var user = await users.FindByEmailAsync(req.Email);
         if (user is null) return Results.BadRequest("invalid_token");
 
-        var result = await users.ResetPasswordAsync(user, req.Token, req.NewPassword);
+        var cacheKey = ResetOtpCacheKey(req.Email, req.Token);
+        var identityToken = cache.Get<string>(cacheKey);
+        if (string.IsNullOrWhiteSpace(identityToken))
+            return Results.BadRequest("invalid_or_expired_otp");
+
+        var result = await users.ResetPasswordAsync(user, identityToken, req.NewPassword);
         if (!result.Succeeded)
             return Results.BadRequest(result.Errors.Select(e => e.Description));
 
-        // SPEC-11: reset commonly follows a suspected compromise - force re-login on every
-        // device by revoking the whole refresh-token family.
+        cache.Remove(cacheKey);
         await refreshTokens.RevokeAllForUserAsync(user.Id, ct);
         return Results.Ok();
     }
@@ -254,13 +265,14 @@ public static partial class AuthEndpoints
         return Results.Ok(new
         {
             sub,
+            tenantId = principal.FindFirstValue("tenant_id"),
+            tenantSlug = principal.FindFirstValue("tenant_slug"),
             roleId = roleId == Guid.Empty ? null : roleId.ToString(),
             role = roleName,
             permissions = perms.OrderBy(p => p).ToArray(),
         });
     }
 
-    // Issues the access token and a fresh refresh-token session (new family) + cookie.
     private static async Task<IResult> IssueSessionAsync(
         AppUser user,
         HttpContext http,
@@ -295,8 +307,6 @@ public static partial class AuthEndpoints
         return issuer.Issue(user.Id, user.TenantId, slug, roleId);
     }
 
-    // Maps the user's Identity role name to its fixed Id. 0 roles / an unknown role yields
-    // Guid.Empty -> backend default-denies any permission-gated endpoint (AC).
     private static Guid ResolveRoleId(IEnumerable<string> roleNames)
     {
         foreach (var name in roleNames)
@@ -309,13 +319,12 @@ public static partial class AuthEndpoints
         http.Response.Cookies.Append(RefreshCookie, raw, BuildCookieOptions(env, expires));
 
     private static void ClearRefreshCookie(HttpContext http, IHostEnvironment env) =>
-        // Must match the set attributes (Path/SameSite/Secure) or the browser keeps a zombie cookie.
         http.Response.Cookies.Delete(RefreshCookie, BuildCookieOptions(env, expires: null));
 
     private static CookieOptions BuildCookieOptions(IHostEnvironment env, DateTimeOffset? expires) => new()
     {
         HttpOnly = true,
-        Secure = !env.IsDevelopment(), // dev runs http; SameSite=Strict still works via vite same-origin proxy.
+        Secure = !env.IsDevelopment(),
         SameSite = SameSiteMode.Strict,
         Path = "/",
         Expires = expires,
@@ -330,10 +339,30 @@ public static partial class AuthEndpoints
                $"?secret={sharedKey}&issuer={encoder.Encode(issuer)}&digits=6";
     }
 
-    // SPEC-11 D11: a usable account must be active (is_active flag) AND not locked out.
+    private static string GenerateOtp() =>
+        RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
+
+    private static string ResetOtpCacheKey(string email, string otp) =>
+        $"password-reset:{email.Trim().ToUpperInvariant()}:{otp.Trim()}";
+
+    private static async Task RecordLoginAsync(AppDbContext db, AppUser user, HttpContext http, CancellationToken ct)
+    {
+        var userAgent = http.Request.Headers.UserAgent.ToString();
+        db.AuditLogs.Add(AuditLog.Create(
+            user.TenantId,
+            user.Id,
+            "auth.login",
+            "user",
+            user.Id,
+            DateTimeOffset.UtcNow,
+            ip: http.Connection.RemoteIpAddress,
+            userAgent: string.IsNullOrWhiteSpace(userAgent) ? null : userAgent));
+        await db.SaveChangesAsync(ct);
+    }
+
     private static bool IsActive(this AppUser user)
     {
-        if (!user.IsActive) return false; // admin-set deactivation flag (M23)
+        if (!user.IsActive) return false;
         if (!user.LockoutEnabled) return true;
         return !user.LockoutEnd.HasValue || user.LockoutEnd <= DateTimeOffset.UtcNow;
     }

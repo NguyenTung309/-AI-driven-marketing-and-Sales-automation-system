@@ -33,7 +33,7 @@ public sealed class ClawbotWebApplicationFactory : WebApplicationFactory<Program
                 ["Jwt:Audience"] = "test-clients",
                 ["Jwt:SigningKey"] = "test-signing-key-of-at-least-32-bytes!!",
                 ["Jwt:AccessTokenMinutes"] = "60",
-                ["AgentService:Url"] = "http://localhost:5050",
+                ["AgentService:Url"] = "http://localhost:15875",
                 ["Vector:Qdrant:Host"] = "localhost",
             });
         });

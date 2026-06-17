@@ -1,6 +1,5 @@
 import { apiClient } from "./client";
 
-// /auth/me — JWT claims only (no name/email/phone).
 export interface MeResponse {
   readonly sub: string | null;
   readonly tenantId: string | null;
@@ -31,14 +30,18 @@ export async function loginTwoFactor(email: string, password: string, code: stri
   return res.data.accessToken as string;
 }
 
-// POST /auth/reset/request → 200 (always; token currently logged server-side, email delivery is backend TODO).
+// POST /auth/reset/request → 200 (always; sends/logs a 6-digit OTP, anti-enumeration).
 export async function requestPasswordReset(email: string): Promise<void> {
   await apiClient.post("/auth/reset/request", { email });
 }
 
-// POST /auth/reset/confirm → 200 | 400. `token` = Identity reset token (NOT a 6-digit OTP).
-export async function confirmPasswordReset(email: string, token: string, newPassword: string): Promise<void> {
-  await apiClient.post("/auth/reset/confirm", { email, token, newPassword });
+// POST /auth/reset/confirm → 200 | 400. API field remains `token`; value is the 6-digit OTP from email.
+export async function confirmPasswordReset(email: string, otp: string, newPassword: string): Promise<void> {
+  await apiClient.post("/auth/reset/confirm", { email, token: otp, newPassword });
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  await apiClient.post("/auth/change-password", { currentPassword, newPassword });
 }
 
 // GET /auth/me (auth)

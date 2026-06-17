@@ -10,7 +10,8 @@ namespace Clawbot.Infrastructure.Ads;
 public sealed partial class MetaAdsConnector(
     HttpClient http,
     IOptions<MetaAdsOptions> options,
-    ILogger<MetaAdsConnector> logger) : IAdsPlatformConnector
+    ILogger<MetaAdsConnector> logger,
+    IAdsPlatformThrottle throttle) : IAdsPlatformConnector
 {
     public string Platform => "meta";
 
@@ -21,20 +22,23 @@ public sealed partial class MetaAdsConnector(
         if (!_options.Enabled || string.IsNullOrWhiteSpace(_options.AccessToken))
             return null;
 
-        try
+        return await throttle.RunAsync(Platform, async throttleCt =>
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(throttleCt);
+                timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
 
-            var url = $"{_options.Endpoint}/{externalCampaignId}/insights?fields=cpc,impressions,clicks,spend,actions&access_token={Uri.EscapeDataString(_options.AccessToken)}";
-            var response = await http.GetStringAsync(new Uri(url, UriKind.Absolute), timeout.Token).ConfigureAwait(false);
-            return ParseMetrics(response);
-        }
-        catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
-        {
-            LogFetchFailed(logger, externalCampaignId, ex);
-            return null;
-        }
+                var url = $"{_options.Endpoint}/{externalCampaignId}/insights?fields=cpc,impressions,clicks,spend,actions&access_token={Uri.EscapeDataString(_options.AccessToken)}";
+                var response = await http.GetStringAsync(new Uri(url, UriKind.Absolute), timeout.Token).ConfigureAwait(false);
+                return ParseMetrics(response);
+            }
+            catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
+            {
+                LogFetchFailed(logger, externalCampaignId, ex);
+                return null;
+            }
+        }, ct).ConfigureAwait(false);
     }
 
     public async Task<bool> ApplyActionAsync(string externalCampaignId, string action, decimal? newBudget, CancellationToken ct = default)
@@ -42,34 +46,37 @@ public sealed partial class MetaAdsConnector(
         if (!_options.Enabled || string.IsNullOrWhiteSpace(_options.AccessToken))
             return false;
 
-        try
+        return await throttle.RunAsync(Platform, async throttleCt =>
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
-
-            var status = action switch
+            try
             {
-                "pause" => "PAUSED",
-                "scale_up" or "scale_down" => "ACTIVE",
-                _ => null,
-            };
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(throttleCt);
+                timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
 
-            var body = new JsonObject();
-            if (status is not null)
-                body["status"] = status;
-            if (newBudget.HasValue)
-                body["daily_budget"] = (int)(newBudget.Value * 100);
+                var status = action switch
+                {
+                    "pause" => "PAUSED",
+                    "scale_up" or "scale_down" => "ACTIVE",
+                    _ => null,
+                };
 
-            var url = $"{_options.Endpoint}/{externalCampaignId}?access_token={Uri.EscapeDataString(_options.AccessToken)}";
-            using var content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
-            using var response = await http.PostAsync(new Uri(url, UriKind.Absolute), content, timeout.Token).ConfigureAwait(false);
-            return response.IsSuccessStatusCode;
-        }
-        catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
-        {
-            LogActionFailed(logger, action, externalCampaignId, ex);
-            return false;
-        }
+                var body = new JsonObject();
+                if (status is not null)
+                    body["status"] = status;
+                if (newBudget.HasValue)
+                    body["daily_budget"] = (int)(newBudget.Value * 100);
+
+                var url = $"{_options.Endpoint}/{externalCampaignId}?access_token={Uri.EscapeDataString(_options.AccessToken)}";
+                using var content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
+                using var response = await http.PostAsync(new Uri(url, UriKind.Absolute), content, timeout.Token).ConfigureAwait(false);
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
+            {
+                LogActionFailed(logger, action, externalCampaignId, ex);
+                return false;
+            }
+        }, ct).ConfigureAwait(false);
     }
 
     public Task<string?> BuildLookalikeAsync(IReadOnlyList<string> seedContactKeys, CancellationToken ct = default) =>

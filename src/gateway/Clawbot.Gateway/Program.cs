@@ -123,7 +123,9 @@ app.UseMiddleware<PancakeHmacMiddleware>();
 // 4. Rate limiting
 app.UseRateLimiter();
 
+
 // 5. AuthN/AuthZ — verify JWT before proxying routes that declare an AuthorizationPolicy.
+
 app.UseAuthentication();
 app.UseAuthorization();
 
