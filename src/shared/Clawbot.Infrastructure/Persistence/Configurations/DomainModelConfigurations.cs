@@ -192,7 +192,7 @@ public sealed class KbVersionConfiguration : IEntityTypeConfiguration<KbVersion>
         builder.Property(x => x.Status).HasMaxLength(32);
         builder.HasIndex(x => new { x.KbModuleId, x.Version }).IsUnique();
         // Embedding stored as JSON-serialized float array in NVARCHAR(MAX).
-        // For vector similarity search use Qdrant â€” see IVectorStore.
+        // For vector similarity search use Qdrant - see IVectorStore.
         builder.Property(x => x.Embedding).HasColumnType("nvarchar(max)");
     }
 }
@@ -418,6 +418,7 @@ public sealed class KpiDailyConfiguration : IEntityTypeConfiguration<KpiDaily>
         builder.HasIndex(x => new { x.TenantId, x.Date, x.Platform }).IsUnique();
     }
 }
+
 public sealed class LlmConfigConfiguration : IEntityTypeConfiguration<LlmConfig>
 {
     public void Configure(EntityTypeBuilder<LlmConfig> builder)
@@ -443,5 +444,41 @@ public sealed class KpiForecastConfiguration : IEntityTypeConfiguration<KpiForec
         builder.Property(x => x.Metric).HasMaxLength(64).IsRequired();
         builder.HasIndex(x => new { x.TenantId, x.Platform, x.Metric, x.ForecastDate }).IsUnique();
         builder.HasIndex(x => new { x.TenantId, x.Metric, x.ForecastDate });
+    }
+}
+
+public sealed class DripSequenceConfiguration : IEntityTypeConfiguration<DripSequence>
+{
+    public void Configure(EntityTypeBuilder<DripSequence> builder)
+    {
+        builder.ToTable("drip_sequences");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Name).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.TriggerEvent).HasMaxLength(64).IsRequired();
+        builder.HasMany(x => x.Steps).WithOne().HasForeignKey(s => s.SequenceId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(x => new { x.TenantId, x.TriggerEvent });
+    }
+}
+
+public sealed class DripSequenceStepConfiguration : IEntityTypeConfiguration<DripSequenceStep>
+{
+    public void Configure(EntityTypeBuilder<DripSequenceStep> builder)
+    {
+        builder.ToTable("drip_sequence_steps");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Channel).HasMaxLength(32).IsRequired();
+        builder.HasIndex(x => x.SequenceId);
+    }
+}
+
+public sealed class DripEnrollmentConfiguration : IEntityTypeConfiguration<DripEnrollment>
+{
+    public void Configure(EntityTypeBuilder<DripEnrollment> builder)
+    {
+        builder.ToTable("drip_enrollments");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Status).HasMaxLength(16).IsRequired();
+        builder.HasIndex(x => new { x.TenantId, x.Status });
+        builder.HasIndex(x => new { x.LeadId, x.Status });
     }
 }

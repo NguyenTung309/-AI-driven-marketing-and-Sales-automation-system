@@ -8,6 +8,7 @@ using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.Application;
 using Clawbot.Infrastructure;
+using Clawbot.Agents.Core.Rag;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Observability;
@@ -29,6 +30,7 @@ builder.Host.UseSerilog((ctx, lc) => lc.ReadFrom.Configuration(ctx.Configuration
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddClawbotRag(builder.Configuration);
 builder.Services.AddClawbotJobs(builder.Configuration);
 builder.Services.AddClawbotTelemetry(builder.Configuration, "clawbot-api");
 

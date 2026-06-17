@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { isAxiosError } from "axios";
 import { apiClient, loadPermissions } from "@/shared/api/client";
@@ -40,10 +40,10 @@ function BrandPanel() {
           {FLOW.map((node, i) => (
             <div key={node.label} className="flex items-center flex-1 last:flex-none">
               <div
-                className={lex flex-col items-center gap-2 rounded-xl border backdrop-blur-sm }
+                className="flex flex-col items-center gap-2 rounded-xl border backdrop-blur-sm"
               >
                 <span
-                  className={material-symbols-outlined text-on-primary }
+                  className="material-symbols-outlined text-on-primary"
                   style={node.emphasis ? { fontVariationSettings: "'FILL' 1" } : undefined}
                 >
                   {node.icon}
@@ -160,7 +160,7 @@ export default function LoginPage() {
                   value={code}
                   onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
                   placeholder="000000"
-                  className={${fieldInput} tracking-[0.5em] text-center}
+                  className={`${fieldInput} tracking-[0.5em] text-center`}
                 />
               </div>
               <button type="submit" disabled={loading} className={submitBtn}>
@@ -217,7 +217,7 @@ export default function LoginPage() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"
-                      className={${fieldInput} pr-12}
+                      className={`${fieldInput} pr-12`}
                     />
                     <button
                       type="button"
