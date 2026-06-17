@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Clawbot.Application.Abstractions;
 using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
@@ -13,7 +13,6 @@ using Clawbot.Domain.Conversations;
 using Clawbot.Domain.Documents;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
-using Clawbot.Domain.Llm;
 using Clawbot.Domain.Notifications;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Domain.Security;
@@ -39,7 +38,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
-    public DbSet<Auth.RefreshToken> RefreshTokens => Set<Auth.RefreshToken>();
     public DbSet<Notification> Notifications => Set<Notification>();
 
     // Contacts
@@ -92,11 +90,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<KpiDaily> KpiDailies => Set<KpiDaily>();
     public DbSet<KpiForecast> KpiForecasts => Set<KpiForecast>();
 
-    // Channel & LLM configs
+    // Channels
     public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();
-    public DbSet<LlmConfig> LlmConfigs => Set<LlmConfig>();
-    // Processed messages (dedup for demo polling)
-    public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
 
     // Competitors (Research-2)
     public DbSet<CompetitorSource> CompetitorSources => Set<CompetitorSource>();
@@ -109,10 +104,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     private sealed class EfConversationSet(DbSet<Conversation> set) : IConversationSet
     {
         public void Add(Conversation conversation) => set.Add(conversation);
-
-        // Global query filters (tenant isolation + soft delete) apply automatically â€” no manual tenant_id filter.
-        public Task<Conversation?> FindByThreadAsync(string platform, string externalThreadId, CancellationToken ct = default) =>
-            set.FirstOrDefaultAsync(c => c.Platform == platform && c.ExternalThreadId == externalThreadId, ct);
     }
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -165,6 +156,3 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
             e => e.TenantId == (tenantRef.Current != null ? tenantRef.Current.TenantId : Guid.Empty));
     }
 }
-
-
-

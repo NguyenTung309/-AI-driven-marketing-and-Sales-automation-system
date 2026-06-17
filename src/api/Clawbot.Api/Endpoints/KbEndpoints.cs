@@ -1,5 +1,4 @@
-﻿using System.Text;
-using Clawbot.Api.Auth;
+using System.Text;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Kb;
 using Clawbot.Agents.Core.Rag;
@@ -17,26 +16,26 @@ public static class KbEndpoints
 {
     public static IEndpointRouteBuilder MapKb(this IEndpointRouteBuilder app)
     {
-var modules = app.MapGroup("/api/modules").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var modules = app.MapGroup("/api/kb/modules").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
-        modules.MapGet("/", ListModulesAsync).RequirePermission("kb:read");
-        modules.MapGet("/{id:guid}", GetModuleAsync).RequirePermission("kb:read");
-        modules.MapPost("/", CreateModuleAsync).RequirePermission("kb:write");
-        modules.MapPut("/{id:guid}", UpdateModuleAsync).RequirePermission("kb:write");
-        modules.MapPost("/{id:guid}/archive", ArchiveModuleAsync).RequirePermission("kb:write");
+        modules.MapGet("/", ListModulesAsync);
+        modules.MapGet("/{id:guid}", GetModuleAsync);
+        modules.MapPost("/", CreateModuleAsync);
+        modules.MapPut("/{id:guid}", UpdateModuleAsync);
+        modules.MapPost("/{id:guid}/archive", ArchiveModuleAsync);
 
-        modules.MapGet("/{id:guid}/versions", ListVersionsAsync).RequirePermission("kb:read");
-        modules.MapPost("/{id:guid}/versions", CreateVersionAsync).RequirePermission("kb:write");
-        modules.MapGet("/{id:guid}/versions/{versionId:guid}", GetVersionDetailAsync).RequirePermission("kb:read");
-        modules.MapPost("/{id:guid}/versions/{versionId:guid}/deploy", DeployVersionAsync).RequirePermission("kb:write");
-        modules.MapPost("/{id:guid}/versions/{versionId:guid}/rollback", RollbackToVersionAsync).RequirePermission("kb:write");
-        modules.MapGet("/{id:guid}/diff", DiffVersionsAsync).RequirePermission("kb:read");
+        modules.MapGet("/{id:guid}/versions", ListVersionsAsync);
+        modules.MapPost("/{id:guid}/versions", CreateVersionAsync);
+        modules.MapGet("/{id:guid}/versions/{versionId:guid}", GetVersionDetailAsync);
+        modules.MapPost("/{id:guid}/versions/{versionId:guid}/deploy", DeployVersionAsync);
+        modules.MapPost("/{id:guid}/versions/{versionId:guid}/rollback", RollbackToVersionAsync);
+        modules.MapGet("/{id:guid}/diff", DiffVersionsAsync);
 
-        modules.MapGet("/{id:guid}/test-cases", ListTestCasesAsync).RequirePermission("kb:read");
-        modules.MapPost("/{id:guid}/test-cases", AddTestCaseAsync).RequirePermission("kb:write");
-        modules.MapPost("/{id:guid}/test", RunTestAsync).RequirePermission("kb:write");
+        modules.MapGet("/{id:guid}/test-cases", ListTestCasesAsync);
+        modules.MapPost("/{id:guid}/test-cases", AddTestCaseAsync);
+        modules.MapPost("/{id:guid}/test", RunTestAsync);
 
-        app.MapGet("/api/kb/accuracy", AccuracyDashboardAsync).RequirePermission("kb:read");
+        app.MapGet("/api/kb/accuracy", AccuracyDashboardAsync).RequireAuthorization();
         return app;
     }
 
@@ -398,6 +397,3 @@ internal static class UnifiedDiff
         return (added, removed, sb.ToString());
     }
 }
-
-
-

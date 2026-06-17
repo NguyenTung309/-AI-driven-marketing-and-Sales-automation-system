@@ -1,5 +1,4 @@
-﻿using Clawbot.Agents.Contracts.SaleAssist;
-using Clawbot.Api.Auth;
+using Clawbot.Agents.Contracts.SaleAssist;
 using Clawbot.Api.Contracts.SaleAssist;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.SaleAssist;
@@ -7,7 +6,6 @@ using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Api.Endpoints;
 
@@ -15,7 +13,7 @@ public static class SaleAssistEndpoints
 {
     public static IEndpointRouteBuilder MapSaleAssist(this IEndpointRouteBuilder app)
     {
-var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var grp = app.MapGroup("/api/sale-assist").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.ChatPolicy);
 
         grp.MapPost("/draft", DraftAsync);
         grp.MapPost("/summary", SummarizeAsync);
@@ -211,8 +209,3 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
         return Results.Ok(new { hot_leads = hotLeads, count = hotLeads.Count });
     }
 }
-
-
-
-
-
