@@ -651,11 +651,11 @@ export default function DocumentsPage() {
           <div>
             <h1 className="text-headline-md text-secondary">Thư viện tài liệu & gửi báo giá</h1>
             <p className="mt-1 text-body-md text-on-surface-variant">
-              Quản lý template, preview HTML/PDF và generate tài liệu qua `/api/docs`.
+              Quản lý template, preview HTML/PDF và tạo tài liệu tự động.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <StatusPill tone={apiError ? "error" : "success"}>{apiError ? "Docs API lỗi" : "Docs API online"}</StatusPill>
+            <StatusPill tone={apiError ? "error" : "success"}>{apiError ? "Mất kết nối" : "Đã kết nối"}</StatusPill>
             <Button
               type="button"
               variant="outline"

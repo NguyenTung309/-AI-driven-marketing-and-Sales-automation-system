@@ -427,7 +427,7 @@ export default function PromptConfigurationPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <StatusPill tone={currentError ? "error" : "success"}>{currentError ? "Prompt API lỗi" : "Prompt API online"}</StatusPill>
+          <StatusPill tone={currentError ? "error" : "success"}>{currentError ? "Mất kết nối" : "Đã kết nối"}</StatusPill>
           <Button type="button" variant="outline" onClick={() => void listQuery.refetch()}>
             <span className="material-symbols-outlined text-[18px]">refresh</span>
             Đồng bộ cấu hình

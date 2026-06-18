@@ -555,7 +555,7 @@ export default function AdminConsolePage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <StatusPill tone={currentError ? "error" : "success"}>{currentError ? "Admin API lỗi" : "Admin API online"}</StatusPill>
+            <StatusPill tone={currentError ? "error" : "success"}>{currentError ? "Mất kết nối" : "Đã kết nối"}</StatusPill>
             <Button type="button" variant="outline" onClick={() => setTab("audit")}>
               <span className="material-symbols-outlined text-[18px]">history</span>
               Nhật ký
@@ -1025,7 +1025,7 @@ export default function AdminConsolePage() {
             </div>
             <div className="mt-5 space-y-2 text-body-md text-on-surface-variant">
               <p>Token và webhook secret được mã hóa ở backend; frontend chỉ gửi giá trị mới khi bạn nhập.</p>
-              <p>Các kênh ads/lookalike đang dùng `/api/ads`; phần này chỉ quản lý kết nối Pancake.</p>
+              <p>Phần này chỉ quản lý kết nối Pancake cho tenant hiện tại.</p>
             </div>
           </Card>
           </div>
@@ -1037,7 +1037,7 @@ export default function AdminConsolePage() {
           <Card className="p-0">
             <div className="border-b border-outline p-card-padding">
               <h2 className="text-headline-sm text-secondary">Nhật ký quản trị</h2>
-              <p className="mt-1 text-body-md text-on-surface-variant">50 sự kiện gần nhất từ `/api/admin/audit-logs`.</p>
+              <p className="mt-1 text-body-md text-on-surface-variant">50 sự kiện quản trị gần nhất.</p>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-[900px] w-full border-collapse text-left">

@@ -9,6 +9,7 @@ using Clawbot.Api.Services;
 using Clawbot.Application;
 using Clawbot.Infrastructure;
 using Clawbot.Agents.Core.Rag;
+using Clawbot.Agents.Core.Skills;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Notifications;
@@ -30,6 +31,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog((ctx, lc) => lc.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console(formatProvider: CultureInfo.InvariantCulture));
 
 builder.Services.AddApplication();
+builder.Services.AddClawbotChatSupport(builder.Configuration);
 Clawbot.Agents.Core.Chat.ChatModule.AddClawbotChat(builder.Services, builder.Configuration);
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddClawbotRag(builder.Configuration);

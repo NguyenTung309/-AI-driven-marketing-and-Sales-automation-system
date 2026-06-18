@@ -8,6 +8,10 @@
 --   * Soft-delete via deleted_at on aggregate roots
 -- =============================================================
 
+-- Required for filtered indexes, indexed views, and computed column indexes
+SET QUOTED_IDENTIFIER ON;
+SET ARITHABORT ON;
+
 -- ------------- Tenants & RBAC -------------
 
 CREATE TABLE tenants (

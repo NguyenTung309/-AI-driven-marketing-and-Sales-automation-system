@@ -11,6 +11,8 @@ dist/
 deploy/.env
 *.tsbuildinfo
 .cache/
+.dotnet/
+.run-logs/
 TestResults/
 coverage/
 appsettings*.Local.json

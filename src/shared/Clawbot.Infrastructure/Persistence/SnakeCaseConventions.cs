@@ -11,7 +11,7 @@ internal static class SnakeCaseConventions
         {
             // MassTransit transactional-outbox entities (InboxState/OutboxState/OutboxMessage) keep their
             // canonical PascalCase schema so the migration DDL matches MassTransit's documented tables exactly.
-            if (string.Equals(entity.ClrType.Namespace, "MassTransit", StringComparison.Ordinal))
+            if (entity.ClrType.Namespace?.StartsWith("MassTransit", StringComparison.Ordinal) == true)
             {
                 continue;
             }

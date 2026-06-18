@@ -223,7 +223,7 @@ export default function TokenManagementPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <StatusPill tone={currentError ? "error" : quotaStatus}>{currentError ? "Token API lỗi" : "Token API online"}</StatusPill>
+          <StatusPill tone={currentError ? "error" : quotaStatus}>{currentError ? "Mất kết nối" : "Đã kết nối"}</StatusPill>
           <Button type="button" variant="outline" disabled={!data} onClick={() => data && exportCsv(data)}>
             <span className="material-symbols-outlined text-[18px]">download</span>
             Xuất báo cáo

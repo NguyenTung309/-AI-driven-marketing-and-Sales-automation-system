@@ -1,4 +1,4 @@
-﻿-- Migration: 0002_processed_messages
+-- Migration: 0002_processed_messages
 -- Description: Add processed_messages table for demo polling dedup
 
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'processed_messages')

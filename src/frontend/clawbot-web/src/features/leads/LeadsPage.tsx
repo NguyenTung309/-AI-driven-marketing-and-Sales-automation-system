@@ -609,7 +609,7 @@ export default function LeadsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StatusPill tone={leadsQuery.isError ? "error" : "success"}>{leadsQuery.isError ? "API lỗi" : "API connected"}</StatusPill>
+          <StatusPill tone={leadsQuery.isError ? "error" : "success"}>{leadsQuery.isError ? "Mất kết nối" : "Đã kết nối"}</StatusPill>
           <button
             className="inline-flex items-center gap-2 rounded border border-outline bg-white px-4 py-2 text-body-md font-bold text-secondary hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
             disabled={!filteredLeads.length}
@@ -712,7 +712,7 @@ export default function LeadsPage() {
         {leadsQuery.isLoading ? (
           <div className="p-card-padding text-body-md text-on-surface-variant">Đang tải danh sách lead...</div>
         ) : leadsQuery.isError ? (
-          <div className="p-card-padding text-body-md text-error">Không tải được API lead. Vui lòng kiểm tra API hoặc quyền truy cập.</div>
+          <div className="p-card-padding text-body-md text-error">Không tải được dữ liệu lead. Vui lòng kiểm tra dịch vụ hoặc quyền truy cập.</div>
         ) : filteredLeads.length ? (
           <>
             <LeadTable
