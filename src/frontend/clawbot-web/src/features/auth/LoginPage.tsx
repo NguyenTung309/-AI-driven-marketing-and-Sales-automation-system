@@ -40,7 +40,7 @@ function BrandPanel() {
           {FLOW.map((node, i) => (
             <div key={node.label} className="flex items-center flex-1 last:flex-none">
               <div
-                className="flex flex-col items-center gap-2 rounded-xl border backdrop-blur-sm"
+                className="flex flex-col items-center gap-2 rounded-xl backdrop-blur-sm"
               >
                 <span
                   className="material-symbols-outlined text-on-primary"

@@ -4,6 +4,7 @@ using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Agents.Core.Skills.Ops;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Clawbot.Agents.Core.Skills;
 
@@ -69,6 +70,20 @@ public static class SkillsModule
     public static IServiceCollection AddClawbotPiiRedactor(this IServiceCollection services)
     {
         services.AddSingleton<IPiiRedactor, RegexPiiRedactor>();
+        return services;
+    }
+
+    public static IServiceCollection AddClawbotChatSupport(this IServiceCollection services, IConfiguration cfg)
+    {
+        services.Configure<ToxicityOptions>(cfg.GetSection(ToxicityOptions.SectionName));
+        services.TryAddSingleton<IIntentClassifier, KeywordIntentClassifier>();
+        services.TryAddSingleton<IPiiRedactor, RegexPiiRedactor>();
+        services.TryAddSingleton<ILanguageDetector, FastTextLanguageDetector>();
+        services.TryAddSingleton<IToxicityFilter, DetoxifyToxicityFilter>();
+        services.TryAddSingleton<ISpamDetector, AkismetSpamDetector>();
+        services.TryAddSingleton<IPromptInjectionDefender, HeuristicPromptInjectionDefender>();
+        services.TryAddSingleton<IClaudeCostTracker, InMemoryClaudeCostTracker>();
+        services.TryAddSingleton<Chat.IAgentToggleGate, Chat.AlwaysEnabledAgentToggleGate>();
         return services;
     }
 }

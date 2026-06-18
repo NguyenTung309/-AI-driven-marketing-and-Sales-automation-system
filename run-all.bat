@@ -8,6 +8,7 @@ set "COMPOSE_FILE=%ROOT%deploy\docker-compose.yml"
 set "FRONTEND_DIR=%ROOT%src\frontend\clawbot-web"
 set "MIGRATIONS_DIR=%ROOT%deploy\migrations"
 set "MSSQL_SA_PASSWORD=Clawbot!2026"
+set "JWT_SIGNING_KEY=dev-only-jwt-signing-key-change-before-staging-0123456789"
 set "DRY_RUN=0"
 
 if /i "%~1"=="--dry-run" set "DRY_RUN=1"
@@ -17,12 +18,13 @@ if "%DRY_RUN%"=="1" (
     echo Root: %ROOT%
     echo Would copy deploy\.env.example to deploy\.env if missing.
     echo Would run: docker compose --env-file deploy\.env -f deploy\docker-compose.yml up -d sqlserver redis rabbitmq qdrant minio postgres metabase
+    echo Would stop old app processes listening on ports 15873, 15874, 15875, 15876
     echo Would run: dotnet restore Clawbot.sln
     echo Would run: dotnet build Clawbot.sln --no-restore
     echo Would run: npm ci in src\frontend\clawbot-web when node_modules is missing
     echo Would start AgentService with ASPNETCORE_URLS=http://localhost:15875
-    echo Would start API with ASPNETCORE_URLS=http://localhost:15874 and AgentService__Url=http://localhost:15875
-    echo Would start Gateway with ASPNETCORE_URLS=http://localhost:15873
+    echo Would start API with ASPNETCORE_URLS=http://localhost:15874, AgentService__Url=http://localhost:15875, and shared Jwt__SigningKey
+    echo Would start Gateway with ASPNETCORE_URLS=http://localhost:15873 and shared Jwt__SigningKey
     echo Would start frontend with npm run dev at http://localhost:15876
     exit /b 0
 )
@@ -32,7 +34,7 @@ echo === ClawBot local one-click runner ===
 echo Root: %ROOT%
 echo.
 
-call :require_command dotnet ".NET SDK 8"
+call :setup_dotnet
 if errorlevel 1 exit /b 1
 call :require_command node "Node.js 20"
 if errorlevel 1 exit /b 1
@@ -59,6 +61,9 @@ if errorlevel 1 (
     echo Open Docker Desktop, wait until it is running, then run this file again.
     exit /b 1
 )
+
+call :stop_app_ports
+if errorlevel 1 exit /b 1
 
 echo [INFO] Starting infrastructure containers...
 docker compose --env-file "%ENV_FILE%" -f "%COMPOSE_FILE%" up -d sqlserver redis rabbitmq qdrant minio postgres metabase
@@ -99,10 +104,10 @@ echo [INFO] Opening service windows...
 start "ClawBot AgentService :15875" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15875&& dotnet run --project ""%ROOT%src\agents\Clawbot.AgentService\Clawbot.AgentService.csproj"" --no-launch-profile"
 timeout /t 2 /nobreak >nul
 
-start "ClawBot API :15874" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15874&& set AgentService__Url=http://localhost:15875&& dotnet run --project ""%ROOT%src\api\Clawbot.Api\Clawbot.Api.csproj"" --no-launch-profile"
+start "ClawBot API :15874" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15874&& set AgentService__Url=http://localhost:15875&& set Jwt__SigningKey=%JWT_SIGNING_KEY%&& dotnet run --project ""%ROOT%src\api\Clawbot.Api\Clawbot.Api.csproj"" --no-launch-profile"
 timeout /t 2 /nobreak >nul
 
-start "ClawBot Gateway :15873" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15873&& dotnet run --project ""%ROOT%src\gateway\Clawbot.Gateway\Clawbot.Gateway.csproj"" --no-launch-profile"
+start "ClawBot Gateway :15873" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15873&& set Jwt__SigningKey=%JWT_SIGNING_KEY%&& dotnet run --project ""%ROOT%src\gateway\Clawbot.Gateway\Clawbot.Gateway.csproj"" --no-launch-profile"
 timeout /t 2 /nobreak >nul
 
 start "ClawBot Web :15876" cmd /k "cd /d ""%FRONTEND_DIR%"" && npm run dev -- --host 0.0.0.0 --port 15876"
@@ -121,6 +126,36 @@ exit /b 0
 where %~1 >nul 2>nul
 if errorlevel 1 (
     echo [ERROR] Missing %~2. Install it, open a new terminal, then run run-all.bat again.
+    exit /b 1
+)
+exit /b 0
+
+:stop_app_ports
+echo [INFO] Releasing old app ports if they are already in use...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ports = @(15873, 15874, 15875, 15876); $listeners = @(Get-NetTCPConnection -LocalPort $ports -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); foreach ($listenerPid in $listeners) { if (-not $listenerPid -or $listenerPid -eq $PID) { continue }; $proc = Get-Process -Id $listenerPid -ErrorAction SilentlyContinue; if ($null -eq $proc) { continue }; Write-Host ('[INFO] Stopping PID {0} ({1}) listening on an app port.' -f $listenerPid, $proc.ProcessName); Stop-Process -Id $listenerPid -Force -ErrorAction SilentlyContinue }; $remaining = @(); for ($i = 0; $i -lt 20; $i++) { Start-Sleep -Milliseconds 500; $remaining = @(Get-NetTCPConnection -LocalPort $ports -State Listen -ErrorAction SilentlyContinue); if (-not $remaining) { exit 0 } }; $remaining | ForEach-Object { Write-Host ('[ERROR] Port {0} is still used by PID {1}.' -f $_.LocalPort, $_.OwningProcess) }; exit 1"
+if errorlevel 1 (
+    echo [ERROR] Could not release one or more app ports. Close the listed process and run again.
+    exit /b 1
+)
+exit /b 0
+
+:setup_dotnet
+if exist "%ROOT%.dotnet\dotnet.exe" (
+    set "DOTNET_ROOT=%ROOT%.dotnet"
+    set "PATH=%ROOT%.dotnet;%PATH%"
+)
+
+where dotnet >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] Missing .NET SDK 8. Install it, open a new terminal, then run run-all.bat again.
+    exit /b 1
+)
+
+dotnet --list-sdks | findstr /b "8." >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] .NET SDK 8 was not found. The dotnet runtime alone is not enough.
+    echo Install SDK 8.0.418, or run:
+    echo powershell -NoProfile -ExecutionPolicy Bypass -File dotnet-install.ps1 -Version 8.0.418 -InstallDir .\.dotnet
     exit /b 1
 )
 exit /b 0
@@ -164,27 +199,69 @@ exit /b %errorlevel%
 
 :apply_migrations_if_needed
 set "SCHEMA_CHECK=%TEMP%\clawbot_schema_check.txt"
-docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -h -1 -W -Q "SET NOCOUNT ON; IF OBJECT_ID(N'dbo.tenants', N'U') IS NULL SELECT 0 ELSE SELECT 1" > "%SCHEMA_CHECK%" 2>nul
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -h -1 -W -Q "SET NOCOUNT ON; SELECT CONCAT(CASE WHEN OBJECT_ID(N'dbo.tenants', N'U') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN OBJECT_ID(N'dbo.AspNetRoles', N'U') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.tenants', N'widget_greeting') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN OBJECT_ID(N'dbo.messages', N'U') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN OBJECT_ID(N'dbo.experiment_events', N'U') IS NULL OR OBJECT_ID(N'dbo.competitor_posts', N'U') IS NULL OR COL_LENGTH(N'dbo.generated_documents', N'expires_at') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_messages_external_id' AND object_id = OBJECT_ID(N'dbo.messages')) THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.users', N'phone_number') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.conversations', N'last_message_at') IS NULL THEN 0 ELSE 1 END)" > "%SCHEMA_CHECK%" 2>nul
 if errorlevel 1 (
     echo [ERROR] Could not inspect clawbot schema.
     exit /b 1
 )
 
 set "HAS_SCHEMA=0"
+set "HAS_IDENTITY_SCHEMA=0"
+set "HAS_LATEST_SCHEMA=0"
+set "HAS_CORE_TABLES=0"
+set "HAS_RECENT_MIGRATIONS=0"
+set "HAS_IDENTITY_RUNTIME_COLUMNS=0"
+set "HAS_CONVERSATION_RUNTIME_COLUMNS=0"
 set /p HAS_SCHEMA=<"%SCHEMA_CHECK%"
 del "%SCHEMA_CHECK%" >nul 2>nul
+for /f "tokens=1,2,3,4,5,6,7 delims=|" %%A in ("%HAS_SCHEMA%") do (
+    set "HAS_SCHEMA=%%A"
+    set "HAS_IDENTITY_SCHEMA=%%B"
+    set "HAS_LATEST_SCHEMA=%%C"
+    set "HAS_CORE_TABLES=%%D"
+    set "HAS_RECENT_MIGRATIONS=%%E"
+    set "HAS_IDENTITY_RUNTIME_COLUMNS=%%F"
+    set "HAS_CONVERSATION_RUNTIME_COLUMNS=%%G"
+)
 
 if "%HAS_SCHEMA%"=="1" (
+    if not "%HAS_IDENTITY_SCHEMA%"=="1" goto incomplete_schema
+    if not "%HAS_LATEST_SCHEMA%"=="1" goto incomplete_schema
+    if not "%HAS_CORE_TABLES%"=="1" goto incomplete_schema
+    if not "%HAS_RECENT_MIGRATIONS%"=="1" goto incomplete_schema
+    set "NEEDS_RUNTIME_REPAIR=0"
+    if not "%HAS_IDENTITY_RUNTIME_COLUMNS%"=="1" set "NEEDS_RUNTIME_REPAIR=1"
+    if not "%HAS_CONVERSATION_RUNTIME_COLUMNS%"=="1" set "NEEDS_RUNTIME_REPAIR=1"
+    if "%NEEDS_RUNTIME_REPAIR%"=="1" (
+        call :repair_runtime_columns
+        if errorlevel 1 exit /b 1
+    )
     echo [INFO] Existing schema detected; skipping SQL migration replay.
     echo [INFO] For a clean local DB, run: docker compose --env-file deploy\.env -f deploy\docker-compose.yml down -v
     exit /b 0
 )
 
+goto replay_migrations
+
+:repair_runtime_columns
+echo [INFO] Repairing runtime columns on existing schema...
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "IF COL_LENGTH(N'dbo.users', N'phone_number') IS NULL ALTER TABLE dbo.users ADD phone_number NVARCHAR(MAX); IF COL_LENGTH(N'dbo.conversations', N'last_message_at') IS NULL ALTER TABLE dbo.conversations ADD last_message_at DATETIMEOFFSET; IF COL_LENGTH(N'dbo.conversations', N'last_msg_at') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'last_message_at') IS NOT NULL EXEC(N'UPDATE conversations SET last_message_at = last_msg_at WHERE last_message_at IS NULL AND last_msg_at IS NOT NULL;'); IF COL_LENGTH(N'dbo.conversations', N'last_message_at') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_conversations_tenant_id_status_last_message_at' AND object_id = OBJECT_ID(N'dbo.conversations')) EXEC(N'CREATE INDEX ix_conversations_tenant_id_status_last_message_at ON conversations (tenant_id, status, last_message_at DESC);');"
+exit /b %errorlevel%
+
+:incomplete_schema
+        echo [ERROR] Existing clawbot database is missing required tables or columns.
+        echo This usually means an older or partial local schema was detected.
+        echo For a clean local DB, run:
+        echo docker compose --env-file deploy\.env -f deploy\docker-compose.yml down -v
+        echo Then run run-all.bat again.
+        exit /b 1
+
+:replay_migrations
 echo [INFO] Applying SQL migrations from deploy\migrations...
 pushd "%MIGRATIONS_DIR%" >nul
 for %%F in (*.sql) do (
     echo [SQL] %%F
-    type "%%F" | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
+    (echo SET QUOTED_IDENTIFIER ON;& echo SET ARITHABORT ON;& type "%%F") | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
     if errorlevel 1 (
         popd >nul
         echo [ERROR] Migration failed: %%F

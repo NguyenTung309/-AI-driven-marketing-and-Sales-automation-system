@@ -1,6 +1,8 @@
-import { NavLink } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { NavLink, useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { logout } from "@/shared/api/auth";
 import { getUnreadNotificationCount } from "@/shared/api/notifications";
+import { useAuthStore } from "@/shared/auth/authStore";
 import { NAV_ITEMS, NAV_SYSTEM, type NavItem } from "./nav";
 
 export interface TopbarProps {
@@ -23,8 +25,10 @@ function MobileNavItem({ item }: { readonly item: NavItem }) {
   );
 }
 
-// Fixed 64px top bar: search left, actions + avatar right.
 export function Topbar({ title }: TopbarProps) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const clearAuth = useAuthStore((state) => state.clear);
   const { data } = useQuery({
     queryKey: ["notifications", "unread-count"],
     queryFn: getUnreadNotificationCount,
@@ -33,8 +37,20 @@ export function Topbar({ title }: TopbarProps) {
   });
   const unreadCount = data?.count ?? 0;
 
+  async function handleLogout() {
+    try {
+      await logout();
+    } catch {
+      // If the server is unreachable, still clear the local session.
+    } finally {
+      clearAuth();
+      queryClient.clear();
+      navigate("/login", { replace: true });
+    }
+  }
+
   return (
-    <header className="bg-surface text-on-surface fixed top-0 right-0 h-[64px] w-full md:w-[calc(100%-260px)] border-b border-surface-variant flex justify-between items-center px-4 md:px-gutter z-10">
+    <header className="fixed right-0 top-0 z-10 flex h-[64px] w-full items-center justify-between border-b border-surface-variant bg-surface px-4 text-on-surface md:w-[calc(100%-260px)] md:px-gutter">
       <div className="flex min-w-0 items-center gap-3">
         <details className="relative md:hidden">
           <summary className="flex size-10 cursor-pointer list-none items-center justify-center rounded border border-outline bg-surface-container-lowest text-on-surface">
@@ -52,23 +68,25 @@ export function Topbar({ title }: TopbarProps) {
             </div>
           </div>
         </details>
+
         <div className="relative hidden sm:block">
-        <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50 text-[20px]">
-          search
-        </span>
-        <input
-          className="bg-surface-container-lowest border border-surface-variant rounded pl-10 pr-4 py-2 w-56 lg:w-72 text-body-md focus:outline-none focus:ring-2 focus:ring-primary/30"
-          placeholder="Tìm kiếm..."
-          aria-label="Tìm kiếm"
-        />
+          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant/50">
+            search
+          </span>
+          <input
+            aria-label="Tìm kiếm"
+            className="w-56 rounded border border-surface-variant bg-surface-container-lowest py-2 pl-10 pr-4 text-body-md focus:outline-none focus:ring-2 focus:ring-primary/30 lg:w-72"
+            placeholder="Tìm kiếm..."
+          />
         </div>
       </div>
+
       <div className="flex min-w-0 items-center gap-3 md:gap-4">
         {title ? <span className="truncate text-headline-sm font-semibold">{title}</span> : null}
         <NavLink
+          aria-label="Thông báo"
           className="relative text-on-surface-variant hover:text-on-surface"
           to="/notifications"
-          aria-label="Thông báo"
         >
           <span className="material-symbols-outlined text-[22px]">notifications</span>
           {unreadCount > 0 ? (
@@ -77,9 +95,32 @@ export function Topbar({ title }: TopbarProps) {
             </span>
           ) : null}
         </NavLink>
-        <div className="size-9 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold">
-          HB
-        </div>
+
+        <details className="relative">
+          <summary
+            aria-label="Tài khoản"
+            className="flex size-9 cursor-pointer list-none items-center justify-center rounded-full bg-primary font-bold text-on-primary outline-none transition-shadow hover:ring-2 hover:ring-primary/30 focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            HB
+          </summary>
+          <div className="absolute right-0 top-11 w-48 rounded-lg border border-outline bg-surface-container-lowest p-2 shadow-2xl">
+            <NavLink
+              className="flex items-center gap-2 rounded px-3 py-2 text-body-md text-on-surface hover:bg-surface-container-low"
+              to="/profile"
+            >
+              <span className="material-symbols-outlined text-[18px]">account_circle</span>
+              <span>Hồ sơ</span>
+            </NavLink>
+            <button
+              className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-body-md text-error hover:bg-red-50"
+              onClick={handleLogout}
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[18px]">logout</span>
+              <span>Đăng xuất</span>
+            </button>
+          </div>
+        </details>
       </div>
     </header>
   );

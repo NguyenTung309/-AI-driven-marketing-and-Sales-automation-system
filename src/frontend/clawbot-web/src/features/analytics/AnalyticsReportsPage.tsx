@@ -536,7 +536,7 @@ function ExportDialog({
       <div className="space-y-4">
         {error ? <Alert tone="error">{errorMessage(error)}</Alert> : null}
         <p className="text-body-md text-on-surface-variant">
-          File export gọi `/api/analytics/export` bằng bearer token hiện tại. CSV dùng cho bảng số liệu, PDF dùng cho báo cáo gửi nội bộ.
+          Xuất CSV cho bảng số liệu, hoặc PDF cho báo cáo gửi nội bộ.
         </p>
       </div>
     </Modal>
@@ -644,7 +644,7 @@ export default function AnalyticsReportsPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill tone={apiError ? "error" : omnichannelQuery.data?.stale ? "warning" : "success"}>
-              {apiError ? "Analytics API lỗi" : omnichannelQuery.data?.stale ? "Dữ liệu cũ" : "Analytics online"}
+              {apiError ? "Mất kết nối" : omnichannelQuery.data?.stale ? "Dữ liệu cũ" : "Đã kết nối"}
             </StatusPill>
             <select
               className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"

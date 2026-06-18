@@ -271,7 +271,7 @@ function FunnelPanel({ funnel }: { readonly funnel: FunnelResponse | null }) {
         <StatusPill tone="neutral">{funnel ? platformLabel(funnel.platform) : "No data"}</StatusPill>
       </div>
       {steps.length === 0 ? (
-        <p className="text-body-md text-on-surface-variant">Không tải được dữ liệu `/api/analytics/funnel`.</p>
+        <p className="text-body-md text-on-surface-variant">Không tải được dữ liệu phễu chuyển đổi.</p>
       ) : (
         <div className="space-y-3">
           {steps.map((step) => (
@@ -302,7 +302,7 @@ function AgentStatus({ agents }: { readonly agents: readonly AgentPerformance[] 
         <StatusPill tone={visible.length ? "success" : "neutral"}>{visible.length ? `${visible.length} active` : "Chưa có session"}</StatusPill>
       </div>
       {visible.length === 0 ? (
-        <p className="text-body-md text-on-surface-variant">Chưa có dữ liệu `/api/analytics/agent-performance`.</p>
+        <p className="text-body-md text-on-surface-variant">Chưa có dữ liệu hiệu suất agent.</p>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {visible.map((agent) => {
@@ -389,7 +389,7 @@ function LiveTaskTable({ anomalies }: { readonly anomalies: readonly AnomalyPoin
             {rows.length === 0 ? (
               <tr>
                 <td className="px-3 py-8 text-center text-body-md text-on-surface-variant" colSpan={5}>
-                  Chưa có anomaly từ `/api/analytics/anomalies`.
+                  Chưa có cảnh báo bất thường.
                 </td>
               </tr>
             ) : (
@@ -470,7 +470,7 @@ export default function DashboardPage() {
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill tone={realtimeTone(realtimeState)}>{realtimeLabel(realtimeState)}</StatusPill>
             <StatusPill tone={apiError ? "error" : omnichannelQuery.data?.stale ? "warning" : "success"}>
-              {apiError ? "API gián đoạn" : omnichannelQuery.data?.stale ? "Dữ liệu cũ" : "KPI online"}
+              {apiError ? "Mất kết nối" : omnichannelQuery.data?.stale ? "Dữ liệu cũ" : "KPI online"}
             </StatusPill>
             <div className="flex rounded border border-outline bg-white p-1">
               {(["7d", "30d"] as const).map((item) => (
@@ -504,7 +504,7 @@ export default function DashboardPage() {
               <h2 className="text-headline-sm">Xu hướng omnichannel</h2>
               <p className="text-body-md text-on-surface-variant">
                 {omnichannelQuery.isLoading
-                  ? "Đang tải `/api/analytics/omnichannel`..."
+                  ? "Đang tải dữ liệu đa kênh..."
                   : `Kỳ ${range.from} → ${range.to}, tổng chi phí ${formatCurrency(agg.adSpend)}.`}
               </p>
             </div>
@@ -524,7 +524,7 @@ export default function DashboardPage() {
           <div className="mb-4 flex items-center justify-between">
             <div>
               <h2 className="text-headline-sm">Dự báo lead 7 ngày</h2>
-              <p className="text-body-md text-on-surface-variant">Nguồn: `/api/analytics/forecast?metric=leads`.</p>
+              <p className="text-body-md text-on-surface-variant">Nguồn: dữ liệu dự báo lead.</p>
             </div>
             <StatusPill tone={forecast.length ? "success" : "neutral"}>{forecast.length ? "Fresh" : "No forecast"}</StatusPill>
           </div>
@@ -542,7 +542,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-headline-sm text-error">Không tải đủ dữ liệu dashboard</h2>
               <p className="mt-1 text-body-md text-on-surface-variant">
-                Kiểm tra quyền Bearer token và các endpoint `/api/analytics/*`. Các panel độc lập vẫn giữ trạng thái riêng để không làm sập trang.
+                Kiểm tra phiên đăng nhập và quyền truy cập. Các panel độc lập vẫn giữ trạng thái riêng để không làm sập trang.
               </p>
               <Button type="button" className="mt-3" variant="outline" onClick={() => void omnichannelQuery.refetch()}>
                 <span className="material-symbols-outlined text-[18px]">refresh</span>

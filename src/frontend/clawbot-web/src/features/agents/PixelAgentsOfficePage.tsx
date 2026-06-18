@@ -268,12 +268,12 @@ export default function PixelAgentsOfficePage() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div>
               <h2 className="text-[18px] font-black leading-6 text-slate-950">Agent floor</h2>
-              <p className="text-[13px] leading-5 text-slate-500">Pixel office view mapped from `/api/agents`.</p>
+              <p className="text-[13px] leading-5 text-slate-500">Theo dõi trạng thái vận hành của từng agent.</p>
             </div>
             {usingFallback ? (
               <span className="border border-amber-300 bg-amber-50 px-3 py-1.5 text-[12px] font-bold uppercase text-amber-800">Demo fallback</span>
             ) : (
-              <span className="border border-green-300 bg-green-50 px-3 py-1.5 text-[12px] font-bold uppercase text-green-800">API connected</span>
+              <span className="border border-green-300 bg-green-50 px-3 py-1.5 text-[12px] font-bold uppercase text-green-800">Đã kết nối</span>
             )}
           </div>
 

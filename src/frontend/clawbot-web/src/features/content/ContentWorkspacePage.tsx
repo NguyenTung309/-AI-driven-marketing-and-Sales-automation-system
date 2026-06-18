@@ -371,7 +371,7 @@ function TrendPanel({
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-headline-sm text-secondary">Xu hướng tuần</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">Nguồn `/api/content/trends` và agent research.</p>
+          <p className="mt-1 text-body-md text-on-surface-variant">Nguồn từ hệ thống xu hướng và agent research.</p>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={onScan} disabled={scanning}>
           <span className="material-symbols-outlined text-[16px]">travel_explore</span>
@@ -650,7 +650,7 @@ function CalendarPanel({
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-headline-sm text-secondary">Lịch xuất bản</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">30 ngày tới từ `/api/content/calendar`.</p>
+          <p className="mt-1 text-body-md text-on-surface-variant">Lịch xuất bản trong 30 ngày tới.</p>
         </div>
         <StatusPill tone={items.length ? "success" : "neutral"}>{items.length} lịch</StatusPill>
       </div>
@@ -791,7 +791,7 @@ function ScheduleDialog({
               <span className="material-symbols-outlined text-[18px] text-primary">schedule</span>
               <span className="text-body-md font-bold text-secondary">Chọn thời điểm riêng</span>
             </div>
-            <p className="mt-1 text-label-sm text-on-surface-variant">Gửi `scheduledAt` cụ thể tới API schedule.</p>
+            <p className="mt-1 text-label-sm text-on-surface-variant">Chọn chính xác thời điểm muốn lên lịch.</p>
           </button>
         </div>
       </div>
@@ -1013,11 +1013,11 @@ export default function ContentWorkspacePage() {
           <div>
             <h1 className="text-headline-md text-secondary">Quản lý Bài viết & Nội dung</h1>
             <p className="mt-1 text-body-md text-on-surface-variant">
-              Quản lý brief, hàng đợi duyệt, lịch đăng và xu hướng từ các endpoint `/api/content`.
+              Quản lý brief, hàng đợi duyệt, lịch đăng và xu hướng nội dung.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <StatusPill tone={activeError ? "error" : "success"}>{activeError ? "API gián đoạn" : "Content API online"}</StatusPill>
+            <StatusPill tone={activeError ? "error" : "success"}>{activeError ? "Mất kết nối" : "Đã kết nối"}</StatusPill>
             <Button type="button" variant="outline" onClick={() => void invalidateContent()}>
               <span className="material-symbols-outlined text-[18px]">refresh</span>
               Làm mới

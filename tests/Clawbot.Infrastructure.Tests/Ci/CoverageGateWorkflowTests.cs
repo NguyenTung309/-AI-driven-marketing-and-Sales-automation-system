@@ -247,6 +247,7 @@ public sealed class CoverageGateWorkflowTests
         script.Should().Contain("ALTER TABLE users ADD");
         script.Should().Contain("normalized_email");
         script.Should().Contain("concurrency_stamp");
+        script.Should().Contain("phone_number");
         script.Should().Contain("two_factor_enabled");
         script.Should().Contain("lockout_enabled");
         script.Should().Contain("CREATE TABLE AspNetUserTokens");

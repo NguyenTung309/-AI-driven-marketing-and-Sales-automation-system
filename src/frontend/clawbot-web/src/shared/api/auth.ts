@@ -44,6 +44,10 @@ export async function changePassword(currentPassword: string, newPassword: strin
   await apiClient.post("/auth/change-password", { currentPassword, newPassword });
 }
 
+export async function logout(): Promise<void> {
+  await apiClient.post("/auth/logout");
+}
+
 // GET /auth/me (auth)
 export async function getMe(): Promise<MeResponse> {
   const res = await apiClient.get<MeResponse>("/auth/me");

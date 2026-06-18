@@ -33,6 +33,7 @@ builder.Services.RemoveAll<Clawbot.Agents.Core.Chat.IAgentToggleGate>();
 builder.Services.AddSingleton<Clawbot.Agents.Core.Chat.IAgentToggleGate, Clawbot.Infrastructure.Agents.DbAgentToggleGate>();
 // Persist-only notification publisher (no SignalR hub in AgentService); FE polls unread count.
 builder.Services.AddSingleton<Clawbot.SharedKernel.Notifications.INotificationPublisher, Clawbot.Infrastructure.Notifications.DbOnlyNotificationPublisher>();
+builder.Services.TryAddSingleton<Clawbot.SharedKernel.Inbox.IInboxNotifier, Clawbot.Infrastructure.Notifications.NoopInboxNotifier>();
 builder.Services.AddClawbotRag(builder.Configuration);
 builder.Services.AddClawbotChat(builder.Configuration);
 builder.Services.AddClawbotContent(builder.Configuration);

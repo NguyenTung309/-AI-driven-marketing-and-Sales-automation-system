@@ -279,7 +279,7 @@ export default function NotificationsPage() {
             <div className="p-card-padding text-body-md text-on-surface-variant">Đang tải thông báo từ backend...</div>
           ) : listQuery.isError ? (
             <div className="m-card-padding rounded-lg border border-error/30 bg-red-50 p-4 text-body-md text-error">
-              Không thể tải thông báo. Kiểm tra API `/api/notifications`.
+              Không thể tải thông báo. Kiểm tra dịch vụ và quyền truy cập.
             </div>
           ) : visibleNotifications.length ? (
             <div className="xl:max-h-[640px] xl:overflow-y-auto">

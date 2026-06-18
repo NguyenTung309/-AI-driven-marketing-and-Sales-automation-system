@@ -217,7 +217,7 @@ export default function KnowledgeBasePage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StatusPill tone={errors.length ? "error" : "success"}>{errors.length ? "API lỗi" : "API connected"}</StatusPill>
+          <StatusPill tone={errors.length ? "error" : "success"}>{errors.length ? "Mất kết nối" : "Đã kết nối"}</StatusPill>
           <button
             className="inline-flex items-center gap-2 rounded bg-primary px-4 py-2 text-body-md font-bold text-white hover:bg-primary-hover"
             onClick={() => setModuleDialog("create")}

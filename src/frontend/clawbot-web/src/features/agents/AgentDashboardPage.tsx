@@ -457,7 +457,7 @@ export default function AgentDashboardPage() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <StatusPill tone={agentsQuery.isError ? "error" : "success"}>
-            {agentsQuery.isError ? "Mất kết nối API" : "API: /api/agents"}
+            {agentsQuery.isError ? "Mất kết nối dữ liệu" : "Agent online"}
           </StatusPill>
           <Button
             className="bg-error hover:bg-red-700"
@@ -481,7 +481,7 @@ export default function AgentDashboardPage() {
         <MetricCard
           label="Agent đang chạy"
           value={`${runningAgents.length}/${agents.length}`}
-          delta="Start/stop qua /api/agents"
+          delta="Start/stop trực tiếp"
           icon="memory"
           tone={runningAgents.length ? "success" : "neutral"}
         />
@@ -509,7 +509,7 @@ export default function AgentDashboardPage() {
               <div className="rounded-lg border border-outline bg-surface p-6 text-body-md text-on-surface-variant">Đang tải danh sách agent...</div>
             ) : agentsQuery.isError ? (
               <div className="rounded-lg border border-error/30 bg-red-50 p-6 text-body-md text-error">
-                Không thể tải `/api/agents`. Kiểm tra backend và quyền truy cập.
+                Không thể tải danh sách agent. Kiểm tra dịch vụ và quyền truy cập.
               </div>
             ) : agents.length ? (
               <div
@@ -602,7 +602,7 @@ export default function AgentDashboardPage() {
                   </div>
                 ))
               ) : (
-                <p className="text-body-md text-on-surface-variant">Chưa có dữ liệu `/api/analytics/agent-cost`.</p>
+                <p className="text-body-md text-on-surface-variant">Chưa có dữ liệu chi phí agent.</p>
               )}
             </div>
           </Card>
