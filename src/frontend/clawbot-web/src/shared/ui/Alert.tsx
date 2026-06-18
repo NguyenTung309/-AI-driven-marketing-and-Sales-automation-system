@@ -26,7 +26,7 @@ export function Alert({ tone = "info", icon, children }: AlertProps) {
   const t = TONE[tone];
   return (
     <div className={`flex gap-3 p-4 rounded-lg border ${t.box}`}>
-      <span className={`material-symbols-outlined text-[20px] shrink-0 ${t.icon}`}>{icon ?? DEFAULT_ICON[tone]}</span>
+      <span aria-hidden="true" className={`material-symbols-outlined text-[20px] shrink-0 ${t.icon}`}>{icon ?? DEFAULT_ICON[tone]}</span>
       <div className="text-label-sm text-on-surface leading-relaxed">{children}</div>
     </div>
   );

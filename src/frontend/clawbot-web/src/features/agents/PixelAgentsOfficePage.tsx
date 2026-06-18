@@ -1,16 +1,17 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
+import { operationalPhaseLabel, toSafeOperationalText } from "@/shared/utils/userText";
 import { getAgentTraces, listAgents, type AgentListItem, type AgentStatus, type AgentTraceItem } from "@/shared/api/agents";
 
 const SAMPLE_AGENTS: readonly AgentListItem[] = [
-  { code: "chat", displayName: "Chat", agentType: "chat", model: "claude", status: "running", updatedAt: "", lastRunAt: null },
+  { code: "chat", displayName: "Trò chuyện", agentType: "chat", model: "claude", status: "running", updatedAt: "", lastRunAt: null },
   { code: "sale", displayName: "Sale", agentType: "sale_assist", model: "claude", status: "running", updatedAt: "", lastRunAt: null },
   { code: "content", displayName: "Content", agentType: "content", model: "claude", status: "running", updatedAt: "", lastRunAt: null },
-  { code: "research", displayName: "Research", agentType: "research", model: "claude", status: "stopped", updatedAt: "", lastRunAt: null },
+  { code: "research", displayName: "Nghiên cứu", agentType: "research", model: "claude", status: "stopped", updatedAt: "", lastRunAt: null },
   { code: "ads", displayName: "Ads", agentType: "ads", model: "rules", status: "running", updatedAt: "", lastRunAt: null },
   { code: "docs", displayName: "Docs", agentType: "docs", model: "questpdf", status: "stopped", updatedAt: "", lastRunAt: null },
-  { code: "report", displayName: "Report", agentType: "report", model: "mlnet", status: "running", updatedAt: "", lastRunAt: null },
+  { code: "report", displayName: "Báo cáo", agentType: "report", model: "mlnet", status: "running", updatedAt: "", lastRunAt: null },
   { code: "lead", displayName: "Lead", agentType: "lead", model: "rules", status: "error", updatedAt: "", lastRunAt: null },
 ];
 
@@ -18,9 +19,9 @@ const SAMPLE_TRACES: readonly AgentTraceItem[] = [
   {
     id: "trace-seed-1",
     sessionId: "demo",
-    agentName: "Chat",
+    agentName: "Trò chuyện",
     phase: "complete",
-    message: "Captured visitor intent and handed context to Sale.",
+    message: "Đã ghi nhận nhu cầu khách và chuyển ngữ cảnh cho đội tư vấn.",
     occurredAt: new Date().toISOString(),
   },
   {
@@ -36,7 +37,7 @@ const SAMPLE_TRACES: readonly AgentTraceItem[] = [
     sessionId: "demo",
     agentName: "Lead",
     phase: "warning",
-    message: "Duplicate contact candidate needs review before scoring.",
+    message: "Có liên hệ trùng cần kiểm tra trước khi chấm điểm.",
     occurredAt: new Date(Date.now() - 420_000).toISOString(),
   },
 ];
@@ -74,14 +75,14 @@ function statusLabel(status: AgentStatus): string {
 
 function agentLabel(agent: AgentListItem): string {
   const type = normalize(agent.agentType || agent.code);
-  if (type === "sale_assist") return "Sale";
-  if (type === "lead") return "Lead";
-  if (type === "docs") return "Docs";
-  if (type === "ads") return "Ads";
-  if (type === "report") return "Report";
-  if (type === "research") return "Research";
-  if (type === "content") return "Content";
-  if (type === "chat") return "Chat";
+  if (type === "sale_assist") return "Tư vấn";
+  if (type === "lead") return "Chấm lead";
+  if (type === "docs") return "Tài liệu";
+  if (type === "ads") return "Quảng cáo";
+  if (type === "report") return "Báo cáo";
+  if (type === "research") return "Nghiên cứu";
+  if (type === "content") return "Nội dung";
+  if (type === "chat") return "Trò chuyện";
   return agent.displayName || agent.code;
 }
 
@@ -158,7 +159,7 @@ function Metric({ icon, label, value }: { readonly icon: string; readonly label:
   return (
     <div className="border border-slate-200 bg-white px-4 py-3 shadow-sm">
       <div className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0] text-slate-500">
-        <span className="material-symbols-outlined text-[17px]">{icon}</span>
+        <span aria-hidden="true" className="material-symbols-outlined text-[17px]">{icon}</span>
         {label}
       </div>
       <div className="mt-2 text-[26px] font-black leading-8 text-slate-950">{value}</div>
@@ -175,10 +176,10 @@ function TraceRow({ trace }: { readonly trace: AgentTraceItem }) {
       <span className="min-w-0">
         <span className="flex flex-wrap items-center gap-2">
           <span className="font-bold text-slate-900">{trace.agentName || "Agent"}</span>
-          <span className="font-mono text-[11px] uppercase text-slate-500">{trace.phase || "trace"}</span>
+          <span className="font-mono text-[11px] uppercase text-slate-500">{operationalPhaseLabel(trace.phase)}</span>
           <span className="ml-auto font-mono text-[11px] text-slate-400">{timeLabel(trace.occurredAt)}</span>
         </span>
-        <span className="mt-1 block text-[13px] leading-5 text-slate-600">{trace.message}</span>
+        <span className="mt-1 block text-[13px] leading-5 text-slate-600">{toSafeOperationalText(trace.message)}</span>
       </span>
     </li>
   );
@@ -214,35 +215,35 @@ export default function PixelAgentsOfficePage() {
   );
 
   return (
-    <AppShell title="Pixel Agents Office">
+    <AppShell title="Không gian agents">
       <section className="mb-5 border border-slate-200 bg-white px-5 py-4 shadow-sm">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <h1 className="text-[32px] font-black leading-10 tracking-[0] text-slate-950">Pixel Agents Office</h1>
-            <p className="mt-1 text-[15px] leading-6 text-slate-600">Mặt bằng vận hành agent, hàng đợi tác vụ và trace đang chạy theo thời gian thực.</p>
+            <h1 className="text-[32px] font-black leading-10 tracking-[0] text-slate-950">Không gian agents</h1>
+            <p className="mt-1 text-[15px] leading-6 text-slate-600">Mặt bằng vận hành agent, hàng đợi tác vụ và sự kiện đang chạy theo thời gian thực.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-2 border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-bold uppercase text-red-700">
               <span className="size-2 animate-pulse bg-red-600" />
               Đang đồng bộ
             </span>
-            <span className="border border-slate-200 px-3 py-2 font-mono text-[12px] uppercase text-slate-500">Polling 5s</span>
+            <span className="border border-slate-200 px-3 py-2 font-mono text-[12px] uppercase text-slate-500">Làm mới 5 giây</span>
           </div>
         </div>
       </section>
 
       <section className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-4">
-        <Metric icon="memory" label="Active agents" value={`${runningCount}/${agents.length}`} />
-        <Metric icon="priority_high" label="Attention" value={String(errorCount)} />
-        <Metric icon="route" label="Queue lanes" value={String(queue.length)} />
-        <Metric icon="history" label="Trace feed" value={String(traces.length)} />
+        <Metric icon="memory" label="Agent đang chạy" value={`${runningCount}/${agents.length}`} />
+        <Metric icon="priority_high" label="Cần chú ý" value={String(errorCount)} />
+        <Metric icon="route" label="Luồng hàng đợi" value={String(queue.length)} />
+        <Metric icon="history" label="Sự kiện" value={String(traces.length)} />
       </section>
 
       <section className="grid grid-cols-1 gap-5 2xl:grid-cols-[320px_minmax(0,1fr)_340px]">
         <aside className="border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 px-4 py-3">
-            <h2 className="text-[18px] font-black leading-6 text-slate-950">Task queue</h2>
-            <p className="text-[13px] leading-5 text-slate-500">Agent work lanes sorted by current floor state.</p>
+            <h2 className="text-[18px] font-black leading-6 text-slate-950">Hàng đợi tác vụ</h2>
+            <p className="text-[13px] leading-5 text-slate-500">Hàng đợi agent được sắp theo trạng thái hiện tại.</p>
           </div>
           <ul className="divide-y divide-slate-200">
             {queue.map((item) => (
@@ -267,11 +268,11 @@ export default function PixelAgentsOfficePage() {
         <div className="min-w-0 border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div>
-              <h2 className="text-[18px] font-black leading-6 text-slate-950">Agent floor</h2>
+              <h2 className="text-[18px] font-black leading-6 text-slate-950">Sơ đồ agents</h2>
               <p className="text-[13px] leading-5 text-slate-500">Theo dõi trạng thái vận hành của từng agent.</p>
             </div>
             {usingFallback ? (
-              <span className="border border-amber-300 bg-amber-50 px-3 py-1.5 text-[12px] font-bold uppercase text-amber-800">Demo fallback</span>
+              <span className="border border-amber-300 bg-amber-50 px-3 py-1.5 text-[12px] font-bold uppercase text-amber-800">Dữ liệu mẫu</span>
             ) : (
               <span className="border border-green-300 bg-green-50 px-3 py-1.5 text-[12px] font-bold uppercase text-green-800">Đã kết nối</span>
             )}
@@ -296,8 +297,8 @@ export default function PixelAgentsOfficePage() {
         <aside className="space-y-5">
           <section className="border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 px-4 py-3">
-              <h2 className="text-[18px] font-black leading-6 text-slate-950">Health</h2>
-              <p className="text-[13px] leading-5 text-slate-500">Selected agent runtime signal.</p>
+              <h2 className="text-[18px] font-black leading-6 text-slate-950">Sức khỏe vận hành</h2>
+              <p className="text-[13px] leading-5 text-slate-500">Tín hiệu vận hành của agent đang chọn.</p>
             </div>
             <div className="space-y-4 px-4 py-4">
               <div>
@@ -306,16 +307,16 @@ export default function PixelAgentsOfficePage() {
               </div>
               <div className="grid grid-cols-2 gap-3 text-[13px]">
                 <div className="border border-slate-200 bg-slate-50 p-3">
-                  <p className="font-bold uppercase text-slate-500">Status</p>
+                  <p className="font-bold uppercase text-slate-500">Trạng thái</p>
                   <p className="mt-1 font-black text-slate-950">{selectedAgent ? statusLabel(selectedAgent.status) : "--"}</p>
                 </div>
                 <div className="border border-slate-200 bg-slate-50 p-3">
-                  <p className="font-bold uppercase text-slate-500">Model</p>
+                  <p className="font-bold uppercase text-slate-500">Mô hình</p>
                   <p className="mt-1 truncate font-black text-slate-950">{selectedAgent?.model || "--"}</p>
                 </div>
               </div>
               <div className="border border-slate-200 bg-slate-50 p-3">
-                <p className="font-bold uppercase text-slate-500">Last run</p>
+                <p className="font-bold uppercase text-slate-500">Lần chạy gần nhất</p>
                 <p className="mt-1 font-mono text-[13px] text-slate-700">{timeLabel(selectedAgent?.lastRunAt ?? null)}</p>
               </div>
             </div>
@@ -323,8 +324,8 @@ export default function PixelAgentsOfficePage() {
 
           <section className="border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 px-4 py-3">
-              <h2 className="text-[18px] font-black leading-6 text-slate-950">Trace feed</h2>
-              <p className="text-[13px] leading-5 text-slate-500">Recent events for the selected floor.</p>
+              <h2 className="text-[18px] font-black leading-6 text-slate-950">Sự kiện vận hành</h2>
+              <p className="text-[13px] leading-5 text-slate-500">Sự kiện mới nhất trong khu vực đang chọn.</p>
             </div>
             <ul className="max-h-[410px] overflow-y-auto px-4">
               {traces.map((trace) => (

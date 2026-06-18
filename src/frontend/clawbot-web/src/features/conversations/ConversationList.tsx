@@ -17,6 +17,13 @@ function formatTime(iso: string | null): string {
   return d.toLocaleDateString('vi', { day: '2-digit', month: '2-digit' });
 }
 
+function statusLabel(status: string): string {
+  if (status === 'open') return 'Đang mở';
+  if (status === 'resolved') return 'Đã xử lý';
+  if (status === 'escalated') return 'Cần người hỗ trợ';
+  return 'Chưa có tin nhắn mới';
+}
+
 export default function ConversationList({ conversations, selectedId, onSelect }: Props) {
   return (
     <div className="flex flex-col overflow-y-auto border-r border-slate-200 h-full">
@@ -34,10 +41,10 @@ export default function ConversationList({ conversations, selectedId, onSelect }
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
-              <span className="font-medium text-sm truncate">{conv.contactDisplayName ?? 'Unknown'}</span>
+              <span className="font-medium text-sm truncate">{conv.contactDisplayName ?? 'Khách chưa định danh'}</span>
               <span className="text-xs text-slate-400 shrink-0">{formatTime(conv.lastMessageAt)}</span>
             </div>
-            <p className="text-xs text-slate-500 truncate mt-0.5">{conv.lastMessagePreview ?? conv.status}</p>
+            <p className="text-xs text-slate-500 truncate mt-0.5">{conv.lastMessagePreview ?? statusLabel(conv.status)}</p>
           </div>
           {conv.unreadCount > 0 && (
             <span className="bg-blue-500 text-white text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0">

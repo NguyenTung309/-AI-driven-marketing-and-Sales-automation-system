@@ -19,6 +19,7 @@ import {
 } from "@/shared/api/inbox";
 import { SaleAssistPanel } from "./SaleAssistPanel";
 import { useInboxRealtime } from "./useInboxRealtime";
+import { toUserFriendlyError } from "@/shared/utils/userText";
 
 type StatusFilter = "all" | "open" | "escalated" | "resolved" | "mine";
 type PlatformFilter = "all" | "facebook" | "zalo" | "web";
@@ -41,7 +42,7 @@ const PLATFORM_FILTERS: readonly { value: PlatformFilter; label: string }[] = [
   { value: "all", label: "Mọi kênh" },
   { value: "facebook", label: "Facebook" },
   { value: "zalo", label: "Zalo" },
-  { value: "web", label: "Web chat" },
+  { value: "web", label: "Khung chat web" },
 ];
 
 function toStatusTone(status: ConversationStatus) {
@@ -61,7 +62,7 @@ function platformLabel(platform: string): string {
   const value = platform.toLowerCase();
   if (value.includes("facebook") || value === "fb") return "Facebook";
   if (value.includes("zalo") || value === "zl") return "Zalo OA";
-  if (value.includes("web")) return "Web chat";
+  if (value.includes("web")) return "Khung chat web";
   return platform || "Omnichannel";
 }
 
@@ -69,7 +70,7 @@ function platformMark(platform: string): string {
   const label = platformLabel(platform);
   if (label === "Facebook") return "FB";
   if (label === "Zalo OA") return "Z";
-  if (label === "Web chat") return "W";
+  if (label === "Khung chat web") return "W";
   return label.slice(0, 2).toUpperCase();
 }
 
@@ -77,7 +78,7 @@ function platformColor(platform: string): string {
   const label = platformLabel(platform);
   if (label === "Facebook") return "bg-blue-100 text-blue-700 border-blue-200";
   if (label === "Zalo OA") return "bg-indigo-100 text-indigo-700 border-indigo-200";
-  if (label === "Web chat") return "bg-emerald-100 text-emerald-700 border-emerald-200";
+  if (label === "Khung chat web") return "bg-emerald-100 text-emerald-700 border-emerald-200";
   return "bg-surface-container text-secondary border-outline";
 }
 
@@ -99,7 +100,7 @@ function formatTime(value: string): string {
 }
 
 function customerName(conversation: ConversationListItem | ConversationDetail): string {
-  return conversation.contactDisplayName?.trim() || conversation.externalThreadId || "Khách chưa định danh";
+  return conversation.contactDisplayName?.trim() || "Khách chưa định danh";
 }
 
 function isOutbound(message: InboxMessage): boolean {
@@ -110,17 +111,17 @@ function errorMessage(error: unknown): string {
   if (error instanceof AxiosError) {
     if (error.response?.status === 404) return "Không tìm thấy hội thoại.";
     if (error.response?.status === 401) return "Phiên đăng nhập hết hạn hoặc thiếu quyền truy cập.";
-    if (error.response?.status === 400) return "Backend từ chối dữ liệu gửi lên.";
+    if (error.response?.status === 400) return "Thông tin gửi lên chưa hợp lệ. Vui lòng kiểm tra lại.";
   }
-  return "Không thể kết nối dữ liệu. Kiểm tra dịch vụ và thử lại.";
+  return toUserFriendlyError(error, "Không thể kết nối dữ liệu. Vui lòng thử lại.");
 }
 
 function realtimeLabel(state: ReturnType<typeof useInboxRealtime>): string {
-  if (state === "connected") return "Realtime đang kết nối";
-  if (state === "reconnecting") return "Realtime đang nối lại";
-  if (state === "connecting") return "Đang mở realtime";
-  if (state === "disabled") return "Realtime chờ token";
-  return "Realtime gián đoạn";
+  if (state === "connected") return "Cập nhật tức thì đang kết nối";
+  if (state === "reconnecting") return "Đang nối lại cập nhật tức thì";
+  if (state === "connecting") return "Đang mở cập nhật tức thì";
+  if (state === "disabled") return "Đang chờ quyền truy cập";
+  return "Cập nhật tức thì gián đoạn";
 }
 
 function realtimeTone(state: ReturnType<typeof useInboxRealtime>) {
@@ -148,7 +149,7 @@ function FilterChip({ active, label, icon, onClick }: FilterChipProps) {
           : "border-outline bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container-low",
       ].join(" ")}
     >
-      {icon ? <span className="material-symbols-outlined text-[14px]">{icon}</span> : null}
+      {icon ? <span aria-hidden="true" className="material-symbols-outlined text-[14px]">{icon}</span> : null}
       {label}
     </button>
   );
@@ -244,7 +245,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
             byAi ? "border-tertiary/20 bg-tertiary/10 text-tertiary" : "border-primary/20 bg-primary text-on-primary",
           ].join(" ")}
         >
-          <span className="material-symbols-outlined text-[16px]">{byAi ? "smart_toy" : "support_agent"}</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">{byAi ? "smart_toy" : "support_agent"}</span>
         </div>
       ) : null}
 
@@ -275,7 +276,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
     return (
       <section className="flex h-full min-h-[720px] flex-col rounded-lg border border-outline bg-surface-container-lowest">
         <div className="m-auto max-w-md text-center">
-          <span className="material-symbols-outlined text-[40px] text-error">error</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[40px] text-error">error</span>
           <p className="mt-3 text-body-md text-on-surface">{errorMessage(error)}</p>
         </div>
       </section>
@@ -286,7 +287,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
     return (
       <section className="flex h-full min-h-[720px] flex-col rounded-lg border border-outline bg-surface-container-lowest">
         <div className="m-auto max-w-md text-center">
-          <span className="material-symbols-outlined text-[44px] text-on-surface-variant">forum</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[44px] text-on-surface-variant">forum</span>
           <h2 className="mt-3 text-headline-sm">Chưa có hội thoại</h2>
           <p className="mt-2 text-body-md text-on-surface-variant">
             Khi có dữ liệu hội thoại mới, nội dung chat sẽ hiển thị tại đây.
@@ -301,7 +302,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
       {conversation.status === "escalated" ? (
         <div className="flex items-center justify-between bg-warning px-gutter py-2 text-label-lg font-semibold text-white">
           <span className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-[18px]">warning</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">warning</span>
             Hội thoại đang cần người hỗ trợ trực tiếp.
           </span>
         </div>
@@ -324,7 +325,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
               </span>
             </h2>
             <p className="text-label-sm text-on-surface-variant">
-              Thread {conversation.externalThreadId} · {statusLabel(conversation.status)}
+              Mã hội thoại: {conversation.externalThreadId || "chưa có"} · {statusLabel(conversation.status)}
             </p>
           </div>
         </div>
@@ -334,7 +335,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
       <div className="flex-1 space-y-4 overflow-y-auto bg-surface p-gutter">
         {conversation.messages.length === 0 ? (
           <div className="rounded-lg border border-dashed border-outline bg-white p-6 text-center text-body-md text-on-surface-variant">
-            Chưa có message trong hội thoại này.
+            Chưa có tin nhắn trong hội thoại này.
           </div>
         ) : (
           conversation.messages.map((message) => <MessageBubble key={message.id} message={message} />)
@@ -347,14 +348,14 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
             type="button"
             className="inline-flex items-center gap-1 rounded border border-outline px-2 py-1 text-label-sm text-secondary hover:bg-surface"
           >
-            <span className="material-symbols-outlined text-[14px]">attach_file</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[14px]">attach_file</span>
             Đính kèm
           </button>
           <button
             type="button"
             className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50/70 px-2 py-1 text-label-sm text-amber-800"
           >
-            <span className="material-symbols-outlined text-[14px]">star</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[14px]">star</span>
             Gắn thẻ khách VIP
           </button>
         </div>
@@ -376,7 +377,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
             className="mb-1 flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-on-primary transition-colors hover:bg-primary-hover disabled:opacity-50"
             aria-label="Gửi tin nhắn"
           >
-            <span className="material-symbols-outlined">send</span>
+            <span aria-hidden="true" className="material-symbols-outlined">send</span>
           </button>
         </div>
       </footer>
@@ -416,21 +417,21 @@ function ContextPanel({
           </div>
           <h4 className="mt-3 text-headline-sm">{conversation ? customerName(conversation) : "Chưa chọn"}</h4>
           <div className="mt-2 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-3 py-1">
-            <span className="material-symbols-outlined text-[16px] text-amber-500">star</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[16px] text-amber-500">star</span>
             <span className="text-label-sm font-bold text-amber-800">Ưu tiên chăm sóc</span>
           </div>
         </div>
         <div className="mt-5 space-y-3 text-body-md">
           <div className="flex items-center gap-3">
-            <span className="material-symbols-outlined text-[18px] text-tertiary">hub</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-tertiary">hub</span>
             <span>{conversation ? platformLabel(conversation.platform) : "Mọi kênh"}</span>
           </div>
           <div className="flex items-center gap-3">
-            <span className="material-symbols-outlined text-[18px] text-tertiary">tag</span>
-            <span className="font-mono text-mono-status">{conversation?.externalThreadId ?? "N/A"}</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-tertiary">tag</span>
+            <span className="font-mono text-mono-status">{conversation?.externalThreadId ?? "Chưa có mã"}</span>
           </div>
           <div className="flex items-center gap-3">
-            <span className="material-symbols-outlined text-[18px] text-tertiary">schedule</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-tertiary">schedule</span>
             <span>{formatRelative(conversation?.lastMessageAt ?? null)}</span>
           </div>
         </div>
@@ -446,15 +447,15 @@ function ContextPanel({
             onClick={onAssign}
             disabled={!conversation || !meId || busy || assignedToMe}
           >
-            <span className="material-symbols-outlined text-[18px]">person_add</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">person_add</span>
             {assignedToMe ? "Đã gán cho bạn" : "Gán cho tôi"}
           </Button>
           <Button type="button" className="w-full" variant="outline" onClick={onEscalate} disabled={!conversation || busy}>
-            <span className="material-symbols-outlined text-[18px]">warning</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">warning</span>
             Cần người hỗ trợ
           </Button>
           <Button type="button" className="w-full" variant="ghost" onClick={onResolve} disabled={!conversation || busy}>
-            <span className="material-symbols-outlined text-[18px]">task_alt</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">task_alt</span>
             Đánh dấu đã xử lý
           </Button>
         </div>
@@ -597,7 +598,7 @@ export default function ConversationsPage() {
             <div>
               <h1 className="text-headline-md">Hộp thư tập trung</h1>
               <p className="mt-1 text-body-md text-on-surface-variant">
-                Ưu tiên hội thoại nóng, cập nhật realtime và thao tác trực tiếp với khách hàng.
+                Ưu tiên hội thoại nóng, cập nhật tức thì và thao tác trực tiếp với khách hàng.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -640,7 +641,7 @@ export default function ConversationsPage() {
               icon="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Tìm tên, SĐT, thread..."
+              placeholder="Tìm tên, SĐT, mã hội thoại..."
             />
             <div className="mt-stack-md flex flex-wrap gap-2">
               {STATUS_FILTERS.map((item) => (

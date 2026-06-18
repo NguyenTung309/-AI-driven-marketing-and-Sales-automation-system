@@ -56,7 +56,7 @@ function typeIcon(notification: AppNotification): string {
 function typeLabel(type: string): string {
   const value = normalize(type);
   if (value.includes("lead")) return "Lead";
-  if (value.includes("content")) return "Content";
+  if (value.includes("content")) return "Nội dung";
   if (value.includes("budget")) return "Ngân sách";
   if (value.includes("agent")) return "Agent";
   if (value.includes("system")) return "Hệ thống";
@@ -86,10 +86,10 @@ function formatRelative(value: string): string {
 }
 
 function realtimeLabel(state: ReturnType<typeof useNotificationsRealtime>): string {
-  if (state === "connected") return "Realtime đang kết nối";
-  if (state === "reconnecting" || state === "connecting") return "Đang nối realtime";
-  if (state === "disabled") return "Realtime tắt";
-  return "Realtime chưa sẵn sàng";
+  if (state === "connected") return "Cập nhật tức thì đang bật";
+  if (state === "reconnecting" || state === "connecting") return "Đang kết nối cập nhật";
+  if (state === "disabled") return "Cập nhật tức thì đang tắt";
+  return "Cập nhật tức thì chưa sẵn sàng";
 }
 
 function notificationActionLabel(notification: AppNotification): string {
@@ -118,7 +118,7 @@ function NotificationRow({
       ].join(" ")}
     >
       <div className={`flex size-10 items-center justify-center rounded-full ${toneClasses(tone)}`}>
-        <span className="material-symbols-outlined text-[20px]">{typeIcon(notification)}</span>
+        <span aria-hidden="true" className="material-symbols-outlined text-[20px]">{typeIcon(notification)}</span>
       </div>
       <div className="min-w-0">
         <div className="mb-1 flex flex-wrap items-center gap-2">
@@ -209,7 +209,7 @@ export default function NotificationsPage() {
         <div>
           <h1 className="text-headline-md font-bold text-secondary">Trung tâm thông báo</h1>
           <p className="mt-1 text-body-md text-on-surface-variant">
-            Theo dõi cảnh báo backend, lead nóng và trạng thái agent từ SignalR in-app.
+            Theo dõi cảnh báo hệ thống, lead nóng và trạng thái agent ngay trong ứng dụng.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -231,12 +231,12 @@ export default function NotificationsPage() {
         <Card>
           <p className="text-label-caps uppercase text-on-surface-variant">Chưa đọc</p>
           <p className="mt-2 text-telemetry-data text-secondary">{unreadCount.toLocaleString("vi-VN")}</p>
-          <p className="mt-1 font-mono text-mono-status text-primary">Badge cập nhật trực tiếp</p>
+          <p className="mt-1 font-mono text-mono-status text-primary">Số đếm cập nhật trực tiếp</p>
         </Card>
         <Card>
           <p className="text-label-caps uppercase text-on-surface-variant">Tổng hiển thị</p>
           <p className="mt-2 text-telemetry-data text-secondary">{totalCount.toLocaleString("vi-VN")}</p>
-          <p className="mt-1 font-mono text-mono-status text-success">Notification table</p>
+          <p className="mt-1 font-mono text-mono-status text-success">Bảng thông báo</p>
         </Card>
         <Card>
           <p className="text-label-caps uppercase text-on-surface-variant">Sự kiện mới nhất</p>
@@ -244,7 +244,7 @@ export default function NotificationsPage() {
             {lastNotification?.title ?? "Chưa có dữ liệu"}
           </p>
           <p className="mt-1 text-body-md text-on-surface-variant">
-            {lastNotification ? formatRelative(lastNotification.createdAt) : "Đang chờ backend gửi notification"}
+            {lastNotification ? formatRelative(lastNotification.createdAt) : "Đang chờ thông báo mới"}
           </p>
         </Card>
       </section>
@@ -276,10 +276,10 @@ export default function NotificationsPage() {
           </div>
 
           {listQuery.isLoading ? (
-            <div className="p-card-padding text-body-md text-on-surface-variant">Đang tải thông báo từ backend...</div>
+            <div className="p-card-padding text-body-md text-on-surface-variant">Đang tải thông báo...</div>
           ) : listQuery.isError ? (
             <div className="m-card-padding rounded-lg border border-error/30 bg-red-50 p-4 text-body-md text-error">
-              Không thể tải thông báo. Kiểm tra dịch vụ và quyền truy cập.
+              Không thể tải thông báo. Vui lòng thử lại hoặc kiểm tra quyền truy cập.
             </div>
           ) : visibleNotifications.length ? (
             <div className="xl:max-h-[640px] xl:overflow-y-auto">
@@ -295,11 +295,11 @@ export default function NotificationsPage() {
           ) : (
             <div className="flex min-h-72 flex-col items-center justify-center p-card-padding text-center">
               <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-surface-container text-secondary">
-                <span className="material-symbols-outlined">notifications_off</span>
+                <span aria-hidden="true" className="material-symbols-outlined">notifications_off</span>
               </div>
               <h3 className="text-headline-sm font-bold text-secondary">Không có thông báo trong bộ lọc này</h3>
               <p className="mt-2 max-w-sm text-body-md text-on-surface-variant">
-                Khi backend phát sự kiện hoặc có bản ghi mới, danh sách sẽ cập nhật qua polling và SignalR.
+                Khi có cảnh báo mới, danh sách sẽ tự cập nhật để đội sale xử lý kịp thời.
               </p>
             </div>
           )}
@@ -309,15 +309,15 @@ export default function NotificationsPage() {
           <Card>
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-label-caps uppercase text-on-surface-variant">Telegram link</p>
-                <h2 className="mt-2 text-headline-sm font-bold text-secondary">Đang ưu tiên in-app SignalR</h2>
+                <p className="text-label-caps uppercase text-on-surface-variant">Kênh Telegram</p>
+                <h2 className="mt-2 text-headline-sm font-bold text-secondary">Đang ưu tiên thông báo trong ứng dụng</h2>
               </div>
               <span className="rounded-full bg-surface-container px-2 py-1 font-mono text-[11px] font-bold uppercase text-on-surface-variant">
-                Deferred
+                Chưa bật
               </span>
             </div>
             <p className="mt-3 text-body-md text-on-surface-variant">
-              Cảnh báo hiện đang gửi qua Trung tâm thông báo in-app; Telegram adapter chưa được bật trong backend hiện tại.
+              Cảnh báo hiện đang gửi qua Trung tâm thông báo. Kênh Telegram sẽ được bật khi cấu hình tích hợp hoàn tất.
             </p>
             <div className="mt-4 rounded-lg border border-outline bg-surface-container-low p-3">
               <div className="flex items-center justify-between gap-3">
@@ -339,20 +339,20 @@ export default function NotificationsPage() {
             <p className="text-label-caps uppercase text-on-surface-variant">Luồng cảnh báo</p>
             <div className="mt-3 space-y-3 text-body-md text-secondary">
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px] text-success">check_circle</span>
-                <span>Lưu cảnh báo vào notification table</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-success">check_circle</span>
+                <span>Lưu cảnh báo vào trung tâm thông báo</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px] text-success">check_circle</span>
-                <span>Đếm badge chưa đọc theo từng user</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-success">check_circle</span>
+                <span>Đếm thông báo chưa đọc theo từng người dùng</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px] text-success">check_circle</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-success">check_circle</span>
                 <span>Đồng bộ trạng thái đã đọc</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px] text-success">sensors</span>
-                <span>Realtime qua SignalR in-app</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-success">sensors</span>
+                <span>Cập nhật tức thì trong ứng dụng</span>
               </div>
             </div>
           </Card>

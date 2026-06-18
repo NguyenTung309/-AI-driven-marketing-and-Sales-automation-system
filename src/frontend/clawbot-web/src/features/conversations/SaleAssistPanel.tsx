@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AxiosError } from "axios";
 import { Alert, Button, Card, Modal, StatusPill, ToggleSwitch } from "@/shared/ui";
+import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
   createQuickReply,
   deleteQuickReply,
@@ -71,13 +71,7 @@ const EMPTY_QUICK_REPLY: QuickReplyFormState = {
 };
 
 function errorMessage(error: unknown): string {
-  if (!error) return "";
-  if (error instanceof AxiosError) {
-    const data = error.response?.data as { error?: string; title?: string } | undefined;
-    return data?.error ?? data?.title ?? error.message;
-  }
-  if (error instanceof Error) return error.message;
-  return "Không xử lý được thao tác. Vui lòng thử lại.";
+  return toUserFriendlyError(error, "Không xử lý được thao tác hỗ trợ bán hàng. Vui lòng thử lại.");
 }
 
 function actionLabel(action: string | null | undefined): string {
@@ -95,9 +89,8 @@ function scoreTone(score: number): "success" | "warning" | "neutral" {
   return "neutral";
 }
 
-function formatLatency(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
+function responseSpeedLabel(ms: number): string {
+  return ms < 5000 ? "Phản hồi nhanh" : "Đã xử lý";
 }
 
 function formatRelative(value: string | null): string {
@@ -214,7 +207,7 @@ function QuickReplyDialog({ state, saving, error, onClose, onSubmit }: QuickRepl
               value={form.platforms}
               onChange={(event) => setForm((old) => ({ ...old, platforms: event.target.value }))}
               className="w-full rounded border border-outline bg-surface-container-lowest px-3 py-2 text-body-md outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-              placeholder="facebook,zalo,web"
+              placeholder="facebook, zalo, chat web"
             />
           </label>
         </div>
@@ -353,10 +346,10 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h3 className="flex items-center gap-2 text-label-caps uppercase text-secondary">
-              <span className="material-symbols-outlined text-primary">psychology_alt</span>
-              Sale Assist
+              <span aria-hidden="true" className="material-symbols-outlined text-primary">psychology_alt</span>
+              Trợ lý tư vấn
             </h3>
-            <p className="mt-1 text-label-sm text-on-surface-variant">Draft AI, quick reply và upsell từ backend.</p>
+            <p className="mt-1 text-label-sm text-on-surface-variant">Bản nháp AI, trả lời nhanh và gợi ý bán thêm.</p>
           </div>
           <StatusPill tone={manualApproval ? "warning" : "success"}>{manualApproval ? "Duyệt tay" : "Tự động"}</StatusPill>
         </div>
@@ -397,7 +390,7 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
             }}
             disabled={!conversationId || draftMutation.isPending}
           >
-            <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">auto_awesome</span>
             {draftMutation.isPending ? "Đang tạo..." : "Tạo nháp AI"}
           </Button>
           <Button
@@ -408,7 +401,7 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
             }}
             disabled={!conversationId || summaryMutation.isPending}
           >
-            <span className="material-symbols-outlined text-[18px]">summarize</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">summarize</span>
             {summaryMutation.isPending ? "Đang tóm tắt..." : "Tóm tắt"}
           </Button>
         </div>
@@ -423,10 +416,10 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap gap-2">
-                <StatusPill tone={scoreTone(activeDraft.response.leadScoreHint)}>Score {activeDraft.response.leadScoreHint}</StatusPill>
+                <StatusPill tone={scoreTone(activeDraft.response.leadScoreHint)}>Điểm {activeDraft.response.leadScoreHint}</StatusPill>
                 <StatusPill tone="neutral">{actionLabel(activeDraft.response.suggestedAction)}</StatusPill>
               </div>
-              <span className="font-mono text-mono-status text-on-surface-variant">{formatLatency(activeDraft.response.latencyMs)}</span>
+              <span className="text-label-sm text-on-surface-variant">{responseSpeedLabel(activeDraft.response.latencyMs)}</span>
             </div>
             <textarea
               value={activeDraft.text}
@@ -438,11 +431,11 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
             />
             <div className="mt-3 flex flex-wrap gap-2">
               <Button type="button" size="sm" onClick={() => applyDraft(activeDraft.text)} disabled={!activeDraft.text.trim()}>
-                <span className="material-symbols-outlined text-[16px]">approval</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[16px]">approval</span>
                 Dùng bản nháp
               </Button>
               <Button type="button" size="sm" variant="ghost" onClick={() => setDraftState(null)}>
-                <span className="material-symbols-outlined text-[16px]">close</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[16px]">close</span>
                 Từ chối
               </Button>
             </div>
@@ -453,7 +446,7 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
           <div className="mt-4 rounded-lg border border-outline bg-surface p-3">
             <div className="mb-2 flex items-center justify-between">
               <p className="text-label-caps uppercase text-secondary">Tóm tắt hội thoại</p>
-              <span className="font-mono text-mono-status text-on-surface-variant">{formatLatency(activeSummary.response.latencyMs)}</span>
+              <span className="text-label-sm text-on-surface-variant">{responseSpeedLabel(activeSummary.response.latencyMs)}</span>
             </div>
             <p className="text-body-md text-on-surface">{activeSummary.response.summary}</p>
           </div>
@@ -464,7 +457,7 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
         <div className="mb-4 flex items-center justify-between gap-3">
           <h3 className="text-label-caps uppercase text-secondary">Phản hồi nhanh</h3>
           <Button type="button" size="sm" variant="outline" onClick={() => setDialogState({ mode: "create", reply: null })}>
-            <span className="material-symbols-outlined text-[16px]">add</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">add</span>
             Thêm
           </Button>
         </div>
@@ -492,7 +485,7 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
                       onClick={() => setDialogState({ mode: "edit", reply })}
                       aria-label="Chỉnh sửa phản hồi nhanh"
                     >
-                      <span className="material-symbols-outlined text-[18px]">edit</span>
+                      <span aria-hidden="true" className="material-symbols-outlined text-[18px]">edit</span>
                     </button>
                     <button
                       type="button"
@@ -501,13 +494,13 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
                       disabled={deleteMutation.isPending}
                       aria-label="Xóa phản hồi nhanh"
                     >
-                      <span className="material-symbols-outlined text-[18px]">delete</span>
+                      <span aria-hidden="true" className="material-symbols-outlined text-[18px]">delete</span>
                     </button>
                   </div>
                 </div>
                 <p className="line-clamp-3 text-body-md text-on-surface">{reply.body}</p>
                 <Button type="button" size="sm" variant="ghost" className="mt-2" onClick={() => applyDraft(reply.body)}>
-                  <span className="material-symbols-outlined text-[16px]">reply</span>
+                  <span aria-hidden="true" className="material-symbols-outlined text-[16px]">reply</span>
                   Dùng trong ô soạn
                 </Button>
               </div>
@@ -517,12 +510,12 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
       </Card>
 
       <Card>
-        <h3 className="mb-4 text-label-caps uppercase text-secondary">Upsell</h3>
+        <h3 className="mb-4 text-label-caps uppercase text-secondary">Gợi ý bán thêm</h3>
         {upsell ? (
           <div className="rounded-lg border border-outline bg-surface p-3">
             <div className="mb-2 flex items-center justify-between">
               <StatusPill tone={upsell.eligible ? "success" : "neutral"}>
-                Score {upsell.leadScore}
+                Điểm {upsell.leadScore}
               </StatusPill>
               <span className="text-label-sm text-on-surface-variant">{upsell.eligible ? "Đủ điều kiện" : "Chưa đủ"}</span>
             </div>
@@ -535,7 +528,7 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
 
         {upsellSuggestions?.hot_leads.length ? (
           <div className="mt-4 space-y-2">
-            <p className="text-label-caps uppercase text-secondary">Hot lead khác</p>
+            <p className="text-label-caps uppercase text-secondary">Lead tiềm năng khác</p>
             {upsellSuggestions.hot_leads.slice(0, 3).map((lead) => (
               <div key={lead.id} className="rounded border border-outline bg-surface p-2">
                 <div className="flex items-center justify-between gap-2">

@@ -4,6 +4,7 @@ import { AppShell } from "@/shared/layout/AppShell";
 import { Alert } from "@/shared/ui/Alert";
 import { Modal } from "@/shared/ui/Modal";
 import { StatusPill } from "@/shared/ui/StatusPill";
+import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
   addKbTestCase,
   archiveKbModule,
@@ -39,8 +40,7 @@ function normalize(value: string | null | undefined): string {
 }
 
 function errorText(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return "Backend không thể xử lý yêu cầu.";
+  return toUserFriendlyError(error, "Không xử lý được kho tri thức. Vui lòng thử lại.");
 }
 
 function moduleMatches(module: KbModule, query: string): boolean {
@@ -208,12 +208,12 @@ export default function KnowledgeBasePage() {
   ].filter(Boolean);
 
   return (
-    <AppShell title="Kho tri thức Markdown">
+    <AppShell title="Kho tri thức">
       <div className="mb-stack-lg flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-headline-md font-bold text-secondary">Kho tri thức Markdown</h1>
+          <h1 className="text-headline-md font-bold text-secondary">Kho tri thức</h1>
           <p className="mt-1 text-body-md text-on-surface-variant">
-            Quản lý module, version, deploy và kiểm định độ chính xác cho RAG.
+            Quản lý nhóm tri thức, lịch sử chỉnh sửa và kiểm định độ chính xác cho agent.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -223,8 +223,8 @@ export default function KnowledgeBasePage() {
             onClick={() => setModuleDialog("create")}
             type="button"
           >
-            <span className="material-symbols-outlined text-[18px]">add</span>
-            Tạo module mới
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">add</span>
+            Tạo nhóm tri thức mới
           </button>
         </div>
       </div>
@@ -306,16 +306,16 @@ export default function KnowledgeBasePage() {
               onClick={() => selectedModule && archiveMutation.mutate(selectedModule.id)}
               type="button"
             >
-              {archiveMutation.isPending ? "Đang lưu trữ" : "Lưu trữ module"}
+              {archiveMutation.isPending ? "Đang lưu trữ" : "Lưu trữ nhóm tri thức"}
             </button>
           </>
         }
         onClose={() => setArchiveConfirm(false)}
         open={archiveConfirm}
-        title="Lưu trữ module"
+        title="Lưu trữ nhóm tri thức"
       >
         <Alert tone="warning">
-          Module <strong>{selectedModule?.name}</strong> sẽ bị ẩn khỏi danh sách. Các version hiện tại vẫn được giữ trong cơ sở dữ liệu.
+          Nhóm tri thức <strong>{selectedModule?.name}</strong> sẽ bị ẩn khỏi danh sách. Các bản hiện tại vẫn được giữ trong cơ sở dữ liệu.
         </Alert>
       </Modal>
       <DiffDrawer diff={diff} onClose={() => setDiff(null)} />

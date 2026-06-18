@@ -24,7 +24,7 @@ export function MetricCard({ label, value, delta, icon, tone = "neutral" }: Metr
       <div className="flex items-start justify-between">
         <p className="text-label-caps uppercase text-on-surface-variant">{label}</p>
         {icon ? (
-          <span className="material-symbols-outlined text-on-surface-variant/60 text-[20px]">{icon}</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-on-surface-variant/60 text-[20px]">{icon}</span>
         ) : null}
       </div>
       <p className="text-telemetry-data mt-2">{value}</p>

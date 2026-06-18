@@ -21,11 +21,11 @@ type OwnerFilter = "all" | "assigned" | "unassigned";
 type DrawerTab = "timeline" | "context";
 
 const STAGES: readonly { value: LeadStage; label: string; tone: StatusTone; icon: string }[] = [
-  { value: "hot", label: "HOT", tone: "error", icon: "local_fire_department" },
-  { value: "warm", label: "WARM", tone: "warning", icon: "trending_up" },
-  { value: "cold", label: "COLD", tone: "neutral", icon: "ac_unit" },
-  { value: "customer", label: "CUSTOMER", tone: "success", icon: "verified" },
-  { value: "lost", label: "LOST", tone: "neutral", icon: "do_not_disturb_on" },
+  { value: "hot", label: "Nóng", tone: "error", icon: "local_fire_department" },
+  { value: "warm", label: "Ấm", tone: "warning", icon: "trending_up" },
+  { value: "cold", label: "Lạnh", tone: "neutral", icon: "ac_unit" },
+  { value: "customer", label: "Khách hàng", tone: "success", icon: "verified" },
+  { value: "lost", label: "Đã mất", tone: "neutral", icon: "do_not_disturb_on" },
 ];
 
 const ACTIVITY_EVENTS = [
@@ -49,7 +49,7 @@ function stageConfig(stage: LeadStage) {
 function stageLabel(stage: LeadStage): string {
   const config = stageConfig(stage);
   if (normalize(config.value) === normalize(stage)) return config.label;
-  return stage || "UNKNOWN";
+  return stage || "Chưa rõ";
 }
 
 function stageTone(stage: LeadStage): StatusTone {
@@ -81,8 +81,8 @@ function contactMeta(lead: LeadListItem, context?: LeadContext | null): string {
   const contact = context?.contact;
   if (contact?.phone) return contact.phone;
   if (contact?.email) return contact.email;
-  if (lead.contactId) return `Contact ${lead.contactId.slice(0, 8)}`;
-  return "Chưa có contact";
+  if (lead.contactId) return `Khách ${lead.contactId.slice(0, 8)}`;
+  return "Chưa có khách hàng";
 }
 
 function formatDateTime(value: string | null): string {
@@ -280,7 +280,7 @@ function KanbanBoard({ leads, onSelect }: { readonly leads: readonly LeadListIte
           <Card className="flex min-h-[280px] flex-col p-0" key={stage.value}>
             <div className="flex items-center justify-between border-b border-outline px-4 py-3">
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px] text-primary">{stage.icon}</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-primary">{stage.icon}</span>
                 <h3 className="text-body-md font-bold text-secondary">{stage.label}</h3>
               </div>
               <span className="rounded-full bg-surface-container px-2 py-0.5 font-mono text-mono-status text-on-surface-variant">
@@ -366,7 +366,7 @@ function LeadDrawer({
               onClick={onClose}
               type="button"
             >
-              <span className="material-symbols-outlined text-[20px]">close</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[20px]">close</span>
             </button>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -404,7 +404,7 @@ function LeadDrawer({
         <div className="flex-1 overflow-y-auto p-5">
           {loading ? (
             <div className="rounded-lg border border-outline bg-surface-container-low p-4 text-body-md text-on-surface-variant">
-              Đang tải dữ liệu scoring từ backend...
+              Đang tải dữ liệu chấm điểm...
             </div>
           ) : tab === "timeline" ? (
             <div className="space-y-5">
@@ -451,7 +451,7 @@ function LeadDrawer({
                 <textarea
                   className="mt-3 min-h-[82px] w-full resize-none rounded border border-outline bg-white px-3 py-2 text-body-md text-secondary focus:border-primary focus:outline-none"
                   onChange={(event) => setNotes(event.target.value)}
-                  placeholder="Ghi chú ngắn cho scoring timeline"
+                  placeholder="Ghi chú ngắn cho dòng thời gian chấm điểm"
                   value={notes}
                 />
                 <button
@@ -476,13 +476,13 @@ function LeadDrawer({
                             {formatDateTime(activity.occurredAt)}
                           </p>
                         </div>
-                        <p className="mt-2 text-body-md">{activity.notes || "Backend chưa có ghi chú cho hoạt động này."}</p>
+                        <p className="mt-2 text-body-md">{activity.notes || "Chưa có ghi chú cho hoạt động này."}</p>
                       </div>
                     </article>
                   ))
                 ) : (
                   <div className="rounded-lg border border-dashed border-outline p-4 text-body-md text-on-surface-variant">
-                    Chưa có hoạt động scoring. Khi sale ghi nhận tương tác, timeline sẽ cập nhật từ backend.
+                    Chưa có hoạt động chấm điểm. Khi sale ghi nhận tương tác, dòng thời gian sẽ tự cập nhật.
                   </div>
                 )}
               </div>
@@ -490,8 +490,8 @@ function LeadDrawer({
           ) : (
             <div className="space-y-4">
               <Card>
-                <p className="text-label-caps uppercase text-on-surface-variant">Next best action</p>
-                <p className="mt-2 text-body-lg font-bold text-secondary">{context?.nextStep ?? "Đang chờ backend tổng hợp"}</p>
+                <p className="text-label-caps uppercase text-on-surface-variant">Gợi ý tiếp theo</p>
+                <p className="mt-2 text-body-lg font-bold text-secondary">{context?.nextStep ?? "Đang chờ hệ thống tổng hợp"}</p>
               </Card>
               <Card>
                 <p className="text-label-caps uppercase text-on-surface-variant">Thông tin liên hệ</p>
@@ -532,7 +532,7 @@ function LeadDrawer({
             className="flex w-full items-center justify-center gap-2 rounded bg-primary px-4 py-3 text-body-md font-bold text-on-primary hover:bg-primary-hover"
             to="/conversations"
           >
-            <span className="material-symbols-outlined text-[18px]">forum</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">forum</span>
             Xem chi tiết cuộc trò chuyện
           </Link>
         </div>
@@ -605,7 +605,7 @@ export default function LeadsPage() {
         <div>
           <h1 className="text-headline-md font-bold text-secondary">Khách hàng tiềm năng</h1>
           <p className="mt-1 text-body-md text-on-surface-variant">
-            Quản lý lead, Kanban pipeline và scoring timeline trực tiếp từ backend.
+            Quản lý lead, bảng xử lý và dòng thời gian chấm điểm.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -616,8 +616,8 @@ export default function LeadsPage() {
             onClick={() => exportLeadCsv(filteredLeads)}
             type="button"
           >
-            <span className="material-symbols-outlined text-[18px]">download</span>
-            Export CSV
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">download</span>
+            Tải danh sách
           </button>
         </div>
       </div>
@@ -631,7 +631,7 @@ export default function LeadsPage() {
         <Card>
           <p className="text-label-caps uppercase text-on-surface-variant">Lead nóng</p>
           <p className="mt-2 text-telemetry-data text-primary">{hotLeads.length.toLocaleString("vi-VN")}</p>
-          <p className="mt-1 text-label-sm text-on-surface-variant">Stage HOT cần xử lý trước</p>
+          <p className="mt-1 text-label-sm text-on-surface-variant">Nhóm nóng cần xử lý trước</p>
         </Card>
         <Card>
           <p className="text-label-caps uppercase text-on-surface-variant">Chưa phân công</p>
@@ -655,11 +655,11 @@ export default function LeadsPage() {
             <label className="block">
               <span className="text-label-sm font-semibold text-on-surface-variant">Tìm kiếm Lead</span>
               <div className="mt-2 flex items-center gap-2 rounded border border-outline bg-white px-3 py-2 focus-within:border-primary">
-                <span className="material-symbols-outlined text-[18px] text-on-surface-variant">search</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-on-surface-variant">search</span>
                 <input
                   className="w-full bg-transparent text-body-md text-secondary outline-none"
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Tên, ID, nguồn..."
+                  placeholder="Tên, mã, nguồn..."
                   value={search}
                 />
               </div>
@@ -680,7 +680,7 @@ export default function LeadsPage() {
               </select>
             </label>
             <label className="block">
-              <span className="text-label-sm font-semibold text-on-surface-variant">Nhân AI</span>
+              <span className="text-label-sm font-semibold text-on-surface-variant">Agent phụ trách</span>
               <select
                 className="mt-2 w-full rounded border border-outline bg-white px-3 py-2 text-body-md text-secondary focus:border-primary focus:outline-none"
                 onChange={(event) => setOwner(event.target.value as OwnerFilter)}
@@ -712,7 +712,7 @@ export default function LeadsPage() {
         {leadsQuery.isLoading ? (
           <div className="p-card-padding text-body-md text-on-surface-variant">Đang tải danh sách lead...</div>
         ) : leadsQuery.isError ? (
-          <div className="p-card-padding text-body-md text-error">Không tải được dữ liệu lead. Vui lòng kiểm tra dịch vụ hoặc quyền truy cập.</div>
+          <div className="p-card-padding text-body-md text-error">Không tải được dữ liệu lead. Vui lòng thử lại hoặc kiểm tra quyền truy cập.</div>
         ) : filteredLeads.length ? (
           <>
             <LeadTable
@@ -736,8 +736,8 @@ export default function LeadsPage() {
 
       <div className="mb-stack-md flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-headline-sm font-bold text-secondary">Kanban pipeline</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">Nhóm lead theo stage scoring để sale xử lý theo mức ưu tiên.</p>
+          <h2 className="text-headline-sm font-bold text-secondary">Bảng xử lý</h2>
+          <p className="mt-1 text-body-md text-on-surface-variant">Nhóm lead theo mức chấm điểm để sale xử lý theo ưu tiên.</p>
         </div>
       </div>
       <KanbanBoard leads={filteredLeads} onSelect={(lead) => setSelectedId(lead.id)} />

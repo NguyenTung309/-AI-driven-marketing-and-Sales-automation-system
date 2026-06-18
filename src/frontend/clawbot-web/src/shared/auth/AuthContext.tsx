@@ -24,7 +24,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   if (status === "loading") {
-    return <div className="flex min-h-screen items-center justify-center text-gray-500">Loading...</div>;
+    return <div className="flex min-h-screen items-center justify-center text-gray-500">Đang tải...</div>;
   }
 
   return <>{children}</>;

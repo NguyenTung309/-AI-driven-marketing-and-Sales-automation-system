@@ -5,12 +5,12 @@ import { getPublicFaq, type PublicFaqItem, type TenantBranding } from "@/shared/
 
 const DEFAULT_TENANT_SLUG = import.meta.env.VITE_WIDGET_TENANT_SLUG ?? "default";
 const DEFAULT_BRANDING: TenantBranding = {
-  brandName: "Hoc Ba Education",
+  brandName: "Học Bá AI",
   logoUrl: null,
   primaryColor: "#d32f2f",
   accentColor: "#f59e0b",
-  supportName: "Hoc Ba Support",
-  widgetGreeting: "Chao ban, Hoc Ba Education co the ho tro tu van lo trinh hoc va lich kiem tra dau vao.",
+  supportName: "Hỗ trợ Học Bá",
+  widgetGreeting: "Chào bạn, Học Bá AI có thể hỗ trợ tư vấn lộ trình học và lịch kiểm tra đầu vào.",
 };
 
 const DEFAULT_FAQ_ITEMS: readonly PublicFaqItem[] = [
@@ -25,7 +25,7 @@ const DEFAULT_FAQ_ITEMS: readonly PublicFaqItem[] = [
       "- Hoàn 50% học phí nếu rút trong tuần đầu tiên của khóa học.",
       "- Sau tuần đầu tiên, học phí sẽ không được hoàn lại dưới bất kỳ hình thức nào.",
       "",
-      "Mọi thắc mắc chi tiết hơn, vui lòng liên hệ trực tiếp với bộ phận tư vấn của Học Bá Education để được giải đáp cụ thể theo từng trường hợp.",
+      "Mọi thắc mắc chi tiết hơn, vui lòng liên hệ trực tiếp với bộ phận tư vấn của Học Bá AI để được giải đáp cụ thể theo từng trường hợp.",
     ].join("\n"),
   },
   {
@@ -181,7 +181,7 @@ export default function SupportFaqPage() {
           className="mb-8 flex h-14 items-center gap-3 rounded-full border border-[#e9c8c4] bg-white px-5 shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-primary/10"
           style={searchBorderStyle}
         >
-          <span className="material-symbols-outlined text-[24px] text-on-surface-variant">search</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[24px] text-on-surface-variant">search</span>
           <input
             aria-label="Tìm kiếm câu hỏi hỗ trợ"
             className="h-full min-w-0 flex-1 bg-transparent text-[16px] leading-6 text-on-surface outline-none placeholder:text-on-surface-variant/60"

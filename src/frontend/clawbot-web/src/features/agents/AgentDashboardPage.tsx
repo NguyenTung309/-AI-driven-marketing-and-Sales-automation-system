@@ -7,6 +7,7 @@ import { Card } from "@/shared/ui/Card";
 import { MetricCard } from "@/shared/ui/MetricCard";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import { WorkflowNode } from "@/shared/ui/WorkflowNode";
+import { operationalPhaseLabel, toSafeOperationalText } from "@/shared/utils/userText";
 import { AgentConfigDrawer } from "./AgentConfigDrawer";
 import {
   disableAgent,
@@ -54,10 +55,10 @@ const DEFAULT_SANDBOX_MESSAGES: readonly SandboxMessage[] = [
 ];
 
 const DEFAULT_AGENT_PROMPTS: Record<string, string> = {
-  chat: "# Role: Chuyên viên tư vấn khách hàng\n# Task: Hỗ trợ học viên và phụ huynh về chương trình Học Bá\n# Tone: Chuyên nghiệp, thân thiện",
-  content: "# Role: Chuyên viên nội dung giáo dục\n# Task: Tạo nội dung đa kênh đúng định vị Học Bá\n# Tone: Rõ ràng, hữu ích, truyền cảm hứng",
-  lead: "# Role: Chuyên viên đánh giá lead\n# Task: Phân loại, chấm điểm và đề xuất bước chăm sóc tiếp theo\n# Tone: Chính xác, ngắn gọn",
-  report: "# Role: Chuyên viên phân tích hiệu suất\n# Task: Tổng hợp số liệu, phát hiện bất thường và đề xuất hành động\n# Tone: Súc tích, có bằng chứng",
+  chat: "# Vai trò: Chuyên viên tư vấn khách hàng\n# Nhiệm vụ: Hỗ trợ học viên và phụ huynh về chương trình Học Bá\n# Giọng văn: Chuyên nghiệp, thân thiện",
+  content: "# Vai trò: Chuyên viên nội dung giáo dục\n# Nhiệm vụ: Tạo nội dung đa kênh đúng định vị Học Bá\n# Giọng văn: Rõ ràng, hữu ích, truyền cảm hứng",
+  lead: "# Vai trò: Chuyên viên đánh giá lead\n# Nhiệm vụ: Phân loại, chấm điểm và đề xuất bước chăm sóc tiếp theo\n# Giọng văn: Chính xác, ngắn gọn",
+  report: "# Vai trò: Chuyên viên phân tích hiệu suất\n# Nhiệm vụ: Tổng hợp số liệu, phát hiện bất thường và đề xuất hành động\n# Giọng văn: Súc tích, có bằng chứng",
 };
 
 function normalize(value: string): string {
@@ -110,14 +111,14 @@ function costForAgent(costs: readonly AgentCostItem[], code: string): AgentCostI
 
 function agentTypeLabel(type: string): string {
   const value = normalize(type);
-  if (value === "sale_assist") return "Sale Assist";
-  if (value === "content") return "Content";
-  if (value === "lead") return "Lead Scoring";
-  if (value === "docs") return "Docs";
-  if (value === "ads") return "Ads";
-  if (value === "report") return "Report";
-  if (value === "research") return "Research";
-  if (value === "chat") return "Chat";
+  if (value === "sale_assist") return "Trợ lý tư vấn";
+  if (value === "content") return "Nội dung";
+  if (value === "lead") return "Chấm điểm lead";
+  if (value === "docs") return "Tài liệu";
+  if (value === "ads") return "Quảng cáo";
+  if (value === "report") return "Báo cáo";
+  if (value === "research") return "Nghiên cứu";
+  if (value === "chat") return "Trò chuyện";
   return type || "Agent";
 }
 
@@ -145,8 +146,14 @@ function buildSettingsPayload(form: AgentSettingsForm): UpdateAgentSettingsPaylo
 
 function exportTraceCsv(agent: AgentListItem | null, traces: readonly AgentTraceItem[]) {
   const rows = [
-    ["occurred_at", "agent", "phase", "message", "session_id"],
-    ...traces.map((trace) => [trace.occurredAt, trace.agentName, trace.phase, trace.message, trace.sessionId]),
+    ["thoi_gian", "agent", "loai_su_kien", "noi_dung", "ma_phien"],
+    ...traces.map((trace) => [
+      trace.occurredAt,
+      trace.agentName,
+      operationalPhaseLabel(trace.phase),
+      toSafeOperationalText(trace.message),
+      trace.sessionId,
+    ]),
   ];
   const csv = rows
     .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
@@ -196,7 +203,7 @@ function AgentNode({
     >
       <WorkflowNode title={agent.displayName || agent.code} subtitle={agentTypeLabel(agent.agentType)} status={statusTone(agent.status)}>
         <div className="flex items-center justify-between gap-2">
-          <span>Model</span>
+          <span>Mô hình</span>
           <span className="truncate text-secondary">{agent.model || "n/a"}</span>
         </div>
         <div className="flex items-center justify-between gap-2">
@@ -254,22 +261,22 @@ function TerminalLog({
       <div className="flex flex-col gap-3 border-b border-slate-700 bg-[#1e293b] px-4 pt-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="flex flex-wrap gap-1">
           <button className="flex items-center gap-2 rounded-t-lg border-b-2 border-error bg-[#0f172a] px-4 py-3 text-label-caps uppercase text-white">
-            <span className="material-symbols-outlined text-[16px]">terminal</span>
-            Log Dịch vụ
+            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">terminal</span>
+            Sự kiện vận hành
           </button>
           <button className="flex items-center gap-2 rounded-t-lg px-4 py-3 text-label-caps uppercase text-slate-400">
-            <span className="material-symbols-outlined text-[16px]">queue</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">queue</span>
             Hàng đợi
           </button>
           <button className="flex items-center gap-2 rounded-t-lg px-4 py-3 text-label-caps uppercase text-slate-400">
-            <span className="material-symbols-outlined text-[16px]">bug_report</span>
-            Error traces
+            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">bug_report</span>
+            Sự kiện lỗi
           </button>
         </div>
         <div className="flex items-center gap-3 pb-3">
           <div className="hidden items-center gap-2 rounded border border-slate-600 bg-[#0f172a] px-3 py-1.5 font-mono text-mono-status text-slate-300 sm:flex">
-            <span className="material-symbols-outlined text-[16px] text-slate-400">tag</span>
-            {selectedAgent?.code ?? "NO_AGENT"}
+            <span aria-hidden="true" className="material-symbols-outlined text-[16px] text-slate-400">tag</span>
+            {selectedAgent?.code ?? "Chưa chọn agent"}
           </div>
           <button
             className="flex items-center gap-2 rounded border border-error px-3 py-1.5 text-label-caps uppercase text-white transition-colors hover:bg-error disabled:cursor-not-allowed disabled:opacity-50"
@@ -277,8 +284,8 @@ function TerminalLog({
             onClick={onExport}
             type="button"
           >
-            <span className="material-symbols-outlined text-[16px]">download</span>
-            Xuất CSV
+            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">download</span>
+            Tải sự kiện
           </button>
         </div>
       </div>
@@ -287,7 +294,7 @@ function TerminalLog({
         {loading ? (
           <div className="flex items-center gap-3 text-slate-400">
             <span className="size-3 animate-pulse rounded-full bg-slate-400" />
-            Đang tải trace từ backend...
+            Đang tải sự kiện vận hành...
           </div>
         ) : traces.length ? (
           traces.map((trace) => (
@@ -299,13 +306,13 @@ function TerminalLog({
               key={trace.id}
             >
               <span className="text-slate-500">{formatDateTime(trace.occurredAt)}</span>
-              <span className={`font-bold uppercase ${phaseTone(trace.phase)}`}>[{trace.phase || "info"}]</span>
-              <span className="min-w-0 break-words text-slate-300">{trace.message}</span>
+              <span className={`font-bold uppercase ${phaseTone(trace.phase)}`}>[{operationalPhaseLabel(trace.phase)}]</span>
+              <span className="min-w-0 break-words text-slate-300">{toSafeOperationalText(trace.message)}</span>
             </div>
           ))
         ) : (
           <div className="rounded border border-slate-700 bg-slate-900/60 p-4 text-slate-400">
-            Chưa có trace cho agent này. Khi backend ghi `AgentTrace`, log sẽ xuất hiện ở đây.
+            Chưa có sự kiện vận hành cho agent này. Khi có hoạt động mới, danh sách sẽ tự cập nhật.
           </div>
         )}
       </div>
@@ -313,9 +320,9 @@ function TerminalLog({
       <div className="flex items-center justify-between bg-primary px-4 py-1 font-mono text-[11px] uppercase text-on-primary">
         <span className="flex items-center gap-2">
           <span className="size-2 rounded-full bg-green-300" />
-          API CONNECTED
+          Đã kết nối
         </span>
-        <span>AUTO-SCROLL: ON</span>
+        <span>Tự cuộn: bật</span>
       </div>
     </section>
   );
@@ -386,7 +393,7 @@ export default function AgentDashboardPage() {
 
   const settingsMutation = useMutation({
     mutationFn: () => {
-      if (!configAgentCode) throw new Error("missing_agent_code");
+      if (!configAgentCode) throw new Error("Chưa chọn agent để cấu hình.");
       return updateAgentSettings(configAgentCode, buildSettingsPayload(settingsForm));
     },
     onSuccess: async (saved) => {
@@ -404,14 +411,19 @@ export default function AgentDashboardPage() {
     onSuccess: async (response) => {
       setSandboxMessages((current) => [
         ...current,
-        { id: response.sessionId, side: "bot", text: response.reply, time: formatDateTime(response.sentAt) },
+        {
+          id: response.sessionId,
+          side: "bot",
+          text: toSafeOperationalText(response.reply, "Đã ghi nhận phản hồi chạy thử."),
+          time: formatDateTime(response.sentAt),
+        },
       ]);
       await queryClient.invalidateQueries({ queryKey: ["agents", configAgentCode, "traces"] });
     },
     onError: () => {
       setSandboxMessages((current) => [
         ...current,
-        { id: `sandbox-error-${Date.now()}`, side: "bot", text: "Không chạy được sandbox. Kiểm tra backend hoặc quyền truy cập.", time: nowLabel() },
+        { id: `sandbox-error-${Date.now()}`, side: "bot", text: "Không thể chạy thử. Vui lòng kiểm tra quyền truy cập hoặc thử lại sau.", time: nowLabel() },
       ]);
     },
   });
@@ -452,12 +464,12 @@ export default function AgentDashboardPage() {
         <div>
           <h1 className="text-display-lg font-black text-on-surface">Giám sát & Cấu hình</h1>
           <p className="mt-1 text-body-lg text-on-surface-variant">
-            Quản lý trạng thái agent, chi phí Claude và log trace từ backend theo thời gian vận hành.
+            Quản lý trạng thái agent, chi phí AI và các sự kiện vận hành theo thời gian thực.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <StatusPill tone={agentsQuery.isError ? "error" : "success"}>
-            {agentsQuery.isError ? "Mất kết nối dữ liệu" : "Agent online"}
+            {agentsQuery.isError ? "Mất kết nối dữ liệu" : "Agent đang trực tuyến"}
           </StatusPill>
           <Button
             className="bg-error hover:bg-red-700"
@@ -465,7 +477,7 @@ export default function AgentDashboardPage() {
             onClick={() => stopAllMutation.mutate(runningAgents)}
             type="button"
           >
-            <span className="material-symbols-outlined text-[18px]">warning</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">warning</span>
             Dừng agent đang chạy
           </Button>
         </div>
@@ -481,13 +493,13 @@ export default function AgentDashboardPage() {
         <MetricCard
           label="Agent đang chạy"
           value={`${runningAgents.length}/${agents.length}`}
-          delta="Start/stop trực tiếp"
+          delta="Bật/tắt trực tiếp"
           icon="memory"
           tone={runningAgents.length ? "success" : "neutral"}
         />
-        <MetricCard label="Agent lỗi" value={String(errorCount)} delta="Trace cần xử lý" icon="bug_report" tone={errorCount ? "error" : "success"} />
-        <MetricCard label="Claude cost" value={formatCurrency(totalUsd)} delta="30 ngày gần nhất" icon="toll" tone="warning" />
-        <MetricCard label="LLM calls" value={totalCalls.toLocaleString("vi-VN")} delta="agent-cost ledger" icon="analytics" tone="neutral" />
+        <MetricCard label="Agent lỗi" value={String(errorCount)} delta="Cần kiểm tra" icon="bug_report" tone={errorCount ? "error" : "success"} />
+        <MetricCard label="Chi phí AI" value={formatCurrency(totalUsd)} delta="30 ngày gần nhất" icon="toll" tone="warning" />
+        <MetricCard label="Lượt gọi AI" value={totalCalls.toLocaleString("vi-VN")} delta="Theo sổ chi phí" icon="analytics" tone="neutral" />
       </section>
 
       <section className="grid grid-cols-1 gap-gutter 2xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -495,13 +507,13 @@ export default function AgentDashboardPage() {
           <Card>
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h2 className="text-headline-sm font-bold text-secondary">Agent Matrix</h2>
+                <h2 className="text-headline-sm font-bold text-secondary">Sơ đồ agent</h2>
                 <p className="mt-1 text-body-md text-on-surface-variant">
-                  Mỗi node đọc từ `AgentConfig`, chọn node để xem trace gần nhất và chi phí tương ứng.
+                  Chọn một agent để xem trạng thái, sự kiện vận hành gần nhất và chi phí tương ứng.
                 </p>
               </div>
               <StatusPill tone={costQuery.isError ? "warning" : "success"}>
-                {costQuery.isError ? "Thiếu cost ledger" : "Cost ledger online"}
+                {costQuery.isError ? "Chưa có dữ liệu chi phí" : "Dữ liệu chi phí sẵn sàng"}
               </StatusPill>
             </div>
 
@@ -509,7 +521,7 @@ export default function AgentDashboardPage() {
               <div className="rounded-lg border border-outline bg-surface p-6 text-body-md text-on-surface-variant">Đang tải danh sách agent...</div>
             ) : agentsQuery.isError ? (
               <div className="rounded-lg border border-error/30 bg-red-50 p-6 text-body-md text-error">
-                Không thể tải danh sách agent. Kiểm tra dịch vụ và quyền truy cập.
+                Không thể tải danh sách agent. Vui lòng thử lại hoặc kiểm tra quyền truy cập.
               </div>
             ) : agents.length ? (
               <div
@@ -534,7 +546,7 @@ export default function AgentDashboardPage() {
               </div>
             ) : (
               <div className="rounded-lg border border-outline bg-surface p-6 text-body-md text-on-surface-variant">
-                Chưa có AgentConfig trong tenant hiện tại.
+                Chưa có agent nào trong đơn vị hiện tại.
               </div>
             )}
           </Card>
@@ -553,7 +565,7 @@ export default function AgentDashboardPage() {
             <h2 className="mt-2 text-headline-sm font-bold text-secondary">{selectedAgent?.displayName ?? "Chưa chọn agent"}</h2>
             <div className="mt-4 space-y-3 text-body-md">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-on-surface-variant">Mã agent</span>
+                <span className="text-on-surface-variant">Mã định danh</span>
                 <span className="font-mono text-mono-status text-secondary">{selectedAgent?.code ?? "--"}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
@@ -561,7 +573,7 @@ export default function AgentDashboardPage() {
                 {selectedAgent ? <StatusPill tone={statusTone(selectedAgent.status)}>{statusLabel(selectedAgent.status)}</StatusPill> : <span>--</span>}
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span className="text-on-surface-variant">Model</span>
+                <span className="text-on-surface-variant">Mô hình AI</span>
                 <span className="font-mono text-mono-status text-secondary">{selectedAgent?.model ?? "--"}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
@@ -570,16 +582,16 @@ export default function AgentDashboardPage() {
               </div>
             </div>
             <Button className="mt-5 w-full" disabled={!selectedAgent} onClick={() => selectedAgent && openAgentConfig(selectedAgent)} type="button">
-              <span className="material-symbols-outlined text-[18px]">settings</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">settings</span>
               Cấu hình agent
             </Button>
           </Card>
 
           <Card>
-            <p className="text-label-caps uppercase text-on-surface-variant">Claude cost</p>
+            <p className="text-label-caps uppercase text-on-surface-variant">Chi phí AI</p>
             <p className="mt-2 text-telemetry-data text-secondary">{selectedCost ? formatCurrency(selectedCost.usd) : "$0.00"}</p>
             <p className="mt-1 font-mono text-mono-status text-on-surface-variant">
-              {selectedCost ? `${selectedCost.calls.toLocaleString("vi-VN")} calls · avg ${formatCurrency(selectedCost.avgUsdPerCall)}` : "Chưa có cost row"}
+              {selectedCost ? `${selectedCost.calls.toLocaleString("vi-VN")} lượt · trung bình ${formatCurrency(selectedCost.avgUsdPerCall)}` : "Chưa có dữ liệu chi phí"}
             </p>
           </Card>
 

@@ -37,17 +37,17 @@ export function ModuleFormModal({
             onClick={() => onSubmit({ code: code.trim(), name: name.trim(), description: description.trim() || null, ownerRole: ownerRole || null })}
             type="button"
           >
-            {pending ? "Đang lưu" : editing ? "Cập nhật" : "Tạo module"}
+            {pending ? "Đang lưu" : editing ? "Cập nhật" : "Tạo nhóm tri thức"}
           </button>
         </>
       }
       onClose={onClose}
       open={Boolean(mode)}
-      title={editing ? "Chỉnh sửa module" : "Tạo module tri thức"}
+      title={editing ? "Chỉnh sửa nhóm tri thức" : "Tạo nhóm tri thức"}
     >
       <div className="space-y-4">
         <label className="block">
-          <span className="text-label-sm font-bold text-secondary">Mã module</span>
+          <span className="text-label-sm font-bold text-secondary">Mã nhóm</span>
           <input
             className="mt-2 w-full rounded border border-outline px-3 py-2 text-body-md outline-none focus:border-primary"
             disabled={editing}
@@ -57,7 +57,7 @@ export function ModuleFormModal({
           />
         </label>
         <label className="block">
-          <span className="text-label-sm font-bold text-secondary">Tên module</span>
+          <span className="text-label-sm font-bold text-secondary">Tên nhóm</span>
           <input
             className="mt-2 w-full rounded border border-outline px-3 py-2 text-body-md outline-none focus:border-primary"
             onChange={(event) => setName(event.target.value)}
@@ -81,10 +81,10 @@ export function ModuleFormModal({
             value={ownerRole}
           >
             <option value="">Chưa phân công</option>
-            <option value="Admin">Admin</option>
-            <option value="Sale">Sale</option>
-            <option value="Marketer">Marketer</option>
-            <option value="QA">QA</option>
+            <option value="Admin">Quản trị</option>
+            <option value="Sale">Tư vấn</option>
+            <option value="Marketer">Marketing</option>
+            <option value="QA">Kiểm định</option>
           </select>
         </label>
       </div>
@@ -131,18 +131,18 @@ export function QaModal({
             onClick={onRun}
             type="button"
           >
-            {testing ? "Đang chạy test" : "Chạy accuracy test"}
+            {testing ? "Đang kiểm tra" : "Chạy kiểm tra độ chính xác"}
           </button>
         </>
       }
       onClose={onClose}
       open={open}
-      title={`Q&A test · ${module?.code ?? ""}`}
+      title={`Kiểm tra hỏi đáp · ${module?.code ?? ""}`}
     >
       <div className="max-h-[58vh] space-y-4 overflow-y-auto pr-1">
         {testResult ? (
           <Alert tone={testResult.accuracyPercent >= 85 ? "success" : "warning"}>
-            Version {testResult.version}: đạt {testResult.passedCases}/{testResult.totalCases} câu, accuracy{" "}
+            Bản {testResult.version}: đạt {testResult.passedCases}/{testResult.totalCases} câu, độ chính xác{" "}
             <strong>{testResult.accuracyPercent}%</strong>.
           </Alert>
         ) : null}
@@ -182,7 +182,7 @@ export function QaModal({
         <div>
           <p className="mb-2 text-label-caps uppercase text-on-surface-variant">Bộ kiểm thử ({cases.length})</p>
           {loading ? (
-            <p className="text-body-md text-on-surface-variant">Đang tải test case...</p>
+            <p className="text-body-md text-on-surface-variant">Đang tải câu kiểm thử...</p>
           ) : cases.length ? (
             <div className="space-y-2">
               {cases.map((testCase) => (
@@ -193,7 +193,7 @@ export function QaModal({
               ))}
             </div>
           ) : (
-            <p className="text-body-md text-on-surface-variant">Chưa có test case. Thêm ít nhất một câu trước khi chạy test.</p>
+            <p className="text-body-md text-on-surface-variant">Chưa có câu kiểm thử. Thêm ít nhất một câu trước khi chạy kiểm tra.</p>
           )}
         </div>
       </div>
