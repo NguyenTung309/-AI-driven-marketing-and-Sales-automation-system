@@ -40,9 +40,9 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
             type="button"
             onClick={onClose}
             aria-label="Đóng"
-            className="material-symbols-outlined text-on-surface-variant hover:bg-surface-variant p-2 rounded-full transition-colors"
+            className="text-on-surface-variant hover:bg-surface-variant p-2 rounded-full transition-colors"
           >
-            close
+            <span aria-hidden="true" className="material-symbols-outlined">close</span>
           </button>
         </div>
         <div className="p-6 space-y-6">{children}</div>

@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { AxiosError } from "axios";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, Modal, StatusPill, type StatusTone } from "@/shared/ui";
+import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
   downloadAnalyticsExport,
   getAgentCost,
@@ -71,6 +71,18 @@ function platformLabel(platform: string | null | undefined): string {
   if (value === "youtube") return "YouTube";
   if (value === "all") return "Tất cả kênh";
   return platform || "Khác";
+}
+
+function metricLabel(metric: string | null | undefined): string {
+  const value = normalize(metric);
+  if (value === "leads") return "Lead";
+  if (value === "dms") return "Tin nhắn";
+  if (value === "replies") return "Phản hồi";
+  if (value === "conversions") return "Chuyển đổi";
+  if (value === "adspend") return "Chi phí quảng cáo";
+  if (value === "cpl") return "Chi phí/lead";
+  if (value === "avgresponsetimesec") return "Thời gian phản hồi";
+  return metric || "Chỉ số";
 }
 
 function platformIcon(platform: string): string {
@@ -146,13 +158,7 @@ function deltaTone(delta: MetricDelta | null, positiveIsGood = true): StatusTone
 }
 
 function errorMessage(error: unknown): string {
-  if (!error) return "";
-  if (error instanceof AxiosError) {
-    const data = error.response?.data as { error?: string; title?: string; detail?: string } | undefined;
-    return data?.error ?? data?.title ?? data?.detail ?? error.message;
-  }
-  if (error instanceof Error) return error.message;
-  return "Không tải được báo cáo. Vui lòng thử lại.";
+  return toUserFriendlyError(error, "Không tải được báo cáo. Vui lòng thử lại.");
 }
 
 function formatDate(value: string): string {
@@ -190,7 +196,7 @@ function MetricCard({
           <p className="text-label-caps uppercase text-on-surface-variant">{label}</p>
           <p className="mt-2 text-telemetry-data text-secondary">{value}</p>
         </div>
-        <span className="material-symbols-outlined rounded bg-primary/10 p-2 text-primary">{icon}</span>
+        <span aria-hidden="true" className="material-symbols-outlined rounded bg-primary/10 p-2 text-primary">{icon}</span>
       </div>
       <div className="mt-3">
         <StatusPill tone={tone}>{meta}</StatusPill>
@@ -207,8 +213,8 @@ function ChannelKpiGrid({ rows }: { readonly rows: readonly OmniChannelRow[] }) 
     <Card>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-headline-sm text-secondary">KPI 5 kênh</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">Leads, DM, phản hồi, chuyển đổi và CPL theo từng kênh.</p>
+          <h2 className="text-headline-sm text-secondary">Hiệu suất 5 kênh</h2>
+          <p className="mt-1 text-body-md text-on-surface-variant">Lead, tin nhắn, phản hồi, chuyển đổi và chi phí/lead theo từng kênh.</p>
         </div>
         <StatusPill tone="neutral">{rows.length} dòng dữ liệu</StatusPill>
       </div>
@@ -221,7 +227,7 @@ function ChannelKpiGrid({ rows }: { readonly rows: readonly OmniChannelRow[] }) 
             <article key={channel} className="rounded-lg border border-outline bg-surface p-3">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="material-symbols-outlined text-[18px] text-primary">{platformIcon(channel)}</span>
+                  <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-primary">{platformIcon(channel)}</span>
                   <h3 className="text-body-md font-bold text-secondary">{platformLabel(channel)}</h3>
                 </div>
                 <StatusPill tone={row ? "success" : "neutral"}>{row ? "live" : "no data"}</StatusPill>
@@ -233,15 +239,15 @@ function ChannelKpiGrid({ rows }: { readonly rows: readonly OmniChannelRow[] }) 
               </div>
               <dl className="mt-3 space-y-2 text-label-sm">
                 <div className="flex justify-between gap-2">
-                  <dt className="text-on-surface-variant">DM</dt>
+                  <dt className="text-on-surface-variant">Tin nhắn</dt>
                   <dd className="font-semibold text-secondary">{formatNumber(row?.dms ?? 0)}</dd>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-on-surface-variant">Reply</dt>
+                  <dt className="text-on-surface-variant">Phản hồi</dt>
                   <dd className="font-semibold text-secondary">{formatPct(rate(row?.replies ?? 0, row?.dms ?? 0))}</dd>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-on-surface-variant">CPL</dt>
+                  <dt className="text-on-surface-variant">Chi phí/lead</dt>
                   <dd className="font-semibold text-secondary">{row?.cpl == null ? "—" : formatCurrency(row.cpl)}</dd>
                 </div>
               </dl>
@@ -264,7 +270,7 @@ function ChannelBars({ rows }: { readonly rows: readonly OmniChannelRow[] }) {
         </div>
         <div className="flex gap-3 text-label-sm text-on-surface-variant">
           <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-primary" /> Lead</span>
-          <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-warning" /> DM</span>
+          <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-warning" /> Tin nhắn</span>
           <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-success" /> Chuyển đổi</span>
         </div>
       </div>
@@ -273,7 +279,7 @@ function ChannelBars({ rows }: { readonly rows: readonly OmniChannelRow[] }) {
           rows.map((row) => (
             <div key={row.platform} className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-3">
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px] text-primary">{platformIcon(row.platform)}</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-primary">{platformIcon(row.platform)}</span>
                 <span className="text-body-md font-semibold text-secondary">{platformLabel(row.platform)}</span>
               </div>
               <div className="space-y-1.5">
@@ -285,7 +291,7 @@ function ChannelBars({ rows }: { readonly rows: readonly OmniChannelRow[] }) {
           ))
         ) : (
           <div className="flex min-h-[260px] items-center justify-center rounded-lg border border-dashed border-outline bg-surface p-6 text-body-md text-on-surface-variant">
-            Chưa có dữ liệu omnichannel cho kỳ này.
+            Chưa có dữ liệu đa kênh cho kỳ này.
           </div>
         )}
       </div>
@@ -297,15 +303,15 @@ function FunnelCard({ funnel }: { readonly funnel: { readonly platform?: string;
   const steps = funnel
     ? [
         { label: "Lead", value: funnel.leads, rate: 100 },
-        { label: "DM", value: funnel.dms, rate: funnel.dmRate },
-        { label: "Reply", value: funnel.replies, rate: funnel.replyRate },
-        { label: "Conversion", value: funnel.conversions, rate: funnel.conversionRate },
+        { label: "Tin nhắn", value: funnel.dms, rate: funnel.dmRate },
+        { label: "Phản hồi", value: funnel.replies, rate: funnel.replyRate },
+        { label: "Chuyển đổi", value: funnel.conversions, rate: funnel.conversionRate },
       ]
     : [];
   return (
     <Card>
       <h2 className="text-headline-sm text-secondary">Tỷ lệ cuộc gọi hỗ trợ</h2>
-      <p className="mt-1 text-body-md text-on-surface-variant">Funnel chuyển đổi {platformLabel(funnel?.platform ?? "all")}.</p>
+      <p className="mt-1 text-body-md text-on-surface-variant">Luồng chuyển đổi {platformLabel(funnel?.platform ?? "all")}.</p>
       <div className="mt-5 space-y-3">
         {steps.map((step) => (
           <div key={step.label}>
@@ -318,7 +324,7 @@ function FunnelCard({ funnel }: { readonly funnel: { readonly platform?: string;
             </div>
           </div>
         ))}
-        {!steps.length ? <p className="text-body-md text-on-surface-variant">Chưa có funnel.</p> : null}
+        {!steps.length ? <p className="text-body-md text-on-surface-variant">Chưa có dữ liệu luồng chuyển đổi.</p> : null}
       </div>
     </Card>
   );
@@ -341,9 +347,9 @@ function ForecastCard({ points }: { readonly points: readonly ForecastPoint[] })
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h2 className="text-headline-sm text-secondary">Dự báo lead 7 ngày</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">Metric `leads` từ `/forecast`.</p>
+          <p className="mt-1 text-body-md text-on-surface-variant">Dựa trên dữ liệu dự báo lead.</p>
         </div>
-        <StatusPill tone={points.length ? "success" : "neutral"}>{points.length ? "Fresh" : "No data"}</StatusPill>
+        <StatusPill tone={points.length ? "success" : "neutral"}>{points.length ? "Mới cập nhật" : "Chưa có dữ liệu"}</StatusPill>
       </div>
       {points.length ? (
         <div className="overflow-x-auto">
@@ -364,7 +370,7 @@ function ForecastCard({ points }: { readonly points: readonly ForecastPoint[] })
         </div>
       ) : (
         <div className="flex min-h-[160px] items-center justify-center rounded-lg border border-dashed border-outline bg-surface p-4 text-body-md text-on-surface-variant">
-          Chưa đủ dữ liệu forecast.
+          Chưa đủ dữ liệu dự báo.
         </div>
       )}
     </Card>
@@ -390,8 +396,8 @@ function AgentRadar({ agents }: { readonly agents: readonly AgentPerformance[] }
   const polygon = points.map((point) => `${point.x},${point.y}`).join(" ");
   return (
     <Card>
-      <h2 className="text-headline-sm text-secondary">RAG Confidence Scores</h2>
-      <p className="mt-1 text-body-md text-on-surface-variant">Radar hiệu suất theo completion rate.</p>
+      <h2 className="text-headline-sm text-secondary">Độ tin cậy câu trả lời</h2>
+      <p className="mt-1 text-body-md text-on-surface-variant">Radar hiệu suất theo tỉ lệ hoàn tất.</p>
       <div className="mt-4 flex justify-center">
         <svg viewBox={`0 0 ${size} ${size}`} className="size-[260px] max-w-full">
           {[0.33, 0.66, 1].map((factor) => (
@@ -419,7 +425,7 @@ function AgentTable({ agents, costs }: { readonly agents: readonly AgentPerforma
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline p-card-padding">
         <div>
           <h2 className="text-headline-sm text-secondary">Bảng dữ liệu hiệu suất Agent</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">Sessions, chất lượng trả lời, trace và token cost.</p>
+          <p className="mt-1 text-body-md text-on-surface-variant">Lượt xử lý, chất lượng trả lời, sự kiện vận hành và chi phí AI.</p>
         </div>
         <StatusPill tone="neutral">{agents.length} agent</StatusPill>
       </div>
@@ -431,7 +437,7 @@ function AgentTable({ agents, costs }: { readonly agents: readonly AgentPerforma
               <th className="px-4 py-3 font-bold">Tổng tác vụ</th>
               <th className="px-4 py-3 font-bold">Xử lý TB</th>
               <th className="px-4 py-3 font-bold">Chất lượng</th>
-              <th className="px-4 py-3 font-bold">Token tiêu thụ</th>
+              <th className="px-4 py-3 font-bold">Lượng dùng AI</th>
               <th className="px-4 py-3 font-bold">Tỉ lệ lỗi</th>
             </tr>
           </thead>
@@ -456,13 +462,13 @@ function AgentTable({ agents, costs }: { readonly agents: readonly AgentPerforma
                     <div className="mt-1 text-label-sm text-on-surface-variant">
                       {agent.qualitySamples
                         ? `${formatNumber(agent.passedQualitySamples)}/${formatNumber(agent.qualitySamples)} mẫu${
-                            agent.averageQualityScore == null ? "" : ` · score ${agent.averageQualityScore.toFixed(2)}`
+                            agent.averageQualityScore == null ? "" : ` · điểm ${agent.averageQualityScore.toFixed(2)}`
                           }`
-                        : "Chưa có mẫu quality"}
+                        : "Chưa có mẫu đánh giá"}
                     </div>
                   </td>
                   <td className="px-4 py-4 align-top text-body-md text-secondary">
-                    {cost ? `${formatNumber(cost.inputTokens + cost.outputTokens)} token · ${formatUsd(cost.usd)}` : `${formatNumber(agent.traceCount)} trace`}
+                    {cost ? `${formatNumber(cost.inputTokens + cost.outputTokens)} lượt dùng · ${formatUsd(cost.usd)}` : `${formatNumber(agent.traceCount)} sự kiện`}
                   </td>
                   <td className="px-4 py-4 align-top"><StatusPill tone={errorRate > 8 ? "error" : errorRate > 3 ? "warning" : "success"}>{formatPct(errorRate)}</StatusPill></td>
                 </tr>
@@ -478,22 +484,22 @@ function AgentTable({ agents, costs }: { readonly agents: readonly AgentPerforma
 function AnomalyList({ anomalies }: { readonly anomalies: readonly AnomalyPoint[] }) {
   return (
     <Card>
-      <h2 className="text-headline-sm text-secondary">Anomaly & cảnh báo</h2>
-      <p className="mt-1 text-body-md text-on-surface-variant">Điểm bất thường từ Report Agent.</p>
+      <h2 className="text-headline-sm text-secondary">Bất thường & cảnh báo</h2>
+      <p className="mt-1 text-body-md text-on-surface-variant">Điểm bất thường từ agent báo cáo.</p>
       <div className="mt-4 space-y-2">
         {anomalies.length ? (
           anomalies.slice(0, 6).map((item) => (
             <div key={`${item.date}-${item.platform}-${item.metric}`} className="rounded border border-outline bg-surface p-3">
               <div className="flex items-center justify-between gap-2">
-                <p className="font-semibold text-secondary">{platformLabel(item.platform)} · {item.metric}</p>
-                <StatusPill tone={item.isAnomaly ? "error" : "neutral"}>z {item.zScore.toFixed(1)}</StatusPill>
+                <p className="font-semibold text-secondary">{platformLabel(item.platform)} · {metricLabel(item.metric)}</p>
+                <StatusPill tone={item.isAnomaly ? "error" : "neutral"}>{item.isAnomaly ? "Bất thường" : "Ổn định"}</StatusPill>
               </div>
-              <p className="mt-1 text-label-sm text-on-surface-variant">{formatDate(item.date)} · value {formatNumber(item.value)}</p>
+              <p className="mt-1 text-label-sm text-on-surface-variant">{formatDate(item.date)} · Giá trị {formatNumber(item.value)}</p>
             </div>
           ))
         ) : (
           <div className="rounded-lg border border-dashed border-outline bg-surface p-4 text-body-md text-on-surface-variant">
-            Không có anomaly trong kỳ hiện tại.
+            Không có cảnh báo bất thường trong kỳ hiện tại.
           </div>
         )}
       </div>
@@ -523,12 +529,12 @@ function ExportDialog({
         <>
           <Button type="button" variant="ghost" onClick={onClose} disabled={exporting}>Hủy</Button>
           <Button type="button" variant="outline" onClick={() => onExport("csv")} disabled={exporting}>
-            <span className="material-symbols-outlined text-[18px]">table_view</span>
-            CSV
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">table_view</span>
+            Bảng CSV
           </Button>
           <Button type="button" onClick={() => onExport("pdf")} disabled={exporting}>
-            <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
-            PDF
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+            Bản PDF
           </Button>
         </>
       }
@@ -536,7 +542,7 @@ function ExportDialog({
       <div className="space-y-4">
         {error ? <Alert tone="error">{errorMessage(error)}</Alert> : null}
         <p className="text-body-md text-on-surface-variant">
-          Xuất CSV cho bảng số liệu, hoặc PDF cho báo cáo gửi nội bộ.
+          Tải bảng số liệu dạng CSV hoặc báo cáo PDF để gửi nội bộ.
         </p>
       </div>
     </Modal>
@@ -620,9 +626,9 @@ export default function AnalyticsReportsPage() {
     },
     {
       icon: "timer",
-      label: "Thời gian phản hồi TB",
-      value: agg.avgResponseTimeSec == null ? "—" : `${agg.avgResponseTimeSec.toFixed(1)}s`,
-      meta: "Từ avgResponseTimeSec",
+      label: "Thời gian phản hồi",
+      value: agg.avgResponseTimeSec == null ? "—" : `${agg.avgResponseTimeSec.toFixed(1)} giây`,
+      meta: "Trung bình trong kỳ",
       tone: "success" as StatusTone,
     },
     {
@@ -663,7 +669,7 @@ export default function AnalyticsReportsPage() {
               {CHANNELS.map((channel) => <option key={channel} value={channel}>{platformLabel(channel)}</option>)}
             </select>
             <Button type="button" variant="outline" onClick={() => setExportOpen(true)}>
-              <span className="material-symbols-outlined text-[18px]">download</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">download</span>
               Xuất báo cáo
             </Button>
           </div>
@@ -715,12 +721,12 @@ export default function AnalyticsReportsPage() {
               icon="fact_check"
               label="Chất lượng trung bình"
               value={averageQualityPassRate == null ? "—" : formatPct(averageQualityPassRate * 100)}
-              meta={qualitySamples ? `${formatNumber(qualitySamples)} quality samples` : "Chưa có mẫu quality"}
+              meta={qualitySamples ? `${formatNumber(qualitySamples)} mẫu đánh giá` : "Chưa có mẫu đánh giá"}
               tone={averageQualityPassRate == null ? "neutral" : averageQualityPassRate >= 0.85 ? "success" : "warning"}
             />
-            <MetricCard icon="speed" label="Tác vụ hoàn tất" value={formatNumber(agents.reduce((sum, agent) => sum + agent.completedSessions, 0))} meta="completedSessions" tone="success" />
-            <MetricCard icon="toll" label="Chi phí token" value={formatUsd(costs.reduce((sum, cost) => sum + cost.usd, 0))} meta="Claude cost ledger" tone="warning" />
-            <MetricCard icon="bug_report" label="Trace count" value={formatNumber(agents.reduce((sum, agent) => sum + agent.traceCount, 0))} meta="Agent traces" tone="neutral" />
+            <MetricCard icon="speed" label="Tác vụ hoàn tất" value={formatNumber(agents.reduce((sum, agent) => sum + agent.completedSessions, 0))} meta="Đã xử lý xong" tone="success" />
+            <MetricCard icon="toll" label="Chi phí AI" value={formatUsd(costs.reduce((sum, cost) => sum + cost.usd, 0))} meta="Theo sổ chi phí" tone="warning" />
+            <MetricCard icon="bug_report" label="Sự kiện vận hành" value={formatNumber(agents.reduce((sum, agent) => sum + agent.traceCount, 0))} meta="Từ các agent" tone="neutral" />
           </section>
           <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1fr)_360px]">
             <AgentTable agents={agents} costs={costs} />
@@ -734,8 +740,8 @@ export default function AnalyticsReportsPage() {
           <section className="grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard icon="person_add" label="Lead" value={formatNumber(agg.leads)} meta={deltaText(deltaFor(deltas, "leads"))} tone={deltaTone(deltaFor(deltas, "leads"))} />
             <MetricCard icon="moving" label="Chuyển đổi" value={formatNumber(agg.conversions)} meta={formatPct(conversionRate)} tone="success" />
-            <MetricCard icon="paid" label="CPL trung bình" value={agg.leads ? formatCurrency(agg.adSpend / agg.leads) : "—"} meta="adSpend / leads" tone="warning" />
-            <MetricCard icon="forum" label="Reply rate" value={formatPct(replyRate)} meta="replies / dms" tone="success" />
+            <MetricCard icon="paid" label="Chi phí/lead trung bình" value={agg.leads ? formatCurrency(agg.adSpend / agg.leads) : "—"} meta="chi phí / lead" tone="warning" />
+            <MetricCard icon="forum" label="Tỷ lệ phản hồi" value={formatPct(replyRate)} meta="phản hồi / tin nhắn" tone="success" />
           </section>
           <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1fr)_380px]">
             <ForecastCard points={forecast} />

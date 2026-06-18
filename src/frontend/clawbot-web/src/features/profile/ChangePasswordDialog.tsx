@@ -1,8 +1,8 @@
 import { useId, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { AxiosError } from "axios";
 import { changePassword } from "@/shared/api/auth";
 import { Alert, Button, Modal } from "@/shared/ui";
+import { toUserFriendlyError } from "@/shared/utils/userText";
 
 export interface ChangePasswordDialogProps {
   readonly open: boolean;
@@ -27,15 +27,7 @@ function scorePassword(password: string): Strength {
 }
 
 function errorMessage(error: unknown): string {
-  if (!error) return "";
-  if (error instanceof AxiosError) {
-    const data = error.response?.data as { error?: string; title?: string; detail?: string; message?: string } | string[] | string | undefined;
-    if (Array.isArray(data)) return data.join(", ");
-    if (typeof data === "string") return data;
-    return data?.message ?? data?.error ?? data?.title ?? data?.detail ?? error.message;
-  }
-  if (error instanceof Error) return error.message;
-  return "Không xử lý được yêu cầu. Vui lòng thử lại.";
+  return toUserFriendlyError(error, "Không đổi được mật khẩu. Vui lòng thử lại.");
 }
 
 function PasswordField({
@@ -70,9 +62,9 @@ function PasswordField({
           type="button"
           onClick={() => setShow((current) => !current)}
           aria-label={show ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
-          className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-on-surface-variant hover:text-primary"
+          className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-on-surface-variant hover:text-primary"
         >
-          {show ? "visibility_off" : "visibility"}
+          <span aria-hidden="true" className="material-symbols-outlined">{show ? "visibility_off" : "visibility"}</span>
         </button>
       </div>
     </div>

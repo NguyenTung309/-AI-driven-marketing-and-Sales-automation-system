@@ -13,7 +13,7 @@ function StepHeader({ icon, title, desc }: { readonly icon: string; readonly tit
     <header className="mb-8 text-center">
       <div className="flex justify-center mb-4">
         <div className="bg-primary/10 p-4 rounded-full">
-          <span className="material-symbols-outlined text-primary text-[40px]">{icon}</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-primary text-[40px]">{icon}</span>
         </div>
       </div>
       <h2 className="text-headline-md text-on-surface mb-2">{title}</h2>
@@ -70,7 +70,7 @@ function OtpInputs({ value, onChange }: { readonly value: string; readonly onCha
           type="text"
           inputMode="numeric"
           maxLength={1}
-          aria-label={`Mã OTP ký tự ${i + 1}`}
+          aria-label={`Mã xác nhận ký tự ${i + 1}`}
           value={value[i] ?? ""}
           onChange={(e) => setDigit(i, e.target.value)}
           onKeyDown={(e) => onKeyDown(i, e)}
@@ -168,7 +168,7 @@ export default function ForgotPasswordPage() {
       await confirmPasswordReset(email, otp, password);
       setStep("success");
     } catch {
-      setError("Mã/token không hợp lệ hoặc đã hết hạn. Vui lòng thử lại.");
+      setError("Mã xác nhận không hợp lệ hoặc đã hết hạn. Vui lòng thử lại.");
     }
   }
 
@@ -179,13 +179,13 @@ export default function ForgotPasswordPage() {
           <StepHeader
             icon="lock_reset"
             title="Quên mật khẩu?"
-            desc="Đừng lo lắng! Nhập email liên kết với tài khoản Học Bá Admin — hệ thống sẽ gửi mã OTP để đặt lại mật khẩu."
+            desc="Đừng lo lắng! Nhập email liên kết với tài khoản quản trị Học Bá — hệ thống sẽ gửi mã xác nhận để đặt lại mật khẩu."
           />
           <form className="space-y-6" onSubmit={submitRequest}>
             <div className="flex flex-col space-y-1">
               <label htmlFor="email" className="text-label-lg text-on-surface">Địa chỉ Email</label>
               <div className="relative flex items-center">
-                <span className="material-symbols-outlined absolute left-3 text-on-surface-variant text-[20px]">mail</span>
+                <span aria-hidden="true" className="material-symbols-outlined absolute left-3 text-on-surface-variant text-[20px]">mail</span>
                 <input
                   id="email"
                   type="email"
@@ -201,10 +201,10 @@ export default function ForgotPasswordPage() {
             <div className="pt-4 space-y-4">
               <button type="submit" className={submitBtn} disabled={requestPending}>
                 <span>{requestPending ? "Đang gửi mã..." : "Gửi mã xác nhận"}</span>
-                <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[20px]">arrow_forward</span>
               </button>
               <Link to="/login" className={backLink}>
-                <span className="material-symbols-outlined text-[18px]">arrow_back</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">arrow_back</span>
                 <span className="hover:underline">Quay lại đăng nhập</span>
               </Link>
             </div>
@@ -227,7 +227,7 @@ export default function ForgotPasswordPage() {
           <form className="flex flex-col items-center" onSubmit={submitOtp}>
             <OtpInputs value={otp} onChange={setOtp} />
             <div className="flex items-center gap-2 text-warning text-label-lg mb-4">
-              <span className="material-symbols-outlined text-[18px]">schedule</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">schedule</span>
               <span>{seconds > 0 ? <>Mã hết hạn sau {formatTimer(seconds)}</> : "Mã đã hết hạn"}</span>
             </div>
             {error ? <p className="text-error text-body-md mb-2">{error}</p> : null}
@@ -260,7 +260,7 @@ export default function ForgotPasswordPage() {
             <div className="flex flex-col space-y-1">
               <label htmlFor="new_password" className="text-label-lg text-on-surface">Mật khẩu mới</label>
               <div className="relative flex items-center">
-                <span className="material-symbols-outlined absolute left-3 text-on-surface-variant text-[20px]">lock</span>
+                <span aria-hidden="true" className="material-symbols-outlined absolute left-3 text-on-surface-variant text-[20px]">lock</span>
                 <input
                   id="new_password"
                   type={showPassword ? "text" : "password"}
@@ -276,14 +276,14 @@ export default function ForgotPasswordPage() {
                   aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
                   className="absolute right-3 text-on-surface-variant hover:text-primary transition-colors"
                 >
-                  <span className="material-symbols-outlined text-[20px]">{showPassword ? "visibility_off" : "visibility"}</span>
+                  <span aria-hidden="true" className="material-symbols-outlined text-[20px]">{showPassword ? "visibility_off" : "visibility"}</span>
                 </button>
               </div>
             </div>
             <div className="flex flex-col space-y-1">
               <label htmlFor="confirm_password" className="text-label-lg text-on-surface">Xác nhận mật khẩu mới</label>
               <div className="relative flex items-center">
-                <span className="material-symbols-outlined absolute left-3 text-on-surface-variant text-[20px]">lock</span>
+                <span aria-hidden="true" className="material-symbols-outlined absolute left-3 text-on-surface-variant text-[20px]">lock</span>
                 <input
                   id="confirm_password"
                   type={showPassword ? "text" : "password"}
@@ -299,10 +299,10 @@ export default function ForgotPasswordPage() {
             <div className="pt-4 space-y-4">
               <button type="submit" className={submitBtn}>
                 <span>Cập nhật mật khẩu</span>
-                <span className="material-symbols-outlined text-[20px]">check_circle</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[20px]">check_circle</span>
               </button>
               <Link to="/login" className={backLink}>
-                <span className="material-symbols-outlined text-[18px]">arrow_back</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">arrow_back</span>
                 <span className="hover:underline">Quay lại đăng nhập</span>
               </Link>
             </div>
@@ -312,13 +312,13 @@ export default function ForgotPasswordPage() {
 
       {step === "success" ? (
         <div className="flex flex-col items-center py-4">
-          <span className="material-symbols-outlined text-[64px] text-success mb-8 [font-variation-settings:'FILL'_1]">check_circle</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[64px] text-success mb-8 [font-variation-settings:'FILL'_1]">check_circle</span>
           <h2 className="text-headline-md text-on-surface text-center mb-2">Đặt lại mật khẩu thành công!</h2>
           <p className="text-body-md text-on-surface-variant text-center leading-relaxed">
             Hệ thống đang tự động quay lại trang Đăng nhập sau 3 giây...
           </p>
           <div className="mt-8">
-            <span className="material-symbols-outlined animate-spin text-on-surface-variant text-[24px]">progress_activity</span>
+            <span aria-hidden="true" className="material-symbols-outlined animate-spin text-on-surface-variant text-[24px]">progress_activity</span>
           </div>
         </div>
       ) : null}

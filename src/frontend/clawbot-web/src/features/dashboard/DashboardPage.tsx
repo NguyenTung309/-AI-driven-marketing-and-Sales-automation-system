@@ -82,9 +82,9 @@ function metricLabel(metric: string): string {
   if (metric === "dms") return "Hội thoại";
   if (metric === "replies") return "Phản hồi";
   if (metric === "conversions") return "Chuyển đổi";
-  if (metric === "adSpend") return "Chi phí Ads";
-  if (metric === "avgResponseTimeSec") return "Phản hồi TB";
-  if (metric === "cpl") return "CPL";
+  if (metric === "adSpend") return "Chi phí quảng cáo";
+  if (metric === "avgResponseTimeSec") return "Phản hồi trung bình";
+  if (metric === "cpl") return "Chi phí/lead";
   return metric;
 }
 
@@ -95,10 +95,10 @@ function metricTone(delta: number | null | undefined, lowerIsBetter = false): St
 }
 
 function realtimeLabel(state: ReturnType<typeof useNotificationsRealtime>): string {
-  if (state === "connected") return "Realtime SignalR";
-  if (state === "connecting" || state === "reconnecting") return "Đang nối realtime";
-  if (state === "disabled") return "Realtime tắt";
-  return "Realtime gián đoạn";
+  if (state === "connected") return "Cập nhật tức thì";
+  if (state === "connecting" || state === "reconnecting") return "Đang nối lại";
+  if (state === "disabled") return "Cập nhật tức thì tắt";
+  return "Cập nhật tức thì gián đoạn";
 }
 
 function realtimeTone(state: ReturnType<typeof useNotificationsRealtime>): StatusTone {
@@ -137,28 +137,28 @@ function metricCards(rows: readonly OmniChannelRow[], deltas: readonly MetricDel
     {
       label: "Hội thoại AI xử lý",
       value: formatNumber(agg.dms),
-      delta: `WoW ${formatPct(dmsDelta)}`,
+      delta: `So với tuần trước ${formatPct(dmsDelta)}`,
       icon: "forum",
       tone: metricTone(dmsDelta),
     },
     {
       label: "Lead mới",
       value: formatNumber(agg.leads),
-      delta: `WoW ${formatPct(leadsDelta)}`,
+      delta: `So với tuần trước ${formatPct(leadsDelta)}`,
       icon: "local_fire_department",
       tone: metricTone(leadsDelta),
     },
     {
       label: "Chuyển đổi",
       value: formatNumber(agg.conversions),
-      delta: `WoW ${formatPct(conversionDelta)}`,
+      delta: `So với tuần trước ${formatPct(conversionDelta)}`,
       icon: "trending_up",
       tone: metricTone(conversionDelta),
     },
     {
-      label: "Phản hồi TB",
-      value: agg.avgResponse != null ? `${agg.avgResponse.toFixed(1)}s` : "—",
-      delta: `SLA < 3s · ${formatPct(responseDelta)}`,
+      label: "Phản hồi trung bình",
+      value: agg.avgResponse != null ? `${agg.avgResponse.toFixed(1)} giây` : "—",
+      delta: `Mục tiêu dưới 3 giây · ${formatPct(responseDelta)}`,
       icon: "bolt",
       tone: metricTone(responseDelta, true),
     },
@@ -189,10 +189,10 @@ function ChannelChart({ rows }: { readonly rows: readonly OmniChannelRow[] }) {
           </div>
           <div className="space-y-1.5">
             {[
-              { label: "DM", value: row.dms, className: "bg-primary" },
+              { label: "Tin nhắn", value: row.dms, className: "bg-primary" },
               { label: "Lead", value: row.leads, className: "bg-tertiary" },
-              { label: "Reply", value: row.replies, className: "bg-warning" },
-              { label: "Conv", value: row.conversions, className: "bg-secondary" },
+              { label: "Phản hồi", value: row.replies, className: "bg-warning" },
+              { label: "Chuyển đổi", value: row.conversions, className: "bg-secondary" },
             ].map((item) => (
               <div key={item.label} className="grid grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-2">
                 <span className="font-mono text-mono-status text-on-surface-variant">{item.label}</span>
@@ -213,7 +213,7 @@ function ForecastChart({ points }: { readonly points: readonly ForecastPoint[] }
   if (points.length === 0) {
     return (
       <div className="flex min-h-[180px] items-center justify-center rounded-lg border border-dashed border-outline bg-surface text-body-md text-on-surface-variant">
-        Chưa có forecast mới trong 24h.
+        Chưa có dự báo mới trong 24 giờ.
       </div>
     );
   }
@@ -237,7 +237,7 @@ function ForecastChart({ points }: { readonly points: readonly ForecastPoint[] }
 
   return (
     <div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-[180px] w-full" role="img" aria-label="Forecast lead 7 ngày">
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-[180px] w-full" role="img" aria-label="Dự báo lead 7 ngày">
         <polygon points={areaPath} className="fill-primary/10" />
         <polyline points={upperPath} fill="none" className="stroke-primary/25" strokeWidth="2" strokeDasharray="4 6" />
         <polyline points={lowerPath} fill="none" className="stroke-primary/25" strokeWidth="2" strokeDasharray="4 6" />
@@ -258,9 +258,9 @@ function FunnelPanel({ funnel }: { readonly funnel: FunnelResponse | null }) {
   const steps = funnel
     ? [
         { label: "Lead", value: funnel.leads, rate: 1 },
-        { label: "DM", value: funnel.dms, rate: funnel.dmRate },
-        { label: "Reply", value: funnel.replies, rate: funnel.replyRate },
-        { label: "Convert", value: funnel.conversions, rate: funnel.conversionRate },
+        { label: "Tin nhắn", value: funnel.dms, rate: funnel.dmRate },
+        { label: "Phản hồi", value: funnel.replies, rate: funnel.replyRate },
+        { label: "Chuyển đổi", value: funnel.conversions, rate: funnel.conversionRate },
       ]
     : [];
 
@@ -268,7 +268,7 @@ function FunnelPanel({ funnel }: { readonly funnel: FunnelResponse | null }) {
     <Card>
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-headline-sm">Phễu chuyển đổi</h2>
-        <StatusPill tone="neutral">{funnel ? platformLabel(funnel.platform) : "No data"}</StatusPill>
+        <StatusPill tone="neutral">{funnel ? platformLabel(funnel.platform) : "Chưa có dữ liệu"}</StatusPill>
       </div>
       {steps.length === 0 ? (
         <p className="text-body-md text-on-surface-variant">Không tải được dữ liệu phễu chuyển đổi.</p>
@@ -299,7 +299,7 @@ function AgentStatus({ agents }: { readonly agents: readonly AgentPerformance[] 
     <Card>
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-headline-sm">Trạng thái Agent</h2>
-        <StatusPill tone={visible.length ? "success" : "neutral"}>{visible.length ? `${visible.length} active` : "Chưa có session"}</StatusPill>
+        <StatusPill tone={visible.length ? "success" : "neutral"}>{visible.length ? `${visible.length} đang hoạt động` : "Chưa có phiên chạy"}</StatusPill>
       </div>
       {visible.length === 0 ? (
         <p className="text-body-md text-on-surface-variant">Chưa có dữ liệu hiệu suất agent.</p>
@@ -312,13 +312,13 @@ function AgentStatus({ agents }: { readonly agents: readonly AgentPerformance[] 
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <p className="truncate text-body-md font-bold text-on-surface">{agent.agentName}</p>
-                    <p className="font-mono text-mono-status text-on-surface-variant">{formatNumber(agent.traceCount)} traces</p>
+                    <p className="font-mono text-mono-status text-on-surface-variant">{formatNumber(agent.traceCount)} sự kiện</p>
                   </div>
-                  <StatusPill tone={healthy ? "success" : "warning"}>{healthy ? "Online" : "Review"}</StatusPill>
+                  <StatusPill tone={healthy ? "success" : "warning"}>{healthy ? "Đang hoạt động" : "Cần kiểm tra"}</StatusPill>
                 </div>
                 <div className="mt-3 flex items-center justify-between font-mono text-mono-status text-secondary">
-                  <span>{formatNumber(agent.sessions)} sessions</span>
-                  <span>{percent(agent.completionRate)} done</span>
+                  <span>{formatNumber(agent.sessions)} lượt xử lý</span>
+                  <span>{percent(agent.completionRate)} hoàn tất</span>
                 </div>
               </div>
             );
@@ -331,9 +331,9 @@ function AgentStatus({ agents }: { readonly agents: readonly AgentPerformance[] 
 
 function QuickActions() {
   const actions = [
-    { to: "/conversations", icon: "add_comment", label: "Mở inbox ưu tiên", detail: "Duyệt hội thoại nóng" },
-    { to: "/kb", icon: "upload_file", label: "Cập nhật tri thức", detail: "Deploy phiên bản KB" },
-    { to: "/notifications", icon: "notifications_active", label: "Xem cảnh báo", detail: "Lead nóng và anomaly" },
+    { to: "/conversations", icon: "add_comment", label: "Mở hộp thư ưu tiên", detail: "Duyệt hội thoại nóng" },
+    { to: "/kb", icon: "upload_file", label: "Cập nhật tri thức", detail: "Phát hành phiên bản mới" },
+    { to: "/notifications", icon: "notifications_active", label: "Xem cảnh báo", detail: "Lead nóng và bất thường" },
   ];
 
   return (
@@ -347,13 +347,13 @@ function QuickActions() {
             className="flex items-center justify-between rounded-lg border border-outline bg-surface p-3 text-body-md font-semibold text-on-surface transition-colors hover:border-primary hover:text-primary"
           >
             <span className="flex min-w-0 items-center gap-2">
-              <span className="material-symbols-outlined text-[18px]">{action.icon}</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{action.icon}</span>
               <span className="min-w-0">
                 <span className="block truncate">{action.label}</span>
                 <span className="block text-label-sm font-normal text-on-surface-variant">{action.detail}</span>
               </span>
             </span>
-            <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">chevron_right</span>
           </Link>
         ))}
       </div>
@@ -367,18 +367,18 @@ function LiveTaskTable({ anomalies }: { readonly anomalies: readonly AnomalyPoin
     <Card className="mt-stack-lg">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-headline-sm">Nhật ký tác vụ Live</h2>
-          <p className="text-body-md text-on-surface-variant">Dòng cảnh báo từ Report Agent và SignalR in-app.</p>
+          <h2 className="text-headline-sm">Nhật ký tác vụ trực tiếp</h2>
+          <p className="text-body-md text-on-surface-variant">Dòng cảnh báo mới từ agent báo cáo và trung tâm thông báo.</p>
         </div>
         <StatusPill tone={rows.some((row) => row.isAnomaly) ? "warning" : "success"}>
-          {rows.some((row) => row.isAnomaly) ? "Có anomaly" : "Ổn định"}
+          {rows.some((row) => row.isAnomaly) ? "Có bất thường" : "Ổn định"}
         </StatusPill>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[680px] border-collapse">
           <thead>
             <tr className="border-b border-outline bg-surface text-left text-label-caps uppercase text-on-surface-variant">
-              <th className="px-3 py-2">ID tác vụ</th>
+              <th className="px-3 py-2">Mã tác vụ</th>
               <th className="px-3 py-2">Agent xử lý</th>
               <th className="px-3 py-2">Phân loại</th>
               <th className="px-3 py-2">Thời lượng</th>
@@ -396,9 +396,9 @@ function LiveTaskTable({ anomalies }: { readonly anomalies: readonly AnomalyPoin
               rows.map((row, index) => (
                 <tr key={`${row.date}-${row.platform}-${index}`} className="border-b border-outline text-body-md">
                   <td className="px-3 py-3 font-mono text-mono-status text-secondary">TK-{String(index + 9211).padStart(4, "0")}</td>
-                  <td className="px-3 py-3">Agent-Report</td>
+                  <td className="px-3 py-3">Báo cáo agent</td>
                   <td className="px-3 py-3">{metricLabel(row.metric)} · {platformLabel(row.platform)}</td>
-                  <td className="px-3 py-3 font-mono text-mono-status">{row.zScore.toFixed(2)}z</td>
+                  <td className="px-3 py-3 font-mono text-mono-status">Mức lệch {row.zScore.toFixed(2)}</td>
                   <td className="px-3 py-3 text-right">
                     <StatusPill tone={row.isAnomaly ? "warning" : "success"}>{row.isAnomaly ? "Cần xử lý" : "Hoàn thành"}</StatusPill>
                   </td>
@@ -458,11 +458,11 @@ export default function DashboardPage() {
   const apiError = omnichannelQuery.isError || deltaQuery.isError || funnelQuery.isError;
 
   return (
-    <AppShell title="Dashboard tổng quan">
+    <AppShell title="Tổng quan">
       <section className="mb-gutter rounded-lg border border-primary/20 bg-primary/5 p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-headline-md">Dashboard Tổng Quan</h1>
+            <h1 className="text-headline-md">Tổng quan vận hành</h1>
             <p className="mt-1 text-body-md text-on-surface-variant">
               Giám sát hiệu năng Agent và hiệu quả tiếp cận theo thời gian thực.
             </p>
@@ -470,7 +470,7 @@ export default function DashboardPage() {
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill tone={realtimeTone(realtimeState)}>{realtimeLabel(realtimeState)}</StatusPill>
             <StatusPill tone={apiError ? "error" : omnichannelQuery.data?.stale ? "warning" : "success"}>
-              {apiError ? "Mất kết nối" : omnichannelQuery.data?.stale ? "Dữ liệu cũ" : "KPI online"}
+              {apiError ? "Mất kết nối" : omnichannelQuery.data?.stale ? "Dữ liệu cũ" : "Báo cáo sẵn sàng"}
             </StatusPill>
             <div className="flex rounded border border-outline bg-white p-1">
               {(["7d", "30d"] as const).map((item) => (
@@ -501,7 +501,7 @@ export default function DashboardPage() {
         <Card>
           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-headline-sm">Xu hướng omnichannel</h2>
+              <h2 className="text-headline-sm">Xu hướng đa kênh</h2>
               <p className="text-body-md text-on-surface-variant">
                 {omnichannelQuery.isLoading
                   ? "Đang tải dữ liệu đa kênh..."
@@ -526,7 +526,7 @@ export default function DashboardPage() {
               <h2 className="text-headline-sm">Dự báo lead 7 ngày</h2>
               <p className="text-body-md text-on-surface-variant">Nguồn: dữ liệu dự báo lead.</p>
             </div>
-            <StatusPill tone={forecast.length ? "success" : "neutral"}>{forecast.length ? "Fresh" : "No forecast"}</StatusPill>
+            <StatusPill tone={forecast.length ? "success" : "neutral"}>{forecast.length ? "Mới cập nhật" : "Chưa có dự báo"}</StatusPill>
           </div>
           <ForecastChart points={forecast} />
         </Card>
@@ -538,15 +538,15 @@ export default function DashboardPage() {
       {apiError ? (
         <Card className="mt-stack-lg border-error/30 bg-error/5">
           <div className="flex items-start gap-3">
-            <span className="material-symbols-outlined text-error">error</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-error">error</span>
             <div>
-              <h2 className="text-headline-sm text-error">Không tải đủ dữ liệu dashboard</h2>
+              <h2 className="text-headline-sm text-error">Không tải đủ dữ liệu tổng quan</h2>
               <p className="mt-1 text-body-md text-on-surface-variant">
-                Kiểm tra phiên đăng nhập và quyền truy cập. Các panel độc lập vẫn giữ trạng thái riêng để không làm sập trang.
+                Kiểm tra phiên đăng nhập và quyền truy cập. Các khối thông tin độc lập vẫn giữ trạng thái riêng để không làm gián đoạn trang.
               </p>
               <Button type="button" className="mt-3" variant="outline" onClick={() => void omnichannelQuery.refetch()}>
-                <span className="material-symbols-outlined text-[18px]">refresh</span>
-                Tải lại KPI
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">refresh</span>
+                Tải lại báo cáo
               </Button>
             </div>
           </div>

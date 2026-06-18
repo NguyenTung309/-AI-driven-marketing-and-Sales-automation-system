@@ -19,7 +19,7 @@ function mobileItemClass(isActive: boolean): string {
 function MobileNavItem({ item }: { readonly item: NavItem }) {
   return (
     <NavLink to={item.to} className={({ isActive }) => mobileItemClass(isActive)}>
-      <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
+      <span aria-hidden="true" className="material-symbols-outlined text-[20px]">{item.icon}</span>
       <span>{item.label}</span>
     </NavLink>
   );
@@ -54,11 +54,11 @@ export function Topbar({ title }: TopbarProps) {
       <div className="flex min-w-0 items-center gap-3">
         <details className="relative md:hidden">
           <summary className="flex size-10 cursor-pointer list-none items-center justify-center rounded border border-outline bg-surface-container-lowest text-on-surface">
-            <span className="material-symbols-outlined">menu</span>
+            <span aria-hidden="true" className="material-symbols-outlined">menu</span>
           </summary>
           <div className="absolute left-0 top-12 w-72 rounded-lg border border-outline bg-surface-container-lowest p-2 shadow-2xl">
             <div className="px-3 py-2">
-              <p className="text-label-caps text-on-surface-variant">Học Bá Education</p>
+              <p className="text-label-caps text-on-surface-variant">Học Bá AI</p>
             </div>
             {NAV_ITEMS.map((item) => (
               <MobileNavItem key={item.to} item={item} />
@@ -70,7 +70,7 @@ export function Topbar({ title }: TopbarProps) {
         </details>
 
         <div className="relative hidden sm:block">
-          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant/50">
+          <span aria-hidden="true" className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant/50">
             search
           </span>
           <input
@@ -88,7 +88,7 @@ export function Topbar({ title }: TopbarProps) {
           className="relative text-on-surface-variant hover:text-on-surface"
           to="/notifications"
         >
-          <span className="material-symbols-outlined text-[22px]">notifications</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[22px]">notifications</span>
           {unreadCount > 0 ? (
             <span className="absolute -right-2 -top-2 rounded-full border-2 border-surface bg-primary px-1.5 text-[10px] font-bold leading-4 text-on-primary">
               {unreadCount > 9 ? "9+" : unreadCount}
@@ -108,7 +108,7 @@ export function Topbar({ title }: TopbarProps) {
               className="flex items-center gap-2 rounded px-3 py-2 text-body-md text-on-surface hover:bg-surface-container-low"
               to="/profile"
             >
-              <span className="material-symbols-outlined text-[18px]">account_circle</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">account_circle</span>
               <span>Hồ sơ</span>
             </NavLink>
             <button
@@ -116,7 +116,7 @@ export function Topbar({ title }: TopbarProps) {
               onClick={handleLogout}
               type="button"
             >
-              <span className="material-symbols-outlined text-[18px]">logout</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">logout</span>
               <span>Đăng xuất</span>
             </button>
           </div>

@@ -8,7 +8,7 @@ export function Input({ icon, className = "", ...rest }: InputProps) {
   return (
     <div className="relative">
       {icon ? (
-        <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50 text-[20px]">
+        <span aria-hidden="true" className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50 text-[20px]">
           {icon}
         </span>
       ) : null}

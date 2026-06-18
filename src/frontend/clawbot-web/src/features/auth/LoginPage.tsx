@@ -24,12 +24,12 @@ function BrandPanel() {
     <section className="hidden md:flex w-1/2 relative bg-primary overflow-hidden flex-col">
       <div className="absolute inset-0 bg-gradient-to-br from-primary via-primary-container to-[#800000] opacity-90 z-0" />
       <div className="absolute top-0 left-0 w-full flex items-center px-8 py-6 z-10">
-        <span className="text-headline-md font-bold text-on-primary tracking-tight">Học Bá Education</span>
+        <span className="text-headline-md font-bold text-on-primary tracking-tight">Học Bá AI</span>
       </div>
 
       <div className="relative z-10 flex flex-col justify-center items-start h-full px-20 max-w-3xl">
         <h1 className="text-on-primary text-headline-lg mb-4">
-          Hệ Thống Trí Tuệ Nhân Tạo Sale &amp; Marketing
+          Hệ thống AI tư vấn &amp; marketing
         </h1>
         <p className="text-on-primary/80 text-body-lg mb-12">
           Quản trị tiến trình tự động hóa, tối ưu chuyển đổi và nâng tầm trải nghiệm học viên thông qua
@@ -42,7 +42,7 @@ function BrandPanel() {
               <div
                 className="flex flex-col items-center gap-2 rounded-xl backdrop-blur-sm"
               >
-                <span
+                <span aria-hidden="true"
                   className="material-symbols-outlined text-on-primary"
                   style={node.emphasis ? { fontVariationSettings: "'FILL' 1" } : undefined}
                 >
@@ -57,7 +57,7 @@ function BrandPanel() {
       </div>
 
       <div className="absolute bottom-0 left-0 w-full flex items-center px-8 py-4 z-10 text-on-primary/60">
-        <span className="text-label-sm">&copy; 2024 Học Bá Education. All rights reserved.</span>
+        <span className="text-label-sm">&copy; 2024 Học Bá AI. Bảo lưu mọi quyền.</span>
       </div>
     </section>
   );
@@ -133,7 +133,7 @@ export default function LoginPage() {
       <BrandPanel />
 
       <section className="w-full md:w-1/2 bg-surface-container-low flex flex-col items-center justify-center p-6 md:p-12 relative">
-        <div className="md:hidden absolute top-8 left-8 text-headline-md font-bold text-primary">Học Bá Education</div>
+        <div className="md:hidden absolute top-8 left-8 text-headline-md font-bold text-primary">Học Bá AI</div>
 
         <div className="w-full max-w-[460px] bg-surface-container-lowest p-10 rounded-[12px] shadow-[0px_1px_3px_rgba(0,0,0,0.05),0px_1px_2px_rgba(0,0,0,0.03)] border border-outline-variant/30">
           {error ? (
@@ -147,11 +147,11 @@ export default function LoginPage() {
               <header className="mb-2">
                 <h2 className="text-secondary text-headline-md mb-2">Xác thực 2 bước</h2>
                 <p className="text-on-surface-variant text-body-md">
-                  Nhập mã 6 chữ số từ ứng dụng Authenticator của bạn.
+                  Nhập mã 6 chữ số từ ứng dụng xác thực của bạn.
                 </p>
               </header>
               <div className="relative flex items-center">
-                <span className="material-symbols-outlined absolute left-4 text-on-surface-variant text-[20px]">shield</span>
+                <span aria-hidden="true" className="material-symbols-outlined absolute left-4 text-on-surface-variant text-[20px]">shield</span>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -183,7 +183,7 @@ export default function LoginPage() {
               <header className="mb-8">
                 <h2 className="text-secondary text-headline-md mb-2">Đăng nhập hệ thống</h2>
                 <p className="text-on-surface-variant text-body-md">
-                  Vui lòng nhập thông tin tài khoản Học Bá Admin để tiếp tục.
+                  Vui lòng nhập thông tin tài khoản quản trị Học Bá để tiếp tục.
                 </p>
               </header>
 
@@ -191,7 +191,7 @@ export default function LoginPage() {
                 <div className="space-y-2">
                   <label className="block text-label-lg text-on-surface" htmlFor="email">Email</label>
                   <div className="relative flex items-center">
-                    <span className="material-symbols-outlined absolute left-4 text-on-surface-variant text-[20px]">mail</span>
+                    <span aria-hidden="true" className="material-symbols-outlined absolute left-4 text-on-surface-variant text-[20px]">mail</span>
                     <input
                       id="email"
                       name="email"
@@ -208,7 +208,7 @@ export default function LoginPage() {
                 <div className="space-y-2">
                   <label className="block text-label-lg text-on-surface" htmlFor="password">Mật khẩu</label>
                   <div className="relative flex items-center">
-                    <span className="material-symbols-outlined absolute left-4 text-on-surface-variant text-[20px]">lock</span>
+                    <span aria-hidden="true" className="material-symbols-outlined absolute left-4 text-on-surface-variant text-[20px]">lock</span>
                     <input
                       id="password"
                       name="password"
@@ -225,7 +225,7 @@ export default function LoginPage() {
                       aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
                       className="absolute right-4 text-on-surface-variant hover:text-primary transition-colors"
                     >
-                      <span className="material-symbols-outlined text-[20px]">{showPassword ? "visibility_off" : "visibility"}</span>
+                      <span aria-hidden="true" className="material-symbols-outlined text-[20px]">{showPassword ? "visibility_off" : "visibility"}</span>
                     </button>
                   </div>
                 </div>
@@ -248,14 +248,14 @@ export default function LoginPage() {
           <div className="mt-8 pt-6 border-t border-outline-variant/30 text-center">
             <p className="text-on-surface-variant text-label-sm">
               Gặp sự cố truy cập?{" "}
-              <a href="#" className="text-primary hover:underline font-semibold">Liên hệ IT Support</a>
+              <a href="#" className="text-primary hover:underline font-semibold">Liên hệ hỗ trợ kỹ thuật</a>
             </p>
           </div>
         </div>
 
         <div className="absolute bottom-8 right-8 flex items-center gap-2 text-on-surface-variant/40 select-none">
-          <span className="material-symbols-outlined">verified_user</span>
-          <span className="text-label-sm font-medium tracking-widest">SECURE ADMIN GATEWAY</span>
+          <span aria-hidden="true" className="material-symbols-outlined">verified_user</span>
+          <span className="text-label-sm font-medium tracking-widest">CỔNG QUẢN TRỊ AN TOÀN</span>
         </div>
       </section>
     </main>

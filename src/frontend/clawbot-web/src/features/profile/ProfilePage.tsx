@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AxiosError } from "axios";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, DataTable, StatusPill, ToggleSwitch, type Column } from "@/shared/ui";
+import { toUserFriendlyError } from "@/shared/utils/userText";
 import { disableTwoFactor, getMe } from "@/shared/api/auth";
 import {
   getProfile,
@@ -30,8 +30,8 @@ const TABS: readonly { readonly key: ProfileTab; readonly label: string }[] = [
 ];
 
 const FALLBACK_PERMS: readonly string[] = [
-  "Truy cập báo cáo KPI",
-  "Cấu hình khuôn mẫu Prompt",
+  "Truy cập báo cáo chỉ số",
+  "Cấu hình hướng dẫn agent",
   "Quản lý Kho tri thức",
 ];
 
@@ -39,15 +39,7 @@ const fieldInput =
   "w-full px-4 py-3 border border-outline-variant rounded text-body-lg focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all";
 
 function errorMessage(error: unknown): string {
-  if (!error) return "";
-  if (error instanceof AxiosError) {
-    const data = error.response?.data as { error?: string; title?: string; detail?: string; message?: string } | string[] | string | undefined;
-    if (Array.isArray(data)) return data.join(", ");
-    if (typeof data === "string") return data;
-    return data?.message ?? data?.error ?? data?.title ?? data?.detail ?? error.message;
-  }
-  if (error instanceof Error) return error.message;
-  return "Không xử lý được yêu cầu. Vui lòng thử lại.";
+  return toUserFriendlyError(error, "Không xử lý được thông tin tài khoản. Vui lòng thử lại.");
 }
 
 function formatDateTime(value: string): string {
@@ -112,7 +104,7 @@ function Field({
             className={`${fieldInput} ${disabled ? "bg-surface-container-low text-on-surface-variant cursor-not-allowed" : ""}`}
           />
           {disabled ? (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] text-on-surface-variant">lock</span>
+            <span aria-hidden="true" className="absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] text-on-surface-variant">lock</span>
           ) : null}
         </div>
       </label>
@@ -142,10 +134,10 @@ function TwoFactorRow() {
       <div className="flex items-center justify-between rounded-xl border border-dashed border-outline-variant bg-surface-container-low p-6">
         <div className="flex items-center gap-4">
           <div className="flex size-12 items-center justify-center rounded-full bg-white shadow-sm">
-            <span className="material-symbols-outlined text-primary">security</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-primary">security</span>
           </div>
           <div>
-            <h5 className="font-bold text-on-surface">Xác thực 2 yếu tố (2FA)</h5>
+            <h5 className="font-bold text-on-surface">Xác thực hai lớp</h5>
             <p className="text-body-md text-on-surface-variant">Tăng cường bảo mật cho tài khoản quản trị của bạn.</p>
           </div>
         </div>
@@ -203,7 +195,7 @@ function InfoTab({
       </div>
       <div className="flex justify-end">
         <Button type="button" className="px-8 py-4 shadow-lg active:scale-95" onClick={onSave} disabled={saving || !canSave}>
-          <span className="material-symbols-outlined">save</span>
+          <span aria-hidden="true" className="material-symbols-outlined">save</span>
           {saving ? "ĐANG LƯU..." : "LƯU THÔNG TIN CÁ NHÂN"}
         </Button>
       </div>
@@ -226,7 +218,7 @@ function PermissionsTab({ perms }: { readonly perms: readonly string[] }) {
         ))}
       </div>
       <p className="text-body-md italic text-on-surface-variant/70">
-        Quyền hạn do hệ thống cấp phát theo vai trò. Vui lòng liên hệ Admin để thay đổi.
+        Quyền hạn do hệ thống cấp phát theo vai trò. Vui lòng liên hệ quản trị viên để thay đổi.
       </p>
     </div>
   );
@@ -340,7 +332,7 @@ export default function ProfilePage() {
                 disabled={uploadAvatarMutation.isPending}
                 className="absolute bottom-1 right-1 flex size-10 items-center justify-center rounded-full border-4 border-white bg-primary text-on-primary shadow-lg transition-transform hover:scale-110 disabled:pointer-events-none disabled:opacity-60"
               >
-                <span className="material-symbols-outlined text-[18px]">photo_camera</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">photo_camera</span>
               </button>
               <input
                 ref={avatarInputRef}
@@ -359,7 +351,7 @@ export default function ProfilePage() {
               <div className="mb-2 inline-flex items-center rounded bg-primary/10 px-3 py-1 text-label-lg font-bold text-primary">{roleBadge}</div>
               <div className="flex items-center justify-center gap-1 text-body-md text-on-surface-variant">
                 <span className="size-2 rounded-full bg-success" />
-                <span>{activeTenant ? `Tenant: ${activeTenant}` : "Đang hoạt động"}</span>
+                <span>{activeTenant ? `Đơn vị: ${activeTenant}` : "Đang hoạt động"}</span>
               </div>
             </div>
             <button
@@ -367,7 +359,7 @@ export default function ProfilePage() {
               onClick={() => setPwOpen(true)}
               className="flex w-full items-center justify-center gap-2 rounded border border-primary bg-white px-4 py-3 text-label-lg font-bold text-primary transition-colors hover:bg-primary/5"
             >
-              <span className="material-symbols-outlined text-[20px]">lock_reset</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[20px]">lock_reset</span>
               ĐỔI MẬT KHẨU
             </button>
           </Card>

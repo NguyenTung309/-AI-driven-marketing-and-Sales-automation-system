@@ -6,6 +6,7 @@ import { Card } from "@/shared/ui/Card";
 import { MetricCard } from "@/shared/ui/MetricCard";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import { AppShell } from "@/shared/layout/AppShell";
+import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
   getPromptConfig,
   listPromptConfigs,
@@ -67,23 +68,23 @@ function statusTone(config: PromptConfig): StatusTone {
 }
 
 function statusLabel(config: PromptConfig): string {
-  if (!config.provider || !config.model) return "Thiếu runtime";
-  if (!config.systemPrompt.trim()) return "Thiếu prompt";
-  if (normalize(config.status) === "running") return "Runtime hợp lệ";
+  if (!config.provider || !config.model) return "Thiếu cấu hình chạy";
+  if (!config.systemPrompt.trim()) return "Thiếu hướng dẫn";
+  if (normalize(config.status) === "running") return "Cấu hình hợp lệ";
   if (normalize(config.status) === "error") return "Agent lỗi";
   return "Sẵn sàng cấu hình";
 }
 
 function agentTypeLabel(type: string): string {
   const value = normalize(type);
-  if (value === "sale_assist") return "Sale Assist";
-  if (value === "content") return "Content";
-  if (value === "lead") return "Lead Scoring";
-  if (value === "docs") return "Docs";
-  if (value === "ads") return "Ads";
-  if (value === "report") return "Report";
-  if (value === "research") return "Research";
-  if (value === "chat") return "Chat";
+  if (value === "sale_assist") return "Trợ lý tư vấn";
+  if (value === "content") return "Nội dung";
+  if (value === "lead") return "Chấm điểm lead";
+  if (value === "docs") return "Tài liệu";
+  if (value === "ads") return "Quảng cáo";
+  if (value === "report") return "Báo cáo";
+  if (value === "research") return "Nghiên cứu";
+  if (value === "chat") return "Trò chuyện";
   return type || "Agent";
 }
 
@@ -93,7 +94,7 @@ function providerInitial(provider: string): string {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Không xử lý được cấu hình prompt.";
+  return toUserFriendlyError(error, "Không xử lý được cấu hình hướng dẫn agent.");
 }
 
 function toPayload(config: PromptConfig, draft: PromptDraft): UpdatePromptConfigPayload {
@@ -138,7 +139,7 @@ function PromptConfigCard({
           </span>
         </button>
         <button aria-label="Xem chi tiết cấu hình" className="rounded p-1 text-on-surface-variant hover:bg-surface hover:text-secondary" onClick={onSelect} type="button">
-          <span className="material-symbols-outlined">more_vert</span>
+          <span aria-hidden="true" className="material-symbols-outlined">more_vert</span>
         </button>
       </div>
 
@@ -149,23 +150,23 @@ function PromptConfigCard({
 
       <div className="mb-4 grid grid-cols-2 gap-3 text-body-md">
         <div>
-          <p className="text-label-sm uppercase text-on-surface-variant">Provider</p>
+          <p className="text-label-sm uppercase text-on-surface-variant">Nhà cung cấp</p>
           <p className="mt-1 font-semibold text-secondary">{config.provider || "n/a"}</p>
         </div>
         <div>
           <p className="text-label-sm uppercase text-on-surface-variant">7 ngày</p>
-          <p className="mt-1 font-mono text-mono-status text-secondary">{formatNumber(config.totalTokensLast7Days)} tokens</p>
+          <p className="mt-1 font-mono text-mono-status text-secondary">{formatNumber(config.totalTokensLast7Days)} lượt dùng</p>
         </div>
       </div>
 
       <div className="mt-auto grid grid-cols-2 gap-2 border-t border-outline pt-4">
         <button className="rounded-lg py-2 text-label-caps uppercase text-on-surface-variant hover:bg-surface hover:text-primary" onClick={onSelect} type="button">
-          <span className="material-symbols-outlined mr-1 align-middle text-[18px]">edit</span>
-          Sửa Prompt
+          <span aria-hidden="true" className="material-symbols-outlined mr-1 align-middle text-[18px]">edit</span>
+          Sửa hướng dẫn
         </button>
         <button className="rounded-lg py-2 text-label-caps uppercase text-on-surface-variant hover:bg-surface hover:text-primary" onClick={onSandbox} type="button">
-          <span className="material-symbols-outlined mr-1 align-middle text-[18px]">bolt</span>
-          Thử Sandbox
+          <span aria-hidden="true" className="material-symbols-outlined mr-1 align-middle text-[18px]">bolt</span>
+          Chạy thử
         </button>
       </div>
     </Card>
@@ -182,8 +183,8 @@ function UsageBars({ config }: { readonly config: PromptConfig }) {
     <Card>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-headline-sm text-secondary">Mức tiêu thụ Token</h3>
-          <p className="mt-1 text-body-md text-on-surface-variant">7 ngày gần nhất từ Claude cost ledger.</p>
+          <h3 className="text-headline-sm text-secondary">Mức tiêu thụ</h3>
+          <p className="mt-1 text-body-md text-on-surface-variant">7 ngày gần nhất theo sổ chi phí AI.</p>
         </div>
         <StatusPill tone="neutral">{formatUsd(config.usdLast7Days)}</StatusPill>
       </div>
@@ -198,11 +199,11 @@ function UsageBars({ config }: { readonly config: PromptConfig }) {
       <div className="flex flex-wrap gap-4 text-body-md text-on-surface-variant">
         <span className="inline-flex items-center gap-2">
           <span className="size-3 rounded-full bg-success" />
-          Input {formatNumber(config.inputTokensLast7Days)}
+          Đầu vào {formatNumber(config.inputTokensLast7Days)}
         </span>
         <span className="inline-flex items-center gap-2">
           <span className="size-3 rounded-full bg-primary" />
-          Output {formatNumber(config.outputTokensLast7Days)}
+          Đầu ra {formatNumber(config.outputTokensLast7Days)}
         </span>
       </div>
     </Card>
@@ -215,7 +216,7 @@ function UsageTable({ rows }: { readonly rows: readonly PromptUsageLog[] }) {
       <Card>
         <h3 className="mb-3 text-headline-sm text-secondary">Nhật ký sử dụng gần nhất</h3>
         <div className="rounded-lg border border-dashed border-outline bg-surface p-6 text-center text-body-md text-on-surface-variant">
-          Chưa có token ledger cho cấu hình này trong 7 ngày qua.
+          Chưa có dữ liệu tiêu thụ cho cấu hình này trong 7 ngày qua.
         </div>
       </Card>
     );
@@ -228,10 +229,10 @@ function UsageTable({ rows }: { readonly rows: readonly PromptUsageLog[] }) {
         <table className="w-full min-w-[560px] text-left">
           <thead className="border-b border-outline text-label-caps uppercase text-on-surface-variant">
             <tr>
-              <th className="py-3 pr-4">ID tác vụ</th>
+              <th className="py-3 pr-4">Mã tác vụ</th>
               <th className="px-4 py-3">Thời gian</th>
-              <th className="px-4 py-3">Model</th>
-              <th className="py-3 pl-4">Tokens</th>
+              <th className="px-4 py-3">Mô hình</th>
+              <th className="py-3 pl-4">Lượng dùng</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-outline">
@@ -273,47 +274,47 @@ function SandboxModal({
 }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-gutter backdrop-blur-sm" onClick={onClose} role="presentation">
-      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-surface-container-lowest shadow-2xl" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="LLM Test Sandbox">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-surface-container-lowest shadow-2xl" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Chạy thử hướng dẫn">
         <div className="flex items-center justify-between border-b border-outline bg-surface px-gutter py-4">
           <div>
-            <h3 className="text-headline-md text-secondary">LLM Test Sandbox</h3>
+            <h3 className="text-headline-md text-secondary">Chạy thử hướng dẫn</h3>
             <p className="mt-1 text-body-md text-on-surface-variant">{config.displayName} · {config.model}</p>
           </div>
-          <button className="rounded-full p-2 text-on-surface-variant hover:bg-error/10 hover:text-error" onClick={onClose} type="button" aria-label="Đóng sandbox">
-            <span className="material-symbols-outlined">close</span>
+          <button className="rounded-full p-2 text-on-surface-variant hover:bg-error/10 hover:text-error" onClick={onClose} type="button" aria-label="Đóng thử nghiệm">
+            <span aria-hidden="true" className="material-symbols-outlined">close</span>
           </button>
         </div>
 
         <div className="grid flex-1 grid-cols-1 overflow-hidden md:grid-cols-2">
           <div className="space-y-4 overflow-y-auto border-r border-outline p-gutter">
             <label className="block">
-              <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">System Prompt</span>
-              <textarea className={textAreaClass} readOnly value={prompt || "Chưa có system prompt tùy chỉnh."} />
+              <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Hướng dẫn gốc</span>
+              <textarea className={textAreaClass} readOnly value={prompt || "Chưa có hướng dẫn tùy chỉnh."} />
             </label>
             <label className="block">
-              <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">User Input</span>
+              <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Tin nhắn thử</span>
               <textarea className={`${textAreaClass} min-h-48`} onChange={(event) => onInputChange(event.target.value)} value={input} />
             </label>
             <Button className="w-full py-3 text-label-caps uppercase" disabled={pending || !input.trim()} onClick={onSubmit} type="button">
-              <span className="material-symbols-outlined">bolt</span>
-              Gửi yêu cầu test
+              <span aria-hidden="true" className="material-symbols-outlined">bolt</span>
+              Gửi thử
             </Button>
           </div>
 
           <div className="flex flex-col overflow-hidden bg-surface p-gutter">
-            <span className="mb-2 block text-label-caps uppercase text-on-surface-variant">Kết quả Output</span>
+            <span className="mb-2 block text-label-caps uppercase text-on-surface-variant">Kết quả phản hồi</span>
             <div className="min-h-64 flex-1 overflow-y-auto rounded-lg border border-outline bg-white p-4 text-body-md leading-relaxed text-secondary">
-              {pending ? <p className="border-r-2 border-primary pr-1">Đang kiểm thử prompt...</p> : null}
+              {pending ? <p className="border-r-2 border-primary pr-1">Đang kiểm thử hướng dẫn...</p> : null}
               {error ? <Alert tone="error">{errorMessage(error)}</Alert> : null}
               {!pending && !error && result ? <p>{result.reply}</p> : null}
-              {!pending && !error && !result ? <p className="text-on-surface-variant">Kết quả sandbox sẽ xuất hiện tại đây.</p> : null}
+              {!pending && !error && !result ? <p className="text-on-surface-variant">Kết quả thử nghiệm sẽ xuất hiện tại đây.</p> : null}
             </div>
             <div className="mt-4 flex flex-wrap gap-3">
               <span className="rounded-full bg-secondary-container px-3 py-1.5 font-mono text-mono-status text-secondary">
                 {result ? formatDateTime(result.sentAt) : "Chưa chạy"}
               </span>
               <span className="rounded-full border border-tertiary/20 bg-tertiary/10 px-3 py-1.5 font-mono text-mono-status text-tertiary">
-                {result ? `${formatNumber(result.estimatedTokens)} tokens` : "0 tokens"}
+                {result ? `${formatNumber(result.estimatedTokens)} lượt dùng` : "0 lượt dùng"}
               </span>
             </div>
           </div>
@@ -360,7 +361,7 @@ export default function PromptConfigurationPage() {
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      if (!selectedConfig) throw new Error("Chưa chọn cấu hình prompt.");
+      if (!selectedConfig) throw new Error("Chưa chọn cấu hình hướng dẫn.");
       return updatePromptConfig(selectedConfig.code, toPayload(selectedConfig, draft));
     },
     onSuccess: (next) => {
@@ -374,13 +375,13 @@ export default function PromptConfigurationPage() {
           : current
       );
       setDraft({});
-      setNotice("Đã lưu cấu hình prompt vào AgentConfig.");
+      setNotice("Đã lưu cấu hình hướng dẫn cho agent.");
     },
   });
 
   const sandboxMutation = useMutation({
     mutationFn: () => {
-      if (!selectedConfig || !effectiveForm) throw new Error("Chưa chọn cấu hình prompt.");
+      if (!selectedConfig || !effectiveForm) throw new Error("Chưa chọn cấu hình hướng dẫn.");
       return runPromptSandbox(selectedConfig.code, {
         message: sandboxInput,
         systemPrompt: effectiveForm.systemPrompt,
@@ -418,18 +419,18 @@ export default function PromptConfigurationPage() {
   }
 
   return (
-    <AppShell title="Cấu hình Prompt gốc">
+    <AppShell title="Cấu hình hướng dẫn agent">
       <section className="mb-gutter flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-display-lg text-secondary">Cấu hình Prompt gốc</h1>
+          <h1 className="text-display-lg text-secondary">Cấu hình hướng dẫn agent</h1>
           <p className="mt-2 max-w-3xl text-body-md text-on-surface-variant">
-            Quản lý provider, model và system prompt đang lưu trong AgentConfig cho các AI agent của tenant hiện tại.
+            Quản lý nhà cung cấp, mô hình AI và hướng dẫn trả lời cho các agent của đơn vị hiện tại.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <StatusPill tone={currentError ? "error" : "success"}>{currentError ? "Mất kết nối" : "Đã kết nối"}</StatusPill>
           <Button type="button" variant="outline" onClick={() => void listQuery.refetch()}>
-            <span className="material-symbols-outlined text-[18px]">refresh</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">refresh</span>
             Đồng bộ cấu hình
           </Button>
         </div>
@@ -447,11 +448,11 @@ export default function PromptConfigurationPage() {
       ) : null}
 
       <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-4">
-        <MetricCard icon="settings_suggest" label="Cấu hình LLM" value={stats ? formatNumber(stats.totalConfigs) : "Đang tải"} delta={`${stats?.runningConfigs ?? 0} runtime đang chạy`} tone="neutral" />
-        <MetricCard icon="terminal" label="Prompt đã cấu hình" value={stats ? formatNumber(stats.promptConfigured) : "Đang tải"} delta="System prompt có nội dung" tone="success" />
-        <MetricCard icon="toll" label="Token 7 ngày" value={stats ? formatNumber(stats.tokensLast7Days) : "Đang tải"} delta={stats ? formatUsd(stats.usdLast7Days) : "Ledger đang đồng bộ"} tone="neutral" />
+        <MetricCard icon="settings_suggest" label="Cấu hình AI" value={stats ? formatNumber(stats.totalConfigs) : "Đang tải"} delta={`${stats?.runningConfigs ?? 0} cấu hình đang chạy`} tone="neutral" />
+        <MetricCard icon="terminal" label="Hướng dẫn đã có" value={stats ? formatNumber(stats.promptConfigured) : "Đang tải"} delta="Có nội dung hướng dẫn" tone="success" />
+        <MetricCard icon="toll" label="Lượng dùng 7 ngày" value={stats ? formatNumber(stats.tokensLast7Days) : "Đang tải"} delta={stats ? formatUsd(stats.usdLast7Days) : "Đang đồng bộ"} tone="neutral" />
         <Card>
-          <p className="text-label-caps uppercase text-on-surface-variant">Provider mix</p>
+          <p className="text-label-caps uppercase text-on-surface-variant">Nhà cung cấp đang dùng</p>
           <div className="mt-3 space-y-2">
             {(providerMix.length ? providerMix : [["none", 0] as const]).slice(0, 3).map(([provider, count]) => (
               <div className="flex items-center justify-between gap-3" key={provider}>
@@ -476,7 +477,7 @@ export default function PromptConfigurationPage() {
         {configs.length === 0 ? (
           <Card className="lg:col-span-2 xl:col-span-3">
             <div className="rounded-lg border border-dashed border-outline bg-surface p-6 text-center text-body-md text-on-surface-variant">
-              Chưa có AgentConfig nào trong tenant hiện tại.
+              Chưa có cấu hình agent trong đơn vị hiện tại.
             </div>
           </Card>
         ) : null}
@@ -502,16 +503,16 @@ export default function PromptConfigurationPage() {
                 <input className={inputClass} value={effectiveForm.displayName} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} />
               </label>
               <label>
-                <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Provider</span>
+                <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Nhà cung cấp</span>
                 <input className={inputClass} value={effectiveForm.provider} onChange={(event) => setDraft((current) => ({ ...current, provider: event.target.value }))} />
               </label>
               <label>
-                <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Model</span>
+                <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Mô hình</span>
                 <input className={inputClass} value={effectiveForm.model} onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))} />
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label>
-                  <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Temperature</span>
+                  <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Độ sáng tạo</span>
                   <input
                     className={inputClass}
                     max={2}
@@ -523,7 +524,7 @@ export default function PromptConfigurationPage() {
                   />
                 </label>
                 <label>
-                  <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Max tokens</span>
+                  <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Giới hạn độ dài</span>
                   <input
                     className={inputClass}
                     max={32000}
@@ -538,18 +539,18 @@ export default function PromptConfigurationPage() {
             </div>
 
             <label className="mt-4 block">
-              <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">System Prompt</span>
+              <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Hướng dẫn gốc</span>
               <textarea className={`${textAreaClass} min-h-64 font-mono text-mono-status`} value={effectiveForm.systemPrompt} onChange={(event) => setDraft((current) => ({ ...current, systemPrompt: event.target.value }))} />
             </label>
 
             <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2">
               <Button disabled={!dirty || saveMutation.isPending} onClick={() => saveMutation.mutate()} type="button">
-                <span className="material-symbols-outlined text-[18px]">save</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">save</span>
                 Lưu cấu hình
               </Button>
               <Button variant="outline" onClick={() => setSandboxOpen(true)} type="button">
-                <span className="material-symbols-outlined text-[18px]">bolt</span>
-                Thử Sandbox
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">bolt</span>
+                Chạy thử
               </Button>
             </div>
           </Card>

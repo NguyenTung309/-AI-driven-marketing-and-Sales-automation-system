@@ -7,13 +7,14 @@ import { MetricCard } from "@/shared/ui/MetricCard";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import { AppShell } from "@/shared/layout/AppShell";
 import { getTokenUsage, updateTokenSettings, type TokenAgentUsage, type TokenAlertSettings, type TokenQuotaUpdate, type TokenUsageResponse } from "@/shared/api/tokens";
+import { toUserFriendlyError } from "@/shared/utils/userText";
 
 type RouterTier = "flash" | "pro" | "high_effort";
 
 const ROUTER_TIERS: readonly { readonly value: RouterTier; readonly label: string; readonly icon: string; readonly description: string }[] = [
-  { value: "flash", label: "Flash Model", icon: "bolt", description: "Mặc định cho phản hồi nhanh và chi phí thấp." },
-  { value: "pro", label: "Pro Model", icon: "psychology", description: "Cho nội dung dài, phân tích và biên tập." },
-  { value: "high_effort", label: "High Effort Model", icon: "school", description: "Cho VIP, handoff khó và tác vụ cần suy luận sâu." },
+  { value: "flash", label: "Nhanh", icon: "bolt", description: "Mặc định cho phản hồi nhanh và chi phí thấp." },
+  { value: "pro", label: "Chuyên sâu", icon: "psychology", description: "Cho nội dung dài, phân tích và biên tập." },
+  { value: "high_effort", label: "Suy luận cao", icon: "school", description: "Cho VIP, bàn giao khó và tác vụ cần suy luận sâu." },
 ];
 
 const MODEL_COLORS = ["bg-primary", "bg-tertiary", "bg-secondary", "bg-surface-variant"];
@@ -32,7 +33,7 @@ function formatUsd(value: number) {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Không thể tải dữ liệu token.";
+  return toUserFriendlyError(error, "Không thể tải dữ liệu hạn mức.");
 }
 
 function statusTone(status: string): StatusTone {
@@ -41,8 +42,16 @@ function statusTone(status: string): StatusTone {
   return "neutral";
 }
 
+function agentStatusLabel(status: string): string {
+  if (status === "running") return "Đang chạy";
+  if (status === "error") return "Cần kiểm tra";
+  if (status === "disabled") return "Đã tắt";
+  if (status === "idle") return "Sẵn sàng";
+  return "Chưa rõ";
+}
+
 function tierLabel(tier: string) {
-  return ROUTER_TIERS.find((item) => item.value === tier)?.label ?? "Flash Model";
+  return ROUTER_TIERS.find((item) => item.value === tier)?.label ?? "Nhanh";
 }
 
 function normalizeTier(tier: string): RouterTier {
@@ -62,7 +71,7 @@ function toQuotas(data: TokenUsageResponse | undefined): readonly TokenQuotaUpda
 
 function exportCsv(data: TokenUsageResponse) {
   const rows = [
-    ["Agent", "Module", "Model", "Calls", "Input tokens", "Output tokens", "Total tokens", "USD", "Monthly quota", "Alert percent", "Router tier"],
+    ["agent", "nhom", "mo_hinh", "luot_goi", "dau_vao", "dau_ra", "tong_luong_dung", "usd", "han_muc_thang", "canh_bao_phan_tram", "luong_phan_bo"],
     ...data.agents.map((agent) => [
       agent.displayName,
       agent.moduleName,
@@ -82,7 +91,7 @@ function exportCsv(data: TokenUsageResponse) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "clawbot-token-usage.csv";
+  link.download = "hocba-ai-luong-dung.csv";
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -97,11 +106,11 @@ function UsageBar({ percent, tone = "primary" }: { readonly percent: number; rea
 }
 
 function ModelMix({ data }: { readonly data: TokenUsageResponse }) {
-  const rows = data.models.length > 0 ? data.models : [{ model: "Chưa có usage", calls: 0, totalTokens: 0, usd: 0, percent: 0 }];
+  const rows = data.models.length > 0 ? data.models : [{ model: "Chưa có dữ liệu sử dụng", calls: 0, totalTokens: 0, usd: 0, percent: 0 }];
 
   return (
     <Card>
-      <h2 className="mb-5 text-headline-sm text-secondary">Cơ cấu tiêu thụ theo model</h2>
+      <h2 className="mb-5 text-headline-sm text-secondary">Phân bổ chi phí theo mô hình</h2>
       <div className="space-y-5">
         {rows.map((model, index) => (
           <div key={model.model} className="grid grid-cols-[112px_minmax(0,1fr)_64px] items-center gap-3">
@@ -133,13 +142,13 @@ function AgentMix({ agents }: { readonly agents: readonly TokenAgentUsage[] }) {
 
   return (
     <Card>
-      <h2 className="mb-5 text-headline-sm text-secondary">Tiêu thụ theo Agent</h2>
+      <h2 className="mb-5 text-headline-sm text-secondary">Lượng dùng theo agent</h2>
       <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
         <div className="relative size-36 shrink-0 rounded-full" style={{ background: chartBackground }}>
           <div className="absolute inset-4 rounded-full bg-white" />
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <span className="font-mono text-label-md text-secondary">{total === 0 ? "0%" : "100%"}</span>
-            <span className="text-label-sm text-on-surface-variant">Token</span>
+            <span className="text-label-sm text-on-surface-variant">Lượng dùng</span>
           </div>
         </div>
         <div className="min-w-0 flex-1 space-y-3">
@@ -155,7 +164,7 @@ function AgentMix({ agents }: { readonly agents: readonly TokenAgentUsage[] }) {
               </div>
             );
           })}
-          {agents.length === 0 ? <p className="text-body-md text-on-surface-variant">Chưa có agent để thống kê.</p> : null}
+          {agents.length === 0 ? <p className="text-body-md text-on-surface-variant">Chưa có agent để tổng hợp dữ liệu.</p> : null}
         </div>
       </div>
     </Card>
@@ -190,12 +199,12 @@ export default function TokenManagementPage() {
       setQuotaDrafts(null);
       setAlertDraft(null);
       setDirty(false);
-      setNotice("Đã lưu cấu hình hạn ngạch và định tuyến model.");
+      setNotice("Đã lưu cấu hình hạn ngạch và luồng chọn mô hình.");
     },
   });
 
   const totalQuota = effectiveQuotaDrafts.reduce((sum, quota) => sum + quota.monthlyQuotaTokens, 0);
-  const projectedDays = data?.estimatedDaysRemaining === null ? "Chưa có usage" : `${data?.estimatedDaysRemaining ?? 0} ngày`;
+  const projectedDays = data?.estimatedDaysRemaining === null ? "Chưa có dữ liệu sử dụng" : `${data?.estimatedDaysRemaining ?? 0} ngày`;
   const quotaStatus = data && data.usagePercent >= 90 ? "error" : data && data.usagePercent >= 75 ? "warning" : "success";
   const currentError = usageQuery.error ?? saveMutation.error;
 
@@ -214,18 +223,18 @@ export default function TokenManagementPage() {
   }
 
   return (
-    <AppShell title="Quản lý Token">
+    <AppShell title="Quản lý chi phí AI">
       <section className="mb-gutter flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-display-lg text-secondary">Quản lý chi phí Token</h1>
+          <h1 className="text-display-lg text-secondary">Quản lý chi phí AI</h1>
           <p className="mt-2 max-w-3xl text-body-md text-on-surface-variant">
-            Theo dõi ledger Claude theo agent, đặt hạn ngạch phân hệ và định tuyến model 3 tầng cho tenant hiện tại.
+            Theo dõi chi phí AI theo agent, đặt hạn mức từng nhóm và chọn chế độ xử lý phù hợp cho đơn vị hiện tại.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <StatusPill tone={currentError ? "error" : quotaStatus}>{currentError ? "Mất kết nối" : "Đã kết nối"}</StatusPill>
           <Button type="button" variant="outline" disabled={!data} onClick={() => data && exportCsv(data)}>
-            <span className="material-symbols-outlined text-[18px]">download</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">download</span>
             Xuất báo cáo
           </Button>
         </div>
@@ -245,34 +254,34 @@ export default function TokenManagementPage() {
       <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-3">
         <MetricCard
           icon="account_balance_wallet"
-          label="Số dư token"
-          value={data ? `${formatNumber(data.remainingTokens)} Tokens` : "Đang tải"}
-          delta={data ? `Dự kiến còn ${projectedDays}` : "Ledger đang đồng bộ"}
+          label="Số dư sử dụng"
+          value={data ? `${formatNumber(data.remainingTokens)} lượt` : "Đang tải"}
+          delta={data ? `Dự kiến còn ${projectedDays}` : "Dữ liệu đang đồng bộ"}
           tone={quotaStatus}
         />
         <MetricCard
           icon="memory"
-          label="Cache-hit ratio"
+          label="Tỉ lệ dùng lại"
           value={data?.cacheHitRatioPercent === null || data?.cacheHitRatioPercent === undefined ? "Chưa có dữ liệu" : `${data.cacheHitRatioPercent.toFixed(1)}%`}
-          delta="Chờ telemetry cache từ RAG/runtime"
+          delta="Đang chờ dữ liệu tổng hợp"
           tone="neutral"
         />
         <Card>
           <div className="flex items-start justify-between">
             <p className="text-label-caps uppercase text-on-surface-variant">Mức tiêu thụ hiện tại</p>
-            <span className="material-symbols-outlined text-[20px] text-on-surface-variant/60">bar_chart</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-on-surface-variant/60">bar_chart</span>
           </div>
           <div className="mt-4 flex h-16 items-end gap-1">
             {[24, 42, 31, 62, 54, Math.max(8, Math.min(100, data?.usagePercent ?? 0))].map((height, index) => (
               <div className={`w-1/6 rounded-t ${index === 5 ? "bg-primary" : "bg-secondary-container"}`} key={`${height}-${index}`} style={{ height: `${height}%` }} />
             ))}
           </div>
-          <p className="mt-3 font-mono text-mono-status text-on-surface-variant">{data ? `${data.usagePercent.toFixed(1)}% quota tháng · ${formatUsd(data.usd)}` : "Đang tải usage"}</p>
+          <p className="mt-3 font-mono text-mono-status text-on-surface-variant">{data ? `${data.usagePercent.toFixed(1)}% hạn mức tháng · ${formatUsd(data.usd)}` : "Đang tải dữ liệu sử dụng"}</p>
         </Card>
       </section>
 
       <section className="mb-gutter grid grid-cols-1 gap-gutter xl:grid-cols-2">
-        {data ? <ModelMix data={data} /> : <Card><p className="text-body-md text-on-surface-variant">Đang tải cơ cấu model...</p></Card>}
+        {data ? <ModelMix data={data} /> : <Card><p className="text-body-md text-on-surface-variant">Đang tải phân bổ chi phí...</p></Card>}
         <AgentMix agents={agents} />
       </section>
 
@@ -280,17 +289,17 @@ export default function TokenManagementPage() {
         <Card className="p-0">
           <div className="border-b border-outline p-card-padding">
             <h2 className="text-headline-sm text-secondary">Cấu hình hạn ngạch phân hệ</h2>
-            <p className="mt-1 text-body-md text-on-surface-variant">Thay đổi được lưu vào cấu hình agent trên backend.</p>
+            <p className="mt-1 text-body-md text-on-surface-variant">Thay đổi được lưu vào cấu hình agent.</p>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-[900px] w-full border-collapse text-left">
               <thead className="bg-surface text-label-sm uppercase text-secondary">
                 <tr>
                   <th className="px-4 py-3 font-bold">Phân hệ</th>
-                  <th className="px-4 py-3 font-bold">Usage</th>
-                  <th className="px-4 py-3 font-bold">Hạn mức token</th>
+                  <th className="px-4 py-3 font-bold">Đã dùng</th>
+                  <th className="px-4 py-3 font-bold">Hạn mức sử dụng</th>
                   <th className="px-4 py-3 font-bold">Cảnh báo</th>
-                  <th className="px-4 py-3 font-bold">Router</th>
+                  <th className="px-4 py-3 font-bold">Luồng xử lý</th>
                   <th className="px-4 py-3 text-right font-bold">Trạng thái</th>
                 </tr>
               </thead>
@@ -349,14 +358,14 @@ export default function TokenManagementPage() {
                         </select>
                       </td>
                       <td className="px-4 py-4 text-right">
-                        <StatusPill tone={statusTone(agent.status)}>{agent.status === "running" ? "Đang chạy" : agent.status}</StatusPill>
+                        <StatusPill tone={statusTone(agent.status)}>{agentStatusLabel(agent.status)}</StatusPill>
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-            {agents.length === 0 ? <div className="p-card-padding text-body-md text-on-surface-variant">Chưa có agent trong tenant hiện tại.</div> : null}
+            {agents.length === 0 ? <div className="p-card-padding text-body-md text-on-surface-variant">Đơn vị hiện tại chưa có agent.</div> : null}
           </div>
           <div className="border-t border-outline p-card-padding">
             <label className="flex items-start gap-3">
@@ -370,7 +379,7 @@ export default function TokenManagementPage() {
                 type="checkbox"
               />
               <span className="text-body-md text-on-surface">
-                Gửi cảnh báo in-app/SignalR khi số dư xuống dưới
+                Gửi cảnh báo trong ứng dụng khi số dư xuống dưới
                 <input
                   className="mx-2 w-32 rounded border border-outline bg-white px-2 py-1 font-mono text-mono-status outline-none focus:border-primary"
                   min={0}
@@ -382,11 +391,11 @@ export default function TokenManagementPage() {
                   type="number"
                   value={effectiveAlertDraft.lowBalanceThresholdTokens}
                 />
-                token.
+                lượt dùng.
               </span>
             </label>
             <Button className="mt-5 w-full py-3 text-headline-sm" disabled={!dirty || saveMutation.isPending || agents.length === 0} onClick={() => saveMutation.mutate()} type="button">
-              <span className="material-symbols-outlined">save</span>
+              <span aria-hidden="true" className="material-symbols-outlined">save</span>
               Lưu cấu hình cảnh báo
             </Button>
           </div>
@@ -394,8 +403,8 @@ export default function TokenManagementPage() {
 
         <Card>
           <div className="mb-5">
-            <h2 className="text-headline-sm text-secondary">Trình định tuyến model</h2>
-            <p className="mt-1 text-body-md text-on-surface-variant">3-tier router dùng để kiểm soát chi phí theo độ khó tác vụ.</p>
+            <h2 className="text-headline-sm text-secondary">Luồng chọn mô hình</h2>
+            <p className="mt-1 text-body-md text-on-surface-variant">Chọn nhóm xử lý phù hợp để kiểm soát chi phí theo độ khó tác vụ.</p>
           </div>
           <div className="space-y-4">
             {ROUTER_TIERS.map((tier) => {
@@ -405,10 +414,10 @@ export default function TokenManagementPage() {
                 <div className={`rounded-lg border p-4 ${active ? "border-primary bg-primary/5" : "border-outline bg-surface"}`} key={tier.value}>
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                      <span className={`material-symbols-outlined ${active ? "text-primary" : "text-on-surface-variant"}`}>{tier.icon}</span>
+                      <span aria-hidden="true" className={`material-symbols-outlined ${active ? "text-primary" : "text-on-surface-variant"}`}>{tier.icon}</span>
                       <h3 className={`text-headline-sm ${active ? "text-primary" : "text-secondary"}`}>{tier.label}</h3>
                     </div>
-                    <StatusPill tone={active ? "success" : "neutral"}>{activeCount} agent</StatusPill>
+                    <StatusPill tone={active ? "success" : "neutral"}>{activeCount} agent áp dụng</StatusPill>
                   </div>
                   <p className="text-body-md text-on-surface-variant">{tier.description}</p>
                 </div>
@@ -416,10 +425,10 @@ export default function TokenManagementPage() {
             })}
           </div>
           <div className="mt-6 rounded-lg border border-outline bg-surface p-4">
-            <p className="text-label-caps uppercase text-on-surface-variant">Tổng quota đang cấu hình</p>
-            <p className="mt-2 text-headline-md text-secondary">{formatNumber(totalQuota)} Tokens</p>
+            <p className="text-label-caps uppercase text-on-surface-variant">Tổng hạn mức đang cấu hình</p>
+            <p className="mt-2 text-headline-md text-secondary">{formatNumber(totalQuota)} lượt dùng</p>
             <p className="mt-1 text-body-md text-on-surface-variant">
-              Router hiện tại ưu tiên {tierLabel(effectiveQuotaDrafts[0]?.routerTier ?? "flash")} cho agent đầu tiên trong danh sách.
+              Chế độ hiện tại ưu tiên {tierLabel(effectiveQuotaDrafts[0]?.routerTier ?? "flash")} cho agent đầu tiên trong danh sách.
             </p>
           </div>
         </Card>

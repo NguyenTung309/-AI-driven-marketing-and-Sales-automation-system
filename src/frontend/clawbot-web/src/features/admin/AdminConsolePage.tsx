@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AxiosError } from "axios";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, Modal, StatusPill, type StatusTone } from "@/shared/ui";
+import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
   createAdminUser,
   createApiKey,
@@ -51,7 +51,7 @@ const DEFAULT_PANCAKE_FORM = {
   signatureHeader: "X-Pancake-Signature",
   signatureAlgo: "HMACSHA256",
   signatureEncoding: "hex",
-  sendPathTemplate: "/api/v1/conversations/{conversationId}/messages",
+  sendPathTemplate: "",
   authMode: "bearer",
   isActive: false,
 };
@@ -86,15 +86,7 @@ function formatDate(value: string | null | undefined): string {
 }
 
 function errorMessage(error: unknown): string {
-  if (!error) return "";
-  if (error instanceof AxiosError) {
-    const data = error.response?.data as { error?: string; title?: string; detail?: string; message?: string } | string[] | string | undefined;
-    if (Array.isArray(data)) return data.join(", ");
-    if (typeof data === "string") return data;
-    return data?.message ?? data?.error ?? data?.title ?? data?.detail ?? error.message;
-  }
-  if (error instanceof Error) return error.message;
-  return "Không xử lý được yêu cầu. Vui lòng thử lại.";
+  return toUserFriendlyError(error, "Không xử lý được yêu cầu quản trị. Vui lòng thử lại.");
 }
 
 function parseScopes(value: string): readonly string[] {
@@ -138,10 +130,10 @@ function MetricTile({
           <p className="text-label-caps uppercase text-on-surface-variant">{label}</p>
           <p className="mt-2 text-telemetry-data text-secondary">{value}</p>
         </div>
-        <span className="material-symbols-outlined rounded bg-primary/10 p-2 text-primary">{icon}</span>
+        <span aria-hidden="true" className="material-symbols-outlined rounded bg-primary/10 p-2 text-primary">{icon}</span>
       </div>
       <div className="mt-3">
-        <StatusPill tone={tone}>Admin console</StatusPill>
+        <StatusPill tone={tone}>Quản trị</StatusPill>
       </div>
     </Card>
   );
@@ -174,7 +166,7 @@ function TabButton({
         active ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"
       }`}
     >
-      <span className="material-symbols-outlined text-[18px]">{icon}</span>
+      <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{icon}</span>
       {label}
     </button>
   );
@@ -380,7 +372,7 @@ export default function AdminConsolePage() {
   const resetPasswordMutation = useMutation({
     mutationFn: resetAdminUserPassword,
     onSuccess: () => {
-      setNotice("Đã phát hành mã đặt lại mật khẩu và gửi email nếu SMTP đã cấu hình.");
+      setNotice("Đã phát hành mã đặt lại mật khẩu và gửi email nếu dịch vụ email đã cấu hình.");
     },
   });
 
@@ -432,7 +424,7 @@ export default function AdminConsolePage() {
   const revokeKeyMutation = useMutation({
     mutationFn: revokeApiKey,
     onSuccess: () => {
-      setNotice("Đã thu hồi API key.");
+      setNotice("Đã thu hồi khóa tích hợp.");
       invalidateAdmin();
     },
   });
@@ -448,7 +440,7 @@ export default function AdminConsolePage() {
         widgetGreeting: brandingForm.widgetGreeting.trim() || null,
       }),
     onSuccess: () => {
-      setNotice("Đã lưu thương hiệu tenant.");
+      setNotice("Đã lưu thương hiệu đơn vị.");
       setBrandingDraft({});
       invalidateAdmin();
     },
@@ -551,13 +543,13 @@ export default function AdminConsolePage() {
           <div>
             <h1 className="text-headline-md text-secondary">Hệ thống & phân quyền</h1>
             <p className="mt-1 text-body-md text-on-surface-variant">
-              Quản trị người dùng, vai trò, API key và kết nối Pancake theo tenant hiện tại.
+              Quản trị người dùng, vai trò, khóa tích hợp và kết nối Pancake cho đơn vị hiện tại.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill tone={currentError ? "error" : "success"}>{currentError ? "Mất kết nối" : "Đã kết nối"}</StatusPill>
             <Button type="button" variant="outline" onClick={() => setTab("audit")}>
-              <span className="material-symbols-outlined text-[18px]">history</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">history</span>
               Nhật ký
             </Button>
           </div>
@@ -578,16 +570,16 @@ export default function AdminConsolePage() {
       <section className="mb-gutter grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
         <MetricTile icon="group" label="Người dùng hoạt động" value={`${activeUsers}/${users.length}`} tone="success" />
         <MetricTile icon="admin_panel_settings" label="Vai trò" value={`${roles.length}`} tone="neutral" />
-        <MetricTile icon="vpn_key" label="API key hoạt động" value={`${activeKeys}`} tone={activeKeys ? "success" : "warning"} />
+        <MetricTile icon="vpn_key" label="Khóa tích hợp hoạt động" value={`${activeKeys}`} tone={activeKeys ? "success" : "warning"} />
         <MetricTile icon="hub" label="Pancake" value={pancakeStatusText} tone={pancakeStatusTone} />
       </section>
 
       <div className="mb-gutter flex flex-wrap border-b border-outline">
         <TabButton active={tab === "users"} icon="group" label="Người dùng" onClick={() => setTab("users")} />
         <TabButton active={tab === "roles"} icon="admin_panel_settings" label="Phân quyền" onClick={() => setTab("roles")} />
-        <TabButton active={tab === "keys"} icon="vpn_key" label="API keys" onClick={() => setTab("keys")} />
+        <TabButton active={tab === "keys"} icon="vpn_key" label="Khóa tích hợp" onClick={() => setTab("keys")} />
         <TabButton active={tab === "integrations"} icon="hub" label="Tích hợp" onClick={() => setTab("integrations")} />
-        <TabButton active={tab === "audit"} icon="receipt_long" label="Audit logs" onClick={() => setTab("audit")} />
+        <TabButton active={tab === "audit"} icon="receipt_long" label="Nhật ký quản trị" onClick={() => setTab("audit")} />
       </div>
 
       {tab === "users" ? (
@@ -601,7 +593,7 @@ export default function AdminConsolePage() {
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input className={inputClass} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tìm email hoặc tên..." />
                 <Button type="button" className="shrink-0 whitespace-nowrap" onClick={openCreateUser}>
-                  <span className="material-symbols-outlined text-[18px]">person_add</span>
+                  <span aria-hidden="true" className="material-symbols-outlined text-[18px]">person_add</span>
                   Thêm người dùng
                 </Button>
               </div>
@@ -639,7 +631,7 @@ export default function AdminConsolePage() {
                       <td className="px-4 py-4">
                         <div className="flex justify-end gap-2">
                           <Button type="button" size="sm" variant="ghost" onClick={() => openEditUser(user)} aria-label={`Sửa ${user.displayName}`}>
-                            <span className="material-symbols-outlined text-[18px]">edit</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">edit</span>
                           </Button>
                           <Button
                             type="button"
@@ -649,7 +641,7 @@ export default function AdminConsolePage() {
                             disabled={activeMutation.isPending}
                             aria-label={user.isActive ? `Khóa ${user.displayName}` : `Mở khóa ${user.displayName}`}
                           >
-                            <span className="material-symbols-outlined text-[18px]">{user.isActive ? "lock" : "lock_open"}</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{user.isActive ? "lock" : "lock_open"}</span>
                           </Button>
                           <Button
                             type="button"
@@ -659,7 +651,7 @@ export default function AdminConsolePage() {
                             disabled={resetPasswordMutation.isPending}
                             aria-label={`Reset mật khẩu ${user.displayName}`}
                           >
-                            <span className="material-symbols-outlined text-[18px]">restart_alt</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">restart_alt</span>
                           </Button>
                         </div>
                       </td>
@@ -682,7 +674,7 @@ export default function AdminConsolePage() {
                 <p className="mt-1 text-body-md text-on-surface-variant">Vai trò và phạm vi quyền được gán cho từng nhóm nhân sự.</p>
               </div>
               <Button type="button" onClick={openCreateRole}>
-                <span className="material-symbols-outlined text-[18px]">add</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">add</span>
                 Thêm vai trò
               </Button>
             </div>
@@ -720,7 +712,7 @@ export default function AdminConsolePage() {
                       <td className="px-4 py-4">
                         <div className="flex justify-end gap-2">
                           <Button type="button" size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); openEditRole(role); }} disabled={role.isSystem}>
-                            <span className="material-symbols-outlined text-[18px]">edit</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">edit</span>
                           </Button>
                           <Button
                             type="button"
@@ -732,7 +724,7 @@ export default function AdminConsolePage() {
                             }}
                             disabled={role.isSystem || deleteRoleMutation.isPending}
                           >
-                            <span className="material-symbols-outlined text-[18px]">delete</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">delete</span>
                           </Button>
                         </div>
                       </td>
@@ -784,7 +776,7 @@ export default function AdminConsolePage() {
             </div>
             <div className="mt-4 flex justify-end">
               <Button type="button" onClick={() => permissionsMutation.mutate()} disabled={!selectedRole || rolePermissionsQuery.isFetching || permissionsMutation.isPending}>
-                <span className="material-symbols-outlined text-[18px]">save</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">save</span>
                 Lưu quyền
               </Button>
             </div>
@@ -797,18 +789,18 @@ export default function AdminConsolePage() {
           <Card className="p-0">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline p-card-padding">
               <div>
-                <h2 className="text-headline-sm text-secondary">API keys</h2>
-                <p className="mt-1 text-body-md text-on-surface-variant">Khóa tích hợp server-to-server. Secret chỉ hiển thị một lần khi phát hành.</p>
+                <h2 className="text-headline-sm text-secondary">Khóa tích hợp</h2>
+                <p className="mt-1 text-body-md text-on-surface-variant">Khóa tích hợp giữa các hệ thống. Mã bí mật chỉ hiển thị một lần khi phát hành.</p>
               </div>
               <Button type="button" onClick={() => setKeyModalOpen(true)}>
-                <span className="material-symbols-outlined text-[18px]">add</span>
-                Phát hành key
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">add</span>
+                Phát hành khóa
               </Button>
             </div>
             {createdKey ? (
               <div className="border-b border-outline p-card-padding">
                 <Alert tone="warning">
-                  API key mới: <span className="font-mono">{createdKey.plaintextKey}</span>
+                  Khóa tích hợp mới: <span className="font-mono">{createdKey.plaintextKey}</span>
                 </Alert>
               </div>
             ) : null}
@@ -816,8 +808,8 @@ export default function AdminConsolePage() {
               <table className="min-w-[820px] w-full border-collapse text-left">
                 <thead className="bg-surface-variant text-label-sm uppercase text-secondary">
                   <tr>
-                    <th className="px-4 py-3 font-bold">Tên key</th>
-                    <th className="px-4 py-3 font-bold">Scopes</th>
+                    <th className="px-4 py-3 font-bold">Tên khóa</th>
+                    <th className="px-4 py-3 font-bold">Quyền truy cập</th>
                     <th className="px-4 py-3 font-bold">Ngày tạo</th>
                     <th className="px-4 py-3 font-bold">Hết hạn</th>
                     <th className="px-4 py-3 font-bold">Trạng thái</th>
@@ -831,9 +823,9 @@ export default function AdminConsolePage() {
                       <td className="px-4 py-4">
                         <div className="flex max-w-[320px] flex-wrap gap-1">
                           {(key.scopes ?? []).length ? (
-                            key.scopes?.map((scope) => <StatusPill key={scope} tone="neutral">{scope}</StatusPill>)
+                            key.scopes?.map((scope) => <StatusPill key={scope} tone="neutral">Quyền tích hợp</StatusPill>)
                           ) : (
-                            <span className="text-body-md text-on-surface-variant">Không giới hạn scope</span>
+                            <span className="text-body-md text-on-surface-variant">Không giới hạn quyền</span>
                           )}
                         </div>
                       </td>
@@ -848,7 +840,7 @@ export default function AdminConsolePage() {
                           onClick={() => revokeKeyMutation.mutate(key.id)}
                           disabled={Boolean(key.revokedAt) || revokeKeyMutation.isPending}
                         >
-                          <span className="material-symbols-outlined text-[18px]">block</span>
+                          <span aria-hidden="true" className="material-symbols-outlined text-[18px]">block</span>
                           Thu hồi
                         </Button>
                       </td>
@@ -857,7 +849,7 @@ export default function AdminConsolePage() {
                 </tbody>
               </table>
             </div>
-            {!apiKeys.length ? <div className="p-card-padding"><EmptyState>Chưa phát hành API key.</EmptyState></div> : null}
+            {!apiKeys.length ? <div className="p-card-padding"><EmptyState>Chưa phát hành khóa tích hợp.</EmptyState></div> : null}
           </Card>
         </section>
       ) : null}
@@ -867,8 +859,8 @@ export default function AdminConsolePage() {
           <Card>
             <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="text-headline-sm text-secondary">Thương hiệu tenant</h2>
-                <p className="mt-1 text-body-md text-on-surface-variant">Tên, logo và màu hiển thị trên public widget/support page.</p>
+                <h2 className="text-headline-sm text-secondary">Thương hiệu đơn vị</h2>
+                <p className="mt-1 text-body-md text-on-surface-variant">Tên, logo và màu hiển thị trên trang hỗ trợ khách hàng.</p>
               </div>
               <div className="flex items-center gap-2 rounded border border-outline bg-surface px-3 py-2">
                 <span className="size-5 rounded" style={{ backgroundColor: brandingForm.primaryColor }} />
@@ -889,7 +881,7 @@ export default function AdminConsolePage() {
               <Field label="Tên hỗ trợ">
                 <input className={inputClass} value={brandingForm.supportName} onChange={(event) => updateBrandingForm({ supportName: event.target.value })} />
               </Field>
-              <Field label="Logo URL">
+              <Field label="Logo hiển thị">
                 <input className={inputClass} value={brandingForm.logoUrl} onChange={(event) => updateBrandingForm({ logoUrl: event.target.value })} />
               </Field>
               <div className="grid grid-cols-2 gap-3">
@@ -900,7 +892,7 @@ export default function AdminConsolePage() {
                   <input className={`${inputClass} h-11 p-1`} type="color" value={brandingForm.accentColor} onChange={(event) => updateBrandingForm({ accentColor: event.target.value })} />
                 </Field>
               </div>
-              <Field label="Lời chào widget">
+              <Field label="Lời chào khung chat">
                 <textarea
                   className={`${inputClass} min-h-24`}
                   value={brandingForm.widgetGreeting}
@@ -909,7 +901,7 @@ export default function AdminConsolePage() {
               </Field>
               <div className="flex items-end justify-end">
                 <Button type="submit" disabled={brandingMutation.isPending || brandingQuery.isFetching}>
-                  <span className="material-symbols-outlined text-[18px]">palette</span>
+                  <span aria-hidden="true" className="material-symbols-outlined text-[18px]">palette</span>
                   Lưu thương hiệu
                 </Button>
               </div>
@@ -921,7 +913,7 @@ export default function AdminConsolePage() {
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-headline-sm text-secondary">Kênh Pancake</h2>
-                <p className="mt-1 text-body-md text-on-surface-variant">Cấu hình gửi/nhận hội thoại qua Pancake và webhook tenant.</p>
+                <p className="mt-1 text-body-md text-on-surface-variant">Cấu hình gửi/nhận hội thoại qua Pancake cho đơn vị hiện tại.</p>
               </div>
               <StatusPill tone={pancakeQuery.data?.isActive ? "success" : "warning"}>
                 {pancakeQuery.data?.isActive ? "Hoạt động" : "Chưa bật"}
@@ -934,47 +926,47 @@ export default function AdminConsolePage() {
                 pancakeMutation.mutate();
               }}
             >
-              <Field label="Base URL">
+              <Field label="Cổng Pancake">
                 <input className={inputClass} value={pancakeForm.baseUrl} onChange={(event) => updatePancakeForm({ baseUrl: event.target.value })} />
               </Field>
-              <Field label="Auth mode">
+              <Field label="Cách xác thực">
                 <select className={inputClass} value={pancakeForm.authMode} onChange={(event) => updatePancakeForm({ authMode: event.target.value })}>
-                  <option value="bearer">Bearer token</option>
-                  <option value="header">Custom header</option>
+                  <option value="bearer">Mã truy cập</option>
+                  <option value="header">Trường gửi kèm tùy chỉnh</option>
                 </select>
               </Field>
-              <Field label="Access token">
+              <Field label="Mã truy cập">
                 <input
                   className={inputClass}
                   type="password"
                   value={pancakeForm.accessToken}
                   onChange={(event) => updatePancakeForm({ accessToken: event.target.value })}
-                  placeholder={pancakeQuery.data?.hasAccessToken ? "Đã lưu token, nhập để thay thế" : "Nhập access token"}
+                  placeholder={pancakeQuery.data?.hasAccessToken ? "Đã lưu mã, nhập để thay thế" : "Nhập mã truy cập"}
                 />
               </Field>
-              <Field label="Webhook secret">
+              <Field label="Mã bí mật nhận sự kiện">
                 <input
                   className={inputClass}
                   type="password"
                   value={pancakeForm.webhookSecret}
                   onChange={(event) => updatePancakeForm({ webhookSecret: event.target.value })}
-                  placeholder={pancakeQuery.data?.hasWebhookSecret ? "Đã lưu secret, nhập để thay thế" : "Nhập webhook secret"}
+                  placeholder={pancakeQuery.data?.hasWebhookSecret ? "Đã lưu mã bí mật, nhập để thay thế" : "Nhập mã bí mật nhận sự kiện"}
                 />
               </Field>
-              <Field label="Signature header">
+              <Field label="Tên thông tin xác minh">
                 <input className={inputClass} value={pancakeForm.signatureHeader} onChange={(event) => updatePancakeForm({ signatureHeader: event.target.value })} />
               </Field>
-              <Field label="Signature algo">
+              <Field label="Kiểu xác minh">
                 <input className={inputClass} value={pancakeForm.signatureAlgo} onChange={(event) => updatePancakeForm({ signatureAlgo: event.target.value })} />
               </Field>
-              <Field label="Signature encoding">
+              <Field label="Dạng mã xác minh">
                 <select className={inputClass} value={pancakeForm.signatureEncoding} onChange={(event) => updatePancakeForm({ signatureEncoding: event.target.value })}>
-                  <option value="hex">hex</option>
-                  <option value="base64">base64</option>
+                  <option value="hex">Dạng chuẩn</option>
+                  <option value="base64">Dạng mã hóa</option>
                 </select>
               </Field>
-              <Field label="Send path template">
-                <input className={inputClass} value={pancakeForm.sendPathTemplate} onChange={(event) => updatePancakeForm({ sendPathTemplate: event.target.value })} />
+              <Field label="Mẫu gửi tin nhắn">
+                <input className={inputClass} placeholder="Nhập mẫu gửi tin do Pancake cung cấp" value={pancakeForm.sendPathTemplate} onChange={(event) => updatePancakeForm({ sendPathTemplate: event.target.value })} />
               </Field>
               <label className="inline-flex items-center gap-2 text-body-md font-semibold text-secondary">
                 <input
@@ -987,11 +979,11 @@ export default function AdminConsolePage() {
               </label>
               <div className="flex flex-wrap justify-end gap-2 lg:col-span-2">
                 <Button type="button" variant="outline" onClick={() => deletePancakeMutation.mutate()} disabled={!pancakeQuery.data || deletePancakeMutation.isPending}>
-                  <span className="material-symbols-outlined text-[18px]">link_off</span>
+                  <span aria-hidden="true" className="material-symbols-outlined text-[18px]">link_off</span>
                   Ngắt kết nối
                 </Button>
                 <Button type="submit" disabled={pancakeMutation.isPending}>
-                  <span className="material-symbols-outlined text-[18px]">save</span>
+                  <span aria-hidden="true" className="material-symbols-outlined text-[18px]">save</span>
                   Lưu cấu hình
                 </Button>
               </div>
@@ -999,15 +991,15 @@ export default function AdminConsolePage() {
           </Card>
 
           <Card>
-            <h2 className="text-headline-sm text-secondary">Webhook</h2>
-            <p className="mt-1 text-body-md text-on-surface-variant">URL nhận event từ Pancake theo tenant slug.</p>
+            <h2 className="text-headline-sm text-secondary">Nhận tín hiệu từ Pancake</h2>
+            <p className="mt-1 text-body-md text-on-surface-variant">Mã kết nối đã được tạo cho đơn vị hiện tại.</p>
             <div className="mt-4 rounded-lg border border-outline bg-surface p-3">
-              <p className="text-label-caps uppercase text-on-surface-variant">Tenant</p>
+              <p className="text-label-caps uppercase text-on-surface-variant">Đơn vị</p>
               <p className="mt-1 font-mono text-mono-status text-secondary">{webhookQuery.data?.tenantSlug ?? "—"}</p>
             </div>
             <div className="mt-3 rounded-lg border border-outline bg-surface p-3">
-              <p className="text-label-caps uppercase text-on-surface-variant">Webhook URL</p>
-              <p className="mt-1 break-all font-mono text-mono-status text-secondary">{webhookQuery.data?.webhookUrl ?? "Đang tải..."}</p>
+              <p className="text-label-caps uppercase text-on-surface-variant">Mã kết nối</p>
+              <p className="mt-1 text-body-md text-secondary">{webhookQuery.data?.webhookUrl ? "Sẵn sàng sao chép" : "Đang tải..."}</p>
             </div>
             <div className="mt-4">
               <Button
@@ -1015,17 +1007,17 @@ export default function AdminConsolePage() {
                 variant="outline"
                 onClick={() => {
                   if (webhookQuery.data?.webhookUrl) void navigator.clipboard?.writeText(webhookQuery.data.webhookUrl);
-                  setNotice("Đã copy webhook URL.");
+                  setNotice("Đã sao chép mã kết nối.");
                 }}
                 disabled={!webhookQuery.data?.webhookUrl}
               >
-                <span className="material-symbols-outlined text-[18px]">content_copy</span>
-                Copy URL
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">content_copy</span>
+                Sao chép
               </Button>
             </div>
             <div className="mt-5 space-y-2 text-body-md text-on-surface-variant">
-              <p>Token và webhook secret được mã hóa ở backend; frontend chỉ gửi giá trị mới khi bạn nhập.</p>
-              <p>Phần này chỉ quản lý kết nối Pancake cho tenant hiện tại.</p>
+              <p>Mã truy cập và mã bí mật nhận sự kiện được mã hóa; giao diện quản trị chỉ gửi giá trị mới khi bạn nhập.</p>
+              <p>Phần này chỉ quản lý kết nối Pancake cho đơn vị hiện tại.</p>
             </div>
           </Card>
           </div>
@@ -1044,10 +1036,10 @@ export default function AdminConsolePage() {
                 <thead className="bg-surface-variant text-label-sm uppercase text-secondary">
                   <tr>
                     <th className="px-4 py-3 font-bold">Thời điểm</th>
-                    <th className="px-4 py-3 font-bold">Action</th>
-                    <th className="px-4 py-3 font-bold">Resource</th>
+                    <th className="px-4 py-3 font-bold">Hành động</th>
+                    <th className="px-4 py-3 font-bold">Đối tượng</th>
                     <th className="px-4 py-3 font-bold">IP</th>
-                    <th className="px-4 py-3 font-bold">Diff</th>
+                    <th className="px-4 py-3 font-bold">Thay đổi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline bg-white">
@@ -1060,13 +1052,13 @@ export default function AdminConsolePage() {
                         {log.resourceId ? <span className="ml-2 font-mono text-mono-status text-on-surface-variant">{log.resourceId.slice(0, 8)}</span> : null}
                       </td>
                       <td className="px-4 py-4 text-body-md text-on-surface-variant">{log.ipAddress ?? "—"}</td>
-                      <td className="max-w-[320px] truncate px-4 py-4 font-mono text-mono-status text-on-surface-variant">{log.diffJson ?? "—"}</td>
+                      <td className="max-w-[320px] truncate px-4 py-4 text-body-md text-on-surface-variant">{log.diffJson ? "Đã ghi nhận thay đổi" : "—"}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            {!auditLogs.length ? <div className="p-card-padding"><EmptyState>Chưa có audit log.</EmptyState></div> : null}
+            {!auditLogs.length ? <div className="p-card-padding"><EmptyState>Chưa có nhật ký quản trị.</EmptyState></div> : null}
           </Card>
         </section>
       ) : null}
@@ -1079,7 +1071,7 @@ export default function AdminConsolePage() {
           <>
             <Button type="button" variant="ghost" onClick={() => setUserModal(null)} disabled={userMutation.isPending}>Hủy</Button>
             <Button type="submit" form="admin-user-form" disabled={userMutation.isPending}>
-              <span className="material-symbols-outlined text-[18px]">save</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">save</span>
               Lưu
             </Button>
           </>
@@ -1134,7 +1126,7 @@ export default function AdminConsolePage() {
           <>
             <Button type="button" variant="ghost" onClick={() => setRoleModal(null)} disabled={roleMutation.isPending}>Hủy</Button>
             <Button type="submit" form="admin-role-form" disabled={roleMutation.isPending}>
-              <span className="material-symbols-outlined text-[18px]">save</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">save</span>
               Lưu
             </Button>
           </>
@@ -1161,12 +1153,12 @@ export default function AdminConsolePage() {
       <Modal
         open={keyModalOpen}
         onClose={() => setKeyModalOpen(false)}
-        title="Phát hành API key"
+        title="Phát hành khóa tích hợp"
         footer={
           <>
             <Button type="button" variant="ghost" onClick={() => setKeyModalOpen(false)} disabled={keyMutation.isPending}>Hủy</Button>
             <Button type="submit" form="admin-key-form" disabled={keyMutation.isPending}>
-              <span className="material-symbols-outlined text-[18px]">vpn_key</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">vpn_key</span>
               Phát hành
             </Button>
           </>
@@ -1181,10 +1173,10 @@ export default function AdminConsolePage() {
             keyMutation.mutate();
           }}
         >
-          <Field label="Tên key">
+          <Field label="Tên khóa">
             <input className={inputClass} required value={keyForm.name} onChange={(event) => setKeyForm({ ...keyForm, name: event.target.value })} />
           </Field>
-          <Field label="Scopes">
+          <Field label="Quyền truy cập">
             <textarea className={`${inputClass} min-h-24`} value={keyForm.scopes} onChange={(event) => setKeyForm({ ...keyForm, scopes: event.target.value })} />
           </Field>
           <Field label="Ngày hết hạn">

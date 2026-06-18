@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AxiosError } from "axios";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, StatusPill, type StatusTone } from "@/shared/ui";
+import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
   createDocumentTemplate,
   deleteDocumentTemplate,
@@ -39,7 +39,7 @@ const NEW_TEMPLATE: TemplateDraft = {
   code: "",
   docType: "quote",
   templateHtml:
-    "<h1>Báo giá khóa học</h1>\n<p>Xin chào {{ contact_name }},</p>\n<p>Gói học phù hợp: {{ course_name }}.</p>\n<p>Học phí ưu đãi: {{ price }}.</p>",
+    "<h1>Báo giá khóa học</h1>\n<p>Xin chào {{ ten_khach }},</p>\n<p>Gói học phù hợp: {{ khoa_hoc }}.</p>\n<p>Học phí ưu đãi: {{ hoc_phi }}.</p>",
 };
 
 function normalize(value: string | null | undefined): string {
@@ -47,13 +47,7 @@ function normalize(value: string | null | undefined): string {
 }
 
 function errorMessage(error: unknown): string {
-  if (!error) return "";
-  if (error instanceof AxiosError) {
-    const data = error.response?.data as { error?: string; title?: string; detail?: string } | undefined;
-    return data?.error ?? data?.title ?? data?.detail ?? error.message;
-  }
-  if (error instanceof Error) return error.message;
-  return "Không xử lý được thao tác. Vui lòng thử lại.";
+  return toUserFriendlyError(error, "Không xử lý được thao tác tài liệu. Vui lòng thử lại.");
 }
 
 function formatDateTime(value: string | null | undefined): string {
@@ -69,18 +63,12 @@ function formatDateTime(value: string | null | undefined): string {
   }).format(date);
 }
 
-function formatBytes(value: number): string {
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / 1024 / 1024).toFixed(1)} MB`;
-}
-
 function docTypeLabel(value: string): string {
   const normalized = normalize(value);
   if (normalized === "quote") return "Báo giá";
-  if (normalized === "brochure") return "Brochure";
-  if (normalized === "onboarding") return "Onboarding";
-  if (normalized === "slide") return "Slide";
+  if (normalized === "brochure") return "Tờ giới thiệu";
+  if (normalized === "onboarding") return "Hồ sơ nhập học";
+  if (normalized === "slide") return "Bài trình chiếu";
   return value || "Tài liệu";
 }
 
@@ -121,7 +109,7 @@ function parseVars(value: string): Record<string, string> | null {
   if (trimmed.startsWith("{")) {
     const parsed = JSON.parse(trimmed) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error("Vars JSON phải là object key/value.");
+      throw new Error("Dữ liệu điền mẫu phải là danh sách tên và giá trị.");
     }
     return Object.fromEntries(
       Object.entries(parsed).map(([key, rawValue]) => [key, typeof rawValue === "string" ? rawValue : String(rawValue)])
@@ -134,7 +122,7 @@ function parseVars(value: string): Record<string, string> | null {
     .filter(Boolean)
     .map((line) => {
       const index = line.indexOf("=");
-      if (index <= 0) throw new Error("Vars dạng dòng phải theo mẫu key=value.");
+      if (index <= 0) throw new Error("Mỗi dòng cần có tên và giá trị tương ứng.");
       return [line.slice(0, index).trim(), line.slice(index + 1).trim()];
     });
   return Object.fromEntries(entries);
@@ -153,10 +141,10 @@ function metricCards(templates: readonly DocumentTemplate[], documents: readonly
   const sent = documents.filter((doc) => doc.sentAt).length;
   const opened = documents.filter((doc) => doc.openedAt).length;
   return [
-    { icon: "article", label: "Template", value: templates.length, meta: "Đang active" },
-    { icon: "picture_as_pdf", label: "Generated", value: documents.length, meta: "100 tài liệu mới nhất" },
-    { icon: "send", label: "Đã gửi", value: sent, meta: "sentVia từ backend" },
-    { icon: "visibility", label: "Đã mở", value: opened, meta: "openedAt/download tracker" },
+    { icon: "article", label: "Mẫu tài liệu", value: templates.length, meta: "Đang sử dụng" },
+    { icon: "picture_as_pdf", label: "Đã tạo", value: documents.length, meta: "100 tài liệu mới nhất" },
+    { icon: "send", label: "Đã gửi", value: sent, meta: "Theo kênh đã chọn" },
+    { icon: "visibility", label: "Đã mở", value: opened, meta: "Theo lượt mở/tải" },
   ];
 }
 
@@ -169,7 +157,7 @@ function MetricCard({ icon, label, value, meta }: { readonly icon: string; reado
           <p className="mt-2 text-telemetry-data text-secondary">{value.toLocaleString("vi-VN")}</p>
           <p className="mt-1 text-label-sm text-on-surface-variant">{meta}</p>
         </div>
-        <span className="material-symbols-outlined rounded bg-primary/10 p-2 text-primary">{icon}</span>
+        <span aria-hidden="true" className="material-symbols-outlined rounded bg-primary/10 p-2 text-primary">{icon}</span>
       </div>
     </Card>
   );
@@ -187,7 +175,7 @@ function TemplateList({
   if (!templates.length) {
     return (
       <div className="rounded-lg border border-dashed border-outline bg-surface p-4 text-body-md text-on-surface-variant">
-        Chưa có template nào từ backend.
+        Chưa có mẫu tài liệu nào.
       </div>
     );
   }
@@ -237,11 +225,11 @@ function TemplateEditor({
     <Card>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-headline-sm text-secondary">Template tài liệu</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">Quản lý mẫu HTML cho Docs Agent.</p>
+          <h2 className="text-headline-sm text-secondary">Mẫu tài liệu</h2>
+          <p className="mt-1 text-body-md text-on-surface-variant">Quản lý mẫu nội dung cho agent tài liệu.</p>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={onNew}>
-          <span className="material-symbols-outlined text-[16px]">add</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">add</span>
           Mẫu mới
         </Button>
       </div>
@@ -250,13 +238,13 @@ function TemplateEditor({
 
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_150px]">
         <label className="block">
-          <span className="mb-1 block text-label-caps uppercase text-secondary">Mã template</span>
+          <span className="mb-1 block text-label-caps uppercase text-secondary">Mã mẫu</span>
           <input
             className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary disabled:bg-surface"
             value={draft.code}
             disabled={Boolean(draft.id)}
             onChange={(event) => onDraft({ ...draft, code: event.target.value.toUpperCase() })}
-            placeholder="QUOTE-V1"
+            placeholder="BAO-GIA-HSK"
           />
         </label>
         <label className="block">
@@ -267,31 +255,31 @@ function TemplateEditor({
             onChange={(event) => onDraft({ ...draft, docType: event.target.value })}
           >
             <option value="quote">Báo giá</option>
-            <option value="brochure">Brochure</option>
-            <option value="onboarding">Onboarding</option>
-            <option value="slide">Slide</option>
+            <option value="brochure">Tờ giới thiệu</option>
+            <option value="onboarding">Hồ sơ nhập học</option>
+            <option value="slide">Bài trình chiếu</option>
           </select>
         </label>
       </div>
 
       <label className="mt-3 block">
-        <span className="mb-1 block text-label-caps uppercase text-secondary">HTML template</span>
+        <span className="mb-1 block text-label-caps uppercase text-secondary">Nội dung mẫu</span>
         <textarea
           className="min-h-[240px] w-full resize-y rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary"
           value={draft.templateHtml}
           onChange={(event) => onDraft({ ...draft, templateHtml: event.target.value })}
-          placeholder="<h1>{{ customer_name }}</h1>"
+          placeholder="<h1>{{ ten_khach }}</h1>"
         />
       </label>
 
       <div className="mt-4 flex flex-wrap gap-2">
         <Button type="button" onClick={onSave} disabled={saving || !draft.code.trim() || !draft.templateHtml.trim()}>
-          <span className="material-symbols-outlined text-[18px]">save</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[18px]">save</span>
           {saving ? "Đang lưu..." : draft.id ? "Cập nhật mẫu" : "Tạo mẫu"}
         </Button>
         {draft.id ? (
           <Button type="button" variant="ghost" onClick={onDelete} disabled={deleting}>
-            <span className="material-symbols-outlined text-[18px]">delete</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">delete</span>
             Xóa mẫu
           </Button>
         ) : null}
@@ -335,19 +323,19 @@ function GeneratePanel({
   return (
     <Card>
       <div className="mb-4">
-        <h2 className="text-headline-sm text-secondary">Generate & gửi</h2>
-        <p className="mt-1 text-body-md text-on-surface-variant">`sentVia=email` sẽ gọi SMTP gated và đánh dấu sent.</p>
+        <h2 className="text-headline-sm text-secondary">Tạo và gửi</h2>
+        <p className="mt-1 text-body-md text-on-surface-variant">Chọn gửi email để hệ thống gửi tài liệu và ghi nhận trạng thái đã gửi.</p>
       </div>
       {error ? <Alert tone="error">{errorMessage(error)}</Alert> : null}
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block">
-          <span className="mb-1 block text-label-caps uppercase text-secondary">Template</span>
+          <span className="mb-1 block text-label-caps uppercase text-secondary">Mẫu tài liệu</span>
           <select
             className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
             value={templateCode}
             onChange={(event) => onTemplateCode(event.target.value)}
           >
-            <option value="">Chọn template</option>
+            <option value="">Chọn mẫu tài liệu</option>
             {templates.map((template) => (
               <option key={template.id} value={template.code}>
                 {template.code}
@@ -362,37 +350,37 @@ function GeneratePanel({
             value={sentVia}
             onChange={(event) => onSentVia(event.target.value)}
           >
-            <option value="">Chỉ generate</option>
+            <option value="">Chỉ tạo tài liệu</option>
             <option value="email">Email</option>
           </select>
         </label>
       </div>
       <label className="mt-3 block">
-        <span className="mb-1 block text-label-caps uppercase text-secondary">Contact ID</span>
+        <span className="mb-1 block text-label-caps uppercase text-secondary">Mã khách hàng</span>
         <input
           className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary"
           value={contactId}
           onChange={(event) => onContactId(event.target.value)}
-          placeholder="GUID contact, optional"
+          placeholder="Nhập mã khách hàng nếu có"
         />
       </label>
       <label className="mt-3 block">
-        <span className="mb-1 block text-label-caps uppercase text-secondary">Vars</span>
+        <span className="mb-1 block text-label-caps uppercase text-secondary">Dữ liệu điền mẫu</span>
         <textarea
           className="min-h-[132px] w-full resize-y rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary"
           value={varsText}
           onChange={(event) => onVarsText(event.target.value)}
-          placeholder={"contact_name=Nguyễn Minh Anh\ncourse_name=HSK 4 cấp tốc\nprice=4.500.000đ"}
+          placeholder={"ten_khach=Nguyễn Minh Anh\nkhoa_hoc=HSK 4 cấp tốc\nhoc_phi=4.500.000đ"}
         />
       </label>
       <div className="mt-4 flex flex-wrap gap-2">
         <Button type="button" onClick={onGenerate} disabled={busy || !templateCode}>
-          <span className="material-symbols-outlined text-[18px]">{sentVia === "email" ? "outgoing_mail" : "picture_as_pdf"}</span>
-          {generating ? "Đang xử lý..." : sentVia === "email" ? "Generate & gửi email" : "Generate tài liệu"}
+          <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{sentVia === "email" ? "outgoing_mail" : "picture_as_pdf"}</span>
+          {generating ? "Đang xử lý..." : sentVia === "email" ? "Tạo và gửi email" : "Tạo tài liệu"}
         </Button>
         <Button type="button" variant="outline" onClick={onGenerateKit} disabled={busy}>
-          <span className="material-symbols-outlined text-[18px]">inventory_2</span>
-          {generatingKit ? "Đang tạo kit..." : "Generate kit"}
+          <span aria-hidden="true" className="material-symbols-outlined text-[18px]">inventory_2</span>
+          {generatingKit ? "Đang tạo bộ tài liệu..." : "Tạo bộ tài liệu"}
         </Button>
       </div>
     </Card>
@@ -413,7 +401,7 @@ function GeneratedList({
   if (!documents.length) {
     return (
       <div className="rounded-lg border border-dashed border-outline bg-surface p-4 text-body-md text-on-surface-variant">
-        Chưa có tài liệu generated nào.
+        Chưa có tài liệu nào được tạo.
       </div>
     );
   }
@@ -424,7 +412,7 @@ function GeneratedList({
         <thead className="bg-surface-variant text-label-sm uppercase text-secondary">
           <tr>
             <th className="px-4 py-3 font-bold">Tài liệu</th>
-            <th className="px-4 py-3 font-bold">Contact</th>
+            <th className="px-4 py-3 font-bold">Khách hàng</th>
             <th className="px-4 py-3 font-bold">Trạng thái</th>
             <th className="px-4 py-3 font-bold">Hiệu lực</th>
             <th className="px-4 py-3 text-right font-bold">Thao tác</th>
@@ -443,7 +431,7 @@ function GeneratedList({
                     <span className="mt-1 block text-label-sm text-on-surface-variant">{formatDateTime(doc.createdAt)}</span>
                   </button>
                 </td>
-                <td className="px-4 py-4 align-top text-body-md text-secondary">{doc.contactId?.slice(0, 8) ?? "Không gắn contact"}</td>
+                <td className="px-4 py-4 align-top text-body-md text-secondary">{doc.contactId?.slice(0, 8) ?? "Chưa gắn khách hàng"}</td>
                 <td className="px-4 py-4 align-top">
                   <StatusPill tone={docTone(doc)}>{docStatusLabel(doc)}</StatusPill>
                 </td>
@@ -451,7 +439,7 @@ function GeneratedList({
                 <td className="px-4 py-4 align-top">
                   <div className="flex justify-end gap-2">
                     <Button type="button" size="sm" variant="outline" onClick={() => onSelect(doc)}>
-                      Preview
+                      Xem trước
                     </Button>
                     <a
                       className="inline-flex items-center justify-center rounded border border-outline px-3 py-1.5 text-mono-status font-medium text-on-surface hover:bg-surface-variant"
@@ -490,8 +478,8 @@ function PreviewPanel({
     <Card className="p-0">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline p-card-padding">
         <div>
-          <h2 className="text-headline-sm text-secondary">Preview</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">HTML template hoặc file generated từ Docs Agent.</p>
+          <h2 className="text-headline-sm text-secondary">Xem trước</h2>
+          <p className="mt-1 text-body-md text-on-surface-variant">Mẫu nội dung hoặc tài liệu đã tạo từ agent tài liệu.</p>
         </div>
         <div className="flex rounded border border-outline bg-white p-1">
           {(["template", "document"] as const).map((item) => (
@@ -503,7 +491,7 @@ function PreviewPanel({
                 mode === item ? "bg-primary text-on-primary" : "text-on-surface-variant hover:bg-surface-container-low"
               }`}
             >
-              {item === "template" ? "Template" : "File"}
+              {item === "template" ? "Mẫu" : "Tài liệu"}
             </button>
           ))}
         </div>
@@ -513,13 +501,13 @@ function PreviewPanel({
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <StatusPill tone={docTone(document)}>{docStatusLabel(document)}</StatusPill>
             <a className="text-label-sm font-bold text-primary hover:underline" href={document.fileUrl} target="_blank" rel="noreferrer">
-              Mở signed URL
+              Mở tài liệu
             </a>
           </div>
           <iframe
             className="h-[560px] w-full rounded-lg border border-outline bg-white"
             src={document.fileUrl}
-            title="Generated document preview"
+            title="Xem trước tài liệu đã tạo"
           />
         </div>
       ) : (
@@ -528,7 +516,7 @@ function PreviewPanel({
             className="h-[560px] w-full rounded-lg border border-outline bg-white"
             sandbox=""
             srcDoc={`<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Inter,Arial,sans-serif;line-height:1.5;padding:32px;color:#1e293b}h1{color:#d32f2f}</style></head><body>${previewHtml}</body></html>`}
-            title="Template preview"
+            title="Xem trước mẫu tài liệu"
           />
         </div>
       )}
@@ -543,7 +531,7 @@ export default function DocumentsPage() {
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [generateTemplateCode, setGenerateTemplateCode] = useState("");
   const [contactId, setContactId] = useState("");
-  const [varsText, setVarsText] = useState("contact_name=Nguyễn Minh Anh\ncourse_name=HSK 4 cấp tốc\nprice=4.500.000đ");
+  const [varsText, setVarsText] = useState("ten_khach=Nguyễn Minh Anh\nkhoa_hoc=HSK 4 cấp tốc\nhoc_phi=4.500.000đ");
   const [sentVia, setSentVia] = useState("");
   const [previewMode, setPreviewMode] = useState<PreviewMode>("template");
   const [notice, setNotice] = useState<NoticeState | null>(null);
@@ -572,7 +560,7 @@ export default function DocumentsPage() {
         setSelectedTemplateId(template.id);
         setGenerateTemplateCode(template.code);
       }
-      setNotice({ tone: "success", message: "Đã lưu template tài liệu." });
+      setNotice({ tone: "success", message: "Đã lưu mẫu tài liệu." });
       await queryClient.invalidateQueries({ queryKey: ["documents", "templates"] });
     },
   });
@@ -582,7 +570,7 @@ export default function DocumentsPage() {
     onSuccess: async () => {
       setDraft(NEW_TEMPLATE);
       setSelectedTemplateId(null);
-      setNotice({ tone: "success", message: "Đã xóa template tài liệu." });
+      setNotice({ tone: "success", message: "Đã xóa mẫu tài liệu." });
       await queryClient.invalidateQueries({ queryKey: ["documents", "templates"] });
     },
   });
@@ -602,7 +590,7 @@ export default function DocumentsPage() {
       setPreviewMode("document");
       setNotice({
         tone: "success",
-        message: `${sentVia === "email" ? "Đã generate và yêu cầu gửi email" : "Đã generate tài liệu"} (${formatBytes(response.sizeBytes)}, ${response.latencyMs}ms).`,
+        message: sentVia === "email" ? "Đã tạo tài liệu và gửi email." : "Đã tạo tài liệu.",
       });
       await queryClient.invalidateQueries({ queryKey: ["documents", "generated"] });
     },
@@ -625,7 +613,7 @@ export default function DocumentsPage() {
       }
       setNotice({
         tone: "success",
-        message: `Đã generate kit ${response.documents.length} tài liệu (${formatBytes(response.totalSizeBytes)}, ${response.totalLatencyMs}ms).`,
+        message: `Đã tạo bộ ${response.documents.length} tài liệu.`,
       });
       await queryClient.invalidateQueries({ queryKey: ["documents", "generated"] });
     },
@@ -651,7 +639,7 @@ export default function DocumentsPage() {
           <div>
             <h1 className="text-headline-md text-secondary">Thư viện tài liệu & gửi báo giá</h1>
             <p className="mt-1 text-body-md text-on-surface-variant">
-              Quản lý template, preview HTML/PDF và tạo tài liệu tự động.
+              Quản lý mẫu, xem trước và tạo tài liệu tự động.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -663,7 +651,7 @@ export default function DocumentsPage() {
                 void queryClient.invalidateQueries({ queryKey: ["documents"] });
               }}
             >
-              <span className="material-symbols-outlined text-[18px]">refresh</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">refresh</span>
               Làm mới
             </Button>
             <Button
@@ -671,12 +659,12 @@ export default function DocumentsPage() {
               onClick={() => generateMutation.mutate()}
               disabled={generateMutation.isPending || generateKitMutation.isPending || !(generateTemplateCode || draft.code)}
             >
-              <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
-              Generate PDF
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+              Tạo PDF
             </Button>
             <Button type="button" variant="outline" onClick={() => generateKitMutation.mutate()} disabled={generateMutation.isPending || generateKitMutation.isPending}>
-              <span className="material-symbols-outlined text-[18px]">inventory_2</span>
-              Generate kit
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">inventory_2</span>
+              Tạo bộ tài liệu
             </Button>
           </div>
         </div>
@@ -700,7 +688,7 @@ export default function DocumentsPage() {
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-headline-sm text-secondary">Kho mẫu</h2>
-                <p className="mt-1 text-body-md text-on-surface-variant">QUOTE-V1, onboarding kit, brochure...</p>
+                <p className="mt-1 text-body-md text-on-surface-variant">Báo giá, hồ sơ nhập học, tờ giới thiệu...</p>
               </div>
               <StatusPill tone="neutral">{templates.length}</StatusPill>
             </div>
@@ -751,8 +739,8 @@ export default function DocumentsPage() {
           <Card className="p-0">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline p-card-padding">
               <div>
-                <h2 className="text-headline-sm text-secondary">Tài liệu đã generate</h2>
-                <p className="mt-1 text-body-md text-on-surface-variant">File URL, trạng thái gửi/mở và hạn link 7 ngày.</p>
+                <h2 className="text-headline-sm text-secondary">Tài liệu đã tạo</h2>
+                <p className="mt-1 text-body-md text-on-surface-variant">Tệp tài liệu, trạng thái gửi/mở và hạn liên kết 7 ngày.</p>
               </div>
               {generatedQuery.isLoading ? <StatusPill tone="warning">Đang tải</StatusPill> : <StatusPill tone="neutral">{documents.length}</StatusPill>}
             </div>

@@ -7,13 +7,13 @@ import "./index.css";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
-  throw new Error("Root element not found");
+  throw new Error("Không tìm thấy vùng hiển thị ứng dụng.");
 }
 
 createRoot(rootElement).render(
   <StrictMode>
     <Providers>
-      <Suspense fallback={<div className="min-h-screen bg-surface p-stack-lg text-body-md text-on-surface">Dang tai...</div>}>
+      <Suspense fallback={<div className="min-h-screen bg-surface p-stack-lg text-body-md text-on-surface">Đang tải...</div>}>
         <RouterProvider router={router} />
       </Suspense>
     </Providers>

@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AxiosError } from "axios";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, Modal, StatusPill, type StatusTone } from "@/shared/ui";
+import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
   approveContentItem,
   createContentBrief,
@@ -52,7 +52,7 @@ const PLATFORMS: readonly PlatformConfig[] = [
   { value: "facebook", label: "Facebook", icon: "thumb_up", accent: "bg-blue-50 text-blue-700 border-blue-100" },
   { value: "zalo", label: "Zalo", icon: "chat", accent: "bg-emerald-50 text-emerald-700 border-emerald-100" },
   { value: "tiktok", label: "TikTok", icon: "music_note", accent: "bg-slate-100 text-slate-800 border-slate-200" },
-  { value: "website", label: "Website", icon: "language", accent: "bg-amber-50 text-amber-700 border-amber-100" },
+  { value: "website", label: "Trang web", icon: "language", accent: "bg-amber-50 text-amber-700 border-amber-100" },
 ];
 
 const STATUS_FILTERS: readonly { readonly value: QueueStatusFilter; readonly label: string }[] = [
@@ -90,7 +90,7 @@ function statusLabel(status: string): string {
   if (value === "scheduled") return "Đã lên lịch";
   if (value === "published") return "Đã đăng";
   if (value === "rejected") return "Từ chối";
-  if (value === "pending") return "Brief mới";
+  if (value === "pending") return "Yêu cầu mới";
   return status || "Không rõ";
 }
 
@@ -150,25 +150,19 @@ function scheduledAtIso(mode: ScheduleMode, date: string, time: string): string 
 }
 
 function errorMessage(error: unknown): string {
-  if (!error) return "";
-  if (error instanceof AxiosError) {
-    const data = error.response?.data as { error?: string; title?: string; detail?: string } | undefined;
-    return data?.error ?? data?.title ?? data?.detail ?? error.message;
-  }
-  if (error instanceof Error) return error.message;
-  return "Không xử lý được thao tác. Vui lòng thử lại.";
+  return toUserFriendlyError(error, "Không xử lý được thao tác nội dung. Vui lòng thử lại.");
 }
 
 function assetsSummary(value: string): string {
-  if (!value || value === "[]") return "Chưa có asset";
+  if (!value || value === "[]") return "Chưa có tệp đính kèm";
   try {
     const parsed = JSON.parse(value) as unknown;
-    if (Array.isArray(parsed)) return `${parsed.length} asset`;
-    if (typeof parsed === "object" && parsed !== null) return "1 asset";
+    if (Array.isArray(parsed)) return `${parsed.length} tệp đính kèm`;
+    if (typeof parsed === "object" && parsed !== null) return "1 tệp đính kèm";
   } catch {
-    return "Asset metadata";
+    return "Thông tin tệp đính kèm";
   }
-  return "Asset metadata";
+  return "Thông tin tệp đính kèm";
 }
 
 function groupCalendar(items: readonly ContentCalendarItem[]) {
@@ -201,7 +195,7 @@ function MetricTile({ icon, label, value, meta }: { readonly icon: string; reado
           <p className="mt-2 text-telemetry-data text-secondary">{value}</p>
           <p className="mt-1 text-label-sm text-on-surface-variant">{meta}</p>
         </div>
-        <span className="material-symbols-outlined rounded bg-primary/10 p-2 text-primary">{icon}</span>
+        <span aria-hidden="true" className="material-symbols-outlined rounded bg-primary/10 p-2 text-primary">{icon}</span>
       </div>
     </Card>
   );
@@ -211,7 +205,7 @@ function PlatformBadge({ platform }: { readonly platform: string }) {
   const config = platformConfig(platform);
   return (
     <span className={`inline-flex items-center gap-1.5 rounded border px-2 py-1 font-mono text-mono-status ${config.accent}`}>
-      <span className="material-symbols-outlined text-[16px]">{config.icon}</span>
+      <span aria-hidden="true" className="material-symbols-outlined text-[16px]">{config.icon}</span>
       {config.label}
     </span>
   );
@@ -254,12 +248,12 @@ function BriefEditor({
     <Card>
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-headline-sm text-secondary">Brief nội dung</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">Tạo brief cho agent marketing và sinh bản nháp.</p>
+          <h2 className="text-headline-sm text-secondary">Yêu cầu nội dung</h2>
+          <p className="mt-1 text-body-md text-on-surface-variant">Tạo yêu cầu cho agent marketing và sinh bản nháp.</p>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={onNew}>
-          <span className="material-symbols-outlined text-[16px]">add</span>
-          Brief mới
+          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">add</span>
+          Yêu cầu mới
         </Button>
       </div>
 
@@ -295,7 +289,7 @@ function BriefEditor({
       </div>
 
       <label className="mt-3 block">
-        <span className="mb-1 block text-label-caps uppercase text-secondary">Brief chi tiết</span>
+        <span className="mb-1 block text-label-caps uppercase text-secondary">Nội dung yêu cầu</span>
         <textarea
           className="min-h-[180px] w-full resize-y rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
           value={briefText}
@@ -306,23 +300,23 @@ function BriefEditor({
 
       <div className="mt-4 flex flex-wrap gap-2">
         <Button type="button" onClick={onSave} disabled={saving || !briefText.trim()}>
-          <span className="material-symbols-outlined text-[18px]">save</span>
-          {saving ? "Đang lưu..." : selectedId ? "Cập nhật brief" : "Lưu brief"}
+          <span aria-hidden="true" className="material-symbols-outlined text-[18px]">save</span>
+          {saving ? "Đang lưu..." : selectedId ? "Cập nhật yêu cầu" : "Lưu yêu cầu"}
         </Button>
         <Button type="button" variant="outline" onClick={onGenerate} disabled={generating || !briefText.trim()}>
-          <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[18px]">auto_awesome</span>
           {generating ? "Đang sinh..." : "Sinh bài nháp"}
         </Button>
         {selectedId ? (
           <Button type="button" variant="ghost" onClick={onDelete} disabled={deleting}>
-            <span className="material-symbols-outlined text-[18px]">archive</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">archive</span>
             Lưu trữ
           </Button>
         ) : null}
       </div>
 
       <div className="mt-5 space-y-2">
-        <p className="text-label-caps uppercase text-secondary">Brief gần đây</p>
+        <p className="text-label-caps uppercase text-secondary">Yêu cầu gần đây</p>
         {briefs.length ? (
           briefs.slice(0, 5).map((brief) => (
             <button
@@ -343,7 +337,7 @@ function BriefEditor({
           ))
         ) : (
           <div className="rounded-lg border border-dashed border-outline bg-surface p-4 text-body-md text-on-surface-variant">
-            Chưa có brief nào từ backend.
+            Chưa có yêu cầu nội dung nào.
           </div>
         )}
       </div>
@@ -371,10 +365,10 @@ function TrendPanel({
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-headline-sm text-secondary">Xu hướng tuần</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">Nguồn từ hệ thống xu hướng và agent research.</p>
+          <p className="mt-1 text-body-md text-on-surface-variant">Nguồn từ hệ thống xu hướng và agent nghiên cứu.</p>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={onScan} disabled={scanning}>
-          <span className="material-symbols-outlined text-[16px]">travel_explore</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">travel_explore</span>
           {scanning ? "Đang quét" : "Quét"}
         </Button>
       </div>
@@ -413,7 +407,7 @@ function TrendPanel({
         </div>
       ) : (
         <div className="rounded-lg border border-dashed border-outline bg-surface p-4 text-body-md text-on-surface-variant">
-          Chưa có trend scan. Bấm Quét để gọi research agent.
+          Chưa có xu hướng được quét. Bấm Quét để gọi agent nghiên cứu.
         </div>
       )}
     </Card>
@@ -472,32 +466,32 @@ function SocialPreview({ item, body }: { readonly item: ContentItem; readonly bo
         <div className="flex items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-full bg-primary text-label-sm font-bold text-white">HB</div>
           <div>
-            <p className="text-body-md font-bold text-secondary">Học Bá Education</p>
-            <p className="text-label-sm text-on-surface-variant">{config.label} · Agent Content</p>
+            <p className="text-body-md font-bold text-secondary">Học Bá AI</p>
+            <p className="text-label-sm text-on-surface-variant">{config.label} · Agent nội dung</p>
           </div>
         </div>
-        <span className="material-symbols-outlined text-on-surface-variant">more_horiz</span>
+        <span aria-hidden="true" className="material-symbols-outlined text-on-surface-variant">more_horiz</span>
       </div>
       <div className="space-y-3 p-4">
         <p className="whitespace-pre-wrap text-body-md text-on-surface">{body || "Nội dung bản nháp sẽ hiển thị ở đây."}</p>
         <div className="flex min-h-[180px] items-center justify-center rounded-lg border border-dashed border-outline bg-surface">
           <div className="text-center">
-            <span className="material-symbols-outlined text-[36px] text-primary">image</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[36px] text-primary">image</span>
             <p className="mt-2 text-label-sm text-on-surface-variant">{assetsSummary(item.assetsJson)}</p>
           </div>
         </div>
       </div>
       <div className="grid grid-cols-3 border-t border-outline text-label-sm text-on-surface-variant">
         <button className="flex items-center justify-center gap-2 py-3 hover:bg-surface" type="button">
-          <span className="material-symbols-outlined text-[16px]">thumb_up</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">thumb_up</span>
           Thích
         </button>
         <button className="flex items-center justify-center gap-2 py-3 hover:bg-surface" type="button">
-          <span className="material-symbols-outlined text-[16px]">comment</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">comment</span>
           Bình luận
         </button>
         <button className="flex items-center justify-center gap-2 py-3 hover:bg-surface" type="button">
-          <span className="material-symbols-outlined text-[16px]">share</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">share</span>
           Chia sẻ
         </button>
       </div>
@@ -541,7 +535,7 @@ function QueueEditor({
   if (!item) {
     return (
       <div className="flex min-h-[520px] items-center justify-center rounded-lg border border-dashed border-outline bg-surface p-6 text-center text-body-md text-on-surface-variant">
-        Chọn một bài trong hàng đợi để chỉnh sửa inline.
+        Chọn một bài trong hàng đợi để chỉnh sửa trực tiếp.
       </div>
     );
   }
@@ -573,7 +567,7 @@ function QueueEditor({
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-label-caps uppercase text-secondary">Asset JSON</span>
+          <span className="mb-1 block text-label-caps uppercase text-secondary">Dữ liệu hình ảnh</span>
           <textarea
             className="min-h-[84px] w-full resize-y rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary"
             value={assetsJson}
@@ -583,23 +577,23 @@ function QueueEditor({
 
         <div className="flex flex-wrap gap-2">
           <Button type="button" onClick={onSave} disabled={saving || !body.trim()}>
-            <span className="material-symbols-outlined text-[18px]">save</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">save</span>
             {saving ? "Đang lưu..." : "Lưu sửa đổi"}
           </Button>
           <Button type="button" variant="outline" onClick={onApprove} disabled={acting || !canApprove}>
-            <span className="material-symbols-outlined text-[18px]">verified</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">verified</span>
             Duyệt đăng
           </Button>
           <Button type="button" variant="outline" onClick={onSchedule} disabled={acting || !canSchedule}>
-            <span className="material-symbols-outlined text-[18px]">event</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">event</span>
             Lên lịch
           </Button>
           <Button type="button" variant="ghost" onClick={onReject} disabled={acting || normalize(item.status) === "rejected"}>
-            <span className="material-symbols-outlined text-[18px]">block</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">block</span>
             Từ chối
           </Button>
           <Button type="button" variant="ghost" onClick={onDelete} disabled={acting}>
-            <span className="material-symbols-outlined text-[18px]">delete</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">delete</span>
             Xóa
           </Button>
         </div>
@@ -623,7 +617,7 @@ function QueueEditor({
             ))}
           </div>
           <Button type="button" size="sm" variant="outline" onClick={() => onRepurpose(repurposeTargets)} disabled={acting || repurposeTargets.length === 0}>
-            <span className="material-symbols-outlined text-[16px]">dynamic_feed</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">dynamic_feed</span>
             Tạo biến thể
           </Button>
         </div>
@@ -677,7 +671,7 @@ function CalendarPanel({
                         onClick={() => onCancel(row.scheduleId)}
                         disabled={cancelingId === row.scheduleId}
                       >
-                        <span className="material-symbols-outlined text-[16px]">event_busy</span>
+                        <span aria-hidden="true" className="material-symbols-outlined text-[16px]">event_busy</span>
                         Hủy lịch
                       </button>
                     ) : null}
@@ -732,7 +726,7 @@ function ScheduleDialog({
             Hủy bỏ
           </Button>
           <Button type="button" onClick={onSubmit} disabled={saving}>
-            <span className="material-symbols-outlined text-[18px]">event_available</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">event_available</span>
             {saving ? "Đang lên lịch..." : "Xác nhận lên lịch"}
           </Button>
         </>
@@ -775,10 +769,10 @@ function ScheduleDialog({
             }`}
           >
             <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-[18px] text-primary">auto_awesome</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-primary">auto_awesome</span>
               <span className="text-body-md font-bold text-secondary">Chọn giờ vàng</span>
             </div>
-            <p className="mt-1 text-label-sm text-on-surface-variant">Backend tự chọn slot tối ưu kế tiếp theo kênh.</p>
+            <p className="mt-1 text-label-sm text-on-surface-variant">Hệ thống tự gợi ý khung giờ phù hợp kế tiếp theo từng kênh.</p>
           </button>
           <button
             type="button"
@@ -788,7 +782,7 @@ function ScheduleDialog({
             }`}
           >
             <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-[18px] text-primary">schedule</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-primary">schedule</span>
               <span className="text-body-md font-bold text-secondary">Chọn thời điểm riêng</span>
             </div>
             <p className="mt-1 text-label-sm text-on-surface-variant">Chọn chính xác thời điểm muốn lên lịch.</p>
@@ -866,7 +860,7 @@ export default function ContentWorkspacePage() {
       setSelectedBriefId(brief.id);
       setBriefPlatform(brief.platform);
       setBriefText(brief.brief);
-      setNotice({ tone: "success", message: "Đã lưu brief nội dung." });
+      setNotice({ tone: "success", message: "Đã lưu yêu cầu nội dung." });
       await queryClient.invalidateQueries({ queryKey: ["content", "briefs"] });
     },
   });
@@ -876,7 +870,7 @@ export default function ContentWorkspacePage() {
     onSuccess: async () => {
       setSelectedBriefId(null);
       setBriefText("");
-      setNotice({ tone: "success", message: "Đã lưu trữ brief." });
+      setNotice({ tone: "success", message: "Đã lưu trữ yêu cầu nội dung." });
       await queryClient.invalidateQueries({ queryKey: ["content", "briefs"] });
     },
   });
@@ -892,7 +886,7 @@ export default function ContentWorkspacePage() {
         setSelectedItemId(first.id);
         setEditorDraft({ itemId: first.id, body: first.body, assetsJson: first.assetsJson || "[]" });
       }
-      setNotice({ tone: "success", message: `Đã sinh ${response.items.length || 1} bài nháp từ content agent.` });
+      setNotice({ tone: "success", message: `Đã sinh ${response.items.length || 1} bài nháp từ agent nội dung.` });
       await queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
     },
   });
@@ -919,7 +913,7 @@ export default function ContentWorkspacePage() {
   });
 
   const rejectMutation = useMutation({
-    mutationFn: (id: string) => rejectContentItem(id, "Rejected from content workspace"),
+    mutationFn: (id: string) => rejectContentItem(id, "Từ chối trong màn hình quản lý nội dung"),
     onSuccess: async () => {
       setNotice({ tone: "warning", message: "Đã chuyển bài sang trạng thái từ chối." });
       await queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
@@ -968,7 +962,7 @@ export default function ContentWorkspacePage() {
   const scanMutation = useMutation({
     mutationFn: () => scanContentTrends(),
     onSuccess: async () => {
-      setNotice({ tone: "success", message: "Đã quét xu hướng mới từ research agent." });
+      setNotice({ tone: "success", message: "Đã quét xu hướng mới từ agent nghiên cứu." });
       await queryClient.invalidateQueries({ queryKey: ["content", "trends"] });
     },
   });
@@ -1002,8 +996,8 @@ export default function ContentWorkspacePage() {
 
   function applyTrendIdea(idea: string) {
     setSelectedBriefId(null);
-    setBriefText((old) => (old.trim() ? `${old.trim()}\n\nÝ tưởng trend: ${idea}` : idea));
-    setNotice({ tone: "info", message: "Đã đưa ý tưởng trend vào brief." });
+    setBriefText((old) => (old.trim() ? `${old.trim()}\n\nÝ tưởng xu hướng: ${idea}` : idea));
+    setNotice({ tone: "info", message: "Đã đưa ý tưởng xu hướng vào yêu cầu nội dung." });
   }
 
   return (
@@ -1011,19 +1005,19 @@ export default function ContentWorkspacePage() {
       <section className="mb-gutter rounded-lg border border-primary/20 bg-primary/5 p-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <h1 className="text-headline-md text-secondary">Quản lý Bài viết & Nội dung</h1>
+            <h1 className="text-headline-md text-secondary">Quản lý bài viết & nội dung</h1>
             <p className="mt-1 text-body-md text-on-surface-variant">
-              Quản lý brief, hàng đợi duyệt, lịch đăng và xu hướng nội dung.
+              Quản lý yêu cầu nội dung, hàng đợi duyệt, lịch đăng và xu hướng nội dung.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <StatusPill tone={activeError ? "error" : "success"}>{activeError ? "Mất kết nối" : "Đã kết nối"}</StatusPill>
             <Button type="button" variant="outline" onClick={() => void invalidateContent()}>
-              <span className="material-symbols-outlined text-[18px]">refresh</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">refresh</span>
               Làm mới
             </Button>
             <Button type="button" onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending || !briefText.trim()}>
-              <span className="material-symbols-outlined text-[18px]">add_circle</span>
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">add_circle</span>
               Tạo bài viết mới
             </Button>
           </div>
@@ -1037,10 +1031,10 @@ export default function ContentWorkspacePage() {
       ) : null}
 
       <section className="mb-gutter grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
-        <MetricTile icon="description" label="Brief active" value={briefs.length} meta="Không tính brief archived" />
-        <MetricTile icon="rate_review" label="Chờ duyệt" value={draftCount} meta={`${queueQuery.data?.total ?? 0} bài trong queue`} />
-        <MetricTile icon="verified" label="Sẵn sàng lịch" value={readyCount} meta="Status approved từ backend" />
-        <MetricTile icon="event" label="Lịch 30 ngày" value={calendarItems.length} meta={`${trends.length} trend đang lưu`} />
+        <MetricTile icon="description" label="Yêu cầu đang mở" value={briefs.length} meta="Không tính yêu cầu đã lưu trữ" />
+        <MetricTile icon="rate_review" label="Chờ duyệt" value={draftCount} meta={`${queueQuery.data?.total ?? 0} bài trong hàng đợi`} />
+        <MetricTile icon="verified" label="Sẵn sàng lịch" value={readyCount} meta="Bài đã được duyệt" />
+        <MetricTile icon="event" label="Lịch 30 ngày" value={calendarItems.length} meta={`${trends.length} xu hướng đang lưu`} />
       </section>
 
       <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[390px_minmax(0,1fr)]">
@@ -1079,7 +1073,7 @@ export default function ContentWorkspacePage() {
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <h2 className="text-headline-sm text-secondary">Hàng đợi duyệt bài</h2>
-                <p className="mt-1 text-body-md text-on-surface-variant">Inline editor cho draft, duyệt bài và repurpose sang kênh khác.</p>
+                <p className="mt-1 text-body-md text-on-surface-variant">Soạn thảo trực tiếp cho bài chờ duyệt, duyệt bài và tạo biến thể sang kênh khác.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <select

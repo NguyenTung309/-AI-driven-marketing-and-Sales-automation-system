@@ -29,7 +29,7 @@ function statusTone(status: string): StatusTone {
 
 function statusLabel(status: string): string {
   const value = normalize(status);
-  if (value === "deployed") return "Đã deploy";
+  if (value === "deployed") return "Đã phát hành";
   if (value === "draft") return "Bản nháp";
   if (value === "archived") return "Lưu trữ";
   if (value === "active") return "Đang hoạt động";
@@ -51,13 +51,13 @@ function accuracyTone(value: number | null): string {
 
 function accuracyLabel(value: number | null): string {
   const percent = accuracyPercent(value);
-  return percent === null ? "Chưa test" : `${percent.toFixed(percent % 1 === 0 ? 0 : 1)}%`;
+  return percent === null ? "Chưa kiểm tra" : `${percent.toFixed(percent % 1 === 0 ? 0 : 1)}%`;
 }
 
 function versionTitle(module: KbModule | null, version: KbVersion | null): string {
-  if (!module) return "Chưa chọn module";
-  if (!version) return `${module.code}.md`;
-  return `${module.code}.v${version.version}.md`;
+  if (!module) return "Chưa chọn nhóm tri thức";
+  if (!version) return module.name;
+  return `${module.name} · bản ${version.version}`;
 }
 
 export function ModuleRail({
@@ -82,12 +82,12 @@ export function ModuleRail({
       <div className="border-b border-outline p-4">
         <p className="text-label-caps uppercase text-on-surface-variant">Thư mục tri thức</p>
         <div className="mt-3 flex items-center gap-2 rounded border border-outline bg-surface-container-lowest px-3 py-2 focus-within:border-primary">
-          <span className="material-symbols-outlined text-[18px] text-on-surface-variant">search</span>
+          <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-on-surface-variant">search</span>
           <input
-            aria-label="Tìm module tri thức"
+            aria-label="Tìm nhóm tri thức"
             className="min-w-0 flex-1 bg-transparent text-body-md text-secondary outline-none"
             onChange={(event) => onSearch(event.target.value)}
-            placeholder="Tìm module..."
+            placeholder="Tìm nhóm tri thức..."
             value={search}
           />
         </div>
@@ -95,7 +95,7 @@ export function ModuleRail({
 
       <div className="flex-1 space-y-1 overflow-y-auto p-2">
         {loading ? (
-          <p className="p-3 text-body-md text-on-surface-variant">Đang tải module...</p>
+          <p className="p-3 text-body-md text-on-surface-variant">Đang tải nhóm tri thức...</p>
         ) : modules.length ? (
           modules.map((module) => (
             <button
@@ -107,7 +107,7 @@ export function ModuleRail({
               onClick={() => onSelect(module.id)}
               type="button"
             >
-              <span className="material-symbols-outlined mt-0.5 text-[19px]">
+              <span aria-hidden="true" className="material-symbols-outlined mt-0.5 text-[19px]">
                 {selectedId === module.id ? "folder_open" : "folder"}
               </span>
               <span className="min-w-0">
@@ -117,7 +117,7 @@ export function ModuleRail({
             </button>
           ))
         ) : (
-          <p className="p-3 text-body-md text-on-surface-variant">Chưa có module phù hợp.</p>
+          <p className="p-3 text-body-md text-on-surface-variant">Chưa có nhóm tri thức phù hợp.</p>
         )}
       </div>
 
@@ -127,8 +127,8 @@ export function ModuleRail({
           onClick={onCreate}
           type="button"
         >
-          <span className="material-symbols-outlined text-[18px]">create_new_folder</span>
-          Tạo module
+          <span aria-hidden="true" className="material-symbols-outlined text-[18px]">create_new_folder</span>
+          Tạo nhóm tri thức
         </button>
       </div>
     </aside>
@@ -162,7 +162,7 @@ export function VersionRail({
 
       <div className="flex-1 space-y-2 overflow-y-auto p-3">
         {!module ? (
-          <p className="p-3 text-body-md text-on-surface-variant">Chọn một module để xem lịch sử.</p>
+          <p className="p-3 text-body-md text-on-surface-variant">Chọn một nhóm tri thức để xem lịch sử.</p>
         ) : loading ? (
           <p className="p-3 text-body-md text-on-surface-variant">Đang tải phiên bản...</p>
         ) : versions.length ? (
@@ -180,20 +180,20 @@ export function VersionRail({
             >
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-body-md font-bold text-secondary">Version {version.version}</p>
+                  <p className="text-body-md font-bold text-secondary">Bản {version.version}</p>
                   <p className="mt-1 text-label-sm text-on-surface-variant">{formatDateTime(version.createdAt)}</p>
                 </div>
                 <StatusPill tone={statusTone(version.status)}>{statusLabel(version.status)}</StatusPill>
               </div>
               <div className="mt-3 flex items-center justify-between gap-3 font-mono text-label-sm">
-                <span className="text-on-surface-variant">Accuracy</span>
+                <span className="text-on-surface-variant">Độ chính xác</span>
                 <span className="font-bold text-secondary">{accuracyLabel(version.accuracyScore)}</span>
               </div>
             </button>
           ))
         ) : (
           <div className="rounded border border-dashed border-outline p-4 text-body-md text-on-surface-variant">
-            Module chưa có version. Nhập Markdown ở editor và lưu bản nháp đầu tiên.
+            Nhóm tri thức chưa có bản nào. Nhập nội dung và lưu bản nháp đầu tiên.
           </div>
         )}
       </div>
@@ -241,12 +241,12 @@ export function EditorWorkspace({
       <div className="flex flex-col gap-3 border-b border-slate-700 bg-white p-4 text-secondary lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="material-symbols-outlined text-[18px] text-primary">description</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-primary">description</span>
             <h2 className="truncate text-body-md font-bold">{versionTitle(module, version)}</h2>
             {version ? <StatusPill tone={statusTone(version.status)}>{statusLabel(version.status)}</StatusPill> : null}
           </div>
           <p className="mt-1 truncate text-label-sm text-on-surface-variant">
-            {module?.description ?? "Markdown nguồn dùng cho RAG và các Agent."}
+            {module?.description ?? "Nội dung tri thức dùng cho các agent."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -256,51 +256,51 @@ export function EditorWorkspace({
             onClick={onOpenQa}
             type="button"
           >
-            Q&A test
+            Kiểm thử Q&A
           </button>
           <button
-            aria-label="Chỉnh sửa module"
+            aria-label="Chỉnh sửa nhóm tri thức"
             className="rounded border border-outline p-2 text-on-surface-variant hover:border-primary hover:text-primary disabled:opacity-50"
             disabled={!module}
             onClick={onEditModule}
-            title="Chỉnh sửa module"
+            title="Chỉnh sửa nhóm tri thức"
             type="button"
           >
-            <span className="material-symbols-outlined text-[18px]">edit</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">edit</span>
           </button>
           <button
-            aria-label="Lưu trữ module"
+            aria-label="Lưu trữ nhóm tri thức"
             className="rounded border border-outline p-2 text-on-surface-variant hover:border-error hover:text-error disabled:opacity-50"
             disabled={!module}
             onClick={onArchive}
-            title="Lưu trữ module"
+            title="Lưu trữ nhóm tri thức"
             type="button"
           >
-            <span className="material-symbols-outlined text-[18px]">archive</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">archive</span>
           </button>
         </div>
       </div>
 
       <div className="flex items-center justify-between border-b border-slate-700 bg-[#1f2937] px-4 py-2 font-mono text-label-sm">
-        <span className="text-slate-400">RAW MARKDOWN EDITOR</span>
+        <span className="text-slate-400">TRÌNH SOẠN TRI THỨC</span>
         <span className="text-slate-500">{content.length.toLocaleString("vi-VN")} ký tự</span>
       </div>
 
       {loading ? (
-        <div className="flex flex-1 items-center justify-center text-body-md text-slate-400">Đang tải nội dung version...</div>
+        <div className="flex flex-1 items-center justify-center text-body-md text-slate-400">Đang tải nội dung...</div>
       ) : module ? (
         <textarea
-          aria-label="Nội dung Markdown"
+          aria-label="Nội dung tri thức"
           className="min-h-[430px] flex-1 resize-none bg-[#111827] p-5 font-mono text-[13px] leading-6 text-slate-200 outline-none placeholder:text-slate-600"
           onChange={(event) => setContent(event.target.value)}
-          placeholder={"# Nội dung module\n\nNhập kiến thức Markdown tại đây..."}
+          placeholder={"# Nội dung tri thức\n\nNhập kiến thức tại đây..."}
           spellCheck={false}
           value={content}
         />
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center p-8 text-center text-slate-400">
-          <span className="material-symbols-outlined text-[42px]">menu_book</span>
-          <p className="mt-3 text-body-md">Chọn hoặc tạo module để bắt đầu biên tập.</p>
+          <span aria-hidden="true" className="material-symbols-outlined text-[42px]">menu_book</span>
+          <p className="mt-3 text-body-md">Chọn hoặc tạo nhóm tri thức để bắt đầu biên tập.</p>
         </div>
       )}
 
@@ -308,7 +308,7 @@ export function EditorWorkspace({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-2 font-mono text-label-sm text-slate-400">
             <span>{hasChanges ? "Có thay đổi chưa lưu" : "Nội dung đã đồng bộ"}</span>
-            {version?.deployedAt ? <span>• Deploy {formatDateTime(version.deployedAt)}</span> : null}
+            {version?.deployedAt ? <span>• Phát hành {formatDateTime(version.deployedAt)}</span> : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -317,7 +317,7 @@ export function EditorWorkspace({
               onClick={onCompare}
               type="button"
             >
-              Xem diff
+              So sánh thay đổi
             </button>
             {!isDeployed && version ? (
               <button
@@ -326,7 +326,7 @@ export function EditorWorkspace({
                 onClick={onRollback}
                 type="button"
               >
-                Rollback tới v{version.version}
+                Khôi phục về bản {version.version}
               </button>
             ) : null}
             <button
@@ -335,7 +335,7 @@ export function EditorWorkspace({
               onClick={() => onSave(content)}
               type="button"
             >
-              {saving ? "Đang lưu" : "Lưu version mới"}
+              {saving ? "Đang lưu" : "Lưu bản mới"}
             </button>
             <button
               className="rounded bg-primary px-4 py-2 text-label-sm font-bold text-white hover:bg-primary-hover disabled:opacity-40"
@@ -343,7 +343,7 @@ export function EditorWorkspace({
               onClick={onDeploy}
               type="button"
             >
-              {deploying ? "Đang deploy" : isDeployed ? "Đã deploy" : "Deploy version"}
+              {deploying ? "Đang phát hành" : isDeployed ? "Đã phát hành" : "Phát hành bản này"}
             </button>
           </div>
         </div>
@@ -362,8 +362,8 @@ export function AccuracyPanel({ items, loading }: { readonly items: readonly KbA
     <section className="mt-gutter">
       <div className="mb-stack-md flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-headline-sm font-bold text-secondary">Độ chính xác Knowledge Base</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">Kết quả RAG + LLM evaluator theo module và version mới nhất.</p>
+          <h2 className="text-headline-sm font-bold text-secondary">Độ chính xác kho tri thức</h2>
+          <p className="mt-1 text-body-md text-on-surface-variant">Kết quả kiểm định theo từng nhóm tri thức và bản mới nhất.</p>
         </div>
         <div className="font-mono text-mono-status text-on-surface-variant">
           Trung bình: <span className="font-bold text-secondary">{accuracyLabel(average)}</span>
@@ -372,7 +372,7 @@ export function AccuracyPanel({ items, loading }: { readonly items: readonly KbA
 
       <Card className="p-0">
         {loading ? (
-          <p className="p-card-padding text-body-md text-on-surface-variant">Đang tải accuracy dashboard...</p>
+          <p className="p-card-padding text-body-md text-on-surface-variant">Đang tải báo cáo độ chính xác...</p>
         ) : items.length ? (
           <div className="divide-y divide-outline">
             {items.map((item) => {
@@ -395,7 +395,7 @@ export function AccuracyPanel({ items, loading }: { readonly items: readonly KbA
             })}
           </div>
         ) : (
-          <p className="p-card-padding text-body-md text-on-surface-variant">Chưa có module nào để tổng hợp accuracy.</p>
+          <p className="p-card-padding text-body-md text-on-surface-variant">Chưa có nhóm tri thức nào để tổng hợp độ chính xác.</p>
         )}
       </Card>
     </section>
@@ -409,13 +409,13 @@ export function DiffDrawer({ diff, onClose }: { readonly diff: KbVersionDiff | n
       <aside className="flex h-full w-full max-w-[620px] flex-col bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-outline p-5">
           <div>
-            <p className="text-label-caps uppercase text-on-surface-variant">Version diff</p>
+            <p className="text-label-caps uppercase text-on-surface-variant">So sánh thay đổi</p>
             <h2 className="mt-1 text-headline-sm font-bold text-secondary">
-              v{diff.fromVersion} → v{diff.toVersion}
+              Bản {diff.fromVersion} → bản {diff.toVersion}
             </h2>
           </div>
-          <button aria-label="Đóng diff" className="rounded-full p-2 hover:bg-surface-variant" onClick={onClose} type="button">
-            <span className="material-symbols-outlined">close</span>
+          <button aria-label="Đóng phần so sánh" className="rounded-full p-2 hover:bg-surface-variant" onClick={onClose} type="button">
+            <span aria-hidden="true" className="material-symbols-outlined">close</span>
           </button>
         </div>
         <div className="flex gap-3 border-b border-outline p-4 font-mono text-mono-status">

@@ -24,7 +24,7 @@ export function TwoFactorSetupDialog({ open, onClose, onVerified }: TwoFactorSet
         if (active) setSharedKey(r.sharedKey);
       })
       .catch(() => {
-        if (active) setError("Không thể khởi tạo 2FA. Vui lòng thử lại.");
+        if (active) setError("Không thể khởi tạo xác thực hai lớp. Vui lòng thử lại.");
       });
     return () => {
       active = false;
@@ -58,7 +58,7 @@ export function TwoFactorSetupDialog({ open, onClose, onVerified }: TwoFactorSet
       }
     >
       <p className="text-body-md text-on-surface-variant">
-        Thêm khóa bên dưới vào ứng dụng Authenticator (Google Authenticator, Authy…), rồi nhập mã 6 số để kích hoạt.
+        Thêm khóa bên dưới vào ứng dụng xác thực (Google Authenticator, Authy…), rồi nhập mã 6 số để kích hoạt.
       </p>
       <div className="flex flex-col gap-1">
         <label className="text-label-lg text-on-surface">Khóa thủ công</label>
