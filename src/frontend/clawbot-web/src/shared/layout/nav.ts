@@ -18,6 +18,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { icon: "toll", label: "Quản lý chi phí AI", to: "/tokens" },
   { icon: "inventory_2", label: "Kho tri thức", to: "/kb" },
   { icon: "settings_suggest", label: "Hướng dẫn agent", to: "/prompts" },
+  { icon: "smart_toy", label: "Cấu hình mô hình AI", to: "/llm-providers" },
 ];
 
 export const NAV_SYSTEM: NavItem = { icon: "settings", label: "Hệ thống", to: "/system" };

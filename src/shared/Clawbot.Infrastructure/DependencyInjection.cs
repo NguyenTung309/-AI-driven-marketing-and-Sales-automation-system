@@ -114,6 +114,8 @@ public static class DependencyInjection
         services.AddScoped<ITenantResolver, DemoTenantResolver>();
         services.Configure<EncryptionOptions>(cfg.GetSection("Encryption"));
         services.AddSingleton<IEncryptor, AesEncryptor>();
+        // Per-(tenant, agent) LLM provider resolution (decrypts the bound LlmConfig at call time).
+        services.AddSingleton<Clawbot.Agents.Core.Chat.ILlmConfigResolver, Agents.LlmConfigResolver>();
         services.Configure<PublisherOptions>(cfg.GetSection(PublisherOptions.SectionName));
         services.AddSingleton<IGoldenHourResolver, DefaultGoldenHourResolver>();
         services.AddClawbotLead(); // Lead-2: least-busy assignment for API endpoints + hot-lead consumer

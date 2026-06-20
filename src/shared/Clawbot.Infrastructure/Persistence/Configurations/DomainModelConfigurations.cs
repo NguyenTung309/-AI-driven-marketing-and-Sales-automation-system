@@ -298,8 +298,16 @@ public sealed class AgentConfigConfiguration : IEntityTypeConfiguration<AgentCon
         builder.Property(x => x.DisplayName).HasMaxLength(256).IsRequired();
         builder.Property(x => x.AgentType).HasMaxLength(32).IsRequired();
         builder.Property(x => x.Model).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.LlmConfigId);
         builder.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
         builder.HasIndex(x => new { x.TenantId, x.AgentType });
+        builder.HasIndex(x => x.LlmConfigId);
+        // FK kept optional + ON DELETE SET NULL so deleting a provider config orphans (not deletes) agents,
+        // which then hard-error at runtime until rebound (D1). No navigation property — resolver loads by id.
+        builder.HasOne<LlmConfig>()
+            .WithMany()
+            .HasForeignKey(x => x.LlmConfigId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }
 
@@ -535,9 +543,13 @@ public sealed class LlmConfigConfiguration : IEntityTypeConfiguration<LlmConfig>
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Provider).HasMaxLength(32).IsRequired();
         builder.Property(x => x.ModelId).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.DisplayName).HasColumnName("display_name").HasMaxLength(128);
         builder.Property(x => x.ApiKeyEncrypted).HasColumnType("nvarchar(max)").IsRequired();
         builder.Property(x => x.BaseUrl).HasMaxLength(512);
         builder.Property(x => x.Temperature).HasColumnType("decimal(3,2)");
+        // Numeric-suffixed names snake-case ambiguously; pin them so DDL + EF agree.
+        builder.Property(x => x.InputUsdPer1M).HasColumnName("input_usd_per_1m").HasColumnType("decimal(10,4)");
+        builder.Property(x => x.OutputUsdPer1M).HasColumnName("output_usd_per_1m").HasColumnType("decimal(10,4)");
         builder.HasIndex(x => new { x.TenantId, x.IsActive });
     }
 }

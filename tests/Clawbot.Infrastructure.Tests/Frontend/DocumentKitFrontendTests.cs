@@ -22,7 +22,7 @@ public sealed class DocumentKitFrontendTests
 
         api.Should().Contain("generateDocumentKit");
         api.Should().Contain("/api/docs/generate-kit");
-        page.Should().Contain("Generate kit");
+        page.Should().Contain("Tạo bộ tài liệu");
         page.Should().Contain("generateKitMutation");
     }
 

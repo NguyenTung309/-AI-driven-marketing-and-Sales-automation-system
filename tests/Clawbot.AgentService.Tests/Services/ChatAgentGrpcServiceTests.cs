@@ -142,7 +142,8 @@ public sealed class ChatAgentGrpcServiceTests
             toxicity,
             spam,
             Options.Create(new ToxicityOptions()),
-            new AlwaysEnabledAgentToggleGate());
+            new AlwaysEnabledAgentToggleGate(),
+            new CoreChat.LlmCallScope());
     }
 
     private sealed class CapturingClaude : IClaudeChatClient

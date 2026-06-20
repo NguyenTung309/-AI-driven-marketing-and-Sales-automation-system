@@ -22,6 +22,7 @@ public sealed record AgentSettingsResponse(
     int MaxTokens,
     IReadOnlyList<string> SkillFiles,
     IReadOnlyList<string> KbModules,
+    Guid? LlmConfigId,
     DateTimeOffset UpdatedAt);
 
 public sealed record AgentSettingsRequest(
@@ -32,7 +33,9 @@ public sealed record AgentSettingsRequest(
     double? Temperature,
     int? MaxTokens,
     IReadOnlyList<string>? SkillFiles,
-    IReadOnlyList<string>? KbModules);
+    IReadOnlyList<string>? KbModules,
+    // Tri-state: null = leave unchanged, Guid.Empty = unbind, otherwise bind to that config.
+    Guid? LlmConfigId = null);
 
 public sealed record AgentSandboxRequest(string Message);
 public sealed record AgentSandboxResponse(Guid SessionId, string Reply, DateTimeOffset SentAt);
@@ -106,7 +109,7 @@ public static class AgentsEndpoints
         IClock clock,
         CancellationToken ct = default)
     {
-        _ = tenants.Require();
+        var tenantId = tenants.Require().TenantId;
         var agent = await db.AgentConfigs.FirstOrDefaultAsync(a => a.Code == code, ct);
         if (agent is null) return Results.NotFound();
 
@@ -114,6 +117,32 @@ public static class AgentsEndpoints
         var model = NormalizeText(req.Model, agent.Model, maxLength: 128);
         if (string.IsNullOrWhiteSpace(displayName)) return Results.BadRequest(new { error = "display_name_required" });
         if (string.IsNullOrWhiteSpace(model)) return Results.BadRequest(new { error = "model_required" });
+
+        // Per-agent provider binding (tri-state) + D9 cross-provider model guard. Resolve the binding
+        // the request *leaves the agent in*, then validate the effective model against that provider —
+        // not only on rebind, so a later model-only edit can't drift a Claude string onto an OpenAI bind.
+        var targetConfigId = req.LlmConfigId switch
+        {
+            null => agent.LlmConfigId,                  // unchanged
+            { } g when g == Guid.Empty => (Guid?)null,  // unbind
+            { } g => g,                                  // bind to g
+        };
+
+        // Only re-validate when the model or the binding was actually touched, so unrelated edits
+        // (e.g. display name) don't trip on pre-existing mismatches.
+        if ((req.Model is not null || req.LlmConfigId is not null) && targetConfigId is { } cfgId)
+        {
+            var boundProvider = await db.LlmConfigs
+                .Where(c => c.Id == cfgId && c.TenantId == tenantId)
+                .Select(c => c.Provider)
+                .FirstOrDefaultAsync(ct);
+            if (boundProvider is null) return Results.BadRequest(new { error = "invalid_llm_config" });
+            if (!IsModelCompatibleWithProvider(boundProvider, model))
+                return Results.BadRequest(new { error = "model_provider_mismatch" });
+        }
+
+        if (req.LlmConfigId is { } bindId)
+            agent.BindLlmConfig(bindId == Guid.Empty ? null : bindId, clock.UtcNow);
 
         var config = ReadRuntimeConfig(agent.ConfigJson);
         config.Provider = NormalizeText(req.Provider, config.Provider, maxLength: 64);
@@ -212,6 +241,7 @@ public static class AgentsEndpoints
             config.MaxTokens,
             DeserializeList(agent.SkillFilesJson),
             DeserializeList(agent.KbModulesJson),
+            agent.LlmConfigId,
             agent.UpdatedAt);
     }
 
@@ -219,6 +249,20 @@ public static class AgentsEndpoints
     {
         var text = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
         return text.Length <= maxLength ? text : text[..maxLength];
+    }
+
+    // D9 — loose cross-provider guard. Anthropic only serves `claude-*` models, so reject anything else.
+    // OpenAI-compatible endpoints serve arbitrary names (gpt-*, o1, llama, qwen, …), so only reject an
+    // obviously-Anthropic model string. Unknown providers are not constrained.
+    internal static bool IsModelCompatibleWithProvider(string provider, string model)
+    {
+        var m = model.Trim();
+        return provider.ToLowerInvariant() switch
+        {
+            "anthropic" => m.StartsWith("claude", StringComparison.OrdinalIgnoreCase),
+            "openai" => !m.StartsWith("claude", StringComparison.OrdinalIgnoreCase),
+            _ => true,
+        };
     }
 
     private static string SerializeList(IReadOnlyList<string>? requested, string fallbackJson)

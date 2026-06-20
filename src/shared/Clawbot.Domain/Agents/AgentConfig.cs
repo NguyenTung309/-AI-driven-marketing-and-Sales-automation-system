@@ -13,6 +13,7 @@ public sealed class AgentConfig : AggregateRoot<Guid>, ITenantOwned
     public string SkillFilesJson { get; private set; } = "[]";
     public string KbModulesJson { get; private set; } = "[]";
     public string ConfigJson { get; private set; } = "{}";
+    public Guid? LlmConfigId { get; private set; }                       // bound LLM provider config (null → unconfigured)
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public DateTimeOffset? DeletedAt { get; private set; }
@@ -55,6 +56,13 @@ public sealed class AgentConfig : AggregateRoot<Guid>, ITenantOwned
         SkillFilesJson = skillFilesJson;
         KbModulesJson = kbModulesJson;
         ConfigJson = configJson;
+        UpdatedAt = updatedAt;
+    }
+
+    // Bind (or unbind) the LLM provider config this agent runs on.
+    public void BindLlmConfig(Guid? llmConfigId, DateTimeOffset updatedAt)
+    {
+        LlmConfigId = llmConfigId;
         UpdatedAt = updatedAt;
     }
 }

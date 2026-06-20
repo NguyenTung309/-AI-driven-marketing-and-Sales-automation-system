@@ -1,4 +1,5 @@
 import type { AgentListItem, UpdateAgentSettingsPayload } from "@/shared/api/agents";
+import type { LlmConfig } from "@/shared/api/llmConfigs";
 
 export type AgentConfigTab = "prompt" | "model" | "tools";
 
@@ -11,6 +12,7 @@ export interface AgentSettingsForm {
   readonly maxTokens: number;
   readonly skillFiles: readonly string[];
   readonly kbModules: readonly string[];
+  readonly llmConfigId: string;
 }
 
 export interface SandboxMessage {
@@ -63,6 +65,7 @@ export function AgentConfigDrawer({
   sandboxInput,
   sandboxMessages,
   sandboxPending,
+  llmConfigs,
   onClose,
   onDraftChange,
   onSave,
@@ -78,6 +81,7 @@ export function AgentConfigDrawer({
   readonly sandboxInput: string;
   readonly sandboxMessages: readonly SandboxMessage[];
   readonly sandboxPending: boolean;
+  readonly llmConfigs: readonly LlmConfig[];
   readonly onClose: () => void;
   readonly onDraftChange: (patch: Partial<UpdateAgentSettingsPayload>) => void;
   readonly onSave: () => void;
@@ -85,6 +89,8 @@ export function AgentConfigDrawer({
   readonly onSendSandbox: (message?: string) => void;
   readonly onTabChange: (tab: AgentConfigTab) => void;
 }) {
+  const boundConfig = llmConfigs.find((c) => c.id === form.llmConfigId);
+  const isUnbound = !boundConfig || !boundConfig.isActive;
   return (
     <>
       <button aria-label="Đóng cấu hình agent" className="fixed inset-0 z-[60] bg-black/20 backdrop-blur-[8px]" onClick={onClose} type="button" />
@@ -136,7 +142,24 @@ export function AgentConfigDrawer({
           ) : null}
 
           {tab === "model" ? (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="flex flex-col gap-4">
+              {isUnbound ? (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-body-md text-amber-800">
+                  Agent chưa gắn cấu hình nhà cung cấp đang hoạt động — agent sẽ báo lỗi khi chạy cho đến khi được gắn cấu hình.
+                </div>
+              ) : null}
+              <label className="space-y-2">
+                <span className="text-label-caps uppercase text-tertiary">Cấu hình nhà cung cấp (LLM)</span>
+                <select className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" onChange={(event) => onDraftChange({ llmConfigId: event.target.value })} value={form.llmConfigId}>
+                  <option value="">— Chưa gắn —</option>
+                  {llmConfigs.map((config) => (
+                    <option key={config.id} value={config.id}>
+                      {`${config.displayName || config.modelId} · ${config.provider}${config.isActive ? "" : " (tắt)"}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <label className="space-y-2">
                 <span className="text-label-caps uppercase text-tertiary">Tên hiển thị</span>
                 <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" onChange={(event) => onDraftChange({ displayName: event.target.value })} value={form.displayName} />
@@ -164,6 +187,7 @@ export function AgentConfigDrawer({
                 <span className="text-label-caps uppercase text-tertiary">Giới hạn độ dài</span>
                 <input className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" min={128} onChange={(event) => onDraftChange({ maxTokens: Number(event.target.value) })} step={128} type="number" value={form.maxTokens} />
               </label>
+              </div>
             </div>
           ) : null}
 

@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using Clawbot.Agents.Core.Chat;
 using FluentAssertions;
-using Microsoft.Extensions.Options;
 
 namespace Clawbot.Agents.Tests.Chat;
 
@@ -34,7 +33,7 @@ public sealed class AnthropicChatClientTests
             new[] { new ChatTurn("user", "old question"), new ChatTurn("assistant", "old answer") },
             "new question");
 
-        result.Should().Be(new ClaudeReply("Xin chao", 100, 40, 0.0009m));
+        result.Should().Be(new ClaudeReply("Xin chao", 100, 40, 0.0009m, "claude-test"));
         handler.Method.Should().Be(HttpMethod.Post);
         handler.RequestUri.Should().Be("https://anthropic.test/v1/messages");
         handler.ApiKey.Should().Be("test-key");
@@ -98,6 +97,7 @@ public sealed class AnthropicChatClientTests
         final.InputTokens.Should().Be(12);
         final.OutputTokens.Should().Be(5);
         final.UsdCost.Should().Be(0.000111m);
+        final.Model.Should().Be("claude-test");
 
         handler.Accept.Should().Contain("text/event-stream");
         using var body = JsonDocument.Parse(handler.Body!);
@@ -105,15 +105,15 @@ public sealed class AnthropicChatClientTests
     }
 
     private static AnthropicChatClient CreateClient(HttpMessageHandler handler) =>
-        new(new HttpClient(handler), Options.Create(new AnthropicOptions
-        {
-            ApiKey = "test-key",
-            BaseUrl = "https://anthropic.test",
-            Model = "claude-test",
-            MaxTokens = 256,
-            InputUsdPer1M = 3m,
-            OutputUsdPer1M = 15m,
-        }));
+        new(new HttpClient(handler), new ResolvedLlmConfig(
+            Provider: "anthropic",
+            Model: "claude-test",
+            ApiKey: "test-key",
+            BaseUrl: "https://anthropic.test",
+            MaxTokens: 256,
+            Temperature: null,
+            InputUsdPer1M: 3m,
+            OutputUsdPer1M: 15m));
 
     private sealed class CapturingHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {

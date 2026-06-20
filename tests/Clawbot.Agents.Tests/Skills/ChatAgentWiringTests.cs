@@ -35,7 +35,7 @@ public sealed class ChatAgentWiringTests
         cost ??= SafeCost();
         var toxicityOpts = Options.Create(new ToxicityOptions());
 
-        return new ChatAgent(rag, claude, intent, pii, injection, cost, language, toxicity, spam, toxicityOpts, new AlwaysEnabledAgentToggleGate());
+        return new ChatAgent(rag, claude, intent, pii, injection, cost, language, toxicity, spam, toxicityOpts, new AlwaysEnabledAgentToggleGate(), new LlmCallScope());
     }
 
     [Fact]

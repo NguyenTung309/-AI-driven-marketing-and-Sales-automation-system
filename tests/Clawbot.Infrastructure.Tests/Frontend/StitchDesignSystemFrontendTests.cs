@@ -29,7 +29,7 @@ public sealed class StitchDesignSystemFrontendTests
         tokens.Should().Contain("--spacing-topbar-height: 64px");
 
         appShell.Should().Contain("md:ml-[260px]");
-        appShell.Should().Contain("pt-[64px]");
+        appShell.Should().Contain("pt-[80px]");
         sidebar.Should().Contain("w-[260px]");
         sidebar.Should().Contain("bg-primary");
         topbar.Should().Contain("h-[64px]");

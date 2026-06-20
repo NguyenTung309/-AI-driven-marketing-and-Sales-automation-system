@@ -18,7 +18,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddGrpc();
+builder.Services.AddGrpc(o => o.Interceptors.Add<LlmConfigGrpcInterceptor>());
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddClawbotTelemetry(builder.Configuration, "clawbot-agent");

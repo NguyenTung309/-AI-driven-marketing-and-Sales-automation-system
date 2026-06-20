@@ -2,9 +2,9 @@ namespace Clawbot.Agents.Core.Chat;
 
 public sealed record ChatTurn(string Role, string Content);
 
-public sealed record ClaudeReply(string Text, int InputTokens, int OutputTokens, decimal UsdCost);
+public sealed record ClaudeReply(string Text, int InputTokens, int OutputTokens, decimal UsdCost, string Model = "");
 
-public sealed record ClaudeStreamChunk(string Text, bool Final, int InputTokens, int OutputTokens, decimal UsdCost);
+public sealed record ClaudeStreamChunk(string Text, bool Final, int InputTokens, int OutputTokens, decimal UsdCost, string Model = "");
 
 public interface IClaudeChatClient
 {

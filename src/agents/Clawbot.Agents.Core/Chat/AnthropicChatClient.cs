@@ -4,15 +4,26 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.Options;
 
 namespace Clawbot.Agents.Core.Chat;
 
-public sealed class AnthropicChatClient(HttpClient http, IOptions<AnthropicOptions> options) : IClaudeChatClient
+// Per-call client bound to a resolved provider config (built by ILlmChatClientFactory).
+// No IOptions/env credential read — the key/model/baseUrl/rates all come from ResolvedLlmConfig (D1/D3).
+public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig config) : IClaudeChatClient
 {
+    private const string DefaultBaseUrl = "https://api.anthropic.com";
+    private const int DefaultMaxTokens = 1024;
+    private const decimal DefaultInputUsdPer1M = 3.00m;
+    private const decimal DefaultOutputUsdPer1M = 15.00m;
+
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _http = http;
-    private readonly AnthropicOptions _opts = options.Value;
+    private readonly ResolvedLlmConfig _config = config;
+
+    private string BaseUrl => string.IsNullOrWhiteSpace(_config.BaseUrl) ? DefaultBaseUrl : _config.BaseUrl;
+    private int MaxTokens => _config.MaxTokens ?? DefaultMaxTokens;
+    private decimal InputRate => _config.InputUsdPer1M ?? DefaultInputUsdPer1M;
+    private decimal OutputRate => _config.OutputUsdPer1M ?? DefaultOutputUsdPer1M;
 
     public async Task<ClaudeReply> CompleteAsync(
         string systemPrompt,
@@ -20,8 +31,8 @@ public sealed class AnthropicChatClient(HttpClient http, IOptions<AnthropicOptio
         string userMessage,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(_opts.ApiKey))
-            throw new InvalidOperationException("Anthropic:ApiKey not configured.");
+        if (string.IsNullOrWhiteSpace(_config.ApiKey))
+            throw new InvalidOperationException("Anthropic API key not configured.");
 
         using var req = CreateRequest(systemPrompt, history, userMessage, "application/json", stream: false);
 
@@ -34,9 +45,9 @@ public sealed class AnthropicChatClient(HttpClient http, IOptions<AnthropicOptio
         var text = string.Concat(dto.Content?.Where(c => c.Type == "text").Select(c => c.Text) ?? Array.Empty<string>());
         var inTok = dto.Usage?.InputTokens ?? 0;
         var outTok = dto.Usage?.OutputTokens ?? 0;
-        var cost = (inTok * _opts.InputUsdPer1M + outTok * _opts.OutputUsdPer1M) / 1_000_000m;
+        var cost = (inTok * InputRate + outTok * OutputRate) / 1_000_000m;
 
-        return new ClaudeReply(text, inTok, outTok, cost);
+        return new ClaudeReply(text, inTok, outTok, cost, _config.Model);
     }
 
     public async IAsyncEnumerable<ClaudeStreamChunk> StreamAsync(
@@ -45,8 +56,8 @@ public sealed class AnthropicChatClient(HttpClient http, IOptions<AnthropicOptio
         string userMessage,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(_opts.ApiKey))
-            throw new InvalidOperationException("Anthropic:ApiKey not configured.");
+        if (string.IsNullOrWhiteSpace(_config.ApiKey))
+            throw new InvalidOperationException("Anthropic API key not configured.");
 
         using var req = CreateRequest(systemPrompt, history, userMessage, "text/event-stream", stream: true);
 
@@ -70,17 +81,17 @@ public sealed class AnthropicChatClient(HttpClient http, IOptions<AnthropicOptio
         msgs.Add(new MessageBody("user", userMessage));
 
         var payload = new RequestBody(
-            Model: _opts.Model,
-            MaxTokens: _opts.MaxTokens,
+            Model: _config.Model,
+            MaxTokens: MaxTokens,
             System: systemPrompt,
             Messages: msgs,
             Stream: stream);
 
-        var req = new HttpRequestMessage(HttpMethod.Post, $"{_opts.BaseUrl.TrimEnd('/')}/v1/messages")
+        var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl.TrimEnd('/')}/v1/messages")
         {
             Content = JsonContent.Create(payload, options: JsonOpts),
         };
-        req.Headers.Add("x-api-key", _opts.ApiKey);
+        req.Headers.Add("x-api-key", _config.ApiKey);
         req.Headers.Add("anthropic-version", "2023-06-01");
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(acceptMediaType));
         return req;
@@ -126,11 +137,12 @@ public sealed class AnthropicChatClient(HttpClient http, IOptions<AnthropicOptio
             Final: true,
             inputTokens,
             outputTokens,
-            CalculateCost(inputTokens, outputTokens));
+            CalculateCost(inputTokens, outputTokens),
+            _config.Model);
     }
 
     private decimal CalculateCost(int inputTokens, int outputTokens) =>
-        (inputTokens * _opts.InputUsdPer1M + outputTokens * _opts.OutputUsdPer1M) / 1_000_000m;
+        (inputTokens * InputRate + outputTokens * OutputRate) / 1_000_000m;
 
     private static ClaudeStreamChunk? TryReadStreamChunk(StringBuilder data, ref int inputTokens, ref int outputTokens)
     {
