@@ -10,6 +10,7 @@ import {
   ForgotPasswordPage,
   KnowledgeBasePage,
   LeadsPage,
+  LlmProvidersPage,
   LoginPage,
   NotificationsPage,
   PixelAgentsOfficePage,
@@ -138,6 +139,14 @@ export const router = createBrowserRouter([
     element: (
       <RequireAuth>
         <ProfilePage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/llm-providers",
+    element: (
+      <RequireAuth>
+        <LlmProvidersPage />
       </RequireAuth>
     ),
   },

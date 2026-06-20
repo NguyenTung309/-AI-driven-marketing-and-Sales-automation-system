@@ -1,3 +1,4 @@
+using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Content;
 using Clawbot.Agents.Core.Rag;
 using FluentAssertions;
@@ -22,12 +23,18 @@ public sealed class ContentAgentTests
         var templates = Substitute.For<IPromptTemplateProvider>();
         templates.GetTemplate("tiktok").Returns("Brief={{brief}}\nKnowledge={{knowledge}}");
 
-        ContentLlmRequest? captured = null;
-        var llm = Substitute.For<IContentLlmClient>();
-        llm.CompleteAsync(Arg.Do<ContentLlmRequest>(r => captured = r), Arg.Any<CancellationToken>())
-            .Returns(new ContentLlmResult(" Draft body ", 17, 9));
+        var scope = new LlmCallScope();
+        string? capturedPrompt = null;
+        LlmCallContext? capturedCtx = null;
+        var claude = Substitute.For<IClaudeChatClient>();
+        claude.CompleteAsync(
+                Arg.Any<string>(),
+                Arg.Any<IReadOnlyList<ChatTurn>>(),
+                Arg.Do<string>(p => { capturedPrompt = p; capturedCtx = scope.Current; }),
+                Arg.Any<CancellationToken>())
+            .Returns(new ClaudeReply(" Draft body ", 17, 9, 0m, "content-model"));
 
-        var agent = new ContentAgent(rag, templates, llm);
+        var agent = new ContentAgent(rag, templates, claude, scope);
 
         var result = await agent.GenerateAsync(
             new ContentGenerateRequest(tenantId, briefId, "tiktok", "Chinese study trend", KbModuleCode: null),
@@ -44,11 +51,11 @@ public sealed class ContentAgentTests
         await rag.Received(1).RetrieveAsync(
             Arg.Is<RagRequest>(r => r.TenantId == tenantId && r.Query == "Chinese study trend" && r.TopK == 4),
             Arg.Any<CancellationToken>());
-        captured.Should().NotBeNull();
-        captured!.TenantId.Should().Be(tenantId);
-        captured.Platform.Should().Be("tiktok");
-        captured.Prompt.Should().Contain("Brief=Chinese study trend");
-        captured.Prompt.Should().Contain("[1] (module=HSK, score=0.91) HSK3 classes open in June");
+        // Provider resolved via the ambient (tenant, content-agent) scope, and the rendered template
+        // is sent verbatim as the user message.
+        capturedCtx.Should().Be(new LlmCallContext(tenantId, "content-agent"));
+        capturedPrompt.Should().Contain("Brief=Chinese study trend");
+        capturedPrompt.Should().Contain("[1] (module=HSK, score=0.91) HSK3 classes open in June");
     }
 
     [Fact]
@@ -57,7 +64,8 @@ public sealed class ContentAgentTests
         var agent = new ContentAgent(
             Substitute.For<IRagRetriever>(),
             Substitute.For<IPromptTemplateProvider>(),
-            Substitute.For<IContentLlmClient>());
+            Substitute.For<IClaudeChatClient>(),
+            new LlmCallScope());
 
         var act = async () => await agent.GenerateAsync(
             new ContentGenerateRequest(Guid.NewGuid(), BriefId: null, "facebook", " ", KbModuleCode: null),

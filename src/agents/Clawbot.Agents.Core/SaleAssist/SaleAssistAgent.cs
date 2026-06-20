@@ -45,8 +45,11 @@ public sealed class SaleAssistAgent(
     IClaudeChatClient claude,
     IConversationSummarizer summarizer,
     IToxicityFilter toxicity,
-    IOptions<ToxicityOptions> toxicityOptions)
+    IOptions<ToxicityOptions> toxicityOptions,
+    ILlmCallScope llmScope)
 {
+    private const string AgentCode = "sale-assist";
+
     private const string DraftSystem =
         "You are ClawBot Sale Assist. Help the human sales rep by drafting the NEXT reply to send to the customer. " +
         "Keep it warm, concise (<=80 words), Vietnamese unless the customer is using Chinese. " +
@@ -67,10 +70,12 @@ public sealed class SaleAssistAgent(
     private readonly IConversationSummarizer _summarizer = summarizer;
     private readonly IToxicityFilter _toxicity = toxicity;
     private readonly ToxicityOptions _toxicityOptions = toxicityOptions.Value;
+    private readonly ILlmCallScope _llmScope = llmScope;
 
     public async Task<DraftResult> DraftAsync(ConversationContext ctx, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(ctx);
+        using var _llm = _llmScope.Begin(ctx.TenantId, AgentCode);
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
         var lastCustomerText = ctx.RecentTurns.LastOrDefault(t => t.Direction == "in")?.Content ?? string.Empty;
@@ -109,6 +114,7 @@ public sealed class SaleAssistAgent(
     public async Task<SummaryResult> SummarizeAsync(ConversationContext ctx, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(ctx);
+        using var _llm = _llmScope.Begin(ctx.TenantId, AgentCode);
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
         var transcript = BuildTranscript(ctx.RecentTurns);
@@ -127,6 +133,7 @@ public sealed class SaleAssistAgent(
     public async Task<UpsellResult> SuggestUpsellAsync(ConversationContext ctx, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(ctx);
+        using var _llm = _llmScope.Begin(ctx.TenantId, AgentCode);
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
         var lastCustomerText = ctx.RecentTurns.LastOrDefault(t => t.Direction == "in")?.Content ?? string.Empty;
@@ -148,6 +155,7 @@ public sealed class SaleAssistAgent(
     public async Task<Core.Skills.Nlp.SummaryResult> AutoSummaryAsync(ConversationContext ctx, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(ctx);
+        using var _llm = _llmScope.Begin(ctx.TenantId, AgentCode);
 
         var turns = ctx.RecentTurns
             .Select(t => new ConversationTurn(

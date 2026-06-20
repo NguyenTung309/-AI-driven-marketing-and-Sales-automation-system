@@ -19,3 +19,4 @@ export const PromptConfigurationPage = lazy(() => import("@/features/prompts/Pro
 export const SupportFaqPage = lazy(() => import("@/features/public/SupportFaqPage"));
 export const WidgetDemoPage = lazy(() => import("@/features/public/WidgetDemoPage"));
 export const TokenManagementPage = lazy(() => import("@/features/tokens/TokenManagementPage"));
+export const LlmProvidersPage = lazy(() => import("@/features/llm-providers/LlmProvidersPage"));

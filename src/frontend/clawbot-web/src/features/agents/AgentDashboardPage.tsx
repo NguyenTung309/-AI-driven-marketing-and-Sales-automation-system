@@ -9,6 +9,7 @@ import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import { WorkflowNode } from "@/shared/ui/WorkflowNode";
 import { operationalPhaseLabel, toSafeOperationalText } from "@/shared/utils/userText";
 import { AgentConfigDrawer } from "./AgentConfigDrawer";
+import { listLlmConfigs, type LlmConfig } from "@/shared/api/llmConfigs";
 import {
   disableAgent,
   enableAgent,
@@ -41,7 +42,11 @@ interface AgentSettingsForm {
   readonly maxTokens: number;
   readonly skillFiles: readonly string[];
   readonly kbModules: readonly string[];
+  readonly llmConfigId: string;
 }
+
+// Backend tri-state: Guid.Empty = unbind. The form always carries the current selection.
+const UNBIND_LLM_CONFIG = "00000000-0000-0000-0000-000000000000";
 
 interface SandboxMessage {
   readonly id: string;
@@ -141,6 +146,7 @@ function buildSettingsPayload(form: AgentSettingsForm): UpdateAgentSettingsPaylo
     maxTokens: form.maxTokens,
     skillFiles: form.skillFiles,
     kbModules: form.kbModules,
+    llmConfigId: form.llmConfigId === "" ? UNBIND_LLM_CONFIG : form.llmConfigId,
   };
 }
 
@@ -364,9 +370,17 @@ export default function AgentDashboardPage() {
       maxTokens: settingsDraft.maxTokens ?? settings?.maxTokens ?? 2048,
       skillFiles: settingsDraft.skillFiles ?? settings?.skillFiles ?? [],
       kbModules: settingsDraft.kbModules ?? settings?.kbModules ?? [],
+      llmConfigId: settingsDraft.llmConfigId ?? settings?.llmConfigId ?? "",
     }),
     [configAgent, settings, settingsDraft],
   );
+
+  const llmConfigsQuery = useQuery({
+    queryKey: ["llm-configs"],
+    queryFn: listLlmConfigs,
+    enabled: Boolean(configAgentCode),
+  });
+  const llmConfigs: readonly LlmConfig[] = llmConfigsQuery.data ?? [];
 
   const tracesQuery = useQuery({
     queryKey: ["agents", selectedAgent?.code, "traces"],
@@ -625,6 +639,7 @@ export default function AgentDashboardPage() {
         <AgentConfigDrawer
           agent={configAgent}
           form={settingsForm}
+          llmConfigs={llmConfigs}
           onClose={closeAgentConfig}
           onDraftChange={(patch) => setSettingsDraft((current) => ({ ...current, ...patch }))}
           onSandboxInputChange={setSandboxInput}

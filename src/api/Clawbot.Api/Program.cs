@@ -211,6 +211,9 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 
+// Map typed gRPC failures from the AgentService (e.g. llm_config_not_configured) → clean HTTP 4xx.
+app.UseMiddleware<Clawbot.Api.Middleware.GrpcErrorTranslationMiddleware>();
+
 // SPEC-12: Demo mode middleware must run early (before route mapping)
 if (demoOpts.Mode)
 {
@@ -250,6 +253,7 @@ app.MapAdminUsers();
 app.MapProfile();
 app.MapNotifications();
 app.MapAgents();
+app.MapLlmConfigs();
 app.MapCompetitors();
 app.MapPublicWidget();
 app.MapBoundedContexts();

@@ -56,6 +56,7 @@ public static partial class RbacSeeder
         ("chat-scenarios:write", [Admin, SalesLead, Marketer, QA]),
         ("channels:manage", [Admin]),
         ("api-keys:manage", [Admin]),
+        ("llm-configs:manage", [Admin]),
         ("rbac:manage", [Admin]),
         ("users:manage", [Admin]),
         ("system:config", [Admin]),

@@ -8,10 +8,13 @@ namespace Clawbot.Api.Services;
 
 internal sealed record KbClaudeEvaluation(bool Passed, string? Reason);
 
-internal sealed class KbTestRunnerService(IRagRetriever rag, IClaudeChatClient claude)
+internal sealed class KbTestRunnerService(IRagRetriever rag, IClaudeChatClient claude, ILlmCallScope llmScope)
 {
+    private const string AgentCode = "chat-agent";
+
     private readonly IRagRetriever _rag = rag;
     private readonly IClaudeChatClient _claude = claude;
+    private readonly ILlmCallScope _llmScope = llmScope;
 
     public async Task<KbTestCaseResult> EvaluateAsync(
         Guid tenantId,
@@ -19,6 +22,7 @@ internal sealed class KbTestRunnerService(IRagRetriever rag, IClaudeChatClient c
         KbTestCase testCase,
         CancellationToken ct)
     {
+        using var _llm = _llmScope.Begin(tenantId, AgentCode);
         var chunks = await _rag.RetrieveAsync(
             new RagRequest(tenantId, moduleCode, testCase.Question, 3), ct).ConfigureAwait(false);
 

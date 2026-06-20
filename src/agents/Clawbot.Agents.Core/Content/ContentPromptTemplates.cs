@@ -57,8 +57,8 @@ public static class ContentModule
         services.AddSingleton<IOptions<ContentPromptTemplateOptions>>(
             _ => Options.Create(LoadPromptTemplateOptions(configuration)));
         services.AddSingleton<IPromptTemplateProvider, ConfigPromptTemplateProvider>();
-        services.Configure<ContentLlmOptions>(configuration.GetSection(ContentLlmOptions.SectionName));
-        services.AddSingleton<IContentLlmClient, OpenAiCompatibleChatClient>();
+        // ContentAgent now resolves its provider via the scoped IClaudeChatClient (D8) — the old
+        // env-config OpenAI client (ContentLlmOptions) is gone. Chat wiring (AddClawbotChat) supplies it.
         services.AddScoped<ContentAgent>();
         return services;
     }

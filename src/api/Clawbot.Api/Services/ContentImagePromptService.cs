@@ -1,10 +1,17 @@
+using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Skills.Content;
 using Clawbot.Api.Contracts.Content;
+using Clawbot.SharedKernel.Multitenancy;
 
 namespace Clawbot.Api.Services;
 
-public sealed class ContentImagePromptService(IImagePromptGenerator generator)
+public sealed class ContentImagePromptService(
+    IImagePromptGenerator generator,
+    ILlmCallScope llmScope,
+    ITenantAccessor tenants)
 {
+    private const string AgentCode = "content-agent";
+
     private static readonly HashSet<string> SupportedPlatforms = new(StringComparer.OrdinalIgnoreCase)
     {
         "facebook",
@@ -15,12 +22,15 @@ public sealed class ContentImagePromptService(IImagePromptGenerator generator)
     };
 
     private readonly IImagePromptGenerator _generator = generator;
+    private readonly ILlmCallScope _llmScope = llmScope;
+    private readonly ITenantAccessor _tenants = tenants;
 
     public async Task<GenerateImagePromptResponse> GenerateAsync(
         GenerateImagePromptRequest request,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        using var _llm = _llmScope.Begin(_tenants.Require().TenantId, AgentCode);
 
         var brief = request.Brief?.Trim();
         if (string.IsNullOrWhiteSpace(brief))

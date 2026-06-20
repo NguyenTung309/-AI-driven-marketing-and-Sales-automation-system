@@ -1,6 +1,8 @@
+using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Skills.Content;
 using Clawbot.Api.Contracts.Content;
 using Clawbot.Api.Services;
+using Clawbot.SharedKernel.Multitenancy;
 using FluentAssertions;
 
 namespace Clawbot.Api.Tests;
@@ -14,7 +16,7 @@ public sealed class ContentImagePromptServiceTests
             "Hero visual prompt",
             "no clutter",
             new Dictionary<string, string> { ["composition"] = "centered student" }));
-        var sut = new ContentImagePromptService(generator);
+        var sut = new ContentImagePromptService(generator, new LlmCallScope(), new FixedTenantAccessor(Guid.NewGuid()));
 
         var result = await sut.GenerateAsync(new GenerateImagePromptRequest(
             Brief: "  HSK4 opening campaign  ",
@@ -37,7 +39,7 @@ public sealed class ContentImagePromptServiceTests
     public async Task GenerateAsync_rejects_unsupported_platform()
     {
         var sut = new ContentImagePromptService(new CapturingImagePromptGenerator(
-            new ImagePromptResult("prompt", string.Empty, new Dictionary<string, string>())));
+            new ImagePromptResult("prompt", string.Empty, new Dictionary<string, string>())), new LlmCallScope(), new FixedTenantAccessor(Guid.NewGuid()));
 
         var act = async () => await sut.GenerateAsync(new GenerateImagePromptRequest(
             Brief: "Campaign",
@@ -59,5 +61,12 @@ public sealed class ContentImagePromptServiceTests
             Requests.Add(request);
             return Task.FromResult(result);
         }
+    }
+
+    private sealed class FixedTenantAccessor(Guid tenantId) : ITenantAccessor
+    {
+        public TenantContext? Current { get; } = new(tenantId, "test");
+
+        public TenantContext Require() => Current!;
     }
 }

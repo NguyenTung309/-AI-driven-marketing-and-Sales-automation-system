@@ -1,5 +1,6 @@
 using Clawbot.AgentService.Services;
 using Clawbot.Agents.Contracts.Content;
+using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Rag;
 using Clawbot.Domain.Content;
 using Clawbot.SharedKernel.Time;
@@ -107,16 +108,19 @@ public sealed class ContentAgentGrpcServiceTests
         var rag = Substitute.For<IRagRetriever>();
         rag.RetrieveAsync(Arg.Any<RagRequest>(), Arg.Any<CancellationToken>())
             .Returns([]);
+        // Platform-bearing template so the rendered prompt carries the channel (the chat client now
+        // only sees the prompt, not the platform).
         var templates = Substitute.For<CoreContent.IPromptTemplateProvider>();
-        templates.GetTemplate(Arg.Any<string>()).Returns("Brief={{brief}}");
-        var llm = Substitute.For<CoreContent.IContentLlmClient>();
-        llm.CompleteAsync(Arg.Any<CoreContent.ContentLlmRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
-            {
-                var request = call.ArgAt<CoreContent.ContentLlmRequest>(0);
-                return new CoreContent.ContentLlmResult($"Draft for {request.Platform}: {request.Prompt}", 11, 7);
-            });
-        var agent = new CoreContent.ContentAgent(rag, templates, llm);
+        templates.GetTemplate(Arg.Any<string>())
+            .Returns(ci => $"{ci.ArgAt<string>(0)}: Brief={{{{brief}}}}");
+        var claude = Substitute.For<IClaudeChatClient>();
+        claude.CompleteAsync(
+                Arg.Any<string>(),
+                Arg.Any<IReadOnlyList<ChatTurn>>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call => new ClaudeReply($"Draft for {call.ArgAt<string>(2)}", 11, 7, 0m, "content-model"));
+        var agent = new CoreContent.ContentAgent(rag, templates, claude, new LlmCallScope());
 
         return new ContentAgentGrpcService(
             agent,

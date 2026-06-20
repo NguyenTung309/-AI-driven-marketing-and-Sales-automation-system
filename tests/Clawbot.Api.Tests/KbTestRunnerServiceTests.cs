@@ -28,7 +28,7 @@ public sealed class KbTestRunnerServiceTests
             new RagChunk("v1", "HSK", "HSK3 tuition is 3,000,000 VND.", 0.91f),
         });
         var claude = new CapturingClaude("""{ "passed": true, "reason": "Tuition matches the expected answer." }""");
-        var sut = new KbTestRunnerService(rag, claude);
+        var sut = new KbTestRunnerService(rag, claude, new LlmCallScope());
         var testCase = KbTestCase.Create(moduleId, "HSK3 hoc phi bao nhieu?", "3,000,000 VND", DateTimeOffset.UtcNow);
 
         var result = await sut.EvaluateAsync(tenantId, "HSK", testCase, CancellationToken.None);

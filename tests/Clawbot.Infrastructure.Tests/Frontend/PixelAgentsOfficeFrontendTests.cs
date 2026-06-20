@@ -16,15 +16,14 @@ public sealed class PixelAgentsOfficeFrontendTests
 
         routes.Should().Contain("PixelAgentsOfficePage");
         routes.Should().Contain("path: \"/agents-office\"");
-        nav.Should().Contain("Pixel Agents Office");
+        nav.Should().Contain("Không gian agents");
         nav.Should().Contain("to: \"/agents-office\"");
 
         var page = File.ReadAllText(pagePath);
-        page.Should().Contain("Pixel Agents Office");
-        page.Should().Contain("Agent floor");
-        page.Should().Contain("Task queue");
-        page.Should().Contain("Trace feed");
-        page.Should().Contain("Health");
+        page.Should().Contain("Không gian agents");
+        page.Should().Contain("Sơ đồ agents");
+        page.Should().Contain("Sự kiện vận hành");
+        page.Should().Contain("Sức khỏe vận hành");
         page.Should().Contain("refetchInterval");
     }
 

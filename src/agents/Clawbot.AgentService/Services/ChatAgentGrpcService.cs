@@ -92,6 +92,9 @@ public sealed partial class ChatAgentGrpcService(
             session.AppendTrace("chat", "chat-agent", "error", ex.Message, _clock.UtcNow);
             session.Finish(_clock.UtcNow);
             await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
+            // Let the typed "no provider config bound" error escape so the interceptor maps it to
+            // FailedPrecondition/llm_config_not_configured instead of a generic Internal failure.
+            if (ex is CoreChat.LlmConfigNotConfiguredException) throw;
             throw new RpcException(new Status(StatusCode.Internal, "chat-agent failure"));
         }
 

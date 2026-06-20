@@ -64,6 +64,8 @@ export interface AgentSettings {
   readonly maxTokens: number;
   readonly skillFiles: readonly string[];
   readonly kbModules: readonly string[];
+  /** Bound LLM provider config id (null = unconfigured → agent hard-errors at runtime). */
+  readonly llmConfigId: string | null;
   readonly updatedAt: string;
 }
 
@@ -76,6 +78,8 @@ export interface UpdateAgentSettingsPayload {
   readonly maxTokens?: number;
   readonly skillFiles?: readonly string[];
   readonly kbModules?: readonly string[];
+  /** Tri-state: omit = unchanged, empty-guid = unbind, otherwise bind to that config id. */
+  readonly llmConfigId?: string | null;
 }
 
 export interface AgentSandboxResponse {

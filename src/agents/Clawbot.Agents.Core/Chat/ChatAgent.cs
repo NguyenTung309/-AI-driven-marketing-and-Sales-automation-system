@@ -47,8 +47,11 @@ public sealed class ChatAgent(
     IToxicityFilter toxicity,
     ISpamDetector spam,
     IOptions<ToxicityOptions> toxicityOptions,
-    IAgentToggleGate toggle)
+    IAgentToggleGate toggle,
+    ILlmCallScope llmScope)
 {
+    private const string AgentCode = "chat-agent";
+
     private const string DefaultSystemPrompt =
         "You are ClawBot — an omnichannel sales assistant for a Chinese-language tutoring center. " +
         "Answer concisely in the customer's language (default Vietnamese, switch to Chinese if asked). " +
@@ -65,10 +68,12 @@ public sealed class ChatAgent(
     private readonly ISpamDetector _spam = spam;
     private readonly ToxicityOptions _toxicityOptions = toxicityOptions.Value;
     private readonly IAgentToggleGate _toggle = toggle;
+    private readonly ILlmCallScope _llmScope = llmScope;
 
     public async Task<ChatAgentReply> ReplyAsync(ChatAgentRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        using var _llm = _llmScope.Begin(request.TenantId, AgentCode);
         var started = System.Diagnostics.Stopwatch.StartNew();
 
         // M25: skip auto-reply if the chat agent is disabled for this tenant.
@@ -142,7 +147,7 @@ public sealed class ChatAgent(
         }
 
         await _cost.RecordAsync(new CostEntry(
-            request.TenantId, "chat-agent", "claude",
+            request.TenantId, AgentCode, reply.Model,
             reply.InputTokens, reply.OutputTokens, reply.UsdCost, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
 
         var escalate = string.Equals(intentResult.Label, "escalation", StringComparison.OrdinalIgnoreCase)
@@ -164,6 +169,7 @@ public sealed class ChatAgent(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        using var _llm = _llmScope.Begin(request.TenantId, AgentCode);
         var started = System.Diagnostics.Stopwatch.StartNew();
 
         if (!await _toggle.IsAutoActionEnabledAsync(request.TenantId, "chat", ct).ConfigureAwait(false))
@@ -222,6 +228,7 @@ public sealed class ChatAgent(
         var inputTokens = 0;
         var outputTokens = 0;
         var usdCost = 0m;
+        var model = string.Empty;
 
         await foreach (var chunk in _claude.StreamAsync(system, request.History, redacted.RedactedText, ct).ConfigureAwait(false))
         {
@@ -230,6 +237,7 @@ public sealed class ChatAgent(
                 inputTokens = chunk.InputTokens;
                 outputTokens = chunk.OutputTokens;
                 usdCost = chunk.UsdCost;
+                model = chunk.Model;
                 continue;
             }
 
@@ -252,7 +260,7 @@ public sealed class ChatAgent(
         }
 
         await _cost.RecordAsync(new CostEntry(
-            request.TenantId, "chat-agent", "claude",
+            request.TenantId, AgentCode, model,
             inputTokens, outputTokens, usdCost, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
 
         var escalate = string.Equals(intentResult.Label, "escalation", StringComparison.OrdinalIgnoreCase)
