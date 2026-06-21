@@ -479,14 +479,18 @@ CREATE INDEX ix_kpi_tenant_date ON kpi_daily (tenant_id, date DESC, platform);
 CREATE TABLE pancake_configs (
     id                       UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
     tenant_id                UNIQUEIDENTIFIER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    channel                  NVARCHAR(32) NOT NULL,
-    page_id                  NVARCHAR(128) NOT NULL,
-    access_token_encrypted   NVARCHAR(MAX) NOT NULL,
-    webhook_secret_encrypted NVARCHAR(MAX) NOT NULL,
+    base_url                 NVARCHAR(256) NOT NULL DEFAULT 'https://pancake.vn/api/v1',
+    access_token_encrypted   NVARCHAR(2048) NOT NULL DEFAULT '',
+    webhook_secret_encrypted NVARCHAR(2048) NOT NULL DEFAULT '',
+    signature_header         NVARCHAR(64) NOT NULL DEFAULT 'x-pancake-signature',
+    signature_algo           NVARCHAR(32) NOT NULL DEFAULT 'hmac-sha256',
+    signature_encoding       NVARCHAR(16) NOT NULL DEFAULT 'hex',
+    send_path_template       NVARCHAR(512) NOT NULL DEFAULT '/pages/{page_id}/conversations/{thread_id}/messages',
+    auth_mode                NVARCHAR(16) NOT NULL DEFAULT 'query',
     is_active                BIT NOT NULL DEFAULT 1,
     created_at               DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
     updated_at               DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
-    UNIQUE (tenant_id, channel, page_id)
+    UNIQUE (tenant_id)
 );
 
 CREATE TABLE llm_configs (

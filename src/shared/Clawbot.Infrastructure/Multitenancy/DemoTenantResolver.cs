@@ -1,4 +1,4 @@
-﻿using Clawbot.Infrastructure.Persistence;
+using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,7 +15,14 @@ public sealed class DemoTenantResolver : ITenantResolver
         var tenant = await _db.Tenants
             .AsNoTracking()
             .IgnoreQueryFilters()
-            .Where(t => t.Slug == "demo")
+            .Where(t => t.Slug == "demo" || t.Slug == "default")
+            .FirstOrDefaultAsync(ct);
+
+        if (tenant is not null) return tenant.Id;
+
+        tenant = await _db.Tenants
+            .AsNoTracking()
+            .IgnoreQueryFilters()
             .FirstOrDefaultAsync(ct);
 
         if (tenant is not null) return tenant.Id;

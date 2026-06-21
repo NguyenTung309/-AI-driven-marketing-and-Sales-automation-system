@@ -1,4 +1,4 @@
-﻿using Clawbot.Domain.Ads;
+using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
 using Clawbot.Domain.Analytics;
 using Clawbot.Domain.Channels;
@@ -82,6 +82,7 @@ public sealed class ApiKeyConfiguration : IEntityTypeConfiguration<ApiKey>
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Name).HasMaxLength(128).IsRequired();
         builder.Property(x => x.KeyHash).IsRequired();
+        builder.Property(x => x.ScopesJson).HasColumnName("scopes").IsRequired();
     }
 }
 
@@ -93,6 +94,11 @@ public sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Action).HasMaxLength(64).IsRequired();
         builder.Property(x => x.ResourceType).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.IpAddress)
+            .HasConversion(
+                v => v == null ? null : v.ToString(),
+                v => string.IsNullOrEmpty(v) ? null : System.Net.IPAddress.Parse(v))
+            .HasMaxLength(45);
         builder.HasIndex(x => new { x.TenantId, x.OccurredAt });
         builder.HasIndex(x => new { x.ResourceType, x.ResourceId });
     }

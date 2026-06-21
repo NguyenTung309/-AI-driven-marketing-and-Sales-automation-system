@@ -1,3 +1,4 @@
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Tenants;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
@@ -10,7 +11,7 @@ public static class TenantBrandingEndpoints
     public static IEndpointRouteBuilder MapTenantBranding(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/admin/tenant/branding")
-            .RequireAuthorization("perm:admin.system")
+            .RequirePermission("admin.system")
             .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         group.MapGet("/", GetAsync);
