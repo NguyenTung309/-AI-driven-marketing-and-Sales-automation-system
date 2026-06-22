@@ -130,8 +130,9 @@ public sealed class ChatAgent(
             new RagRequest(request.TenantId, request.KbModuleCode, redacted.RedactedText, TopK: 4),
             ct).ConfigureAwait(false);
 
+        var redactedHistory = await RedactHistoryAsync(request.History, ct).ConfigureAwait(false);
         var system = BuildSystemPrompt(chunks, intentResult.Label, langResult.LanguageCode, request.MatchedScenarioTemplate);
-        var reply = await _claude.CompleteAsync(system, request.History, redacted.RedactedText, ct).ConfigureAwait(false);
+        var reply = await _claude.CompleteAsync(system, redactedHistory, redacted.RedactedText, ct).ConfigureAwait(false);
 
         // C2: Outbound toxicity scan — block/regenerate if Claude output is toxic
         var outboundToxic = await _toxicity.IsBlockedAsync(reply.Text, _toxicityOptions.OutboundBlockThreshold, ct).ConfigureAwait(false);
@@ -148,7 +149,9 @@ public sealed class ChatAgent(
 
         await _cost.RecordAsync(new CostEntry(
             request.TenantId, AgentCode, reply.Model,
-            reply.InputTokens, reply.OutputTokens, reply.UsdCost, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+            reply.InputTokens, reply.OutputTokens, reply.UsdCost,
+            _llmScope.Current?.CostAt ?? DateTimeOffset.UtcNow,
+            _llmScope.Current?.ReservationId), ct).ConfigureAwait(false);
 
         var escalate = string.Equals(intentResult.Label, "escalation", StringComparison.OrdinalIgnoreCase)
             || chunks.Count == 0
@@ -223,6 +226,7 @@ public sealed class ChatAgent(
             new RagRequest(request.TenantId, request.KbModuleCode, redacted.RedactedText, TopK: 4),
             ct).ConfigureAwait(false);
 
+        var redactedHistory = await RedactHistoryAsync(request.History, ct).ConfigureAwait(false);
         var system = BuildSystemPrompt(chunks, intentResult.Label, langResult.LanguageCode, request.MatchedScenarioTemplate);
         var text = new StringBuilder();
         var inputTokens = 0;
@@ -230,7 +234,7 @@ public sealed class ChatAgent(
         var usdCost = 0m;
         var model = string.Empty;
 
-        await foreach (var chunk in _claude.StreamAsync(system, request.History, redacted.RedactedText, ct).ConfigureAwait(false))
+        await foreach (var chunk in _claude.StreamAsync(system, redactedHistory, redacted.RedactedText, ct).ConfigureAwait(false))
         {
             if (chunk.Final)
             {
@@ -261,7 +265,9 @@ public sealed class ChatAgent(
 
         await _cost.RecordAsync(new CostEntry(
             request.TenantId, AgentCode, model,
-            inputTokens, outputTokens, usdCost, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+            inputTokens, outputTokens, usdCost,
+            _llmScope.Current?.CostAt ?? DateTimeOffset.UtcNow,
+            _llmScope.Current?.ReservationId), ct).ConfigureAwait(false);
 
         var escalate = string.Equals(intentResult.Label, "escalation", StringComparison.OrdinalIgnoreCase)
             || chunks.Count == 0
@@ -275,6 +281,18 @@ public sealed class ChatAgent(
             ToxicityBlocked: false,
             SpamFlagged: spamSignal.IsSpam,
             Escalate: escalate), text: string.Empty);
+    }
+
+    private async Task<IReadOnlyList<ChatTurn>> RedactHistoryAsync(IReadOnlyList<ChatTurn> history, CancellationToken ct)
+    {
+        if (history.Count == 0) return Array.Empty<ChatTurn>();
+        var redacted = new List<ChatTurn>(history.Count);
+        foreach (var turn in history)
+        {
+            var content = await _pii.RedactAsync(turn.Content, ct).ConfigureAwait(false);
+            redacted.Add(new ChatTurn(turn.Role, content.RedactedText));
+        }
+        return redacted;
     }
 
     private static ChatAgentStreamChunk Final(ChatAgentReply reply, string? text = null) =>

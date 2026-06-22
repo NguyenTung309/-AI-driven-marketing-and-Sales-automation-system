@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Middleware;
+using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Domain.Agents;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -48,13 +50,13 @@ public static class AgentsEndpoints
     {
         var grp = app.MapGroup("/api/agents").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
-        grp.MapGet("/", ListAsync);
-        grp.MapPost("/{code}/enable", EnableAsync);
-        grp.MapPost("/{code}/disable", DisableAsync);
-        grp.MapGet("/{code}/settings", SettingsAsync);
-        grp.MapPut("/{code}/settings", UpdateSettingsAsync);
-        grp.MapPost("/{code}/sandbox", SandboxAsync);
-        grp.MapGet("/{code}/traces", TracesAsync);
+        grp.MapGet("/", ListAsync).RequirePermission("agent.read");
+        grp.MapPost("/{code}/enable", EnableAsync).RequirePermission("agent.manage");
+        grp.MapPost("/{code}/disable", DisableAsync).RequirePermission("agent.manage");
+        grp.MapGet("/{code}/settings", SettingsAsync).RequirePermission("agent.read");
+        grp.MapPut("/{code}/settings", UpdateSettingsAsync).RequirePermission("agent.manage");
+        grp.MapPost("/{code}/sandbox", SandboxAsync).RequirePermission("agent.manage");
+        grp.MapGet("/{code}/traces", TracesAsync).RequirePermission("agent.read");
 
         return grp;
     }
@@ -168,6 +170,7 @@ public static class AgentsEndpoints
         AppDbContext db,
         ITenantAccessor tenants,
         IClock clock,
+        IPiiRedactor pii,
         CancellationToken ct = default)
     {
         var tenant = tenants.Require();
@@ -177,11 +180,12 @@ public static class AgentsEndpoints
         if (agent is null) return Results.NotFound();
 
         var now = clock.UtcNow;
+        var redactedMessage = (await pii.RedactAsync(req.Message.Trim(), ct).ConfigureAwait(false)).RedactedText;
         var config = ReadRuntimeConfig(agent.ConfigJson);
         var session = AgentSession.Start(tenant.TenantId, agent.Id, null, "Agent configuration sandbox", now);
-        session.AppendTrace("sandbox", agent.DisplayName, "input", req.Message.Trim(), now);
+        session.AppendTrace("sandbox", agent.DisplayName, "input", redactedMessage, now);
 
-        var reply = BuildSandboxReply(agent, config, req.Message.Trim());
+        var reply = BuildSandboxReply(agent, config, redactedMessage);
         session.AppendTrace("sandbox", agent.DisplayName, "reply", reply, now.AddMilliseconds(1));
         session.Finish(now.AddMilliseconds(2));
         db.AgentSessions.Add(session);

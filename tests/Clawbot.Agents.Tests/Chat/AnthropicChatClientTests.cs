@@ -26,7 +26,7 @@ public sealed class AnthropicChatClientTests
                 Encoding.UTF8,
                 "application/json"),
         });
-        var sut = CreateClient(handler);
+        var sut = CreateClient(handler, temperature: 0.7m);
 
         var result = await sut.CompleteAsync(
             "system prompt",
@@ -43,6 +43,7 @@ public sealed class AnthropicChatClientTests
         using var body = JsonDocument.Parse(handler.Body!);
         body.RootElement.GetProperty("model").GetString().Should().Be("claude-test");
         body.RootElement.GetProperty("max_tokens").GetInt32().Should().Be(256);
+        body.RootElement.GetProperty("temperature").GetDecimal().Should().Be(0.7m);
         body.RootElement.GetProperty("system").GetString().Should().Be("system prompt");
 
         var messages = body.RootElement.GetProperty("messages").EnumerateArray().ToArray();
@@ -104,14 +105,14 @@ public sealed class AnthropicChatClientTests
         body.RootElement.GetProperty("stream").GetBoolean().Should().BeTrue();
     }
 
-    private static AnthropicChatClient CreateClient(HttpMessageHandler handler) =>
+    private static AnthropicChatClient CreateClient(HttpMessageHandler handler, decimal? temperature = null) =>
         new(new HttpClient(handler), new ResolvedLlmConfig(
             Provider: "anthropic",
             Model: "claude-test",
             ApiKey: "test-key",
             BaseUrl: "https://anthropic.test",
             MaxTokens: 256,
-            Temperature: null,
+            Temperature: temperature,
             InputUsdPer1M: 3m,
             OutputUsdPer1M: 15m));
 

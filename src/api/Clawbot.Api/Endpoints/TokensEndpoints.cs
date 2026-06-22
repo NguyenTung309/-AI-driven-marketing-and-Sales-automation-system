@@ -99,7 +99,11 @@ public static class TokensEndpoints
 
         var costs = await db.ClaudeCostLedger
             .IgnoreQueryFilters()
-            .Where(cost => cost.TenantId == tenant.TenantId && cost.CreatedAt >= range.From && cost.CreatedAt <= range.To)
+            .Where(cost =>
+                cost.TenantId == tenant.TenantId &&
+                cost.AgentCode != Clawbot.Domain.Agents.ClaudeCostEntry.ReservationAgentCode &&
+                cost.CreatedAt >= range.From &&
+                cost.CreatedAt <= range.To)
             .ToListAsync(ct);
 
         var costByAgent = costs

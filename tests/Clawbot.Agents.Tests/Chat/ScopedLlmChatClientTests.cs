@@ -65,4 +65,20 @@ public sealed class ScopedLlmChatClientTests
 
         scope.Current.Should().BeNull();
     }
+
+    [Fact]
+    public void Begin_inherits_outer_cost_timestamp_when_not_overridden()
+    {
+        var scope = new LlmCallScope();
+        var tenant = Guid.NewGuid();
+        var costAt = new DateTimeOffset(2026, 6, 30, 23, 59, 0, TimeSpan.Zero);
+
+        using (scope.Begin(tenant, "orchestrator", costAt))
+        {
+            using (scope.Begin(tenant, "content-agent"))
+            {
+                scope.Current.Should().Be(new LlmCallContext(tenant, "content-agent", costAt));
+            }
+        }
+    }
 }

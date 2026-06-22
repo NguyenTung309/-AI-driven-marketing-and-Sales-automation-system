@@ -46,7 +46,11 @@ public static class AnalyticsEndpoints
 
         var items = await db.ClaudeCostLedger
             .IgnoreQueryFilters()
-            .Where(c => c.TenantId == tenantId && c.CreatedAt >= fromDate && c.CreatedAt <= toDate)
+            .Where(c =>
+                c.TenantId == tenantId &&
+                c.AgentCode != Clawbot.Domain.Agents.ClaudeCostEntry.ReservationAgentCode &&
+                c.CreatedAt >= fromDate &&
+                c.CreatedAt <= toDate)
             .GroupBy(c => c.AgentCode)
             .Select(g => new
             {

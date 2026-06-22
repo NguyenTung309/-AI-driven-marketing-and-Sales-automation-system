@@ -12,11 +12,22 @@ public sealed class LlmChatClientFactory(IHttpClientFactory httpClientFactory) :
     public IClaudeChatClient Create(ResolvedLlmConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
+        if (!string.IsNullOrWhiteSpace(config.BaseUrl) && !LlmBaseUrlGuard.IsAllowedBaseUrl(config.BaseUrl))
+            throw new InvalidOperationException("Configured LLM base URL is not allowed.");
+
         return config.Provider switch
         {
-            "anthropic" => new AnthropicChatClient(_httpClientFactory.CreateClient(AnthropicHttpClientName), config),
+            "anthropic" => new AnthropicChatClient(CreateAnthropicHttpClient(config), config),
             "openai" => new OpenAiChatClient(config),
             _ => throw new NotSupportedException($"Unsupported LLM provider '{config.Provider}'."),
         };
+    }
+
+    private HttpClient CreateAnthropicHttpClient(ResolvedLlmConfig config)
+    {
+        if (string.IsNullOrWhiteSpace(config.BaseUrl))
+            return _httpClientFactory.CreateClient(AnthropicHttpClientName);
+
+        return LlmBaseUrlGuard.CreateGuardedHttpClient(new Uri(config.BaseUrl, UriKind.Absolute));
     }
 }

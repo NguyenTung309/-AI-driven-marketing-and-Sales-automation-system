@@ -58,7 +58,7 @@ public sealed class HeuristicPromptInjectionDefenderTests
     }
 }
 
-// M11 — InMemoryClaudeCostTracker (per-tenant per-month ledger, $200 cap).
+// M11 — InMemoryClaudeCostTracker (per-tenant per-month observed-spend ledger).
 public sealed class InMemoryClaudeCostTrackerTests
 {
     private static CostEntry Entry(Guid tenant, decimal usd, DateTimeOffset at) =>
@@ -110,7 +110,7 @@ public sealed class InMemoryClaudeCostTrackerTests
     }
 
     [Fact]
-    public async Task Does_not_record_entry_that_would_exceed_monthly_cap()
+    public async Task Records_actual_spend_even_when_monthly_cap_is_exceeded()
     {
         var sut = new InMemoryClaudeCostTracker();
         var tenant = Guid.NewGuid();
@@ -120,8 +120,22 @@ public sealed class InMemoryClaudeCostTrackerTests
         await sut.RecordAsync(Entry(tenant, 2m, month.AddDays(1)), CancellationToken.None);
 
         var summary = await sut.SummaryAsync(tenant, month, CancellationToken.None);
-        summary.MonthToDateUsd.Should().Be(199m);
-        summary.PercentUsed.Should().BeApproximately(199f / 200f, 0.0001f);
+        summary.MonthToDateUsd.Should().Be(201m);
+        summary.PercentUsed.Should().BeGreaterThan(1f);
+    }
+
+    [Fact]
+    public async Task Ignores_non_positive_entries()
+    {
+        var sut = new InMemoryClaudeCostTracker();
+        var tenant = Guid.NewGuid();
+        var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        await sut.RecordAsync(Entry(tenant, 0m, month), CancellationToken.None);
+        await sut.RecordAsync(Entry(tenant, -1m, month), CancellationToken.None);
+
+        var summary = await sut.SummaryAsync(tenant, month, CancellationToken.None);
+        summary.MonthToDateUsd.Should().Be(0m);
     }
 
     [Fact]

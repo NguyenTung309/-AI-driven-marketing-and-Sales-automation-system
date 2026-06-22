@@ -176,6 +176,10 @@ builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Report.ReportAgent.Repor
 {
     o.Address = new Uri(agentServiceUrl);
 });
+builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Orchestrator.Orchestrator.OrchestratorClient>(o =>
+{
+    o.Address = new Uri(agentServiceUrl);
+});
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -253,6 +257,7 @@ app.MapAdminUsers();
 app.MapProfile();
 app.MapNotifications();
 app.MapAgents();
+app.MapOrchestration();
 app.MapLlmConfigs();
 app.MapCompetitors();
 app.MapPublicWidget();

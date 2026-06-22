@@ -63,7 +63,7 @@ public sealed class BackendAdminOpsTests
     }
 
     [Fact]
-    public async Task DbClaudeCostTracker_does_not_record_entry_that_would_exceed_monthly_cap()
+    public async Task DbClaudeCostTracker_records_actual_spend_even_when_monthly_cap_is_exceeded()
     {
         using var t = new TestAppDb();
         var sut = new DbClaudeCostTracker(ScopeFactoryFor(t.Db));
@@ -73,8 +73,75 @@ public sealed class BackendAdminOpsTests
         await sut.RecordAsync(new CostEntry(t.TenantId, "chat", "claude", 100, 50, 2m, month.AddDays(1)), CancellationToken.None);
 
         var entries = await t.Db.ClaudeCostLedger.IgnoreQueryFilters().ToListAsync();
-        entries.Should().ContainSingle();
-        entries.Sum(e => e.Usd).Should().Be(199m);
+        entries.Should().HaveCount(2);
+        entries.Sum(e => e.Usd).Should().Be(201m);
+
+        var summary = await sut.SummaryAsync(t.TenantId, month, CancellationToken.None);
+        summary.MonthToDateUsd.Should().Be(201m);
+        summary.PercentUsed.Should().BeGreaterThan(1f);
+    }
+
+    [Fact]
+    public async Task DbClaudeCostTracker_reserves_and_releases_budget_through_ledger()
+    {
+        using var t = new TestAppDb();
+        var sut = new DbClaudeCostTracker(ScopeFactoryFor(t.Db));
+        var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        await sut.RecordAsync(new CostEntry(t.TenantId, "chat", "claude", 100, 50, 198m, month), CancellationToken.None);
+
+        var allowed = await sut.TryReserveAsync(t.TenantId, 2m, month.AddDays(1), CancellationToken.None);
+        var denied = await sut.TryReserveAsync(t.TenantId, 1m, month.AddDays(1), CancellationToken.None);
+
+        allowed.Allowed.Should().BeTrue();
+        allowed.ReservationId.Should().NotBeNull();
+        denied.Allowed.Should().BeFalse();
+        denied.Reason.Should().Be("cost_cap_midrun");
+        (await sut.SummaryAsync(t.TenantId, month, CancellationToken.None)).MonthToDateUsd.Should().Be(200m);
+
+        await sut.ReleaseReservationAsync(t.TenantId, allowed.ReservationId!.Value, CancellationToken.None);
+        await sut.ReleaseReservationAsync(t.TenantId, allowed.ReservationId.Value, CancellationToken.None);
+
+        var summary = await sut.SummaryAsync(t.TenantId, month, CancellationToken.None);
+        summary.MonthToDateUsd.Should().Be(198m);
+    }
+
+    [Fact]
+    public async Task DbClaudeCostTracker_release_targets_only_requested_reservation_row()
+    {
+        using var t = new TestAppDb();
+        var tracker = new DbClaudeCostTracker(ScopeFactoryFor(t.Db));
+        var guard = new Clawbot.Agents.Core.Orchestrator.OrchestratorCostGuard(tracker);
+        var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        await tracker.RecordAsync(new CostEntry(t.TenantId, "chat", "claude", 100, 50, 10m, month), CancellationToken.None);
+        var first = await guard.TryReserveAsync(t.TenantId, 2m, month.AddDays(1), CancellationToken.None);
+        var second = await guard.TryReserveAsync(t.TenantId, 3m, month.AddDays(1), CancellationToken.None);
+
+        await guard.AdjustReservationAsync(t.TenantId, first.ReservationId, CancellationToken.None);
+        await guard.AdjustReservationAsync(t.TenantId, first.ReservationId, CancellationToken.None);
+
+        var entries = await t.Db.ClaudeCostLedger.IgnoreQueryFilters().ToListAsync();
+        entries.Single(e => e.Id == first.ReservationId).Usd.Should().Be(0m);
+        entries.Single(e => e.Id == second.ReservationId).Usd.Should().Be(3m);
+        entries.Single(e => e.AgentCode == "chat").Usd.Should().Be(10m);
+    }
+
+    [Fact]
+    public async Task DbClaudeCostTracker_applies_actual_cost_to_reservation_row()
+    {
+        using var t = new TestAppDb();
+        var tracker = new DbClaudeCostTracker(ScopeFactoryFor(t.Db));
+        var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        var reserved = await tracker.TryReserveAsync(t.TenantId, 2m, month, CancellationToken.None);
+        await tracker.RecordAsync(new CostEntry(t.TenantId, "content-agent", "claude", 10, 20, 0.50m, month, reserved.ReservationId), CancellationToken.None);
+        await tracker.ReleaseReservationAsync(t.TenantId, reserved.ReservationId!.Value, CancellationToken.None);
+
+        var entry = await t.Db.ClaudeCostLedger.IgnoreQueryFilters().SingleAsync();
+        entry.AgentCode.Should().Be("content-agent");
+        entry.Model.Should().Be("claude");
+        entry.Usd.Should().Be(0.50m);
     }
 
     [Fact]

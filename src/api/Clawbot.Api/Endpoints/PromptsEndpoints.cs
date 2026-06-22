@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Clawbot.Api.Middleware;
+using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Domain.Agents;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -99,7 +100,11 @@ public static class PromptsEndpoints
         var costs = await db.ClaudeCostLedger
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(cost => cost.TenantId == tenantId && cost.CreatedAt >= since && cost.CreatedAt <= clock.UtcNow)
+            .Where(cost =>
+                cost.TenantId == tenantId &&
+                cost.AgentCode != ClaudeCostEntry.ReservationAgentCode &&
+                cost.CreatedAt >= since &&
+                cost.CreatedAt <= clock.UtcNow)
             .ToListAsync(ct);
 
         var lastRuns = await db.AgentSessions
@@ -138,7 +143,12 @@ public static class PromptsEndpoints
         var costs = await db.ClaudeCostLedger
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(cost => cost.TenantId == tenantId && cost.AgentCode == agent.Code && cost.CreatedAt >= since && cost.CreatedAt <= clock.UtcNow)
+            .Where(cost =>
+                cost.TenantId == tenantId &&
+                cost.AgentCode == agent.Code &&
+                cost.AgentCode != ClaudeCostEntry.ReservationAgentCode &&
+                cost.CreatedAt >= since &&
+                cost.CreatedAt <= clock.UtcNow)
             .OrderByDescending(cost => cost.CreatedAt)
             .ToListAsync(ct);
 
@@ -191,6 +201,7 @@ public static class PromptsEndpoints
         AppDbContext db,
         ITenantAccessor tenants,
         IClock clock,
+        IPiiRedactor pii,
         CancellationToken ct = default)
     {
         var tenant = tenants.Require();
@@ -205,11 +216,13 @@ public static class PromptsEndpoints
             ? config.SystemPrompt
             : request.SystemPrompt.Trim();
 
+        var message = request.Message.Trim();
+        var redactedMessage = (await pii.RedactAsync(message, ct).ConfigureAwait(false)).RedactedText;
         var session = AgentSession.Start(tenant.TenantId, agent.Id, null, "Prompt configuration sandbox", now);
         session.AppendTrace("prompt-sandbox", agent.DisplayName, "system_prompt", RedactPromptForTrace(effectivePrompt), now);
-        session.AppendTrace("prompt-sandbox", agent.DisplayName, "input", request.Message.Trim(), now.AddMilliseconds(1));
+        session.AppendTrace("prompt-sandbox", agent.DisplayName, "input", redactedMessage, now.AddMilliseconds(1));
 
-        var reply = BuildSandboxReply(agent, config, effectivePrompt, request.Message.Trim());
+        var reply = BuildSandboxReply(agent, config, effectivePrompt, redactedMessage);
         session.AppendTrace("prompt-sandbox", agent.DisplayName, "reply", reply, now.AddMilliseconds(2));
         session.Finish(now.AddMilliseconds(3));
         db.AgentSessions.Add(session);

@@ -14,6 +14,7 @@ public sealed class Tenant : AggregateRoot<Guid>
     public string? AccentColor { get; private set; }
     public string? SupportName { get; private set; }
     public string? WidgetGreeting { get; private set; }
+    public bool RequireOrchestrationApproval { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     private Tenant() { }
@@ -44,6 +45,9 @@ public sealed class Tenant : AggregateRoot<Guid>
         SupportName = NormalizeNullable(supportName);
         WidgetGreeting = NormalizeNullable(widgetGreeting);
     }
+
+    public void SetRequireOrchestrationApproval(bool requireApproval) =>
+        RequireOrchestrationApproval = requireApproval;
 
     private static string? NormalizeNullable(string? value)
     {

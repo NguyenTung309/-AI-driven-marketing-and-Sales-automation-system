@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using Clawbot.Agents.Core.Chat;
+using Clawbot.Agents.Core.Skills.Ops;
 using Microsoft.Extensions.Options;
 
 namespace Clawbot.Agents.Core.Skills.Nlp;
@@ -29,11 +30,19 @@ internal sealed partial class ClaudeConversationSummarizer : IConversationSummar
 {
     private readonly IClaudeChatClient _claude;
     private readonly SummarizerOptions _options;
+    private readonly IClaudeCostTracker? _costTracker;
+    private readonly ILlmCallScope? _llmScope;
 
-    public ClaudeConversationSummarizer(IClaudeChatClient claude, IOptions<SummarizerOptions> options)
+    public ClaudeConversationSummarizer(
+        IClaudeChatClient claude,
+        IOptions<SummarizerOptions> options,
+        IClaudeCostTracker? costTracker = null,
+        ILlmCallScope? llmScope = null)
     {
         _claude = claude;
         _options = options.Value;
+        _costTracker = costTracker;
+        _llmScope = llmScope;
     }
 
     public string Name => "conversation-summarization";
@@ -54,8 +63,26 @@ internal sealed partial class ClaudeConversationSummarizer : IConversationSummar
             Array.Empty<ChatTurn>(),
             prompt,
             ct).ConfigureAwait(false);
+        await RecordCostAsync(reply, ct).ConfigureAwait(false);
 
         return ParseSummary(reply.Text);
+    }
+
+    private async Task RecordCostAsync(ClaudeReply reply, CancellationToken ct)
+    {
+        var current = _llmScope?.Current;
+        if (_costTracker is null || current is null || reply.UsdCost <= 0m)
+            return;
+
+        await _costTracker.RecordAsync(new CostEntry(
+            current.Value.TenantId,
+            current.Value.AgentCode,
+            reply.Model,
+            reply.InputTokens,
+            reply.OutputTokens,
+            reply.UsdCost,
+            current.Value.CostAt ?? DateTimeOffset.UtcNow,
+            current.Value.ReservationId), ct).ConfigureAwait(false);
     }
 
     private static string BuildTranscript(IReadOnlyList<ConversationTurn> turns)

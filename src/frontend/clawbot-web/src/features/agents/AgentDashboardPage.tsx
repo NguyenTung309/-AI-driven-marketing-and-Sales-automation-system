@@ -9,6 +9,7 @@ import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import { WorkflowNode } from "@/shared/ui/WorkflowNode";
 import { operationalPhaseLabel, toSafeOperationalText } from "@/shared/utils/userText";
 import { AgentConfigDrawer } from "./AgentConfigDrawer";
+import { OrchestrationPanel } from "./OrchestrationPanel";
 import { listLlmConfigs, type LlmConfig } from "@/shared/api/llmConfigs";
 import {
   disableAgent,
@@ -502,6 +503,10 @@ export default function AgentDashboardPage() {
           <Alert tone="success">{notice}</Alert>
         </div>
       ) : null}
+
+      <section className="mb-gutter">
+        <OrchestrationPanel />
+      </section>
 
       <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-2 xl:grid-cols-4">
         <MetricCard

@@ -9,11 +9,13 @@ public sealed record OrchestratorTraceEntry(string TaskId, string Phase, string 
 public sealed class PlanningOrchestrator(AgentRegistry registry)
 {
     private readonly ConcurrentDictionary<string, List<OrchestratorTraceEntry>> _traces = new();
+    private readonly ConcurrentDictionary<string, string> _sessionTenants = new();
 
     public OrchestratorPlan Plan(string tenantId, string goal)
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var cleanGoal = (goal ?? string.Empty).Trim();
+        _sessionTenants[sessionId] = tenantId;
         var agentNames = registry.Names
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -25,9 +27,6 @@ public sealed class PlanningOrchestrator(AgentRegistry registry)
             .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .Select(item => item.Name)
             .ToArray();
-
-        if (selected.Length == 0)
-            selected = agentNames;
 
         var tasks = selected
             .Select((name, index) => new AgentTask(
@@ -80,9 +79,13 @@ public sealed class PlanningOrchestrator(AgentRegistry registry)
         }
     }
 
-    public IReadOnlyList<OrchestratorTraceEntry> GetTrace(string sessionId)
+    public IReadOnlyList<OrchestratorTraceEntry> GetTrace(string sessionId, string tenantId)
     {
-        if (string.IsNullOrWhiteSpace(sessionId) || !_traces.TryGetValue(sessionId, out var entries))
+        if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(tenantId))
+            return [];
+        if (!_sessionTenants.TryGetValue(sessionId, out var owner) || !string.Equals(owner, tenantId, StringComparison.Ordinal))
+            return [];
+        if (!_traces.TryGetValue(sessionId, out var entries))
             return [];
 
         lock (entries)
@@ -105,20 +108,37 @@ public sealed class PlanningOrchestrator(AgentRegistry registry)
         foreach (var candidate in AgentReferenceCandidates(agentName))
         {
             var index = goal.IndexOf(candidate, StringComparison.OrdinalIgnoreCase);
-            if (index >= 0)
-                return index;
+            while (index >= 0)
+            {
+                if (IsReferenceBoundary(goal, index - 1) && IsReferenceBoundary(goal, index + candidate.Length))
+                    return index;
+
+                index = goal.IndexOf(candidate, index + candidate.Length, StringComparison.OrdinalIgnoreCase);
+            }
         }
 
         return -1;
     }
 
+    private static bool IsReferenceBoundary(string value, int index) =>
+        index < 0 || index >= value.Length || !char.IsLetterOrDigit(value[index]);
+
     private static IEnumerable<string> AgentReferenceCandidates(string agentName)
     {
         yield return agentName;
+        if (!agentName.EndsWith('s'))
+            yield return $"{agentName}s";
+
         if (agentName.Contains('_', StringComparison.Ordinal))
         {
-            yield return agentName.Replace('_', '-');
-            yield return agentName.Replace('_', ' ');
+            var hyphenated = agentName.Replace('_', '-');
+            var spaced = agentName.Replace('_', ' ');
+            yield return hyphenated;
+            yield return spaced;
+            if (!hyphenated.EndsWith('s'))
+                yield return $"{hyphenated}s";
+            if (!spaced.EndsWith('s'))
+                yield return $"{spaced}s";
         }
     }
 }

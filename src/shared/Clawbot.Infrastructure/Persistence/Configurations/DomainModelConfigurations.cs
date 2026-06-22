@@ -37,6 +37,7 @@ public sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.Property(x => x.AccentColor).HasMaxLength(16);
         builder.Property(x => x.SupportName).HasMaxLength(256);
         builder.Property(x => x.WidgetGreeting).HasMaxLength(1024);
+        builder.Property(x => x.RequireOrchestrationApproval).HasDefaultValue(false);
         builder.HasIndex(x => x.Slug).IsUnique();
     }
 }
@@ -317,8 +318,12 @@ public sealed class AgentSessionConfiguration : IEntityTypeConfiguration<AgentSe
     {
         builder.ToTable("agent_sessions");
         builder.HasKey(x => x.Id);
+        builder.Property(x => x.RequiresApproval).HasDefaultValue(false);
+        builder.Property(x => x.ReplanCount).HasDefaultValue(0);
+        builder.Property(x => x.RowVersion).IsRowVersion();
         builder.HasMany(x => x.Traces).WithOne().HasForeignKey(t => t.SessionId).OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(x => new { x.TenantId, x.StartedAt });
+        builder.HasIndex(x => new { x.TenantId, x.Status, x.StartedAt });
     }
 }
 

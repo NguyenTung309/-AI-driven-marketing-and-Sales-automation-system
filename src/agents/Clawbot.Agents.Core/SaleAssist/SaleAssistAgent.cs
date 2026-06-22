@@ -3,6 +3,7 @@ using System.Text;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Rag;
 using Clawbot.Agents.Core.Skills.Nlp;
+using Clawbot.Agents.Core.Skills.Ops;
 using Microsoft.Extensions.Options;
 
 namespace Clawbot.Agents.Core.SaleAssist;
@@ -44,9 +45,11 @@ public sealed class SaleAssistAgent(
     IRagRetriever rag,
     IClaudeChatClient claude,
     IConversationSummarizer summarizer,
+    IPiiRedactor pii,
     IToxicityFilter toxicity,
     IOptions<ToxicityOptions> toxicityOptions,
-    ILlmCallScope llmScope)
+    ILlmCallScope llmScope,
+    IClaudeCostTracker? costTracker = null)
 {
     private const string AgentCode = "sale-assist";
 
@@ -68,9 +71,11 @@ public sealed class SaleAssistAgent(
     private readonly IRagRetriever _rag = rag;
     private readonly IClaudeChatClient _claude = claude;
     private readonly IConversationSummarizer _summarizer = summarizer;
+    private readonly IPiiRedactor _pii = pii;
     private readonly IToxicityFilter _toxicity = toxicity;
     private readonly ToxicityOptions _toxicityOptions = toxicityOptions.Value;
     private readonly ILlmCallScope _llmScope = llmScope;
+    private readonly IClaudeCostTracker? _costTracker = costTracker;
 
     public async Task<DraftResult> DraftAsync(ConversationContext ctx, CancellationToken ct = default)
     {
@@ -78,18 +83,20 @@ public sealed class SaleAssistAgent(
         using var _llm = _llmScope.Begin(ctx.TenantId, AgentCode);
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        var lastCustomerText = ctx.RecentTurns.LastOrDefault(t => t.Direction == "in")?.Content ?? string.Empty;
+        var redactedTurns = await RedactTurnsAsync(ctx.RecentTurns, ct).ConfigureAwait(false);
+        var lastCustomerText = redactedTurns.LastOrDefault(t => t.Direction == "in")?.Content ?? string.Empty;
         var chunks = await _rag.RetrieveAsync(
             new RagRequest(ctx.TenantId, KbModuleCode: null, lastCustomerText, TopK: 3),
             ct).ConfigureAwait(false);
 
-        var history = ctx.RecentTurns
+        var history = redactedTurns
             .Select(t => new ChatTurn(t.Direction == "in" ? "user" : "assistant", t.Content))
             .ToList();
 
         var system = AppendKb(DraftSystem, chunks);
         var prompt = $"Customer last said: \"{lastCustomerText}\". Draft the next reply.";
         var reply = await _claude.CompleteAsync(system, history, prompt, ct).ConfigureAwait(false);
+        await RecordCostAsync(ctx.TenantId, reply, ct).ConfigureAwait(false);
 
         // Tone check: block draft if toxic before showing to sale rep
         var isToxic = await _toxicity.IsBlockedAsync(reply.Text, _toxicityOptions.DraftBlockThreshold, ct).ConfigureAwait(false);
@@ -117,11 +124,13 @@ public sealed class SaleAssistAgent(
         using var _llm = _llmScope.Begin(ctx.TenantId, AgentCode);
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        var transcript = BuildTranscript(ctx.RecentTurns);
+        var redactedTurns = await RedactTurnsAsync(ctx.RecentTurns, ct).ConfigureAwait(false);
+        var transcript = BuildTranscript(redactedTurns);
         var reply = await _claude.CompleteAsync(SummarySystem,
             history: Array.Empty<ChatTurn>(),
             userMessage: $"Transcript:\n{transcript}\n\nSummary:",
             ct).ConfigureAwait(false);
+        await RecordCostAsync(ctx.TenantId, reply, ct).ConfigureAwait(false);
 
         sw.Stop();
         return new SummaryResult(reply.Text.Trim(),
@@ -136,15 +145,17 @@ public sealed class SaleAssistAgent(
         using var _llm = _llmScope.Begin(ctx.TenantId, AgentCode);
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        var lastCustomerText = ctx.RecentTurns.LastOrDefault(t => t.Direction == "in")?.Content ?? string.Empty;
+        var redactedTurns = await RedactTurnsAsync(ctx.RecentTurns, ct).ConfigureAwait(false);
+        var lastCustomerText = redactedTurns.LastOrDefault(t => t.Direction == "in")?.Content ?? string.Empty;
         var chunks = await _rag.RetrieveAsync(
             new RagRequest(ctx.TenantId, KbModuleCode: null, lastCustomerText, TopK: 3), ct).ConfigureAwait(false);
 
         var system = AppendKb(UpsellSystem, chunks);
-        var transcript = BuildTranscript(ctx.RecentTurns);
+        var transcript = BuildTranscript(redactedTurns);
         var reply = await _claude.CompleteAsync(
             system, history: Array.Empty<ChatTurn>(),
             userMessage: $"Conversation so far:\n{transcript}\n\nUpsell suggestion:", ct).ConfigureAwait(false);
+        await RecordCostAsync(ctx.TenantId, reply, ct).ConfigureAwait(false);
 
         sw.Stop();
         return new UpsellResult(reply.Text.Trim(),
@@ -157,7 +168,8 @@ public sealed class SaleAssistAgent(
         ArgumentNullException.ThrowIfNull(ctx);
         using var _llm = _llmScope.Begin(ctx.TenantId, AgentCode);
 
-        var turns = ctx.RecentTurns
+        var redactedTurns = await RedactTurnsAsync(ctx.RecentTurns, ct).ConfigureAwait(false);
+        var turns = redactedTurns
             .Select(t => new ConversationTurn(
                 t.Direction == "in" ? "customer" : "agent",
                 t.Content,
@@ -165,6 +177,34 @@ public sealed class SaleAssistAgent(
             .ToList();
 
         return await _summarizer.SummarizeAsync(turns, maxWords: 100, ct).ConfigureAwait(false);
+    }
+
+    private async Task<IReadOnlyList<TurnSnapshot>> RedactTurnsAsync(IReadOnlyList<TurnSnapshot> turns, CancellationToken ct)
+    {
+        if (turns.Count == 0) return Array.Empty<TurnSnapshot>();
+        var redacted = new List<TurnSnapshot>(turns.Count);
+        foreach (var turn in turns)
+        {
+            var content = await _pii.RedactAsync(turn.Content, ct).ConfigureAwait(false);
+            redacted.Add(new TurnSnapshot(turn.Direction, content.RedactedText, turn.SentAt));
+        }
+        return redacted;
+    }
+
+    private async Task RecordCostAsync(Guid tenantId, ClaudeReply reply, CancellationToken ct)
+    {
+        if (_costTracker is null || reply.UsdCost <= 0m)
+            return;
+
+        await _costTracker.RecordAsync(new CostEntry(
+            tenantId,
+            AgentCode,
+            reply.Model,
+            reply.InputTokens,
+            reply.OutputTokens,
+            reply.UsdCost,
+            _llmScope.Current?.CostAt ?? DateTimeOffset.UtcNow,
+            _llmScope.Current?.ReservationId), ct).ConfigureAwait(false);
     }
 
     private static string AppendKb(string baseSystem, IReadOnlyList<RagChunk> chunks)
