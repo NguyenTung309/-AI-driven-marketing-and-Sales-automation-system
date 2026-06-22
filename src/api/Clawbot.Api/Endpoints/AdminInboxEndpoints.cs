@@ -19,15 +19,15 @@ public static class AdminInboxEndpoints
 {
     public static IEndpointRouteBuilder MapAdminInboxEndpoints(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup(""/api/admin"")
+        var grp = app.MapGroup("/api/admin")
             .RequireRateLimiting(Middleware.RateLimitingExtensions.GeneralPolicy)
-            .RequirePermission(""admin:inboxes"");
-        grp.MapGet(""/users/simple"", ListSimpleUsersAsync);
-        grp.MapPut(""/inboxes/{id:guid}/members"", UpdateMemberAsync);
-        grp.MapPost(""/inboxes/{id:guid}/reassign"", ReassignAsync);
-        grp.MapGet(""/inboxes/{id:guid}/members"", ListMembersAsync);
-        grp.MapGet(""/inboxes/{id:guid}/assignable-agents"", ListAssignableAgentsAsync);
-        grp.MapGet(""/inboxes"", ListInboxesAsync);
+            .RequirePermission("admin:inboxes");
+        grp.MapGet("/users/simple", ListSimpleUsersAsync);
+        grp.MapPut("/inboxes/{id:guid}/members", UpdateMemberAsync);
+        grp.MapPost("/inboxes/{id:guid}/reassign", ReassignAsync);
+        grp.MapGet("/inboxes/{id:guid}/members", ListMembersAsync);
+        grp.MapGet("/inboxes/{id:guid}/assignable-agents", ListAssignableAgentsAsync);
+        grp.MapGet("/inboxes", ListInboxesAsync);
         return app;
     }
 
@@ -55,7 +55,7 @@ public static class AdminInboxEndpoints
         {
             var currentMembers = await db.InboxMembers.Where(m => m.InboxId == id).ToListAsync(ct);
             if (currentMembers.Count == 0)
-                return Results.BadRequest(new { error = ""inbox_must_have_member"", message = ""Kenh phai co it nhat 1 sale phu trach"" });
+                return Results.BadRequest(new { error = "inbox_must_have_member", message = "Kenh phai co it nhat 1 sale phu trach" });
 
             var oldIds = currentMembers.Select(m => m.AgentId).ToList();
             var conversations = await db.Conversations
@@ -70,7 +70,7 @@ public static class AdminInboxEndpoints
         }
 
         var agentExists = await db.Users.AnyAsync(u => u.Id == body.AgentId && u.TenantId == tenantId, ct);
-        if (!agentExists) return Results.BadRequest(new { error = ""agent_not_found"" });
+        if (!agentExists) return Results.BadRequest(new { error = "agent_not_found" });
 
         var existing = await db.InboxMembers.Where(m => m.InboxId == id).ToListAsync(ct);
         var oldMembers = existing.Select(e => e.AgentId).ToList();
@@ -86,7 +86,7 @@ public static class AdminInboxEndpoints
         await db.SaveChangesAsync(ct);
         foreach (var oldId in oldMembers)
             await notifier.NotifyConversationUpdatedAsync(tenantId,
-                new InboxConversationEvent(Guid.Empty, ""reassigned"", null, null), ct);
+                new InboxConversationEvent(Guid.Empty, "reassigned", null, null), ct);
 
         return Results.NoContent();
     }
@@ -103,7 +103,7 @@ public static class AdminInboxEndpoints
         if (inbox is null) return Results.NotFound();
 
         var newAgent = await db.Users.FirstOrDefaultAsync(u => u.Id == body.NewAgentId && u.TenantId == tenantId, ct);
-        if (newAgent is null) return Results.BadRequest(new { error = ""agent_not_found"" });
+        if (newAgent is null) return Results.BadRequest(new { error = "agent_not_found" });
 
         var oldMembers = await db.InboxMembers.Where(m => m.InboxId == id).Select(m => m.AgentId).ToListAsync(ct);
         var existing = await db.InboxMembers.Where(m => m.InboxId == id).ToListAsync(ct);
@@ -122,7 +122,7 @@ public static class AdminInboxEndpoints
         db.AuditLogs.Add(new AuditLog
         {
             Id = Guid.NewGuid(), TenantId = tenantId, UserId = adminUserId,
-            Action = ""inbox:reassign"", EntityType = ""Inbox"", EntityId = id.ToString(),
+            Action = "inbox:reassign", EntityType = "Inbox", EntityId = id.ToString(),
             OldValue = JsonSerializer.Serialize(new { AgentIds = oldMembers }),
             NewValue = JsonSerializer.Serialize(new { AgentIds = new[] { body.NewAgentId } }),
             CreatedAt = clock.UtcNow
@@ -131,7 +131,7 @@ public static class AdminInboxEndpoints
 
         foreach (var oldId in oldMembers)
             await notifier.NotifyConversationUpdatedAsync(tenantId,
-                new InboxConversationEvent(Guid.Empty, ""reassigned"", null, null), ct);
+                new InboxConversationEvent(Guid.Empty, "reassigned", null, null), ct);
 
         return Results.Ok(new
         {
