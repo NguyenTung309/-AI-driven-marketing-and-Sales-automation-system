@@ -1,3 +1,4 @@
+using Clawbot.Api.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Security;
 using Clawbot.Infrastructure.Persistence;
@@ -7,6 +8,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
 
+public sealed record TenantOrchestrationSettingsRequest(bool RequireApproval);
+
 public static class AdminEndpoints
 {
     public static IEndpointRouteBuilder MapAdmin(this IEndpointRouteBuilder app)
@@ -14,8 +17,24 @@ public static class AdminEndpoints
         var grp = app.MapGroup("/api/admin").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/audit-logs", ListAuditLogsAsync);
+        grp.MapPut("/tenant/orchestration", UpdateTenantOrchestrationAsync).RequirePermission("system:config");
 
         return grp;
+    }
+
+    private static async Task<IResult> UpdateTenantOrchestrationAsync(
+        TenantOrchestrationSettingsRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        CancellationToken ct = default)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, ct);
+        if (tenant is null) return Results.NotFound(new { error = "tenant_not_found" });
+
+        tenant.SetRequireOrchestrationApproval(body.RequireApproval);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new { tenant.RequireOrchestrationApproval });
     }
 
     private static async Task<IResult> ListAuditLogsAsync(

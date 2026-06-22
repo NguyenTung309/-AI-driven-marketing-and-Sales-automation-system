@@ -85,6 +85,7 @@ public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig confi
             MaxTokens: MaxTokens,
             System: systemPrompt,
             Messages: msgs,
+            Temperature: _config.Temperature,
             Stream: stream);
 
         var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl.TrimEnd('/')}/v1/messages")
@@ -201,6 +202,7 @@ public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig confi
         [property: JsonPropertyName("max_tokens")] int MaxTokens,
         [property: JsonPropertyName("system")] string System,
         [property: JsonPropertyName("messages")] IReadOnlyList<MessageBody> Messages,
+        [property: JsonPropertyName("temperature"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? Temperature = null,
         [property: JsonPropertyName("stream"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Stream = false);
 
     private sealed record ResponseBody(

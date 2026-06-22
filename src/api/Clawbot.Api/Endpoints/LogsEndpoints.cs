@@ -299,6 +299,7 @@ public static class LogsEndpoints
                 .AsNoTracking()
                 .Where(cost =>
                     cost.TenantId == tenantId &&
+                    cost.AgentCode != Clawbot.Domain.Agents.ClaudeCostEntry.ReservationAgentCode &&
                     cost.CreatedAt >= minStarted &&
                     cost.CreatedAt <= maxFinished &&
                     agentCodes.Contains(cost.AgentCode))
@@ -349,7 +350,11 @@ public static class LogsEndpoints
         var tokens = await db.ClaudeCostLedger
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(cost => cost.TenantId == tenantId && cost.CreatedAt >= since && cost.CreatedAt <= now)
+            .Where(cost =>
+                cost.TenantId == tenantId &&
+                cost.AgentCode != Clawbot.Domain.Agents.ClaudeCostEntry.ReservationAgentCode &&
+                cost.CreatedAt >= since &&
+                cost.CreatedAt <= now)
             .SumAsync(cost => (int?)(cost.InputTokens + cost.OutputTokens), ct) ?? 0;
 
         return new TaskRunStatsResponse(

@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Clawbot.Domain.Agents;
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.Security;
@@ -57,6 +58,10 @@ public static partial class RbacSeeder
         ("channels:manage", [Admin]),
         ("api-keys:manage", [Admin]),
         ("llm-configs:manage", [Admin]),
+        ("orchestration:view", [Admin, SalesLead, Marketer]),
+        ("orchestration:run", [Admin, SalesLead, Marketer]),
+        ("orchestration:approve", [Admin, SalesLead]),
+        ("orchestration:manage", [Admin]),
         ("rbac:manage", [Admin]),
         ("users:manage", [Admin]),
         ("system:config", [Admin]),
@@ -64,6 +69,7 @@ public static partial class RbacSeeder
 
     private static readonly (string Code, string DisplayName, string AgentType)[] DefaultAgents =
     [
+        ("orchestrator", "Agent-Orchestrator", "planner"),
         ("chat-agent", "Agent-Chat", "chat"),
         ("sale-assist", "Agent-SaleAssist", "sale_assist"),
         ("lead-agent", "Agent-Lead", "lead"),
@@ -266,17 +272,37 @@ public static partial class RbacSeeder
                 }
             }
 
-            var existingAgentCodes = await db.AgentConfigs
+            var activeLlmConfigs = await db.LlmConfigs
+                .IgnoreQueryFilters()
+                .Where(config => config.TenantId == tenant.Id && config.IsActive)
+                .OrderBy(config => config.CreatedAt)
+                .Select(config => new { Id = (Guid?)config.Id, config.ModelId })
+                .ToListAsync(ct);
+            var defaultLlmConfig = activeLlmConfigs.FirstOrDefault();
+            var modelByConfigId = activeLlmConfigs
+                .Where(config => config.Id.HasValue)
+                .ToDictionary(config => config.Id!.Value, config => config.ModelId);
+            var existingAgents = await db.AgentConfigs
                 .IgnoreQueryFilters()
                 .Where(a => a.TenantId == tenant.Id)
-                .Select(a => a.Code)
                 .ToListAsync(ct);
             foreach (var (code, displayName, agentType) in DefaultAgents)
             {
-                if (existingAgentCodes.Contains(code)) continue;
-                var agent = AgentConfig.Create(tenant.Id, code, displayName, agentType, "claude", now);
-                agent.Start();
-                db.AgentConfigs.Add(agent);
+                var agent = existingAgents.FirstOrDefault(existing => existing.Code == code);
+                if (agent is null)
+                {
+                    agent = AgentConfig.Create(tenant.Id, code, displayName, agentType, defaultLlmConfig?.ModelId ?? string.Empty, now);
+                    agent.Start();
+                    db.AgentConfigs.Add(agent);
+                    existingAgents.Add(agent);
+                }
+
+                var effectiveModel = string.Equals(agent.Model, "claude", StringComparison.OrdinalIgnoreCase)
+                    ? ResolveSeededModel(agent.LlmConfigId, modelByConfigId, defaultLlmConfig?.ModelId, agent.Model)
+                    : agent.Model;
+                agent.UpdateSettings(displayName, effectiveModel, agent.SkillFilesJson, agent.KbModulesJson, MergeOrchestrationConfig(agent.ConfigJson, code), now);
+                if (agent.LlmConfigId is null && defaultLlmConfig?.Id is { } llmConfigId)
+                    agent.BindLlmConfig(llmConfigId, now);
             }
 
             var hasWarmDrip = await db.Set<DripSequence>()
@@ -296,6 +322,51 @@ public static partial class RbacSeeder
         var saved = await db.SaveChangesAsync(ct);
         if (saved > 0) LogRolePermsSeeded(logger, saved);
     }
+
+    private static string ResolveSeededModel(
+        Guid? llmConfigId,
+        Dictionary<Guid, string> modelByConfigId,
+        string? defaultModel,
+        string currentModel)
+    {
+        if (llmConfigId.HasValue && modelByConfigId.TryGetValue(llmConfigId.Value, out var boundModel))
+            return boundModel;
+
+        return string.IsNullOrWhiteSpace(defaultModel) ? currentModel : defaultModel;
+    }
+
+    private static string MergeOrchestrationConfig(string configJson, string code)
+    {
+        JsonObject root;
+        try
+        {
+            root = string.IsNullOrWhiteSpace(configJson)
+                ? new JsonObject()
+                : JsonNode.Parse(configJson)?.AsObject() ?? new JsonObject();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            root = new JsonObject();
+        }
+
+        var metadata = JsonNode.Parse(BuildOrchestrationConfig(code))!.AsObject()["orchestration"]!.DeepClone();
+        root["orchestration"] = metadata;
+        return root.ToJsonString();
+    }
+
+    private static string BuildOrchestrationConfig(string code) => code switch
+    {
+        "orchestrator" => "{\"orchestration\":{\"description\":\"Plan and coordinate multi-agent DAGs.\",\"inputSchema\":\"{\\\"goal\\\":\\\"string\\\"}\",\"orchestratable\":false}}",
+        "chat-agent" => "{\"orchestration\":{\"description\":\"Draft a non-streaming customer chat reply.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"user_text\\\":\\\"string\\\"}\",\"orchestratable\":true}}",
+        "sale-assist" => "{\"orchestration\":{\"description\":\"Summarize, draft, or suggest upsells for sales conversations.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"conversation_id\\\":\\\"guid\\\",\\\"turns_json\\\":\\\"array\\\"}\",\"orchestratable\":true}}",
+        "lead-agent" => "{\"orchestration\":{\"description\":\"Score or create lead records from campaign context.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"operation\\\":\\\"score|create\\\"}\",\"orchestratable\":true}}",
+        "content-agent" => "{\"orchestration\":{\"description\":\"Generate platform-specific campaign content from a brief.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"platform\\\":\\\"string\\\",\\\"brief\\\":\\\"string\\\"}\",\"orchestratable\":true}}",
+        "research-agent" => "{\"orchestration\":{\"description\":\"Research markets, competitors, and keyword topics.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"geo\\\":\\\"string\\\",\\\"keywords\\\":\\\"array\\\"}\",\"orchestratable\":true}}",
+        "docs-agent" => "{\"orchestration\":{\"description\":\"Render templated documents with tenant branding.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"template_code\\\":\\\"string\\\",\\\"template_body\\\":\\\"string\\\"}\",\"orchestratable\":true}}",
+        "report-agent" => "{\"orchestration\":{\"description\":\"Build tenant analytics and performance reports.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"report_type\\\":\\\"string\\\"}\",\"orchestratable\":true}}",
+        "ads-agent" => "{\"orchestration\":{\"description\":\"Apply ad actions, build lookalikes, or remarketing audiences.\",\"inputSchema\":\"{\\\"platform\\\":\\\"string\\\",\\\"operation\\\":\\\"apply|lookalike|remarketing\\\"}\",\"orchestratable\":true}}",
+        _ => "{\"orchestration\":{\"description\":\"Run agent task.\",\"inputSchema\":\"{}\",\"orchestratable\":true}}",
+    };
 
     [LoggerMessage(EventId = 1001, Level = LogLevel.Warning,
         Message = "Failed to seed role {RoleName}: {Errors}")]

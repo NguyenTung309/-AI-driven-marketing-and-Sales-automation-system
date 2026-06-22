@@ -70,6 +70,27 @@ public sealed class LlmConfigResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_throws_typed_config_error_when_decryption_fails()
+    {
+        using var fx = new TestAppDb();
+        var config = LlmConfig.Create(fx.TenantId, "anthropic", "claude-sonnet", "cipher-key", Now);
+        var agent = AgentConfig.Create(fx.TenantId, "chat-agent", "Chat", "chat", "claude-sonnet", Now);
+        agent.BindLlmConfig(config.Id, Now);
+        fx.Db.LlmConfigs.Add(config);
+        fx.Db.AgentConfigs.Add(agent);
+        await fx.Db.SaveChangesAsync();
+
+        var decryptor = Substitute.For<IEncryptor>();
+        decryptor.Decrypt("cipher-key").Returns(_ => throw new InvalidOperationException("bad cipher internals"));
+        var sut = new LlmConfigResolver(BuildScopeFactory(fx), decryptor);
+
+        var act = async () => await sut.ResolveAsync(fx.TenantId, "chat-agent");
+
+        await act.Should().ThrowAsync<LlmConfigNotConfiguredException>()
+            .Where(ex => ex.TenantId == fx.TenantId && ex.AgentCode == "chat-agent");
+    }
+
+    [Fact]
     public async Task ResolveAsync_throws_when_bound_config_is_inactive()
     {
         using var fx = new TestAppDb();

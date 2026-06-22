@@ -82,6 +82,20 @@ public sealed class LlmConfig : AggregateRoot<Guid>, ITenantOwned
         UpdatedAt = updatedAt;
     }
 
-    public void Activate(DateTimeOffset updatedAt)   { IsActive = true;  UpdatedAt = updatedAt; }
+    public void RequireKeyRotation(DateTimeOffset updatedAt)
+    {
+        ApiKeyEncrypted = string.Empty;
+        IsActive = false;
+        UpdatedAt = updatedAt;
+    }
+
+    public void Activate(DateTimeOffset updatedAt)
+    {
+        if (string.IsNullOrWhiteSpace(ApiKeyEncrypted))
+            throw new InvalidOperationException("LLM config requires key rotation before activation.");
+        IsActive = true;
+        UpdatedAt = updatedAt;
+    }
+
     public void Deactivate(DateTimeOffset updatedAt) { IsActive = false; UpdatedAt = updatedAt; }
 }

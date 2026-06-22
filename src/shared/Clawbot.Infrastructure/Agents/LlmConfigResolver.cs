@@ -40,7 +40,15 @@ public sealed class LlmConfigResolver(IServiceScopeFactory scopeFactory, IEncryp
 
         // D2: the per-agent model string overrides the config's model when set.
         var effectiveModel = string.IsNullOrWhiteSpace(agent.Model) ? cfg.ModelId : agent.Model;
-        var apiKey = _encryptor.Decrypt(cfg.ApiKeyEncrypted);
+        string apiKey;
+        try
+        {
+            apiKey = _encryptor.Decrypt(cfg.ApiKeyEncrypted);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new LlmConfigNotConfiguredException(tenantId, agentCode);
+        }
 
         return new ResolvedLlmConfig(
             cfg.Provider,

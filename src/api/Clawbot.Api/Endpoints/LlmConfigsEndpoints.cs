@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Llm;
@@ -101,9 +100,22 @@ public static class LlmConfigsEndpoints
 
         var now = clock.UtcNow;
         var provider = req.Provider.Trim().ToLowerInvariant();
-        row.UpdateConnection(provider, req.ModelId.Trim(), NormalizeBaseUrl(provider, req.BaseUrl), Trimmed(req.DisplayName), now);
+        var modelId = req.ModelId.Trim();
+        var boundAgentModels = await db.AgentConfigs
+            .Where(a => a.TenantId == row.TenantId && a.LlmConfigId == row.Id && a.DeletedAt == null)
+            .Select(a => a.Model)
+            .ToListAsync(ct).ConfigureAwait(false);
+        if (!AreBoundAgentModelsCompatible(provider, modelId, boundAgentModels))
+            return Results.BadRequest(new { error = "model_provider_mismatch" });
+
+        var baseUrl = NormalizeBaseUrl(provider, req.BaseUrl);
+        var credentialEndpointChanged = !string.Equals(row.Provider, provider, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(row.BaseUrl, baseUrl, StringComparison.OrdinalIgnoreCase);
+        row.UpdateConnection(provider, modelId, baseUrl, Trimmed(req.DisplayName), now);
         row.UpdateDefaults(req.MaxTokens, req.Temperature, now);
         row.UpdateRates(req.InputUsdPer1M, req.OutputUsdPer1M, now);
+        if (credentialEndpointChanged)
+            row.RequireKeyRotation(now);
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.Ok(Map(row));
@@ -138,7 +150,12 @@ public static class LlmConfigsEndpoints
         var row = await FindAsync(db, tenants, id, ct).ConfigureAwait(false);
         if (row is null) return Results.NotFound();
 
-        if (active) row.Activate(clock.UtcNow);
+        if (active)
+        {
+            if (string.IsNullOrWhiteSpace(row.ApiKeyEncrypted))
+                return Results.BadRequest(new { error = "llm_config_requires_key_rotation" });
+            row.Activate(clock.UtcNow);
+        }
         else row.Deactivate(clock.UtcNow);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.Ok(Map(row));
@@ -155,14 +172,15 @@ public static class LlmConfigsEndpoints
     {
         var row = await FindAsync(db, tenants, id, ct).ConfigureAwait(false);
         if (row is null) return Results.NotFound();
-
-        var resolved = new ResolvedLlmConfig(
-            row.Provider, row.ModelId, encryptor.Decrypt(row.ApiKeyEncrypted), row.BaseUrl,
-            MaxTokens: TestPingMaxTokens, row.Temperature, row.InputUsdPer1M, row.OutputUsdPer1M);
+        if (string.IsNullOrWhiteSpace(row.ApiKeyEncrypted))
+            return Results.Ok(new TestLlmConfigResponse(false, 0, "llm_config_requires_key_rotation"));
 
         var sw = Stopwatch.StartNew();
         try
         {
+            var resolved = new ResolvedLlmConfig(
+                row.Provider, row.ModelId, encryptor.Decrypt(row.ApiKeyEncrypted), row.BaseUrl,
+                MaxTokens: TestPingMaxTokens, row.Temperature, row.InputUsdPer1M, row.OutputUsdPer1M);
             var client = factory.Create(resolved);
             await client.CompleteAsync("You are a connection test. Reply with 'ok'.", Array.Empty<ChatTurn>(), "ping", ct)
                 .ConfigureAwait(false);
@@ -172,7 +190,7 @@ public static class LlmConfigsEndpoints
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             sw.Stop();
-            return Results.Ok(new TestLlmConfigResponse(false, sw.ElapsedMilliseconds, ex.Message));
+            return Results.Ok(new TestLlmConfigResponse(false, sw.ElapsedMilliseconds, SafeTestConnectionError(ex)));
         }
     }
 
@@ -200,6 +218,9 @@ public static class LlmConfigsEndpoints
 
     private static string? Trimmed(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    internal static string SafeTestConnectionError(Exception _) =>
+        "llm_connection_test_failed";
 
     // D10 — make the per-provider baseUrl suffix difference invisible to the admin. The OpenAI SDK
     // appends only `/chat/completions` (endpoint must already carry `/v1`), while AnthropicChatClient
@@ -236,33 +257,15 @@ public static class LlmConfigsEndpoints
         return null;
     }
 
-    internal static bool IsAllowedBaseUrl(string baseUrl)
-    {
-        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)) return false;
-        if (uri.Scheme != Uri.UriSchemeHttps) return false;
-        return !IsPrivateHost(uri);
-    }
+    internal static bool IsAllowedBaseUrl(string baseUrl) =>
+        LlmBaseUrlGuard.IsAllowedBaseUrl(baseUrl);
 
-    private static bool IsPrivateHost(Uri uri)
-    {
-        var host = uri.Host;
-        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
-        if (!IPAddress.TryParse(host, out var ip)) return false; // DNS names allowed; only block literal private IPs
-
-        if (IPAddress.IsLoopback(ip)) return true;
-        var bytes = ip.GetAddressBytes();
-        if (bytes.Length == 4)
-        {
-            return bytes[0] switch
-            {
-                10 => true,
-                127 => true,
-                169 when bytes[1] == 254 => true,                  // link-local
-                172 when bytes[1] is >= 16 and <= 31 => true,
-                192 when bytes[1] == 168 => true,
-                _ => false,
-            };
-        }
-        return ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal;
-    }
+    internal static bool AreBoundAgentModelsCompatible(
+        string provider,
+        string configModel,
+        IEnumerable<string> boundAgentModels) =>
+        AgentsEndpoints.IsModelCompatibleWithProvider(provider, configModel)
+        && boundAgentModels.All(model => AgentsEndpoints.IsModelCompatibleWithProvider(
+            provider,
+            string.IsNullOrWhiteSpace(model) ? configModel : model));
 }

@@ -7,8 +7,16 @@ package clawbot.agents.orchestrator;
 import "google/protobuf/timestamp.proto";
 
 service Orchestrator {
+  // Legacy keyword planner (kept for compatibility).
   rpc Plan (PlanRequest) returns (PlanResponse);
   rpc Trace (TraceRequest) returns (stream TraceEvent);
+
+  // Dynamic agent orchestration lifecycle.
+  rpc Submit (SubmitRequest) returns (SessionResponse);
+  rpc GetPlan (SessionRef) returns (SessionResponse);
+  rpc UpdatePlan (UpdatePlanRequest) returns (SessionResponse);
+  rpc Approve (SessionRef) returns (SessionResponse);
+  rpc Control (ControlRequest) returns (SessionResponse);
 }
 
 message PlanRequest {
@@ -27,10 +35,15 @@ message PlannedTask {
   string agent = 2;
   string description = 3;
   repeated string depends_on = 4;
+  string status = 5;
+  string output = 6;
+  string error = 7;
+  string input_json = 8;
 }
 
 message TraceRequest {
   string session_id = 1;
+  string tenant_id = 2;
 }
 
 message TraceEvent {
@@ -38,4 +51,46 @@ message TraceEvent {
   string phase = 2;
   string message = 3;
   google.protobuf.Timestamp at = 4;
+  string agent_name = 5;
+}
+
+// --- Dynamic orchestration lifecycle messages ---
+
+message SubmitRequest {
+  string tenant_id = 1;
+  string goal = 2;
+  google.protobuf.Timestamp requested_at = 3;
+}
+
+message SessionRef {
+  string tenant_id = 1;
+  string session_id = 2;
+  string expected_etag = 3;
+}
+
+message UpdatePlanRequest {
+  string tenant_id = 1;
+  string session_id = 2;
+  string plan_json = 3;
+  string expected_etag = 4;
+}
+
+message ControlRequest {
+  string tenant_id = 1;
+  string session_id = 2;
+  string action = 3; // pause | resume | cancel
+  string expected_etag = 4;
+}
+
+message SessionResponse {
+  string session_id = 1;
+  string status = 2;
+  bool requires_approval = 3;
+  string goal = 4;
+  repeated PlannedTask tasks = 5;
+  bool cost_blocked = 6;
+  string cost_reason = 7;
+  int32 replan_count = 8;
+  string etag = 9;
+  string plan_json = 10;
 }

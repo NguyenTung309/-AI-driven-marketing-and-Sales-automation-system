@@ -14,6 +14,34 @@ namespace Clawbot.Infrastructure.Tests.Identity;
 public sealed class DevDataSeederTests
 {
     [Fact]
+    public async Task SeedAsync_restricts_orchestration_manage_to_admin()
+    {
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync();
+        await using var provider = BuildServices(connection);
+        using (var scope = provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Database.EnsureCreatedAsync();
+        }
+
+        await RbacSeeder.SeedAsync(provider);
+
+        using var verifyScope = provider.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var managePermissionId = await verifyDb.Permissions
+            .Where(permission => permission.Code == "orchestration:manage")
+            .Select(permission => permission.Id)
+            .SingleAsync();
+        var roleNames = await verifyDb.RolePermissions
+            .Where(link => link.PermissionId == managePermissionId)
+            .Join(verifyDb.RbacRoles.IgnoreQueryFilters(), link => link.RoleId, role => role.Id, (_, role) => role.Name)
+            .ToArrayAsync();
+
+        roleNames.Should().BeEquivalentTo([RbacSeeder.Admin]);
+    }
+
+    [Fact]
     public async Task SeedAdminAsync_repairs_existing_dev_admin_so_default_login_works()
     {
         await using var connection = new SqliteConnection("DataSource=:memory:");

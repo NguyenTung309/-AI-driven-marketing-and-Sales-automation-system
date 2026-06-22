@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Rag;
+using Clawbot.Agents.Core.Skills.Ops;
 
 namespace Clawbot.Agents.Core.Content;
 
@@ -20,13 +21,15 @@ public sealed record ContentDraftResult(
     IReadOnlyList<RagChunk> Citations,
     int InputTokens,
     int OutputTokens,
+    decimal UsdCost,
     long LatencyMs);
 
 public sealed class ContentAgent(
     IRagRetriever rag,
     IPromptTemplateProvider templates,
     IClaudeChatClient claude,
-    ILlmCallScope llmScope)
+    ILlmCallScope llmScope,
+    IClaudeCostTracker? costTracker = null)
 {
     private const string AgentCode = "content-agent";
 
@@ -34,6 +37,7 @@ public sealed class ContentAgent(
     private readonly IPromptTemplateProvider _templates = templates;
     private readonly IClaudeChatClient _claude = claude;
     private readonly ILlmCallScope _llmScope = llmScope;
+    private readonly IClaudeCostTracker? _costTracker = costTracker;
 
     public async Task<ContentDraftResult> GenerateAsync(ContentGenerateRequest request, CancellationToken ct = default)
     {
@@ -55,6 +59,7 @@ public sealed class ContentAgent(
         // mirroring the prior single-user-message content call.
         var prompt = RenderTemplate(template, request.Brief, BuildKnowledgeContext(chunks));
         var reply = await _claude.CompleteAsync(string.Empty, Array.Empty<ChatTurn>(), prompt, ct).ConfigureAwait(false);
+        await RecordCostAsync(request.TenantId, reply, ct).ConfigureAwait(false);
 
         sw.Stop();
         return new ContentDraftResult(
@@ -64,7 +69,24 @@ public sealed class ContentAgent(
             chunks,
             reply.InputTokens,
             reply.OutputTokens,
+            reply.UsdCost,
             sw.ElapsedMilliseconds);
+    }
+
+    private async Task RecordCostAsync(Guid tenantId, ClaudeReply reply, CancellationToken ct)
+    {
+        if (_costTracker is null || reply.UsdCost <= 0m)
+            return;
+
+        await _costTracker.RecordAsync(new CostEntry(
+            tenantId,
+            AgentCode,
+            reply.Model,
+            reply.InputTokens,
+            reply.OutputTokens,
+            reply.UsdCost,
+            _llmScope.Current?.CostAt ?? DateTimeOffset.UtcNow,
+            _llmScope.Current?.ReservationId), ct).ConfigureAwait(false);
     }
 
     private static string RenderTemplate(string template, string brief, string knowledge) =>

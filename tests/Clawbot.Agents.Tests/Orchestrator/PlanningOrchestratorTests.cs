@@ -25,7 +25,7 @@ public sealed class PlanningOrchestratorTests
     }
 
     [Fact]
-    public void Plan_falls_back_to_all_registered_agents_when_goal_has_no_agent_name()
+    public void Plan_returns_empty_plan_when_goal_has_no_agent_name()
     {
         var orchestrator = new PlanningOrchestrator(new AgentRegistry([
             Agent("lead"),
@@ -34,7 +34,32 @@ public sealed class PlanningOrchestratorTests
 
         var plan = orchestrator.Plan("tenant-1", "Build the daily operations plan.");
 
-        plan.Tasks.Select(task => task.AgentName).Should().Equal("chat", "lead");
+        plan.Tasks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Plan_matches_agent_names_as_whole_references_only()
+    {
+        var orchestrator = new PlanningOrchestrator(new AgentRegistry([
+            Agent("lead"),
+            Agent("ads"),
+        ]));
+
+        var plan = orchestrator.Plan("tenant-1", "Work on leads pipeline.");
+
+        plan.Tasks.Select(task => task.AgentName).Should().Equal("lead");
+    }
+
+    [Fact]
+    public void Plan_ignores_agent_name_substrings_inside_words()
+    {
+        var orchestrator = new PlanningOrchestrator(new AgentRegistry([
+            Agent("lead"),
+        ]));
+
+        var plan = orchestrator.Plan("tenant-1", "Improve leadership training.");
+
+        plan.Tasks.Should().BeEmpty();
     }
 
     [Fact]
@@ -57,7 +82,7 @@ public sealed class PlanningOrchestratorTests
         }
 
         results.Should().ContainSingle(result => result.Success);
-        orchestrator.GetTrace(plan.SessionId)
+        orchestrator.GetTrace(plan.SessionId, "tenant-1")
             .Select(trace => trace.Phase)
             .Should().ContainInOrder("planned", "started", "completed");
     }

@@ -25,6 +25,22 @@ builder.Services.AddClawbotTelemetry(builder.Configuration, "clawbot-agent");
 builder.Services.AddSingleton<AgentRegistry>(_ => DefaultAgentRegistry.Create());
 builder.Services.AddSingleton<PlanningOrchestrator>();
 builder.Services.AddClawbotSkills(builder.Configuration);
+// Dynamic agent orchestration (SK planner + parallel DAG executor + lifecycle).
+builder.Services.AddScoped<IAgentCatalog, Clawbot.Infrastructure.Agents.DbAgentCatalog>();
+builder.Services.AddScoped<Microsoft.SemanticKernel.ChatCompletion.IChatCompletionService, ClawbotChatCompletionService>();
+builder.Services.AddScoped<SemanticKernelPlanGenerator>();
+builder.Services.AddSingleton<OrchestratorCostGuard>();
+builder.Services.AddScoped<SemanticKernelOrchestrator>();
+builder.Services.AddScoped<IAgent, ChatAgentAdapter>();
+builder.Services.AddScoped<IAgent, ContentAgentAdapter>();
+builder.Services.AddScoped<IAgent, ResearchAgentAdapter>();
+builder.Services.AddScoped<IAgent, DocsAgentAdapter>();
+builder.Services.AddScoped<IAgent, AdsAgentAdapter>();
+builder.Services.AddScoped<IAgent, SaleAssistAgentAdapter>();
+builder.Services.AddScoped<LeadAgentRunner>();
+builder.Services.AddScoped<ReportAgentRunner>();
+builder.Services.AddScoped<IAgent, LeadOrchestrationAdapter>();
+builder.Services.AddScoped<IAgent, ReportOrchestrationAdapter>();
 // M25: persist Claude cost to claude_cost_ledger (overrides in-memory tracker from the skills module).
 builder.Services.RemoveAll<Clawbot.Agents.Core.Skills.Ops.IClaudeCostTracker>();
 builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Ops.IClaudeCostTracker, Clawbot.Infrastructure.Agents.DbClaudeCostTracker>();

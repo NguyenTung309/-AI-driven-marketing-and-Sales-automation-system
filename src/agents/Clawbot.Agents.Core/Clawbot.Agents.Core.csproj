@@ -12,6 +12,7 @@
     <PackageReference Include="MathNet.Numerics" />
     <PackageReference Include="Microsoft.ML" />
     <PackageReference Include="Microsoft.ML.TimeSeries" />
+    <PackageReference Include="Microsoft.SemanticKernel" />
     <PackageReference Include="QuestPDF" />
     <PackageReference Include="QRCoder" />
     <PackageReference Include="OpenCCNET" />

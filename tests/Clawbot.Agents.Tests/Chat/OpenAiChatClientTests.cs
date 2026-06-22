@@ -59,6 +59,31 @@ public sealed class OpenAiChatClientTests
         final.Model.Should().Be("gpt-test");
     }
 
+    [Fact]
+    public async Task CompleteAsync_uses_default_rates_when_config_rates_are_missing()
+    {
+        var handler = new StubHandler(CompletionJson);
+        var options = new OpenAIClientOptions
+        {
+            Transport = new HttpClientPipelineTransport(new HttpClient(handler)),
+        };
+        var chatClient = new ChatClient("gpt-test", new ApiKeyCredential("test-key"), options);
+        var config = new ResolvedLlmConfig(
+            Provider: "openai",
+            Model: "gpt-test",
+            ApiKey: "test-key",
+            BaseUrl: null,
+            MaxTokens: 256,
+            Temperature: 0.5m,
+            InputUsdPer1M: null,
+            OutputUsdPer1M: null);
+        var sut = new OpenAiChatClient(chatClient, config);
+
+        var reply = await sut.CompleteAsync("system prompt", Array.Empty<ChatTurn>(), "new question");
+
+        reply.UsdCost.Should().Be(0.0009m);
+    }
+
     private static OpenAiChatClient CreateClient(out StubHandler handler)
     {
         handler = new StubHandler(CompletionJson);

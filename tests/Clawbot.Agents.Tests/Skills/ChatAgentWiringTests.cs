@@ -152,6 +152,66 @@ public sealed class ChatAgentWiringTests
     }
 
     [Fact]
+    public async Task ReplyAsync_redacts_history_before_claude_call()
+    {
+        var pii = Substitute.For<IPiiRedactor>();
+        pii.RedactAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => new RedactionResult(
+                ci.ArgAt<string>(0).Replace("0912345678", "[PHONE]", StringComparison.Ordinal),
+                Array.Empty<PiiSpan>()));
+        var claude = Substitute.For<IClaudeChatClient>();
+        claude.CompleteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ClaudeReply("ok", 1, 1, 0.001m));
+        var sut = CreateAgent(pii: pii, claude: claude);
+
+        await sut.ReplyAsync(new ChatAgentRequest(
+            Guid.NewGuid(),
+            null,
+            null,
+            "new 0912345678",
+            [new ChatTurn("user", "old 0912345678")]));
+
+        await claude.Received(1).CompleteAsync(
+            Arg.Any<string>(),
+            Arg.Is<IReadOnlyList<ChatTurn>>(turns =>
+                turns.Count == 1 && turns[0].Content == "old [PHONE]"),
+            "new [PHONE]",
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StreamReplyAsync_redacts_history_before_claude_call()
+    {
+        var pii = Substitute.For<IPiiRedactor>();
+        pii.RedactAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => new RedactionResult(
+                ci.ArgAt<string>(0).Replace("0912345678", "[PHONE]", StringComparison.Ordinal),
+                Array.Empty<PiiSpan>()));
+        var claude = Substitute.For<IClaudeChatClient>();
+        claude.StreamAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Stream(new ClaudeStreamChunk(string.Empty, Final: true, 1, 1, 0.001m, "m")));
+        var sut = CreateAgent(pii: pii, claude: claude);
+
+        var chunks = new List<ChatAgentStreamChunk>();
+        await foreach (var chunk in sut.StreamReplyAsync(new ChatAgentRequest(
+                           Guid.NewGuid(),
+                           null,
+                           null,
+                           "new 0912345678",
+                           [new ChatTurn("user", "old 0912345678")])))
+        {
+            chunks.Add(chunk);
+        }
+
+        _ = claude.Received(1).StreamAsync(
+            Arg.Any<string>(),
+            Arg.Is<IReadOnlyList<ChatTurn>>(turns =>
+                turns.Count == 1 && turns[0].Content == "old [PHONE]"),
+            "new [PHONE]",
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Cost_cap_blocks_claude_call_before_generation()
     {
         var tenant = Guid.NewGuid();
@@ -241,6 +301,15 @@ public sealed class ChatAgentWiringTests
         spam.EvaluateAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(new SpamSignal(false, 0f, null));
         return spam;
+    }
+
+    private static async IAsyncEnumerable<ClaudeStreamChunk> Stream(params ClaudeStreamChunk[] chunks)
+    {
+        foreach (var chunk in chunks)
+        {
+            await Task.Yield();
+            yield return chunk;
+        }
     }
 
     private static IClaudeChatClient SafeClaude()
