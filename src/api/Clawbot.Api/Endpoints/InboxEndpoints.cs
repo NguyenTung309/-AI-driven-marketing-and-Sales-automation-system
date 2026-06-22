@@ -287,7 +287,7 @@ public static class InboxEndpoints
         var userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
         var uid = Guid.Parse(userId!);
         var roleId = user.FindFirstValue("role_id");
-        Guid.TryParse(roleId, out var rid);
+        if (!Guid.TryParse(roleId, out var rid)) rid = Guid.Empty;
         var perms = await permResolver.GetPermissionsAsync(rid, ct);
         var isAdmin = perms.Contains("admin:inboxes");
 
@@ -329,3 +329,5 @@ public static class InboxEndpoints
     }
 
 }
+
+

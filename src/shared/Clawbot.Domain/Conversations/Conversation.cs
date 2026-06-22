@@ -56,6 +56,22 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
         LastMessageAt = sentAt;
         return msg;
     }
+
+    public void ReopenIfNeeded()
+    {
+        if (Status != "snoozed" && Status != "resolved") return;
+        Status = "open";
+        SnoozedUntil = null;
+    }
+
+    public void Snooze(DateTimeOffset until)
+    {
+        Status = "snoozed";
+        SnoozedUntil = until;
+    }
+
 }
+
+
 
 
