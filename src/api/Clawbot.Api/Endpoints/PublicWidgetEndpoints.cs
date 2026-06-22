@@ -1,4 +1,4 @@
-using Clawbot.Agents.Core.Lead;
+﻿using Clawbot.Agents.Core.Lead;
 using Clawbot.Api.Contracts.Tenants;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
@@ -34,9 +34,9 @@ public static class PublicWidgetEndpoints
     private const string SourcePlatform = "web-widget";
     private static readonly string[] SuggestedQuestions =
     [
-        "Tư vấn khóa HSK phù hợp",
-        "Đặt lịch kiểm tra đầu vào",
-        "Nhận học phí và ưu đãi mới nhất",
+        "TÆ° váº¥n khÃ³a HSK phÃ¹ há»£p",
+        "Äáº·t lá»‹ch kiá»ƒm tra Ä‘áº§u vÃ o",
+        "Nháº­n há»c phÃ­ vÃ  Æ°u Ä‘Ã£i má»›i nháº¥t",
     ];
 
     public static IEndpointRouteBuilder MapPublicWidget(this IEndpointRouteBuilder app)
@@ -115,12 +115,15 @@ public static class PublicWidgetEndpoints
         var lead = await FindOrCreateLeadAsync(db, tenant.Id, contact.Id, assignment, now, ct);
         var conversation = await FindOrCreateConversationAsync(db, tenant.Id, contact.Id, now, ct);
 
+        if (conversation.Status == "snoozed" || conversation.Status == "resolved")
+            conversation.ReopenIfNeeded();
+
         var visitorText = string.IsNullOrWhiteSpace(req.Message)
-            ? $"Tôi muốn được tư vấn. Số điện thoại: {req.Phone.Trim()}"
+            ? $"TÃ´i muá»‘n Ä‘Æ°á»£c tÆ° váº¥n. Sá»‘ Ä‘iá»‡n thoáº¡i: {req.Phone.Trim()}"
             : req.Message.Trim();
         var inbound = conversation.AppendMessage("in", "visitor", visitorText, "text", now);
 
-        const string reply = "Cảm ơn bạn. Học Bá đã ghi nhận thông tin và đội tư vấn sẽ liên hệ trong thời gian sớm nhất.";
+        const string reply = "Cáº£m Æ¡n báº¡n. Há»c BÃ¡ Ä‘Ã£ ghi nháº­n thÃ´ng tin vÃ  Ä‘á»™i tÆ° váº¥n sáº½ liÃªn há»‡ trong thá»i gian sá»›m nháº¥t.";
         var outbound = conversation.AppendMessage("out", "bot", reply, "text", now.AddMilliseconds(1));
 
         await db.SaveChangesAsync(ct);
@@ -151,7 +154,7 @@ public static class PublicWidgetEndpoints
 
         var now = clock.UtcNow;
         var inbound = conversation.AppendMessage("in", "visitor", req.Content.Trim(), "text", now);
-        const string reply = "Mình đã nhận được tin nhắn. Nếu cần tư vấn gấp, bạn vui lòng để lại số điện thoại trong khung chat.";
+        const string reply = "MÃ¬nh Ä‘Ã£ nháº­n Ä‘Æ°á»£c tin nháº¯n. Náº¿u cáº§n tÆ° váº¥n gáº¥p, báº¡n vui lÃ²ng Ä‘á»ƒ láº¡i sá»‘ Ä‘iá»‡n thoáº¡i trong khung chat.";
         var outbound = conversation.AppendMessage("out", "bot", reply, "text", now.AddMilliseconds(1));
 
         await db.SaveChangesAsync(ct);
@@ -175,7 +178,7 @@ public static class PublicWidgetEndpoints
     {
         var phone = req.Phone.Trim();
         var email = string.IsNullOrWhiteSpace(req.Email) ? null : req.Email.Trim();
-        var displayName = string.IsNullOrWhiteSpace(req.DisplayName) ? $"Khách {phone}" : req.DisplayName.Trim();
+        var displayName = string.IsNullOrWhiteSpace(req.DisplayName) ? $"KhÃ¡ch {phone}" : req.DisplayName.Trim();
 
         var contact = await db.Contacts
             .IgnoreQueryFilters()
@@ -272,3 +275,4 @@ public static class PublicWidgetEndpoints
             conversation.LastMessageAt), ct);
     }
 }
+

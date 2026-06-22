@@ -1,4 +1,4 @@
-using Clawbot.Domain.Common;
+﻿using Clawbot.Domain.Common;
 
 namespace Clawbot.Domain.Conversations;
 
@@ -12,9 +12,12 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
     public string ExternalThreadId { get; private set; } = string.Empty;
     public string Status { get; private set; } = "open";
     public Guid? AssignedTo { get; private set; }
+    public DateTimeOffset? SnoozedUntil { get; private set; }
     public DateTimeOffset? LastMessageAt { get; private set; }
+    public Guid? InboxId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? DeletedAt { get; private set; }
+    public byte[]? RowVersion { get; private set; }
 
     public IReadOnlyCollection<Message> Messages => _messages.AsReadOnly();
 
@@ -54,3 +57,5 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
         return msg;
     }
 }
+
+
