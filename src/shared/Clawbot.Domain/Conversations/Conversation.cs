@@ -57,6 +57,8 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
         return msg;
     }
 
+    public void Unassign() => AssignedTo = null;
+
     public void ReopenIfNeeded()
     {
         if (Status != "snoozed" && Status != "resolved") return;
@@ -71,6 +73,7 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
     }
 
 }
+
 
 
 

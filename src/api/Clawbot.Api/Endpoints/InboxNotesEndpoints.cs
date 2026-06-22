@@ -49,7 +49,7 @@ public static class InboxNotesEndpoints
 
     private static async Task<IResult> CreateAsync(
         Guid conversationId, CreateNoteRequest body,
-        AppDbContext db, ITenantAccessor tenants, ClaimsPrincipal user, CancellationToken ct)
+        AppDbContext db, ITenantAccessor tenants, ClaimsPrincipal user, IPermissionResolver permResolver, CancellationToken ct)
     {
         var tenant = tenants.Require();
 
@@ -102,14 +102,6 @@ public static class InboxNotesEndpoints
         AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
     {
         var tenant = tenants.Require();
-
-        var roleNoteUpd = user.FindFirstValue("role_id");
-        if (Guid.TryParse(roleNoteUpd, out var ridNoteUpd))
-        {
-            var permsNoteUpd = await permResolver.GetPermissionsAsync(ridNoteUpd, ct);
-            if (permsNoteUpd.Contains("admin:inboxes"))
-                return Results.Forbid();
-        }
 
         var note = await db.ConversationNotes
             .FirstOrDefaultAsync(n => n.Id == id && n.TenantId == tenant.TenantId && n.ConversationId == conversationId, ct);

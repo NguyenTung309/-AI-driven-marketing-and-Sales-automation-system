@@ -9,6 +9,7 @@ using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Clawbot.Domain.Security;
 
 namespace Clawbot.Api.Endpoints;
 
@@ -62,7 +63,7 @@ public static class AdminInboxEndpoints
                 .Where(c => c.InboxId == id && oldIds.Contains(c.AssignedTo!.Value))
                 .ToListAsync(ct);
             foreach (var conv in conversations)
-                conv.Assign(null);
+                conv.Unassign();
 
             db.InboxMembers.RemoveRange(currentMembers);
             await db.SaveChangesAsync(ct);
@@ -81,7 +82,7 @@ public static class AdminInboxEndpoints
             .Where(c => c.InboxId == id && oldMembers.Contains(c.AssignedTo!.Value))
             .ToListAsync(ct);
         foreach (var conv in oldConvs)
-            conv.Assign(null);
+            conv.Unassign();
 
         await db.SaveChangesAsync(ct);
         foreach (var oldId in oldMembers)
@@ -114,19 +115,14 @@ public static class AdminInboxEndpoints
             .Where(c => c.InboxId == id && c.AssignedTo.HasValue && oldMembers.Contains(c.AssignedTo.Value))
             .ToListAsync(ct);
         foreach (var conv in convs)
-            conv.Assign(null);
+            conv.Unassign();
 
         await db.SaveChangesAsync(ct);
 
         // Audit log
-        db.AuditLogs.Add(new AuditLog
-        {
-            Id = Guid.NewGuid(), TenantId = tenantId, UserId = adminUserId,
-            Action = "inbox:reassign", EntityType = "Inbox", EntityId = id.ToString(),
-            OldValue = JsonSerializer.Serialize(new { AgentIds = oldMembers }),
-            NewValue = JsonSerializer.Serialize(new { AgentIds = new[] { body.NewAgentId } }),
-            CreatedAt = clock.UtcNow
-        });
+        db.AuditLogs.Add(AuditLog.Create(
+            tenantId, adminUserId, "inbox:reassign", "Inbox", id, clock.UtcNow,
+            JsonSerializer.Serialize(new { OldAgentIds = oldMembers, NewAgentId = body.NewAgentId })));
         await db.SaveChangesAsync(ct);
 
         foreach (var oldId in oldMembers)
