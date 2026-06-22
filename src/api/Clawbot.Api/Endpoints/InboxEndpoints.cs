@@ -260,6 +260,20 @@ public static class InboxEndpoints
         if (inboxIds.Count > 0 && conv.InboxId.HasValue && !inboxIds.Contains(conv.InboxId.Value))
             return Results.Forbid();
 
+        var roleIdStr = user.FindFirstValue("role_id");
+        if (Guid.TryParse(roleIdStr, out var adminRoleId))
+        {
+            var adminPerms = await permResolver.GetPermissionsAsync(adminRoleId, ct);
+            if (adminPerms.Contains("admin:inboxes"))
+            {
+                var adminUid = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+                var isMember = await db.InboxMembers
+                    .AnyAsync(m => m.AgentId == adminUid && m.InboxId == conv.InboxId, ct);
+                if (!isMember)
+                    return Results.Forbid();
+            }
+        }
+
         try { await safety.EnsureAllowedAsync(body.Content, ct).ConfigureAwait(false); }
         catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
