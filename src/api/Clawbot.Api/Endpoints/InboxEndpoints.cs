@@ -279,7 +279,7 @@ public static class InboxEndpoints
         catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
         await adapter.SendAsync(conv.ExternalThreadId, body.Content, ct).ConfigureAwait(false);
-        var msg = conv.AppendMessage("out", "user", body.Content, body.ContentType, clock.UtcNow, senderUserId: uid);
+        var msg = conv.AppendMessage("out", "user", body.Content, body.ContentType, clock.UtcNow, senderUserId: Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!));
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await notifier.NotifyMessageAsync(tenant.TenantId,
@@ -391,7 +391,7 @@ public static class InboxEndpoints
             messagesSent,
             openConversations,
             closeRate,
-            date = todayStart.ToString("yyyy-MM-dd"),
+            date = todayStart.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
         });
     }
 }
