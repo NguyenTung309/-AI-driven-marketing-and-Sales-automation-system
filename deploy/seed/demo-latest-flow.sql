@@ -14,7 +14,7 @@
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
-DECLARE @tenant_slug NVARCHAR(64) = N'demo'; -- <-- CHANGE to the staging demo tenant slug
+DECLARE @tenant_slug NVARCHAR(64) = N'$(TenantSlug)'; -- <-- CHANGE to the staging demo tenant slug
 DECLARE @tenant_id UNIQUEIDENTIFIER = (SELECT TOP 1 id FROM tenants WHERE slug = @tenant_slug AND deleted_at IS NULL);
 DECLARE @now DATETIMEOFFSET = SYSDATETIMEOFFSET();
 DECLARE @base_time DATETIMEOFFSET = DATETIMEOFFSETFROMPARTS(2026, 6, 23, 9, 0, 0, 0, 7, 0, 7);

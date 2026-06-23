@@ -15,7 +15,7 @@
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
-DECLARE @tenant_slug NVARCHAR(64) = N'demo';   -- <-- CHANGE to the target tenant slug
+DECLARE @tenant_slug NVARCHAR(64) = N'$(TenantSlug)';   -- <-- CHANGE to the target tenant slug
 DECLARE @tenant_id UNIQUEIDENTIFIER = (SELECT id FROM tenants WHERE slug = @tenant_slug);
 DECLARE @expected_rows INT = 50;
 
