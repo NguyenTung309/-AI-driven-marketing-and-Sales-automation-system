@@ -1,4 +1,4 @@
-import { AxiosError } from "axios";
+﻿import { AxiosError } from "axios";
 import { apiClient } from "./client";
 import type { TenantBranding } from "./publicWidget";
 
@@ -228,4 +228,41 @@ export async function listAuditLogs(params?: {
 }): Promise<PagedResponse<AuditLog>> {
   const res = await apiClient.get<PagedResponse<AuditLog>>("/api/admin/audit-logs", { params });
   return res.data;
+}
+
+// --- Channel Management ---
+
+export interface SimpleUser {
+  readonly id: string;
+  readonly displayName: string;
+  readonly email: string;
+}
+
+export interface InboxItem {
+  readonly id: string;
+  readonly name: string;
+  readonly platform: string;
+  readonly externalPageId: string;
+  readonly isActive: boolean;
+  readonly createdAt: string;
+  readonly memberCount: number;
+}
+
+export async function getSimpleUserList(): Promise<readonly SimpleUser[]> {
+  const res = await apiClient.get<readonly SimpleUser[]>("/api/admin/users/simple");
+  return res.data;
+}
+
+export async function listInboxes(): Promise<readonly InboxItem[]> {
+  const res = await apiClient.get<readonly InboxItem[]>("/api/admin/inboxes");
+  return res.data;
+}
+
+export async function getInboxMembers(inboxId: string): Promise<readonly string[]> {
+  const res = await apiClient.get<readonly string[]>(`/api/admin/inboxes/${inboxId}/members`);
+  return res.data;
+}
+
+export async function updateInboxMembers(inboxId: string, agentIds: readonly string[]): Promise<void> {
+  await apiClient.put(`/api/admin/inboxes/${inboxId}/members`, { agentIds });
 }
