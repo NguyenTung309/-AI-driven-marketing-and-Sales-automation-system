@@ -23,6 +23,7 @@ export default function AgentHubLayout() {
 
   const meQuery = useQuery({ queryKey: ["me"], queryFn: getMe });
   const meId = meQuery.data?.sub;
+  const isAdmin = meQuery.data?.permissions?.includes("admin:inboxes") ?? false;
 
   // Load channel list if we have channelId (for header name)
   const channelsQuery = useQuery({
@@ -101,6 +102,11 @@ export default function AgentHubLayout() {
 
   return (
     <AppShell title={title}>
+      {isAdmin && (
+        <div className="mx-4 mt-2 rounded-lg bg-warning-container px-3 py-1.5 text-label-sm text-on-warning-container">
+          Xem chi doc ? Ban co quyen admin, khong the gui tin nhan.
+        </div>
+      )}
       <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
         {/* Left panel: conversation list */}
         <aside className="w-[320px] shrink-0 border-r border-outline bg-surface-container-lowest flex flex-col">
@@ -189,20 +195,24 @@ export default function AgentHubLayout() {
                 />
               </div>
 
-              {/* Quick actions */}
-              <QuickActionBar
-                conversationId={activeId}
-                status={activeConv?.status ?? "open"}
-                onResolve={() => resolveMutation.mutate()}
-                onAssign={() => assignMutation.mutate()}
-              />
+              {!isAdmin && (
+                <>
+                  {/* Quick actions */}
+                  <QuickActionBar
+                    conversationId={activeId}
+                    status={activeConv?.status ?? "open"}
+                    onResolve={() => resolveMutation.mutate()}
+                    onAssign={() => assignMutation.mutate()}
+                  />
 
-              {/* Composer */}
-              <ComposerWithAI
-                conversationId={activeId}
-                onSend={handleSend}
-                disabled={activeConv?.status === "resolved" || sendMutation.isPending}
-              />
+                  {/* Composer */}
+                  <ComposerWithAI
+                    conversationId={activeId}
+                    onSend={handleSend}
+                    disabled={activeConv?.status === "resolved" || sendMutation.isPending}
+                  />
+                </>
+              )}
             </>
           )}
         </main>
