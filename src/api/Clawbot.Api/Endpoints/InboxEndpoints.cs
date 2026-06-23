@@ -33,6 +33,7 @@ public static class InboxEndpoints
         grp.MapPost("/conversations/{id:guid}/escalate", EscalateAsync).RequirePermission("conversations:write");
         grp.MapPost("/conversations/{id:guid}/messages", SendOutboundAsync).RequirePermission("conversations:write");
         grp.MapGet("/channels", ListChannelsAsync).RequirePermission("conversations:read");
+        grp.MapGet("/daily-summary", DailySummaryAsync).RequirePermission("conversations:read");
 
         return app;
     }
@@ -342,6 +343,57 @@ public static class InboxEndpoints
         return Results.Ok(channels);
     }
 
+
+    private static async Task<IResult> DailySummaryAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        ClaimsPrincipal user,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userId, out var uid))
+            return Results.Unauthorized();
+
+        var todayStart = clock.UtcNow.Date;
+        var todayEnd = todayStart.AddDays(1);
+
+        var conversationsHandled = await db.Conversations
+            .CountAsync(c => c.TenantId == tenant.TenantId
+                && c.AssignedTo == uid
+                && c.LastMessageAt >= todayStart
+                && c.LastMessageAt < todayEnd, ct);
+
+        var messagesSent = await db.Messages
+            .CountAsync(m => m.SenderUserId == uid
+                && m.Direction == "outbound"
+                && m.SentAt >= todayStart
+                && m.SentAt < todayEnd, ct);
+
+        var openConversations = await db.Conversations
+            .CountAsync(c => c.TenantId == tenant.TenantId
+                && c.AssignedTo == uid
+                && c.Status == "open", ct);
+
+        var totalHandled = await db.Conversations
+            .CountAsync(c => c.TenantId == tenant.TenantId
+                && c.AssignedTo == uid
+                && c.Status == "resolved", ct);
+
+        var closeRate = totalHandled > 0
+            ? (int)Math.Round((double)conversationsHandled / totalHandled * 100)
+            : 0;
+
+        return Results.Ok(new
+        {
+            conversationsHandled,
+            messagesSent,
+            openConversations,
+            closeRate,
+            date = todayStart.ToString("yyyy-MM-dd"),
+        });
+    }
 }
 
 

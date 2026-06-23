@@ -11,6 +11,20 @@ export interface InboxChannel {
   readonly memberDisplayName: string | null;
 }
 
+
+export interface DailySummary {
+  readonly conversationsHandled: number;
+  readonly messagesSent: number;
+  readonly openConversations: number;
+  readonly closeRate: number;
+  readonly date: string;
+}
+
+export async function getDailySummary(): Promise<DailySummary> {
+  const res = await apiClient.get<DailySummary>("/api/inbox/daily-summary");
+  return res.data;
+}
+
 export async function listChannels(): Promise<readonly InboxChannel[]> {
   const res = await apiClient.get<readonly InboxChannel[]>("/api/inbox/channels");
   return res.data;
