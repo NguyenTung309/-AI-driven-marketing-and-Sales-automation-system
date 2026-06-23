@@ -137,7 +137,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
         builder.AddInboxStateEntity();
 
-        modelBuilder.Entity<InboxMember>(e =>
+        builder.Entity<InboxMember>(e =>
         {
             e.HasIndex(m => m.InboxId).IsUnique().HasDatabaseName("uq_inbox_members_inbox");
         });
@@ -176,4 +176,5 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
         builder.Entity<TEntity>().HasQueryFilter(e => e.TenantId == CurrentTenantId);
     }
 }
+
 

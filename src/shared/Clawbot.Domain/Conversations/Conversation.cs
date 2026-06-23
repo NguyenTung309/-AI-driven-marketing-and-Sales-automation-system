@@ -49,9 +49,9 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
         Raise(new Events.ConversationEscalated(TenantId, Id, DateTimeOffset.UtcNow));
     }
 
-    public Message AppendMessage(string direction, string senderType, string content, string contentType, DateTimeOffset sentAt, string? externalMessageId = null, string? originalContent = null, string? redactedContent = null, string messageType = "text", string? parentPostId = null)
+    public Message AppendMessage(string direction, string senderType, string content, string contentType, DateTimeOffset sentAt, Guid? senderUserId = null, string? externalMessageId = null, string? originalContent = null, string? redactedContent = null, string messageType = "text", string? parentPostId = null)
     {
-        var msg = Message.Create(Id, TenantId, direction, senderType, content, contentType, sentAt, externalMessageId, originalContent, redactedContent, messageType, parentPostId);
+        var msg = Message.Create(Id, TenantId, direction, senderType, content, contentType, sentAt, senderUserId, externalMessageId, originalContent, redactedContent, messageType, parentPostId);
         _messages.Add(msg);
         LastMessageAt = sentAt;
         return msg;

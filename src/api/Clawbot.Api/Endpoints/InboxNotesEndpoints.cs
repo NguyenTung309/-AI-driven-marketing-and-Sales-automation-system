@@ -64,9 +64,14 @@ public static class InboxNotesEndpoints
         var userId = CurrentUserId(user);
         if (userId is null) return Results.BadRequest(new { error = "invalid_user" });
 
+        var userDisplayName = await db.Users
+            .Where(u => u.Id == userId.Value)
+            .Select(u => u.DisplayName)
+            .FirstOrDefaultAsync(ct) ?? "Unknown";
+
         var note = ConversationNote.Create(
             tenant.TenantId, conversationId, userId.Value,
-            body.Content, body.CreatedByName, body.Type ?? "private");
+            body.Content, userDisplayName, body.Type ?? "private");
         db.ConversationNotes.Add(note);
         await db.SaveChangesAsync(ct);
         return Results.Created($"/api/inbox/conversations/{conversationId}/notes/{note.Id}",

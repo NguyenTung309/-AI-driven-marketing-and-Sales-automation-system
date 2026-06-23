@@ -560,3 +560,71 @@ public sealed class KpiForecastConfiguration : IEntityTypeConfiguration<KpiForec
         builder.HasIndex(x => new { x.TenantId, x.Metric, x.ForecastDate });
     }
 }
+
+public sealed class InboxConfiguration : IEntityTypeConfiguration<Inbox>
+{
+    public void Configure(EntityTypeBuilder<Inbox> builder)
+    {
+        builder.ToTable("inboxes");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Name).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.ExternalPageId).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.AvatarUrl).HasMaxLength(512);
+        builder.HasIndex(x => new { x.TenantId, x.Platform, x.ExternalPageId }).HasFilter("is_active = 1");
+    }
+}
+
+public sealed class InboxMemberConfiguration : IEntityTypeConfiguration<InboxMember>
+{
+    public void Configure(EntityTypeBuilder<InboxMember> builder)
+    {
+        builder.ToTable("inbox_members");
+        builder.HasKey(x => new { x.InboxId, x.AgentId });
+        builder.HasOne<Inbox>().WithMany().HasForeignKey(x => x.InboxId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class ChannelTokenConfiguration : IEntityTypeConfiguration<ChannelToken>
+{
+    public void Configure(EntityTypeBuilder<ChannelToken> builder)
+    {
+        builder.ToTable("channel_tokens");
+        builder.HasKey(x => x.InboxId);
+        builder.HasOne<Inbox>().WithOne().HasForeignKey<ChannelToken>(x => x.InboxId).OnDelete(DeleteBehavior.Cascade);
+        builder.Property(x => x.AccessTokenEncrypted).IsRequired();
+        builder.Property(x => x.WebhookSecretEncrypted).IsRequired();
+    }
+}
+
+public sealed class LabelConfiguration : IEntityTypeConfiguration<Label>
+{
+    public void Configure(EntityTypeBuilder<Label> builder)
+    {
+        builder.ToTable("labels");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Name).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.Color).HasMaxLength(32).IsRequired();
+    }
+}
+
+public sealed class ConversationLabelConfiguration : IEntityTypeConfiguration<ConversationLabel>
+{
+    public void Configure(EntityTypeBuilder<ConversationLabel> builder)
+    {
+        builder.ToTable("conversation_labels");
+        builder.HasKey(x => new { x.ConversationId, x.LabelId });
+    }
+}
+
+public sealed class ConversationNoteConfiguration : IEntityTypeConfiguration<ConversationNote>
+{
+    public void Configure(EntityTypeBuilder<ConversationNote> builder)
+    {
+        builder.ToTable("conversation_notes");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Content).IsRequired();
+        builder.Property(x => x.Type).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.CreatedByDisplayName).HasMaxLength(256);
+    }
+}

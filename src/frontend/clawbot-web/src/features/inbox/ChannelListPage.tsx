@@ -14,7 +14,7 @@ export default function ChannelListPage() {
   });
 
   function handleSelect(channel: InboxChannel) {
-    navigate(/inbox/);
+    navigate(`/inbox/${channel.id}`);
   }
 
   return (

@@ -14,16 +14,42 @@ import {
 import ChatMessageThread from "./ChatMessageThread";
 import ComposerWithAI from "./ComposerWithAI";
 import QuickActionBar from "./QuickActionBar";
+import ConversationTabs from "./ConversationTabs";
+import CommandPalette from "./CommandPalette";
+import SideDrawer from "./SideDrawer";
+import DailySummaryPopup from "./DailySummaryPopup";
 
 export default function AgentHubLayout() {
   const { channelId } = useParams<{ channelId?: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
+  const [tabs, setTabs] = useState<string[]>([]);
 
   const meQuery = useQuery({ queryKey: ["me"], queryFn: getMe });
   const meId = meQuery.data?.sub;
   const isAdmin = meQuery.data?.permissions?.includes("admin:inboxes") ?? false;
+
+  // Ctrl+K for command palette
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setCommandOpen(true);
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, []);
+
+  // Detect daily summary from URL (/?summary=)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("summary")) setShowSummary(true);
+  }, []);
 
   // Load channel list if we have channelId (for header name)
   const channelsQuery = useQuery({
@@ -86,6 +112,15 @@ export default function AgentHubLayout() {
 
   function selectConversation(id: string) {
     setActiveId(id);
+    setTabs((prev) => {
+      if (prev.includes(id)) return prev;
+      return [...prev, id];
+    });
+  }
+
+  function closeTab(id: string) {
+    setTabs((prev) => prev.filter((t) => t !== id));
+    if (activeId === id) setActiveId(tabs.filter((t) => t !== id)[0] ?? null);
   }
 
   function statusColor(status: string): string {
@@ -171,21 +206,12 @@ export default function AgentHubLayout() {
             </div>
           ) : (
             <>
-              {/* Tab bar */}
-              <div className="flex items-center gap-2 border-b border-outline bg-surface-container-lowest px-4 py-2">
-                {activeItem ? (
-                  <div className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-1.5">
-                    <span className="font-semibold text-label-sm text-primary">
-                      {activeItem.contactDisplayName ?? activeItem.externalThreadId}
-                    </span>
-                    <button type="button" onClick={() => setActiveId(null)} className="ml-1 text-on-surface-variant hover:text-secondary">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="size-4">
-                        <path d="M18 6 6 18M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                ) : null}
-              </div>
+              <ConversationTabs
+                conversations={tabs.map((tid) => conversations.find((c) => c.id === tid)).filter(Boolean) as ConversationListItem[]}
+                activeId={activeId}
+                onSelect={selectConversation}
+                onClose={closeTab}
+              />
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto">
@@ -216,7 +242,37 @@ export default function AgentHubLayout() {
             </>
           )}
         </main>
+
+        {/* Side drawer */}
+        {activeConv && (
+          <SideDrawer
+            open={drawerOpen}
+            onClose={() => setDrawerOpen(false)}
+            contactDisplayName={activeConv.contactDisplayName}
+            contactId={activeConv.contactId}
+            platform={activeConv.platform}
+          />
+        )}
+
+        {/* Drawer toggle button */}
+        {activeId && (
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(!drawerOpen)}
+            className="fixed bottom-4 right-4 z-20 flex size-10 items-center justify-center rounded-full bg-primary text-on-primary shadow-lg md:hidden"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
+            </svg>
+          </button>
+        )}
       </div>
+
+      {/* Command palette */}
+      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
+
+      {/* Daily summary popup */}
+      {showSummary && <DailySummaryPopup onClose={() => setShowSummary(false)} />}
     </AppShell>
   );
 }

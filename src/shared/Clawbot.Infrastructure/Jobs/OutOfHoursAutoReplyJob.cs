@@ -78,8 +78,8 @@ public sealed partial class OutOfHoursAutoReplyJob(
         IEnumerable<Guid> tenantIds,
         CancellationToken ct)
     {
-        var ids = tenantIds.ToArray();
-        if (ids.Length == 0)
+        var ids = tenantIds.ToList();
+        if (ids.Count == 0)
             return new Dictionary<Guid, OutOfHoursSettings>();
 
         var configs = await db.AgentConfigs.IgnoreQueryFilters()

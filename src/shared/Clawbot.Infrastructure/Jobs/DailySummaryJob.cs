@@ -36,7 +36,7 @@ public sealed class DailySummaryJob(
 
             var messagesSent = await db.Messages
                 .CountAsync(m => m.SenderUserId == saleId
-                    && m.Direction == "outbound"
+                    && m.Direction == "out"
                     && m.SentAt >= todayStart
                     && m.SentAt < todayEnd, ct);
 

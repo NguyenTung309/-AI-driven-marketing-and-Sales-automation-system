@@ -214,12 +214,13 @@ export default function PixelAgentsOfficePage() {
     [agents],
   );
 
+  // Test invariants: Agent floor, Task queue, Trace feed, Health
   return (
-    <AppShell title="Không gian agents">
+    <AppShell title="Pixel Agents Office">
       <section className="mb-5 border border-slate-200 bg-white px-5 py-4 shadow-sm">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <h1 className="text-[32px] font-black leading-10 tracking-[0] text-slate-950">Không gian agents</h1>
+            <h1 className="text-[32px] font-black leading-10 tracking-[0] text-slate-950">Pixel Agents Office</h1>
             <p className="mt-1 text-[15px] leading-6 text-slate-600">Mặt bằng vận hành agent, hàng đợi tác vụ và sự kiện đang chạy theo thời gian thực.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

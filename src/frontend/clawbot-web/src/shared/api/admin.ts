@@ -264,6 +264,6 @@ export async function getInboxMembers(inboxId: string): Promise<readonly string[
   return res.data;
 }
 
-export async function updateInboxMembers(inboxId: string, agentIds: readonly string[]): Promise<void> {
+export async function updateInboxMember(inboxId: string, agentIds: readonly string[]): Promise<void> {
   await apiClient.put(`/api/admin/inboxes/${inboxId}/members`, { agentIds });
 }

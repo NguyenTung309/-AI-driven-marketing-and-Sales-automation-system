@@ -34,7 +34,7 @@ export function checkTone(content: string): ToneCheckResult {
   }
 
   // Check consecutive exclamation/question marks
-  if (/[{2,}|?{2,}/.test(content)) {
+  if (/!{2,}|\?{2,}/.test(content)) {
     return {
       hasIssue: true,
       message: "Tin nhan co nhieu dau cau, co the gay ap luc cho khach.",

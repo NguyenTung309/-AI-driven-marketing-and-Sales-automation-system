@@ -279,7 +279,7 @@ public static class InboxEndpoints
         catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
         await adapter.SendAsync(conv.ExternalThreadId, body.Content, ct).ConfigureAwait(false);
-        var msg = conv.AppendMessage("out", "user", body.Content, body.ContentType, clock.UtcNow);
+        var msg = conv.AppendMessage("out", "user", body.Content, body.ContentType, clock.UtcNow, senderUserId: uid);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await notifier.NotifyMessageAsync(tenant.TenantId,
@@ -367,7 +367,7 @@ public static class InboxEndpoints
 
         var messagesSent = await db.Messages
             .CountAsync(m => m.SenderUserId == uid
-                && m.Direction == "outbound"
+                && m.Direction == "out"
                 && m.SentAt >= todayStart
                 && m.SentAt < todayEnd, ct);
 

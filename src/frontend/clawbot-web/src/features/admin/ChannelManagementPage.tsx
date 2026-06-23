@@ -63,7 +63,8 @@ export default function ChannelManagementPage() {
     },
     onSuccess: () => {
       setEditInboxId(null);
-      setNotice("Da cap nhat sale cho kenh.");
+      setTokenInput("");
+      setNotice("Da cap nhat kenh.");
       void queryClient.invalidateQueries({ queryKey: ["admin", "inboxes"] });
     },
   });

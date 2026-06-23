@@ -112,6 +112,7 @@ function errorMessage(error: unknown): string {
     if (error.response?.status === 404) return "Không tìm thấy hội thoại.";
     if (error.response?.status === 401) return "Phiên đăng nhập hết hạn hoặc thiếu quyền truy cập.";
     if (error.response?.status === 400) return "Thông tin gửi lên chưa hợp lệ. Vui lòng kiểm tra lại.";
+    if (error.response?.status === 409) return "Dữ liệu đã thay đổi bởi người khác. Vui lòng tải lại hội thoại.";
   }
   return toUserFriendlyError(error, "Không thể kết nối dữ liệu. Vui lòng thử lại.");
 }
@@ -556,21 +557,21 @@ export default function ConversationsPage() {
   });
 
   const assignMutation = useMutation({
-    mutationFn: () => assignConversation(activeConversationId ?? "", meId ?? ""),
+    mutationFn: () => assignConversation(activeConversationId ?? "", meId ?? "", selectedConversation?.rowVersion),
     onSuccess: () => {
       void invalidateActive();
     },
   });
 
   const escalateMutation = useMutation({
-    mutationFn: () => escalateConversation(activeConversationId ?? ""),
+    mutationFn: () => escalateConversation(activeConversationId ?? "", selectedConversation?.rowVersion),
     onSuccess: () => {
       void invalidateActive();
     },
   });
 
   const resolveMutation = useMutation({
-    mutationFn: () => resolveConversation(activeConversationId ?? ""),
+    mutationFn: () => resolveConversation(activeConversationId ?? "", selectedConversation?.rowVersion),
     onSuccess: () => {
       void invalidateActive();
     },

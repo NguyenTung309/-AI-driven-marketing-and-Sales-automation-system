@@ -95,6 +95,7 @@ builder.Services.AddAuthorizationBuilder()
 // PermissionAuthorizationHandler also removed for the same reason.
 
 builder.Services.AddClawbotRateLimiting();
+builder.Services.AddCopilotRateLimiting();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IInboxNotifier, SignalRInboxNotifier>();
 builder.Services.AddScoped<INotificationPublisher, Clawbot.Api.Hubs.DbNotificationPublisher>();
@@ -117,6 +118,7 @@ builder.Services.AddScoped<ReplicationHealthService>();
 builder.Services.AddScoped<ContactDataExportService>();
 builder.Services.AddScoped<ConversationExportService>();
 builder.Services.AddScoped<InboxSearchService>();
+builder.Services.AddScoped<IUserInboxResolver, UserInboxResolver>();
 builder.Services.AddScoped<KbTestRunnerService>();
 builder.Services.AddScoped<LeadCsvService>();
 builder.Services.AddScoped<Clawbot.Agents.Core.Skills.Content.IImagePromptGenerator, Clawbot.Agents.Core.Skills.Content.ClaudeImagePromptGenerator>();
@@ -255,6 +257,10 @@ app.MapRoles();
 app.MapApiKeys();
 app.MapKb();
 app.MapInbox();
+app.MapCopilot();
+app.MapLabels();
+app.MapInboxNotes();
+app.MapInboxLabels();
 app.MapSaleAssist();
 app.MapContent();
 app.MapAds();
@@ -270,6 +276,7 @@ app.MapChannels();
 app.MapWebhooks();
 app.MapContacts();
 app.MapAdmin();
+app.MapAdminInboxEndpoints();
 app.MapTenantBranding();
 app.MapAdminUsers();
 app.MapProfile();
@@ -299,3 +306,4 @@ if (app.Environment.IsDevelopment())
 app.Run();
 
 public partial class Program { }
+

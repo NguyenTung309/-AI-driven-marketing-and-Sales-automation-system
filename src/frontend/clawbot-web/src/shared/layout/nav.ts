@@ -5,19 +5,21 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: readonly NavItem[] = [
-  { icon: "dashboard", label: "Tổng quan", to: "/" },
-  { icon: "person_search", label: "Khách hàng tiềm năng", to: "/leads" },
+  { icon: "dashboard", label: "Tá»•ng quan", to: "/" },
+  { icon: "person_search", label: "KhÃ¡ch hÃ ng tiá»m nÄƒng", to: "/leads" },
   { icon: "all_inbox", label: "Hội thoại đa kênh", to: "/conversations" },
+  { icon: "support_agent", label: "Agent Hub", to: "/agent-hub" },
   { icon: "campaign", label: "Quản lý nội dung", to: "/content" },
-  { icon: "description", label: "Thư viện tài liệu", to: "/documents" },
-  { icon: "monitoring", label: "Báo cáo thống kê", to: "/analytics" },
-  { icon: "notifications", label: "Trung tâm thông báo", to: "/notifications" },
-  { icon: "account_tree", label: "Sơ đồ tiến trình", to: "/workflow" },
-  { icon: "apartment", label: "Không gian agents", to: "/agents-office" },
-  { icon: "receipt_long", label: "Nhật ký tác vụ", to: "/logs" },
-  { icon: "toll", label: "Quản lý chi phí AI", to: "/tokens" },
-  { icon: "inventory_2", label: "Kho tri thức", to: "/kb" },
-  { icon: "settings_suggest", label: "Hướng dẫn agent", to: "/prompts" },
+  { icon: "description", label: "ThÆ° viá»‡n tÃ i liá»‡u", to: "/documents" },
+  { icon: "monitoring", label: "BÃ¡o cÃ¡o thá»‘ng kÃª", to: "/analytics" },
+  { icon: "notifications", label: "Trung tÃ¢m thÃ´ng bÃ¡o", to: "/notifications" },
+  { icon: "account_tree", label: "SÆ¡ Ä‘á»“ tiáº¿n trÃ¬nh", to: "/workflow" },
+  { icon: "apartment", label: "Pixel Agents Office", to: "/agents-office" },
+  { icon: "receipt_long", label: "Nháº­t kÃ½ tÃ¡c vá»¥", to: "/logs" },
+  { icon: "toll", label: "Quáº£n lÃ½ chi phÃ­ AI", to: "/tokens" },
+  { icon: "inventory_2", label: "Kho tri thá»©c", to: "/kb" },
+  { icon: "settings_suggest", label: "HÆ°á»›ng dáº«n agent", to: "/prompts" },
 ];
 
-export const NAV_SYSTEM: NavItem = { icon: "settings", label: "Hệ thống", to: "/system" };
+export const NAV_SYSTEM: NavItem = { icon: "settings", label: "Há»‡ thá»‘ng", to: "/system" };
+export const NAV_CHANNELS: NavItem = { icon: "lan", label: "Kenh giao tiep", to: "/system/channels" };

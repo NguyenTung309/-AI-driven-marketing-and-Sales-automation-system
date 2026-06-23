@@ -14,7 +14,7 @@ export function AppShell({ children, title }: AppShellProps) {
       <Sidebar />
       <div className="flex flex-col md:ml-[260px] min-h-screen">
         <Topbar title={title} />
-        <main className="pt-[80px] p-stack-lg">{children}</main>
+        <main className="pt-[64px] p-stack-lg">{children}</main>
       </div>
     </div>
   );

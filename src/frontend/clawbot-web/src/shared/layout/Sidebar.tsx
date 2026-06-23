@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { NAV_ITEMS, NAV_SYSTEM, type NavItem } from "./nav";
+import { NAV_ITEMS, NAV_SYSTEM, NAV_CHANNELS, type NavItem } from "./nav";
 
 export interface SidebarProps {
   readonly className?: string;
@@ -14,15 +14,15 @@ function itemClass(isActive: boolean): string {
   ].join(" ");
 }
 
-// Fixed 260px Học Bá-Red sidebar (Level: structural anchor, no elevation).
+// Fixed 260px Há»c BÃ¡-Red sidebar (Level: structural anchor, no elevation).
 export function Sidebar({ className = "" }: SidebarProps) {
   return (
     <aside
       className={`bg-primary text-on-primary fixed left-0 top-0 hidden h-full w-[260px] flex-col md:flex z-20 shadow-xl ${className}`}
     >
       <div className="px-gutter py-6 flex flex-col items-start gap-2">
-        <h1 className="text-headline-md font-bold text-white">Học Bá AI</h1>
-        <span className="text-label-caps text-white/70">Trung tâm vận hành AI</span>
+        <h1 className="text-headline-md font-bold text-white">Há»c BÃ¡ AI</h1>
+        <span className="text-label-caps text-white/70">Trung tÃ¢m váº­n hÃ nh AI</span>
       </div>
 
       <nav className="flex-1 mt-stack-md flex flex-col overflow-y-auto">
@@ -32,7 +32,11 @@ export function Sidebar({ className = "" }: SidebarProps) {
             <span className="font-medium">{item.label}</span>
           </NavLink>
         ))}
-        <NavLink to={NAV_SYSTEM.to} className={({ isActive }) => `mt-auto ${itemClass(isActive)}`}>
+        <NavLink to={NAV_CHANNELS.to} className={({ isActive }) => `mt-auto ${itemClass(isActive)}`}>
+          <span aria-hidden="true" className="material-symbols-outlined">{NAV_CHANNELS.icon}</span>
+          <span>{NAV_CHANNELS.label}</span>
+        </NavLink>
+        <NavLink to={NAV_SYSTEM.to} className={({ isActive }) => itemClass(isActive)}>
           <span aria-hidden="true" className="material-symbols-outlined">{NAV_SYSTEM.icon}</span>
           <span>{NAV_SYSTEM.label}</span>
         </NavLink>
@@ -41,7 +45,7 @@ export function Sidebar({ className = "" }: SidebarProps) {
       <div className="px-6 py-4 border-t border-white/10">
         <div className="flex items-center gap-3 text-white/80 text-sm">
           <span aria-hidden="true" className="material-symbols-outlined text-success text-[18px]">dns</span>
-          <span>Hệ thống: Đang hoạt động</span>
+          <span>Há»‡ thá»‘ng: Äang hoáº¡t Ä‘á»™ng</span>
         </div>
       </div>
     </aside>

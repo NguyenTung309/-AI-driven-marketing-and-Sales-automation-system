@@ -1,4 +1,4 @@
-namespace Clawbot.Api.Contracts.Inbox;
+﻿namespace Clawbot.Api.Contracts.Inbox;
 
 public sealed record ConversationListItemDto(
     Guid Id,
@@ -10,6 +10,7 @@ public sealed record ConversationListItemDto(
     Guid? AssignedTo,
     DateTimeOffset? LastMessageAt,
     string? LastMessagePreview,
+    byte[]? RowVersion,
     int UnreadCount);
 
 public sealed record ConversationDetailDto(
@@ -22,6 +23,7 @@ public sealed record ConversationDetailDto(
     Guid? AssignedTo,
     DateTimeOffset? LastMessageAt,
     DateTimeOffset CreatedAt,
+    byte[]? RowVersion,
     IReadOnlyList<MessageDto> Messages);
 
 public sealed record MessageDto(

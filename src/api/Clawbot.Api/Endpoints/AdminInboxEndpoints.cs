@@ -89,7 +89,7 @@ public static class AdminInboxEndpoints
         await db.SaveChangesAsync(ct);
         foreach (var oldId in oldMembers)
             await notifier.NotifyConversationUpdatedAsync(tenantId,
-                new InboxConversationEvent(Guid.Empty, "reassigned", null, null), ct);
+                new InboxConversationEvent(id, "reassigned", null, null), ct);
 
         return Results.NoContent();
     }

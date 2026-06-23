@@ -40,6 +40,9 @@ public sealed partial class ChannelMessageIngestor(
 
         var conversation = await UpsertConversationAsync(tenantId, message, ct).ConfigureAwait(false);
 
+        // Section 9: Auto-reopen resolved/snoozed on inbound message
+        conversation.ReopenIfNeeded();
+
         if (await IsDuplicateAsync(conversation.Id, message, ct).ConfigureAwait(false))
         {
             LogDuplicate(_logger, conversation.Id, message.ExternalThreadId);
@@ -57,6 +60,7 @@ public sealed partial class ChannelMessageIngestor(
             content: redacted.RedactedText,
             contentType: message.Metadata.TryGetValue("content_type", out var ct2) ? ct2 : "text",
             sentAt: message.SentAt,
+            senderUserId: null,
             externalMessageId: externalMsgId,
             originalContent: message.Text,
             redactedContent: redacted.RedactedText,

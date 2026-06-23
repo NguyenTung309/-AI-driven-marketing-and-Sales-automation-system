@@ -1,4 +1,4 @@
-using Clawbot.Api.Contracts.Inbox;
+﻿using Clawbot.Api.Contracts.Inbox;
 using Clawbot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,6 +15,7 @@ internal sealed class InboxSearchService(AppDbContext db)
         string? platform,
         int page,
         int pageSize,
+        List<Guid> inboxIds,
         CancellationToken ct)
     {
         if (pageSize is < 1 or > 200) pageSize = 50;
@@ -29,6 +30,10 @@ internal sealed class InboxSearchService(AppDbContext db)
             .IgnoreQueryFilters()
             .AsNoTracking()
             .Where(c => c.TenantId == tenantId && c.DeletedAt == null);
+        if (inboxIds != null && inboxIds.Count > 0)
+        {
+            conversations = conversations.Where(c => c.InboxId != null && inboxIds.Contains(c.InboxId.Value));
+        }
 
         if (!string.IsNullOrWhiteSpace(status))
             conversations = conversations.Where(c => c.Status == status);
@@ -65,6 +70,7 @@ internal sealed class InboxSearchService(AppDbContext db)
                 c.ContactId,
                 c.AssignedTo,
                 c.LastMessageAt,
+                RowVersion = c.RowVersion ?? Array.Empty<byte>(),
                 LastMessage = c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault(),
             })
             .ToListAsync(ct).ConfigureAwait(false);
@@ -84,6 +90,7 @@ internal sealed class InboxSearchService(AppDbContext db)
             r.AssignedTo,
             r.LastMessageAt,
             r.LastMessage is null ? null : Preview(r.LastMessage),
+            r.RowVersion,
             UnreadCount: 0)).ToList();
 
         return new ConversationListResponse(items, total, page, pageSize);
@@ -97,3 +104,4 @@ internal sealed class InboxSearchService(AppDbContext db)
             .Replace("%", "[%]", StringComparison.Ordinal)
             .Replace("_", "[_]", StringComparison.Ordinal);
 }
+
