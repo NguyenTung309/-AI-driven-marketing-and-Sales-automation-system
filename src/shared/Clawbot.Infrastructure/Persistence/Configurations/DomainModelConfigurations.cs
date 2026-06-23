@@ -303,12 +303,12 @@ public sealed class AgentConfigConfiguration : IEntityTypeConfiguration<AgentCon
         builder.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
         builder.HasIndex(x => new { x.TenantId, x.AgentType });
         builder.HasIndex(x => x.LlmConfigId);
-        // FK kept optional + ON DELETE SET NULL so deleting a provider config orphans (not deletes) agents,
-        // which then hard-error at runtime until rebound (D1). No navigation property — resolver loads by id.
+        // Optional FK with NO ACTION avoids SQL Server multiple-cascade-path failures.
+        // Rebind agents before deleting a provider config. No navigation property — resolver loads by id.
         builder.HasOne<LlmConfig>()
             .WithMany()
             .HasForeignKey(x => x.LlmConfigId)
-            .OnDelete(DeleteBehavior.SetNull);
+            .OnDelete(DeleteBehavior.NoAction);
     }
 }
 
