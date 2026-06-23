@@ -372,14 +372,12 @@ BEGIN
                    api_key_encrypted = N'DEMO_PLACEHOLDER_NOT_A_SECRET',
                    base_url = NULL,
                    is_active = 0,
-                   max_tokens = 1024,
-                   temperature = 0.30,
                    input_usd_per_1m = 3.0000,
                    output_usd_per_1m = 15.0000,
                    updated_at = @now
     WHEN NOT MATCHED THEN
-        INSERT (id, tenant_id, provider, model_id, api_key_encrypted, base_url, is_active, max_tokens, temperature, created_at, updated_at, display_name, input_usd_per_1m, output_usd_per_1m)
-        VALUES (NEWID(), @tenant_id, source.provider, source.model_id, N'DEMO_PLACEHOLDER_NOT_A_SECRET', NULL, 0, 1024, 0.30, @now, @now, source.display_name, 3.0000, 15.0000);
+        INSERT (id, tenant_id, provider, model_id, api_key_encrypted, base_url, is_active, created_at, updated_at, display_name, input_usd_per_1m, output_usd_per_1m)
+        VALUES (NEWID(), @tenant_id, source.provider, source.model_id, N'DEMO_PLACEHOLDER_NOT_A_SECRET', NULL, 0, @now, @now, source.display_name, 3.0000, 15.0000);
 END;
 
 DECLARE @expected_contacts INT = 3;

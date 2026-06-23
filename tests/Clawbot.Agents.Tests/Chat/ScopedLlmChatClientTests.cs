@@ -11,7 +11,7 @@ public sealed class ScopedLlmChatClientTests
     public async Task CompleteAsync_resolves_current_ambient_context_and_delegates_to_provider_client()
     {
         var tenantId = Guid.NewGuid();
-        var resolved = new ResolvedLlmConfig("anthropic", "claude-sonnet", "plain-key", null, null, null, 3m, 15m);
+        var resolved = new ResolvedLlmConfig("anthropic", "claude-sonnet", "plain-key", null, 3m, 15m);
         var provider = Substitute.For<IClaudeChatClient>();
         provider.CompleteAsync("sys", Arg.Any<IReadOnlyList<ChatTurn>>(), "hello", Arg.Any<CancellationToken>())
             .Returns(new ClaudeReply("hi", 1, 2, 0.000033m, "claude-sonnet"));

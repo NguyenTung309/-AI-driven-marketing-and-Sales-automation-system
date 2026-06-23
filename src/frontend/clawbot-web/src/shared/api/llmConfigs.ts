@@ -10,8 +10,6 @@ export interface LlmConfig {
   readonly hasApiKey: boolean;
   readonly baseUrl: string | null;
   readonly isActive: boolean;
-  readonly maxTokens: number | null;
-  readonly temperature: number | null;
   readonly inputUsdPer1M: number | null;
   readonly outputUsdPer1M: number | null;
   readonly createdAt: string;
@@ -24,8 +22,6 @@ export interface CreateLlmConfigPayload {
   readonly apiKey: string;
   readonly displayName?: string | null;
   readonly baseUrl?: string | null;
-  readonly maxTokens?: number | null;
-  readonly temperature?: number | null;
   readonly inputUsdPer1M?: number | null;
   readonly outputUsdPer1M?: number | null;
 }

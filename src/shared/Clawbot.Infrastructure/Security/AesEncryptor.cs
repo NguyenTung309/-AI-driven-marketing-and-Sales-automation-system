@@ -16,7 +16,28 @@ public sealed class AesEncryptor(IOptions<EncryptionOptions> options) : IEncrypt
     private const int IvLength = 16;
     private const int TagLength = 32;
 
-    private readonly byte[] _key = Convert.FromBase64String(options.Value.Base64Key);
+    private readonly byte[] _key = ParseKey(options.Value.Base64Key);
+
+    private static byte[] ParseKey(string base64Key)
+    {
+        if (string.IsNullOrWhiteSpace(base64Key))
+            throw new InvalidOperationException("Encryption:Base64Key is not configured.");
+
+        byte[] key;
+        try
+        {
+            key = Convert.FromBase64String(base64Key);
+        }
+        catch (FormatException ex)
+        {
+            throw new InvalidOperationException("Encryption:Base64Key is not valid base64.", ex);
+        }
+
+        if (key.Length != 32)
+            throw new InvalidOperationException($"Encryption:Base64Key must decode to 32 bytes (got {key.Length}).");
+
+        return key;
+    }
 
     public string Encrypt(string plaintext)
     {

@@ -25,8 +25,6 @@ public sealed class LlmConfigResolverTests
             "cipher-key",
             Now,
             baseUrl: "https://api.example",
-            maxTokens: 4096,
-            temperature: 0.6m,
             displayName: "Claude prod",
             inputUsdPer1M: 1.25m,
             outputUsdPer1M: 5.5m);
@@ -47,8 +45,6 @@ public sealed class LlmConfigResolverTests
             "agent-model",
             "plain-key",
             "https://api.example",
-            4096,
-            0.6m,
             1.25m,
             5.5m));
     }

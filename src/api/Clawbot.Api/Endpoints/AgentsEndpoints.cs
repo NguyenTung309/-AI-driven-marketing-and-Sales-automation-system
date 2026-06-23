@@ -3,6 +3,7 @@ using Clawbot.Api.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Domain.Agents;
+using Clawbot.Infrastructure.Auth;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
@@ -109,8 +110,13 @@ public static class AgentsEndpoints
         AppDbContext db,
         ITenantAccessor tenants,
         IClock clock,
+        IPermissionResolver permissions,
+        HttpContext http,
         CancellationToken ct = default)
     {
+        if (req.LlmConfigId is not null && !await HasPermissionAsync(http, permissions, "llm-configs:manage", ct))
+            return Forbidden(http);
+
         var tenantId = tenants.Require().TenantId;
         var agent = await db.AgentConfigs.FirstOrDefaultAsync(a => a.Code == code, ct);
         if (agent is null) return Results.NotFound();
@@ -229,6 +235,24 @@ public static class AgentsEndpoints
 
         return Results.Ok(new { total, page, pageSize, items });
     }
+
+    private static async Task<bool> HasPermissionAsync(
+        HttpContext http,
+        IPermissionResolver permissions,
+        string code,
+        CancellationToken ct)
+    {
+        if (!Guid.TryParse(http.User.FindFirst("role_id")?.Value, out var roleId) || roleId == Guid.Empty)
+            return false;
+
+        var granted = await permissions.GetPermissionsAsync(roleId, ct);
+        return granted.Contains(code);
+    }
+
+    private static IResult Forbidden(HttpContext http) =>
+        Results.Json(
+            new { errorCode = "forbidden", message = "Không có quyền", requestId = http.TraceIdentifier },
+            statusCode: StatusCodes.Status403Forbidden);
 
     private static AgentSettingsResponse ToSettings(AgentConfig agent)
     {

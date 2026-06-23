@@ -27,6 +27,16 @@ public sealed class AgentsEndpointPermissionTests
         source.Should().Contain("BuildSandboxReply(agent, config, redactedMessage)");
     }
 
+    [Fact]
+    public void Llm_config_binding_requires_llm_config_manage_permission()
+    {
+        var source = File.ReadAllText(FindRepoFile("src", "api", "Clawbot.Api", "Endpoints", "AgentsEndpoints.cs"));
+
+        source.Should().Contain("IPermissionResolver permissions");
+        source.Should().Contain("llm-configs:manage");
+        source.Should().Contain("req.LlmConfigId is not null");
+    }
+
     [Theory]
     [InlineData("anthropic", "claude-opus-4", true)]
     [InlineData("anthropic", "gpt-4o", false)]

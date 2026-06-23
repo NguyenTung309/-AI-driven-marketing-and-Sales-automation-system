@@ -13,8 +13,6 @@ public sealed class LlmConfig : AggregateRoot<Guid>, ITenantOwned
     public string ApiKeyEncrypted { get; private set; } = string.Empty;
     public string? BaseUrl { get; private set; }
     public bool IsActive { get; private set; } = true;
-    public int? MaxTokens { get; private set; }
-    public decimal? Temperature { get; private set; }
     public decimal? InputUsdPer1M { get; private set; }              // cost rate; null → provider default
     public decimal? OutputUsdPer1M { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -29,8 +27,6 @@ public sealed class LlmConfig : AggregateRoot<Guid>, ITenantOwned
         string apiKeyEncrypted,
         DateTimeOffset createdAt,
         string? baseUrl = null,
-        int? maxTokens = null,
-        decimal? temperature = null,
         string? displayName = null,
         decimal? inputUsdPer1M = null,
         decimal? outputUsdPer1M = null) =>
@@ -44,20 +40,11 @@ public sealed class LlmConfig : AggregateRoot<Guid>, ITenantOwned
             ApiKeyEncrypted = apiKeyEncrypted,
             BaseUrl = baseUrl,
             IsActive = true,
-            MaxTokens = maxTokens,
-            Temperature = temperature,
             InputUsdPer1M = inputUsdPer1M,
             OutputUsdPer1M = outputUsdPer1M,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         };
-
-    public void UpdateDefaults(int? maxTokens, decimal? temperature, DateTimeOffset updatedAt)
-    {
-        MaxTokens = maxTokens;
-        Temperature = temperature;
-        UpdatedAt = updatedAt;
-    }
 
     // Update connection identity (provider/model/baseUrl/label) without touching the key.
     public void UpdateConnection(string provider, string modelId, string? baseUrl, string? displayName, DateTimeOffset updatedAt)

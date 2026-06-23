@@ -9,6 +9,7 @@ set "FRONTEND_DIR=%ROOT%src\frontend\clawbot-web"
 set "MIGRATIONS_DIR=%ROOT%deploy\migrations"
 set "MSSQL_SA_PASSWORD=Clawbot!2026"
 set "JWT_SIGNING_KEY=dev-only-jwt-signing-key-change-before-staging-0123456789"
+set "ENCRYPTION_BASE64_KEY=Y2xhd2JvdC1sb2NhbC1kZXYtYWVzLWtleS0zMmJ5dGU="
 set "DRY_RUN=0"
 set "RUN_SEEDS=0"
 set "SEED_TENANT_SLUG=demo"
@@ -43,8 +44,8 @@ if "%DRY_RUN%"=="1" (
     echo Would run: dotnet restore Clawbot.sln
     echo Would run: dotnet build Clawbot.sln --no-restore
     echo Would run: npm ci in src\frontend\clawbot-web when node_modules is missing
-    echo Would start AgentService with ASPNETCORE_URLS=http://localhost:15875
-    echo Would start API with ASPNETCORE_URLS=http://localhost:15874, AgentService__Url=http://localhost:15875, and shared Jwt__SigningKey
+    echo Would start AgentService with ASPNETCORE_URLS=http://localhost:15875 and shared Encryption__Base64Key
+    echo Would start API with ASPNETCORE_URLS=http://localhost:15874, AgentService__Url=http://localhost:15875, shared Jwt__SigningKey, and shared Encryption__Base64Key
     echo Would start Gateway with ASPNETCORE_URLS=http://localhost:15873 and shared Jwt__SigningKey
     echo Would start frontend with npm run dev at http://localhost:15876
     exit /b 0
@@ -128,10 +129,10 @@ if not exist "%FRONTEND_DIR%\node_modules" (
 )
 
 echo [INFO] Opening service windows...
-start "ClawBot AgentService :15875" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15875&& dotnet run --project ""%ROOT%src\agents\Clawbot.AgentService\Clawbot.AgentService.csproj"" --no-launch-profile"
+start "ClawBot AgentService :15875" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15875&& set Encryption__Base64Key=%ENCRYPTION_BASE64_KEY%&& dotnet run --project ""%ROOT%src\agents\Clawbot.AgentService\Clawbot.AgentService.csproj"" --no-launch-profile"
 timeout /t 2 /nobreak >nul
 
-start "ClawBot API :15874" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15874&& set AgentService__Url=http://localhost:15875&& set Jwt__SigningKey=%JWT_SIGNING_KEY%&& dotnet run --project ""%ROOT%src\api\Clawbot.Api\Clawbot.Api.csproj"" --no-launch-profile"
+start "ClawBot API :15874" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15874&& set AgentService__Url=http://localhost:15875&& set Jwt__SigningKey=%JWT_SIGNING_KEY%&& set Encryption__Base64Key=%ENCRYPTION_BASE64_KEY%&& dotnet run --project ""%ROOT%src\api\Clawbot.Api\Clawbot.Api.csproj"" --no-launch-profile"
 timeout /t 2 /nobreak >nul
 
 start "ClawBot Gateway :15873" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15873&& set Jwt__SigningKey=%JWT_SIGNING_KEY%&& dotnet run --project ""%ROOT%src\gateway\Clawbot.Gateway\Clawbot.Gateway.csproj"" --no-launch-profile"

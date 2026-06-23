@@ -19,10 +19,6 @@ public static class LlmConfigsEndpoints
     private static readonly HashSet<string> AllowedProviders =
         new(StringComparer.OrdinalIgnoreCase) { "anthropic", "openai" };
 
-    private const int MinTokens = 128;
-    private const int MaxTokens = 32_000;
-    private const int TestPingMaxTokens = 16;
-
     public static IEndpointRouteBuilder MapLlmConfigs(this IEndpointRouteBuilder app)
     {
         var grp = app.MapGroup("/api/llm-configs")
@@ -60,7 +56,7 @@ public static class LlmConfigsEndpoints
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(req.ApiKey)) return Results.BadRequest(new { error = "api_key_required" });
-        if (Validate(req.Provider, req.ModelId, req.BaseUrl, req.MaxTokens, req.Temperature, req.InputUsdPer1M, req.OutputUsdPer1M) is { } err)
+        if (Validate(req.Provider, req.ModelId, req.BaseUrl, req.InputUsdPer1M, req.OutputUsdPer1M) is { } err)
             return Results.BadRequest(new { error = err });
 
         var tenantId = tenants.Require().TenantId;
@@ -73,8 +69,6 @@ public static class LlmConfigsEndpoints
             encryptor.Encrypt(req.ApiKey),
             now,
             baseUrl: NormalizeBaseUrl(provider, req.BaseUrl),
-            maxTokens: req.MaxTokens,
-            temperature: req.Temperature,
             displayName: Trimmed(req.DisplayName),
             inputUsdPer1M: req.InputUsdPer1M,
             outputUsdPer1M: req.OutputUsdPer1M);
@@ -92,7 +86,7 @@ public static class LlmConfigsEndpoints
         IClock clock,
         CancellationToken ct)
     {
-        if (Validate(req.Provider, req.ModelId, req.BaseUrl, req.MaxTokens, req.Temperature, req.InputUsdPer1M, req.OutputUsdPer1M) is { } err)
+        if (Validate(req.Provider, req.ModelId, req.BaseUrl, req.InputUsdPer1M, req.OutputUsdPer1M) is { } err)
             return Results.BadRequest(new { error = err });
 
         var row = await FindAsync(db, tenants, id, ct).ConfigureAwait(false);
@@ -112,7 +106,6 @@ public static class LlmConfigsEndpoints
         var credentialEndpointChanged = !string.Equals(row.Provider, provider, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(row.BaseUrl, baseUrl, StringComparison.OrdinalIgnoreCase);
         row.UpdateConnection(provider, modelId, baseUrl, Trimmed(req.DisplayName), now);
-        row.UpdateDefaults(req.MaxTokens, req.Temperature, now);
         row.UpdateRates(req.InputUsdPer1M, req.OutputUsdPer1M, now);
         if (credentialEndpointChanged)
             row.RequireKeyRotation(now);
@@ -180,7 +173,7 @@ public static class LlmConfigsEndpoints
         {
             var resolved = new ResolvedLlmConfig(
                 row.Provider, row.ModelId, encryptor.Decrypt(row.ApiKeyEncrypted), row.BaseUrl,
-                MaxTokens: TestPingMaxTokens, row.Temperature, row.InputUsdPer1M, row.OutputUsdPer1M);
+                row.InputUsdPer1M, row.OutputUsdPer1M);
             var client = factory.Create(resolved);
             await client.CompleteAsync("You are a connection test. Reply with 'ok'.", Array.Empty<ChatTurn>(), "ping", ct)
                 .ConfigureAwait(false);
@@ -199,6 +192,11 @@ public static class LlmConfigsEndpoints
         var row = await FindAsync(db, tenants, id, ct).ConfigureAwait(false);
         if (row is null) return Results.NoContent();
 
+        var isBound = await db.AgentConfigs
+            .AnyAsync(a => a.TenantId == row.TenantId && a.LlmConfigId == row.Id && a.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (isBound) return Results.BadRequest(new { error = "llm_config_in_use" });
+
         db.LlmConfigs.Remove(row);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.NoContent();
@@ -213,7 +211,7 @@ public static class LlmConfigsEndpoints
     private static LlmConfigDto Map(LlmConfig c) => new(
         c.Id, c.Provider, c.ModelId, c.DisplayName,
         HasApiKey: !string.IsNullOrEmpty(c.ApiKeyEncrypted),
-        c.BaseUrl, c.IsActive, c.MaxTokens, c.Temperature,
+        c.BaseUrl, c.IsActive,
         c.InputUsdPer1M, c.OutputUsdPer1M, c.CreatedAt, c.UpdatedAt);
 
     private static string? Trimmed(string? value) =>
@@ -237,10 +235,10 @@ public static class LlmConfigsEndpoints
         };
     }
 
-    // Boundary validation: provider enum, https-only baseUrl (SSRF guard), numeric clamps.
+    // Boundary validation: provider enum, https-only baseUrl (SSRF guard), non-negative cost rates.
     private static string? Validate(
         string? provider, string? modelId, string? baseUrl,
-        int? maxTokens, decimal? temperature, decimal? inputRate, decimal? outputRate)
+        decimal? inputRate, decimal? outputRate)
     {
         if (string.IsNullOrWhiteSpace(provider) || !AllowedProviders.Contains(provider.Trim()))
             return "invalid_provider";
@@ -248,10 +246,6 @@ public static class LlmConfigsEndpoints
             return "invalid_model_id";
         if (!string.IsNullOrWhiteSpace(baseUrl) && !IsAllowedBaseUrl(baseUrl.Trim()))
             return "invalid_base_url";
-        if (maxTokens is { } mt && (mt < MinTokens || mt > MaxTokens))
-            return "invalid_max_tokens";
-        if (temperature is { } t && (t < 0m || t > 2m))
-            return "invalid_temperature";
         if (inputRate is < 0m || outputRate is < 0m)
             return "invalid_rate";
         return null;

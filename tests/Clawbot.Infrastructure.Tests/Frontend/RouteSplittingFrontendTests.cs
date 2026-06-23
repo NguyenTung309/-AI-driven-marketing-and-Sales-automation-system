@@ -28,6 +28,18 @@ public sealed class RouteSplittingFrontendTests
         main.Should().Contain("<RouterProvider router={router} />");
     }
 
+    [Fact]
+    public void Llm_providers_page_uses_shared_app_shell_layout()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "src", "frontend", "clawbot-web", "src", "features", "llm-providers", "LlmProvidersPage.tsx"));
+
+        page.Should().Contain("import { AppShell } from \"@/shared/layout/AppShell\"");
+        page.Should().Contain("<AppShell title=\"Cấu hình mô hình AI\">");
+        page.Should().Contain("</AppShell>");
+        page.Should().NotContain("<div className=\"flex flex-col gap-6 p-8\">");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
