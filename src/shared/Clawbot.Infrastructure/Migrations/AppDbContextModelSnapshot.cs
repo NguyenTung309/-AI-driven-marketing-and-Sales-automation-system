@@ -1403,10 +1403,6 @@ namespace Clawbot.Infrastructure.Migrations
                         .HasColumnType("bit")
                         .HasColumnName("is_active");
 
-                    b.Property<int?>("MaxTokens")
-                        .HasColumnType("int")
-                        .HasColumnName("max_tokens");
-
                     b.Property<string>("ModelId")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -1418,10 +1414,6 @@ namespace Clawbot.Infrastructure.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)")
                         .HasColumnName("provider");
-
-                    b.Property<decimal?>("Temperature")
-                        .HasColumnType("decimal(3,2)")
-                        .HasColumnName("temperature");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier")

@@ -20,6 +20,12 @@ foreach ($needle in @('--seed', '--tenant', 'SEED_TENANT_SLUG', ':ensure_seed_te
     }
 }
 
+foreach ($needle in @('ENCRYPTION_BASE64_KEY', 'Encryption__Base64Key')) {
+    if (-not $script.Contains($needle)) {
+        throw "run-all.bat local app encryption config missing $needle"
+    }
+}
+
 $repairIndex = $script.IndexOf('call :repair_runtime_columns')
 $skipIndex = $script.IndexOf('Existing schema detected; skipping SQL migration replay.')
 if ($repairIndex -lt 0 -or $repairIndex -gt $skipIndex) {

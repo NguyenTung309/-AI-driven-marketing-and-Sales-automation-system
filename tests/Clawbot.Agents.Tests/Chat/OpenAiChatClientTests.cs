@@ -73,8 +73,6 @@ public sealed class OpenAiChatClientTests
             Model: "gpt-test",
             ApiKey: "test-key",
             BaseUrl: null,
-            MaxTokens: 256,
-            Temperature: 0.5m,
             InputUsdPer1M: null,
             OutputUsdPer1M: null);
         var sut = new OpenAiChatClient(chatClient, config);
@@ -97,8 +95,6 @@ public sealed class OpenAiChatClientTests
             Model: "gpt-test",
             ApiKey: "test-key",
             BaseUrl: null,
-            MaxTokens: 256,
-            Temperature: 0.5m,
             InputUsdPer1M: 3m,
             OutputUsdPer1M: 15m);
         return new OpenAiChatClient(chatClient, config);

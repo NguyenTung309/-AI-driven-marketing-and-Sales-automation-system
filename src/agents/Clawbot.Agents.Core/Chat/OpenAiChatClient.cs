@@ -10,7 +10,6 @@ namespace Clawbot.Agents.Core.Chat;
 // Reuses the official OpenAI SDK ChatClient — same pattern as ContentLlmClient.
 public sealed class OpenAiChatClient : IClaudeChatClient
 {
-    private const int DefaultMaxTokens = 1024;
     private const decimal DefaultInputUsdPer1M = 3.00m;
     private const decimal DefaultOutputUsdPer1M = 15.00m;
 
@@ -45,7 +44,6 @@ public sealed class OpenAiChatClient : IClaudeChatClient
         _client = client;
     }
 
-    private int MaxTokens => _config.MaxTokens ?? DefaultMaxTokens;
     private decimal InputRate => _config.InputUsdPer1M ?? DefaultInputUsdPer1M;
     private decimal OutputRate => _config.OutputUsdPer1M ?? DefaultOutputUsdPer1M;
     private decimal Cost(int inTok, int outTok) => (inTok * InputRate + outTok * OutputRate) / 1_000_000m;
@@ -91,13 +89,7 @@ public sealed class OpenAiChatClient : IClaudeChatClient
         yield return new ClaudeStreamChunk(string.Empty, Final: true, inTok, outTok, Cost(inTok, outTok), _config.Model);
     }
 
-    private ChatCompletionOptions BuildOptions()
-    {
-        var options = new ChatCompletionOptions { MaxOutputTokenCount = MaxTokens };
-        if (_config.Temperature is { } temp)
-            options.Temperature = (float)temp;
-        return options;
-    }
+    private static ChatCompletionOptions BuildOptions() => new();
 
     private static List<ChatMessage> BuildMessages(string systemPrompt, IReadOnlyList<ChatTurn> history, string userMessage)
     {

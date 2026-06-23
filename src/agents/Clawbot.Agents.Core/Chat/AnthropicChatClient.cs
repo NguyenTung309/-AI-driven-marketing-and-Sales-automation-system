@@ -21,7 +21,6 @@ public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig confi
     private readonly ResolvedLlmConfig _config = config;
 
     private string BaseUrl => string.IsNullOrWhiteSpace(_config.BaseUrl) ? DefaultBaseUrl : _config.BaseUrl;
-    private int MaxTokens => _config.MaxTokens ?? DefaultMaxTokens;
     private decimal InputRate => _config.InputUsdPer1M ?? DefaultInputUsdPer1M;
     private decimal OutputRate => _config.OutputUsdPer1M ?? DefaultOutputUsdPer1M;
 
@@ -82,10 +81,9 @@ public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig confi
 
         var payload = new RequestBody(
             Model: _config.Model,
-            MaxTokens: MaxTokens,
+            MaxTokens: DefaultMaxTokens,
             System: systemPrompt,
             Messages: msgs,
-            Temperature: _config.Temperature,
             Stream: stream);
 
         var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl.TrimEnd('/')}/v1/messages")
@@ -202,7 +200,6 @@ public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig confi
         [property: JsonPropertyName("max_tokens")] int MaxTokens,
         [property: JsonPropertyName("system")] string System,
         [property: JsonPropertyName("messages")] IReadOnlyList<MessageBody> Messages,
-        [property: JsonPropertyName("temperature"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? Temperature = null,
         [property: JsonPropertyName("stream"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Stream = false);
 
     private sealed record ResponseBody(

@@ -96,12 +96,53 @@ public sealed class LlmConfigValidationTests
     }
 
     [Fact]
-    public void AreBoundAgentModelsCompatible_blocks_incompatible_config_model_even_when_agents_override()
+    public void Delete_blocks_configs_that_are_still_bound_to_agents()
     {
-        LlmConfigsEndpoints.AreBoundAgentModelsCompatible(
-                provider: "openai",
-                configModel: "claude-sonnet-4",
-                boundAgentModels: ["gpt-4o"])
-            .Should().BeFalse();
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "api", "Clawbot.Api", "Endpoints", "LlmConfigsEndpoints.cs"));
+
+        source.Should().Contain("llm_config_in_use");
+        source.Should().Contain("AnyAsync(a => a.TenantId == row.TenantId && a.LlmConfigId == row.Id && a.DeletedAt == null");
+    }
+
+    [Fact]
+    public void Llm_provider_config_no_longer_exposes_max_tokens_or_temperature()
+    {
+        var root = FindRepositoryRoot();
+        var files = new[]
+        {
+            Path.Combine(root, "src", "api", "Clawbot.Api.Contracts", "Llm", "LlmConfigDtos.cs"),
+            Path.Combine(root, "src", "shared", "Clawbot.Domain", "Llm", "LlmConfig.cs"),
+            Path.Combine(root, "src", "shared", "Clawbot.Infrastructure", "Agents", "LlmConfigResolver.cs"),
+            Path.Combine(root, "src", "agents", "Clawbot.Agents.Core", "Chat", "LlmProviderAbstractions.cs"),
+            Path.Combine(root, "src", "frontend", "clawbot-web", "src", "shared", "api", "llmConfigs.ts"),
+            Path.Combine(root, "src", "frontend", "clawbot-web", "src", "features", "llm-providers", "LlmProvidersPage.tsx"),
+        };
+
+        foreach (var file in files)
+        {
+            var text = File.ReadAllText(file);
+            text.Should().NotContain("MaxTokens");
+            text.Should().NotContain("maxTokens");
+            text.Should().NotContain("Temperature");
+            text.Should().NotContain("temperature");
+        }
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "Clawbot.sln")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate repository root.");
     }
 }

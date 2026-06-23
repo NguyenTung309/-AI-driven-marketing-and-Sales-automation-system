@@ -9,8 +9,6 @@ public sealed record LlmConfigDto(
     bool HasApiKey,
     string? BaseUrl,
     bool IsActive,
-    int? MaxTokens,
-    decimal? Temperature,
     decimal? InputUsdPer1M,
     decimal? OutputUsdPer1M,
     DateTimeOffset CreatedAt,
@@ -22,8 +20,6 @@ public sealed record CreateLlmConfigRequest(
     string ApiKey,
     string? DisplayName = null,
     string? BaseUrl = null,
-    int? MaxTokens = null,
-    decimal? Temperature = null,
     decimal? InputUsdPer1M = null,
     decimal? OutputUsdPer1M = null);
 
@@ -33,8 +29,6 @@ public sealed record UpdateLlmConfigRequest(
     string ModelId,
     string? DisplayName = null,
     string? BaseUrl = null,
-    int? MaxTokens = null,
-    decimal? Temperature = null,
     decimal? InputUsdPer1M = null,
     decimal? OutputUsdPer1M = null);
 

@@ -55,8 +55,6 @@ public sealed class LlmConfigResolver(IServiceScopeFactory scopeFactory, IEncryp
             effectiveModel,
             apiKey,
             cfg.BaseUrl,
-            cfg.MaxTokens,
-            cfg.Temperature,
             cfg.InputUsdPer1M,
             cfg.OutputUsdPer1M);
     }

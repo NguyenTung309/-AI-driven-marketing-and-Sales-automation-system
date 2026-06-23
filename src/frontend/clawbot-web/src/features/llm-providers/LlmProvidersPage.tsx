@@ -4,6 +4,7 @@ import { Button } from "@/shared/ui/Button";
 import { DataTable, type Column } from "@/shared/ui/DataTable";
 import { Modal } from "@/shared/ui/Modal";
 import { hasPermission } from "@/shared/auth/authStore";
+import { AppShell } from "@/shared/layout/AppShell";
 import {
   createLlmConfig,
   deleteLlmConfig,
@@ -27,8 +28,6 @@ interface FormState {
   readonly displayName: string;
   readonly apiKey: string;
   readonly baseUrl: string;
-  readonly maxTokens: string;
-  readonly temperature: string;
   readonly inputUsdPer1M: string;
   readonly outputUsdPer1M: string;
 }
@@ -39,8 +38,6 @@ const EMPTY_FORM: FormState = {
   displayName: "",
   apiKey: "",
   baseUrl: "",
-  maxTokens: "",
-  temperature: "",
   inputUsdPer1M: "",
   outputUsdPer1M: "",
 };
@@ -58,8 +55,6 @@ function toUpdatePayload(form: FormState): UpdateLlmConfigPayload {
     modelId: form.modelId.trim(),
     displayName: form.displayName.trim() || null,
     baseUrl: form.baseUrl.trim() || null,
-    maxTokens: toNullableNumber(form.maxTokens),
-    temperature: toNullableNumber(form.temperature),
     inputUsdPer1M: toNullableNumber(form.inputUsdPer1M),
     outputUsdPer1M: toNullableNumber(form.outputUsdPer1M),
   };
@@ -76,8 +71,6 @@ function fromConfig(config: LlmConfig): FormState {
     displayName: config.displayName ?? "",
     apiKey: "",
     baseUrl: config.baseUrl ?? "",
-    maxTokens: config.maxTokens?.toString() ?? "",
-    temperature: config.temperature?.toString() ?? "",
     inputUsdPer1M: config.inputUsdPer1M?.toString() ?? "",
     outputUsdPer1M: config.outputUsdPer1M?.toString() ?? "",
   };
@@ -243,17 +236,18 @@ export default function LlmProvidersPage() {
 
   if (!canManage) {
     return (
-      <div className="p-8">
+      <AppShell title="Cấu hình mô hình AI">
         <div className="rounded-lg border border-outline bg-surface p-6 text-body-md text-on-surface-variant">
           Bạn không có quyền quản lý cấu hình mô hình AI.
         </div>
-      </div>
+      </AppShell>
     );
   }
 
   return (
-    <div className="flex flex-col gap-6 p-8">
-      <header className="flex items-start justify-between gap-4">
+    <AppShell title="Cấu hình mô hình AI">
+      <div className="flex flex-col gap-6">
+        <header className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-headline-md font-bold text-on-surface">Cấu hình mô hình AI</h1>
           <p className="mt-1 text-body-md text-on-surface-variant">
@@ -322,14 +316,6 @@ export default function LlmProvidersPage() {
         </label>
         <div className="grid grid-cols-2 gap-3">
           <label className="block space-y-1">
-            <span className={LABEL_CLASS}>Max tokens</span>
-            <input className={FIELD_CLASS} type="number" min={128} step={128} value={form.maxTokens} onChange={(e) => setForm({ ...form, maxTokens: e.target.value })} />
-          </label>
-          <label className="block space-y-1">
-            <span className={LABEL_CLASS}>Temperature</span>
-            <input className={FIELD_CLASS} type="number" min={0} max={2} step={0.1} value={form.temperature} onChange={(e) => setForm({ ...form, temperature: e.target.value })} />
-          </label>
-          <label className="block space-y-1">
             <span className={LABEL_CLASS}>USD / 1M input</span>
             <input className={FIELD_CLASS} type="number" min={0} step={0.01} value={form.inputUsdPer1M} onChange={(e) => setForm({ ...form, inputUsdPer1M: e.target.value })} />
           </label>
@@ -361,6 +347,7 @@ export default function LlmProvidersPage() {
           <input className={`${FIELD_CLASS} font-mono`} type="password" value={rotateKey} onChange={(e) => setRotateKeyValue(e.target.value)} placeholder="sk-..." autoComplete="off" />
         </label>
       </Modal>
-    </div>
+      </div>
+    </AppShell>
   );
 }

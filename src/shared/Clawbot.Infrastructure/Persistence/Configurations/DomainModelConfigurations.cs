@@ -551,7 +551,6 @@ public sealed class LlmConfigConfiguration : IEntityTypeConfiguration<LlmConfig>
         builder.Property(x => x.DisplayName).HasColumnName("display_name").HasMaxLength(128);
         builder.Property(x => x.ApiKeyEncrypted).HasColumnType("nvarchar(max)").IsRequired();
         builder.Property(x => x.BaseUrl).HasMaxLength(512);
-        builder.Property(x => x.Temperature).HasColumnType("decimal(3,2)");
         // Numeric-suffixed names snake-case ambiguously; pin them so DDL + EF agree.
         builder.Property(x => x.InputUsdPer1M).HasColumnName("input_usd_per_1m").HasColumnType("decimal(10,4)");
         builder.Property(x => x.OutputUsdPer1M).HasColumnName("output_usd_per_1m").HasColumnType("decimal(10,4)");

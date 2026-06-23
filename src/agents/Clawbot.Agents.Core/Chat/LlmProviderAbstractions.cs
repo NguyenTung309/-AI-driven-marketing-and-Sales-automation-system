@@ -7,8 +7,6 @@ public sealed record ResolvedLlmConfig(
     string Model,
     string ApiKey,
     string? BaseUrl,
-    int? MaxTokens,
-    decimal? Temperature,
     decimal? InputUsdPer1M,
     decimal? OutputUsdPer1M);
 

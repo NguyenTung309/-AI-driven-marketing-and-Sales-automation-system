@@ -40,8 +40,7 @@ public sealed class LlmChatClientFactoryTests
     }
 
     private static ResolvedLlmConfig Config(string provider) =>
-        new(provider, "model-x", "key", BaseUrl: null, MaxTokens: 256, Temperature: null,
-            InputUsdPer1M: 1m, OutputUsdPer1M: 2m);
+        new(provider, "model-x", "key", BaseUrl: null, InputUsdPer1M: 1m, OutputUsdPer1M: 2m);
 
     private sealed class StubHttpClientFactory : IHttpClientFactory
     {
