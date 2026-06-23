@@ -246,6 +246,7 @@ export interface InboxItem {
   readonly isActive: boolean;
   readonly createdAt: string;
   readonly memberCount: number;
+  readonly hasToken: boolean;
 }
 
 export async function getSimpleUserList(): Promise<readonly SimpleUser[]> {

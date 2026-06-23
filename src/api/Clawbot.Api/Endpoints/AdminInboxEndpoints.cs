@@ -184,6 +184,7 @@ public static class AdminInboxEndpoints
                 i.ExternalPageId,
                 i.IsActive,
                 i.CreatedAt,
+                HasToken = i.EncryptedAccessToken != null,
                 MemberCount = db.InboxMembers.Count(m => m.InboxId == i.Id)
             })
             .OrderBy(i => i.Platform).ThenBy(i => i.Name)
