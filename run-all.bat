@@ -10,8 +10,15 @@ set "MIGRATIONS_DIR=%ROOT%deploy\migrations"
 set "MSSQL_SA_PASSWORD=Clawbot!2026"
 set "JWT_SIGNING_KEY=dev-only-jwt-signing-key-change-before-staging-0123456789"
 set "DRY_RUN=0"
+set "RUN_SEEDS=0"
 
+:parse_args
+if "%~1"=="" goto args_done
 if /i "%~1"=="--dry-run" set "DRY_RUN=1"
+if /i "%~1"=="--seed" set "RUN_SEEDS=1"
+shift
+goto parse_args
+:args_done
 
 if "%DRY_RUN%"=="1" (
     echo [DRY-RUN] ClawBot one-click runner
@@ -19,6 +26,7 @@ if "%DRY_RUN%"=="1" (
     echo Would copy deploy\.env.example to deploy\.env if missing.
     echo Would run: docker compose --env-file deploy\.env -f deploy\docker-compose.yml up -d sqlserver redis rabbitmq qdrant minio postgres metabase
     echo Would stop old app processes listening on ports 15873, 15874, 15875, 15876
+    echo Would apply deploy\seed\*.sql when --seed is passed.
     echo Would run: dotnet restore Clawbot.sln
     echo Would run: dotnet build Clawbot.sln --no-restore
     echo Would run: npm ci in src\frontend\clawbot-web when node_modules is missing
@@ -79,6 +87,9 @@ call :ensure_database
 if errorlevel 1 exit /b 1
 
 call :apply_migrations_if_needed
+if errorlevel 1 exit /b 1
+
+call :apply_seeds_if_requested
 if errorlevel 1 exit /b 1
 
 echo [INFO] Restoring .NET packages...
@@ -199,7 +210,7 @@ exit /b %errorlevel%
 
 :apply_migrations_if_needed
 set "SCHEMA_CHECK=%TEMP%\clawbot_schema_check.txt"
-docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -h -1 -W -Q "SET NOCOUNT ON; SELECT CONCAT(CASE WHEN OBJECT_ID(N'dbo.tenants', N'U') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN OBJECT_ID(N'dbo.AspNetRoles', N'U') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.tenants', N'widget_greeting') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN OBJECT_ID(N'dbo.messages', N'U') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN OBJECT_ID(N'dbo.experiment_events', N'U') IS NULL OR OBJECT_ID(N'dbo.competitor_posts', N'U') IS NULL OR COL_LENGTH(N'dbo.generated_documents', N'expires_at') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_messages_external_id' AND object_id = OBJECT_ID(N'dbo.messages')) THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.users', N'phone_number') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.conversations', N'last_message_at') IS NULL THEN 0 ELSE 1 END)" > "%SCHEMA_CHECK%" 2>nul
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -h -1 -W -Q "SET NOCOUNT ON; SELECT CONCAT(CASE WHEN OBJECT_ID(N'dbo.tenants', N'U') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN OBJECT_ID(N'dbo.AspNetRoles', N'U') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.tenants', N'widget_greeting') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN OBJECT_ID(N'dbo.messages', N'U') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN OBJECT_ID(N'dbo.experiment_events', N'U') IS NULL OR OBJECT_ID(N'dbo.competitor_posts', N'U') IS NULL OR COL_LENGTH(N'dbo.generated_documents', N'expires_at') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_messages_external_id' AND object_id = OBJECT_ID(N'dbo.messages')) THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.users', N'phone_number') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.conversations', N'last_message_at') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.agents', N'llm_config_id') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.agent_sessions', N'requires_approval') IS NULL OR COL_LENGTH(N'dbo.agent_sessions', N'replan_count') IS NULL OR COL_LENGTH(N'dbo.agent_sessions', N'row_version') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.tenants', N'require_orchestration_approval') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agent_sessions_tenant_status_started_at' AND object_id = OBJECT_ID(N'dbo.agent_sessions')) THEN 0 ELSE 1 END)" > "%SCHEMA_CHECK%" 2>nul
 if errorlevel 1 (
     echo [ERROR] Could not inspect clawbot schema.
     exit /b 1
@@ -212,9 +223,13 @@ set "HAS_CORE_TABLES=0"
 set "HAS_RECENT_MIGRATIONS=0"
 set "HAS_IDENTITY_RUNTIME_COLUMNS=0"
 set "HAS_CONVERSATION_RUNTIME_COLUMNS=0"
+set "HAS_LLM_CONFIG_BINDING=0"
+set "HAS_ORCHESTRATION_COLUMNS=0"
+set "HAS_ORCHESTRATION_TENANT=0"
+set "HAS_ORCHESTRATION_INDEX=0"
 set /p HAS_SCHEMA=<"%SCHEMA_CHECK%"
 del "%SCHEMA_CHECK%" >nul 2>nul
-for /f "tokens=1,2,3,4,5,6,7 delims=|" %%A in ("%HAS_SCHEMA%") do (
+for /f "tokens=1,2,3,4,5,6,7,8,9,10,11 delims=|" %%A in ("%HAS_SCHEMA%") do (
     set "HAS_SCHEMA=%%A"
     set "HAS_IDENTITY_SCHEMA=%%B"
     set "HAS_LATEST_SCHEMA=%%C"
@@ -222,6 +237,10 @@ for /f "tokens=1,2,3,4,5,6,7 delims=|" %%A in ("%HAS_SCHEMA%") do (
     set "HAS_RECENT_MIGRATIONS=%%E"
     set "HAS_IDENTITY_RUNTIME_COLUMNS=%%F"
     set "HAS_CONVERSATION_RUNTIME_COLUMNS=%%G"
+    set "HAS_LLM_CONFIG_BINDING=%%H"
+    set "HAS_ORCHESTRATION_COLUMNS=%%I"
+    set "HAS_ORCHESTRATION_TENANT=%%J"
+    set "HAS_ORCHESTRATION_INDEX=%%K"
 )
 
 if "%HAS_SCHEMA%"=="1" (
@@ -232,6 +251,10 @@ if "%HAS_SCHEMA%"=="1" (
     set "NEEDS_RUNTIME_REPAIR=0"
     if not "%HAS_IDENTITY_RUNTIME_COLUMNS%"=="1" set "NEEDS_RUNTIME_REPAIR=1"
     if not "%HAS_CONVERSATION_RUNTIME_COLUMNS%"=="1" set "NEEDS_RUNTIME_REPAIR=1"
+    if not "%HAS_LLM_CONFIG_BINDING%"=="1" set "NEEDS_RUNTIME_REPAIR=1"
+    if not "%HAS_ORCHESTRATION_COLUMNS%"=="1" set "NEEDS_RUNTIME_REPAIR=1"
+    if not "%HAS_ORCHESTRATION_TENANT%"=="1" set "NEEDS_RUNTIME_REPAIR=1"
+    if not "%HAS_ORCHESTRATION_INDEX%"=="1" set "NEEDS_RUNTIME_REPAIR=1"
     if "%NEEDS_RUNTIME_REPAIR%"=="1" (
         call :repair_runtime_columns
         if errorlevel 1 exit /b 1
@@ -245,7 +268,7 @@ goto replay_migrations
 
 :repair_runtime_columns
 echo [INFO] Repairing runtime columns on existing schema...
-docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "IF COL_LENGTH(N'dbo.users', N'phone_number') IS NULL ALTER TABLE dbo.users ADD phone_number NVARCHAR(MAX); IF COL_LENGTH(N'dbo.conversations', N'last_message_at') IS NULL ALTER TABLE dbo.conversations ADD last_message_at DATETIMEOFFSET; IF COL_LENGTH(N'dbo.conversations', N'last_msg_at') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'last_message_at') IS NOT NULL EXEC(N'UPDATE conversations SET last_message_at = last_msg_at WHERE last_message_at IS NULL AND last_msg_at IS NOT NULL;'); IF COL_LENGTH(N'dbo.conversations', N'last_message_at') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_conversations_tenant_id_status_last_message_at' AND object_id = OBJECT_ID(N'dbo.conversations')) EXEC(N'CREATE INDEX ix_conversations_tenant_id_status_last_message_at ON conversations (tenant_id, status, last_message_at DESC);');"
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "IF COL_LENGTH(N'dbo.users', N'phone_number') IS NULL ALTER TABLE dbo.users ADD phone_number NVARCHAR(MAX); IF COL_LENGTH(N'dbo.conversations', N'last_message_at') IS NULL ALTER TABLE dbo.conversations ADD last_message_at DATETIMEOFFSET; IF COL_LENGTH(N'dbo.conversations', N'last_msg_at') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'last_message_at') IS NOT NULL EXEC(N'UPDATE conversations SET last_message_at = last_msg_at WHERE last_message_at IS NULL AND last_msg_at IS NOT NULL;'); IF COL_LENGTH(N'dbo.conversations', N'last_message_at') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_conversations_tenant_id_status_last_message_at' AND object_id = OBJECT_ID(N'dbo.conversations')) EXEC(N'CREATE INDEX ix_conversations_tenant_id_status_last_message_at ON conversations (tenant_id, status, last_message_at DESC);'); IF COL_LENGTH(N'dbo.agents', N'llm_config_id') IS NULL ALTER TABLE dbo.agents ADD llm_config_id UNIQUEIDENTIFIER NULL; IF COL_LENGTH(N'dbo.agents', N'llm_config_id') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_agents_llm_config_id' AND object_id = OBJECT_ID(N'dbo.agents')) EXEC(N'CREATE INDEX ix_agents_llm_config_id ON agents (llm_config_id);'); IF COL_LENGTH(N'dbo.agents', N'llm_config_id') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'fk_agents_llm_configs_llm_config_id') EXEC(N'ALTER TABLE agents ADD CONSTRAINT fk_agents_llm_configs_llm_config_id FOREIGN KEY (llm_config_id) REFERENCES llm_configs (id) ON DELETE SET NULL;'); IF COL_LENGTH(N'dbo.agent_sessions', N'requires_approval') IS NULL ALTER TABLE dbo.agent_sessions ADD requires_approval BIT NOT NULL CONSTRAINT DF_agent_sessions_requires_approval DEFAULT 0; IF COL_LENGTH(N'dbo.agent_sessions', N'replan_count') IS NULL ALTER TABLE dbo.agent_sessions ADD replan_count INT NOT NULL CONSTRAINT DF_agent_sessions_replan_count DEFAULT 0; IF COL_LENGTH(N'dbo.agent_sessions', N'row_version') IS NULL ALTER TABLE dbo.agent_sessions ADD row_version ROWVERSION; IF COL_LENGTH(N'dbo.tenants', N'require_orchestration_approval') IS NULL ALTER TABLE dbo.tenants ADD require_orchestration_approval BIT NOT NULL CONSTRAINT DF_tenants_require_orchestration_approval DEFAULT 0; IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agent_sessions_tenant_status_started_at' AND object_id = OBJECT_ID(N'dbo.agent_sessions')) EXEC(N'CREATE INDEX IX_agent_sessions_tenant_status_started_at ON agent_sessions (tenant_id, status, started_at);');"
 exit /b %errorlevel%
 
 :incomplete_schema
@@ -255,6 +278,22 @@ exit /b %errorlevel%
         echo docker compose --env-file deploy\.env -f deploy\docker-compose.yml down -v
         echo Then run run-all.bat again.
         exit /b 1
+
+:apply_seeds_if_requested
+if not "%RUN_SEEDS%"=="1" exit /b 0
+echo [INFO] Applying SQL seeds from deploy\seed...
+pushd "%ROOT%deploy\seed" >nul
+for %%F in (*.sql) do (
+    echo [SEED] %%F
+    (echo SET QUOTED_IDENTIFIER ON;& echo SET ARITHABORT ON;& type "%%F") | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
+    if errorlevel 1 (
+        popd >nul
+        echo [ERROR] Seed failed: %%F
+        exit /b 1
+    )
+)
+popd >nul
+exit /b 0
 
 :replay_migrations
 echo [INFO] Applying SQL migrations from deploy\migrations...
