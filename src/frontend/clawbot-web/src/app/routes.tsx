@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router-dom";
+﻿import { createBrowserRouter } from "react-router-dom";
 import {
   AdminConsolePage,
   AgentDashboardPage,
@@ -19,6 +19,9 @@ import {
   TaskLogsPage,
   TokenManagementPage,
   WidgetDemoPage,
+  ChannelManagementPage,
+  ChannelListPage,
+  AgentHubLayout,
 } from "./lazyPages";
 import { RequireAuth } from "./RequireAuth";
 
@@ -149,4 +152,38 @@ export const router = createBrowserRouter([
       </RequireAuth>
     ),
   },
+  {
+    path: "/system/channels",
+    element: (
+      <RequireAuth>
+        <ChannelManagementPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/agent-hub",
+    element: (
+      <RequireAuth>
+        <AgentHubLayout />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/inbox",
+    element: (
+      <RequireAuth>
+        <ChannelListPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/inbox/:channelId",
+    element: (
+      <RequireAuth>
+        <AgentHubLayout />
+      </RequireAuth>
+    ),
+  },
 ]);
+
+

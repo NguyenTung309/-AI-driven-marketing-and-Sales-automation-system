@@ -1,4 +1,20 @@
-import { apiClient } from "./client";
+﻿import { apiClient } from "./client";
+export interface InboxChannel {
+  readonly id: string;
+  readonly name: string;
+  readonly platform: string;
+  readonly externalPageId: string;
+  readonly isActive: boolean;
+  readonly avatarUrl: string | null;
+  readonly hasToken: boolean;
+  readonly unreadCount: number;
+  readonly memberDisplayName: string | null;
+}
+
+export async function listChannels(): Promise<readonly InboxChannel[]> {
+  const res = await apiClient.get<readonly InboxChannel[]>("/api/inbox/channels");
+  return res.data;
+}
 
 export type ConversationStatus = "open" | "resolved" | "escalated" | string;
 
@@ -12,6 +28,7 @@ export interface ConversationListItem {
   readonly assignedTo: string | null;
   readonly lastMessageAt: string | null;
   readonly lastMessagePreview: string | null;
+  readonly rowVersion: string | null;
   readonly unreadCount: number;
 }
 
@@ -42,6 +59,7 @@ export interface ConversationDetail {
   readonly assignedTo: string | null;
   readonly lastMessageAt: string | null;
   readonly createdAt: string;
+  readonly rowVersion: string | null;
   readonly messages: readonly InboxMessage[];
 }
 
@@ -89,16 +107,29 @@ export async function getConversation(id: string): Promise<ConversationDetail> {
   return res.data;
 }
 
-export async function assignConversation(id: string, userId: string): Promise<void> {
-  await apiClient.post(`/api/inbox/conversations/${id}/assign`, { userId });
+export async function assignConversation(id: string, userId: string, rowVersion?: string | null): Promise<void> {
+  const headers = rowVersion ? { "If-Match": rowVersion } : undefined;
+  await apiClient.post(`/api/inbox/conversations/${id}/assign`, { userId }, { headers });
 }
 
-export async function resolveConversation(id: string): Promise<void> {
-  await apiClient.post(`/api/inbox/conversations/${id}/resolve`);
+export async function resolveConversation(id: string, rowVersion?: string | null): Promise<void> {
+  const headers = rowVersion ? { "If-Match": rowVersion } : undefined;
+  await apiClient.post(`/api/inbox/conversations/${id}/resolve`, null, { headers });
 }
 
-export async function escalateConversation(id: string): Promise<void> {
-  await apiClient.post(`/api/inbox/conversations/${id}/escalate`);
+export async function escalateConversation(id: string, rowVersion?: string | null): Promise<void> {
+  const headers = rowVersion ? { "If-Match": rowVersion } : undefined;
+  await apiClient.post(`/api/inbox/conversations/${id}/escalate`, null, { headers });
+}
+
+export interface CopilotSuggestResponse {
+  readonly suggestion: string | null;
+  readonly draftVersion: number;
+}
+
+export async function copilotSuggest(id: string, currentDraft: string, draftVersion: number): Promise<CopilotSuggestResponse> {
+  const res = await apiClient.post<CopilotSuggestResponse>(`/api/inbox/conversations/${id}/copilot/suggest`, { currentDraft, draftVersion });
+  return res.data;
 }
 
 export async function sendConversationMessage(id: string, content: string): Promise<InboxMessage> {
@@ -108,3 +139,6 @@ export async function sendConversationMessage(id: string, content: string): Prom
   });
   return res.data;
 }
+
+
+
