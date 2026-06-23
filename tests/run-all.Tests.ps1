@@ -14,7 +14,7 @@ foreach ($needle in @(
     }
 }
 
-foreach ($needle in @('--seed', ':apply_seeds_if_requested', 'deploy\seed')) {
+foreach ($needle in @('--seed', '--tenant', 'SEED_TENANT_SLUG', ':ensure_seed_tenant', ':apply_seeds_if_requested', 'deploy\seed')) {
     if (-not $script.Contains($needle)) {
         throw "run-all.bat seed option missing $needle"
     }
@@ -45,4 +45,23 @@ foreach ($needle in @('SET QUOTED_IDENTIFIER ON;', 'SET ARITHABORT ON;')) {
     if (-not $repairBlock.Contains($needle)) {
         throw "run-all.bat repair SQL missing $needle"
     }
+}
+
+$seedBlock = $script.Substring($script.IndexOf(':apply_seeds_if_requested'))
+foreach ($needle in @('-v TenantSlug="%SEED_TENANT_SLUG%"', '$(TenantSlug)')) {
+    if (-not $seedBlock.Contains($needle)) {
+        throw "run-all.bat seed SQL missing $needle"
+    }
+}
+
+foreach ($seed in Get-ChildItem (Join-Path $root 'deploy\seed') -Filter '*.sql') {
+    $seedText = Get-Content $seed.FullName -Raw
+    if (-not $seedText.Contains('N''$(TenantSlug)''')) {
+        throw "$($seed.Name) must use SQLCMD TenantSlug"
+    }
+}
+
+$dryRun = & cmd /c "`"$(Join-Path $root 'run-all.bat')`" --dry-run --seed --tenant demo" 2>&1 | Out-String
+if (-not $dryRun.Contains('tenant demo')) {
+    throw "run-all.bat --tenant demo dry-run did not select tenant demo: $dryRun"
 }
