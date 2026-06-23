@@ -81,6 +81,7 @@ export interface InboxMessageEvent {
 }
 
 export interface ListConversationsParams {
+  readonly inboxId?: string;
   readonly status?: string;
   readonly platform?: string;
   readonly page?: number;
@@ -139,6 +140,7 @@ export async function sendConversationMessage(id: string, content: string): Prom
   });
   return res.data;
 }
+
 
 
 
