@@ -15,6 +15,7 @@ namespace Clawbot.Api.Endpoints;
 
 public sealed record UpdateMemberRequest(Guid? AgentId);
 public sealed record ReassignRequest(Guid NewAgentId);
+public sealed record CreateInboxRequest(string Name, string Platform, string ExternalPageId, string? PageAccessToken, Guid? AgentId);
 
 public static class AdminInboxEndpoints
 {
@@ -29,6 +30,7 @@ public static class AdminInboxEndpoints
         grp.MapGet("/inboxes/{id:guid}/members", ListMembersAsync);
         grp.MapGet("/inboxes/{id:guid}/assignable-agents", ListAssignableAgentsAsync);
         grp.MapGet("/inboxes", ListInboxesAsync);
+        grp.MapPost("/inboxes", CreateInboxAsync);
         return app;
     }
 
@@ -187,6 +189,39 @@ public static class AdminInboxEndpoints
             .OrderBy(i => i.Platform).ThenBy(i => i.Name)
             .ToListAsync(ct);
         return Results.Ok(inboxes);
+    }
+
+    private static async Task<IResult> CreateInboxAsync(
+        CreateInboxRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var inbox = Inbox.Create(tenant.TenantId, body.Name, body.Platform, body.ExternalPageId);
+
+        if (!string.IsNullOrEmpty(body.PageAccessToken))
+            inbox.SetAccessToken(body.PageAccessToken, clock.UtcNow);
+
+        db.Inboxes.Add(inbox);
+
+        if (body.AgentId.HasValue)
+        {
+            db.InboxMembers.Add(InboxMember.Create(inbox.Id, body.AgentId.Value));
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        return Results.Created($"/api/admin/inboxes/{inbox.Id}", new
+        {
+            inbox.Id,
+            inbox.Name,
+            inbox.Platform,
+            inbox.ExternalPageId,
+            inbox.IsActive,
+            inbox.CreatedAt,
+        });
     }
 }
 
