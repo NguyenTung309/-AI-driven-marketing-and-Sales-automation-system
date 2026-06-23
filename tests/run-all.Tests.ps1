@@ -37,3 +37,12 @@ if ($migration0027.Contains('ON DELETE SET NULL')) {
 if (-not $migration0027.Contains('ON DELETE NO ACTION')) {
     throw '0027 FK missing explicit ON DELETE NO ACTION'
 }
+
+$repairStart = $script.IndexOf(':repair_runtime_columns')
+$repairEnd = $script.IndexOf(':incomplete_schema')
+$repairBlock = $script.Substring($repairStart, $repairEnd - $repairStart)
+foreach ($needle in @('SET QUOTED_IDENTIFIER ON;', 'SET ARITHABORT ON;')) {
+    if (-not $repairBlock.Contains($needle)) {
+        throw "run-all.bat repair SQL missing $needle"
+    }
+}
