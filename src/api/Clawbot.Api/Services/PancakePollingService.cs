@@ -145,6 +145,51 @@ public sealed partial class PancakePollingService : BackgroundService
                 var ingestor = scope.ServiceProvider.GetRequiredService<IChannelMessageIngestor>();
                 var tenantId = await resolver.ResolveTenantIdAsync(ct);
 
+                // Build enriched metadata from Pancake conversation data
+                var metadata = new Dictionary<string, string>
+                {
+                    ["external_message_id"] = latestMsg.Id,
+                    ["content_type"] = "text",
+                };
+
+                if (conv.From != null)
+                {
+                    if (!string.IsNullOrEmpty(conv.From.Name))
+                        metadata["display_name"] = conv.From.Name;
+                    if (!string.IsNullOrEmpty(conv.From.AvatarUrl))
+                        metadata["avatar_url"] = conv.From.AvatarUrl;
+                    if (conv.From.IsGroup == true)
+                        metadata["is_group"] = "true";
+                    metadata["from_id"] = conv.From.Id ?? "";
+                }
+
+                if (conv.LastSentBy != null)
+                {
+                    var senderName = conv.LastSentBy.DisplayName ?? conv.LastSentBy.Name ?? conv.LastSentBy.AdminName;
+                    if (!string.IsNullOrEmpty(senderName))
+                        metadata["sender_name"] = senderName;
+                    metadata["sender_id"] = conv.LastSentBy.Id ?? "";
+
+                    if (!string.IsNullOrEmpty(conv.PageId)
+                        && string.Equals(conv.LastSentBy.Id, conv.PageId, StringComparison.Ordinal)
+                        && !string.IsNullOrEmpty(senderName))
+                    {
+                        metadata["page_admin_name"] = senderName;
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(conv.PageId))
+                    metadata["page_id"] = conv.PageId;
+
+                if (conv.Customers != null && conv.Customers.Count > 0)
+                {
+                    var firstCustomer = conv.Customers[0];
+                    if (!string.IsNullOrEmpty(firstCustomer.Name) && !metadata.ContainsKey("display_name"))
+                        metadata["display_name"] = firstCustomer.Name;
+                    if (!string.IsNullOrEmpty(firstCustomer.AvatarUrl) && !metadata.ContainsKey("avatar_url"))
+                        metadata["avatar_url"] = firstCustomer.AvatarUrl;
+                }
+
                 var channelMsg = new ChannelMessage(
                     Channel: "zalo",
                     ExternalThreadId: convId,
@@ -153,12 +198,7 @@ public sealed partial class PancakePollingService : BackgroundService
                     SentAt: conv.UpdatedAt.HasValue
                         ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero)
                         : DateTimeOffset.UtcNow,
-                    Metadata: new Dictionary<string, string>
-                    {
-                        ["external_message_id"] = latestMsg.Id,
-                        ["content_type"] = "text",
-                    });
-
+                    Metadata: metadata);
                 await ingestor.IngestAsync(tenantId, channelMsg, ct);
             }
             catch (Exception ex)
