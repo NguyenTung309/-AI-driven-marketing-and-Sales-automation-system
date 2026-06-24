@@ -1,4 +1,4 @@
-﻿import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
@@ -10,6 +10,7 @@ import {
   sendConversationMessage,
   assignConversation,
   resolveConversation,
+  type ConversationListItem,
 } from "@/shared/api/inbox";
 import ChatMessageThread from "./ChatMessageThread";
 import ComposerWithAI from "./ComposerWithAI";
@@ -103,7 +104,6 @@ export default function AgentHubLayout() {
 
   const conversations = listQuery.data?.items ?? [];
   const activeConv = detailQuery.data;
-  const activeItem = conversations.find((c) => c.id === activeId);
 
   const handleSend = useCallback(
     (content: string) => sendMutation.mutate(content),
@@ -123,26 +123,16 @@ export default function AgentHubLayout() {
     if (activeId === id) setActiveId(tabs.filter((t) => t !== id)[0] ?? null);
   }
 
-  function statusColor(status: string): string {
-    switch (status) {
-      case "open": return "bg-success text-success";
-      case "pending": return "bg-warning-container text-warning";
-      case "resolved": return "bg-surface-variant text-on-surface-variant";
-      case "snoozed": return "bg-surface-variant text-on-surface-variant";
-      default: return "bg-surface-variant text-on-surface-variant";
-    }
-  }
-
   const title = currentChannel ? currentChannel.name : "Agent Hub";
 
   return (
-    <AppShell title={title}>
+    <AppShell title={title} noPadding={true}>
       {isAdmin && (
-        <div className="mx-4 mt-2 rounded-lg bg-warning-container px-3 py-1.5 text-label-sm text-on-warning-container">
-          Xem chi doc ? Ban co quyen admin, khong the gui tin nhan.
+        <div className="mx-4 mt-2 shrink-0 rounded-lg bg-warning-container px-3 py-1.5 text-label-sm text-on-warning-container">
+          Xem chỉ đọc? Bạn có quyền admin, không thể gửi tin nhắn.
         </div>
       )}
-      <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Left panel: conversation list */}
         <aside className="w-[320px] shrink-0 border-r border-outline bg-surface-container-lowest flex flex-col">
           <div className="border-b border-outline px-4 py-3">
@@ -158,39 +148,48 @@ export default function AgentHubLayout() {
                 Tat ca kenh
               </button>
             )}
-            <h2 className="text-label-md font-bold text-secondary">Hoi thoai</h2>
+            <h2 className="text-label-md font-bold text-secondary">Hội thoại</h2>
             <p className="text-label-sm text-on-surface-variant">
-              {listQuery.data?.total ?? 0} cuoc hoi thoai
+              {listQuery.data?.total ?? 0} cuộc hội thoại
             </p>
           </div>
           <div className="flex-1 overflow-y-auto">
             {listQuery.isLoading ? (
-              <div className="p-4 text-body-md text-on-surface-variant">Dang tai...</div>
+              <div className="p-4 text-body-md text-on-surface-variant">Đang tải...</div>
             ) : conversations.length === 0 ? (
-              <div className="p-4 text-body-md text-on-surface-variant">Khong co hoi thoai</div>
+              <div className="p-4 text-body-md text-on-surface-variant">Không có hội thoại</div>
             ) : (
               conversations.map((item) => (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => selectConversation(item.id)}
-                  className={w-full text-left px-4 py-3 border-b border-outline/50 hover:bg-surface-container-high transition-colors }
+                  className="w-full text-left px-4 py-3 border-b border-outline/50 hover:bg-surface-container-high transition-colors"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-body-md text-secondary truncate">
-                      {item.contactDisplayName ?? item.externalThreadId}
-                    </span>
-                    <span className={inline-flex items-center rounded-full px-2 py-0.5 text-label-xs }>
+                    <div className="flex items-center gap-3">
+                    {item.contactAvatarUrl ? (
+                      <img src={item.contactAvatarUrl} alt="" className="size-9 rounded-full object-cover shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    ) : (
+                      <div className="size-9 rounded-full bg-surface-variant flex items-center justify-center text-label-sm font-bold text-on-surface-variant shrink-0">
+                        {(item.contactDisplayName?.charAt(0) ?? "?").toUpperCase()}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <span className="font-semibold text-body-md text-secondary truncate">
+                        {item.contactDisplayName ?? item.externalThreadId}
+                      </span>
+                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-label-xs">
                       {item.status}
                     </span>
                   </div>
                   <p className="mt-1 text-body-sm text-on-surface-variant truncate">
-                    {item.lastMessagePreview ?? "Chua co tin nhan"}
+                    {item.lastMessagePreview ?? "Chưa có tin nhắn"}
                   </p>
                   <p className="mt-1 text-label-xs text-on-surface-variant">
                     {item.lastMessageAt
                       ? new Date(item.lastMessageAt).toLocaleString("vi-VN")
-                      : "Chua co tin nhan"}
+                      : "Chưa có tin nhắn"}
                   </p>
                 </button>
               ))
@@ -202,7 +201,7 @@ export default function AgentHubLayout() {
         <main className="flex-1 flex flex-col">
           {!activeId ? (
             <div className="flex-1 flex items-center justify-center text-body-md text-on-surface-variant">
-              Chon mot cuoc hoi thoai de bat dau
+              Chọn một cuộc hội thoại để bắt đầu
             </div>
           ) : (
             <>
@@ -218,6 +217,8 @@ export default function AgentHubLayout() {
                 <ChatMessageThread
                   messages={activeConv?.messages ?? []}
                   loading={detailQuery.isLoading}
+                  contactAvatarUrl={activeConv?.contactAvatarUrl}
+                  contactDisplayName={activeConv?.contactDisplayName}
                 />
               </div>
 

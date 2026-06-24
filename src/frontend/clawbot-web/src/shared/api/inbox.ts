@@ -1,4 +1,4 @@
-﻿import { apiClient } from "./client";
+import { apiClient } from "./client";
 export interface InboxChannel {
   readonly id: string;
   readonly name: string;
@@ -39,6 +39,10 @@ export interface ConversationListItem {
   readonly status: ConversationStatus;
   readonly contactId: string | null;
   readonly contactDisplayName: string | null;
+  readonly contactAvatarUrl: string | null;
+  readonly inboxId: string | null;
+  readonly inboxName: string | null;
+  readonly inboxAvatarUrl: string | null;
   readonly assignedTo: string | null;
   readonly lastMessageAt: string | null;
   readonly lastMessagePreview: string | null;
@@ -61,6 +65,7 @@ export interface InboxMessage {
   readonly content: string;
   readonly contentType: string;
   readonly sentAt: string;
+  readonly senderDisplayName: string | null;
 }
 
 export interface ConversationDetail {
@@ -70,6 +75,10 @@ export interface ConversationDetail {
   readonly status: ConversationStatus;
   readonly contactId: string | null;
   readonly contactDisplayName: string | null;
+  readonly contactAvatarUrl: string | null;
+  readonly inboxId: string | null;
+  readonly inboxName: string | null;
+  readonly inboxAvatarUrl: string | null;
   readonly assignedTo: string | null;
   readonly lastMessageAt: string | null;
   readonly createdAt: string;

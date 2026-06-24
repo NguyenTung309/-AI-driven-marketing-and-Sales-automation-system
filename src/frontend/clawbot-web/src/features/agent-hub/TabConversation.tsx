@@ -41,7 +41,7 @@ export default function TabConversation({ conversation, isActive, onSelect, onCl
         type='button'
         onClick={(e) => { e.stopPropagation(); onClose(); }}
         className='ml-auto text-on-surface-variant opacity-0 group-hover:opacity-100 hover:text-secondary'
-        aria-label='Dong tab'
+        aria-label='Đóng tab'
       >
         <svg width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2'>
           <path d='M18 6 6 18M6 6l12 12' />

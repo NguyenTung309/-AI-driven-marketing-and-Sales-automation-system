@@ -2,12 +2,13 @@ import type { MessageDto } from './types';
 interface Props {
   messages: MessageDto[];
   contactName: string | null;
+  contactAvatarUrl?: string | null;
 }
 function formatTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString('vi', { hour: '2-digit', minute: '2-digit' });
 }
-export default function ChatPane({ messages, contactName }: Props) {
+export default function ChatPane({ messages, contactName, contactAvatarUrl }: Props) {
   return (
     <div className="flex-1 flex flex-col gap-2 p-4 overflow-y-auto">
       {messages.length === 0 && (
