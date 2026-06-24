@@ -17,7 +17,7 @@ public static class KbEndpoints
 {
     public static IEndpointRouteBuilder MapKb(this IEndpointRouteBuilder app)
     {
-var modules = app.MapGroup("/api/modules").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+var modules = app.MapGroup("/api/kb/modules").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         modules.MapGet("/", ListModulesAsync).RequirePermission("kb:read");
         modules.MapGet("/{id:guid}", GetModuleAsync).RequirePermission("kb:read");

@@ -46,6 +46,12 @@ public sealed class SemanticKernelPlanGenerator(IChatCompletionService chat)
     private static string NormalizeJson(string json)
     {
         var trimmed = json.Trim();
+
+        // Strip leading prose before opening fence (e.g. "Here is the plan:\n```json ... ```")
+        var fenceStart = trimmed.IndexOf("```", StringComparison.Ordinal);
+        if (fenceStart > 0)
+            trimmed = trimmed[fenceStart..];
+
         if (!trimmed.StartsWith("```", StringComparison.Ordinal))
             return trimmed;
 
