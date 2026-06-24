@@ -13,6 +13,15 @@ public sealed class AgentServiceProgramRegistrationTests
         program.Should().NotContain("Array.Empty<IAgent>()");
     }
 
+    [Fact]
+    public void Agent_service_program_registers_schedule_worker()
+    {
+        var program = File.ReadAllText(FindRepoFile("src", "agents", "Clawbot.AgentService", "Program.cs"));
+
+        program.Should().Contain("AddScoped<Clawbot.AgentService.Services.AgentScheduleRunner>()");
+        program.Should().Contain("AddHostedService<Clawbot.AgentService.Services.AgentScheduleWorker>()");
+    }
+
     private static string FindRepoFile(params string[] segments)
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

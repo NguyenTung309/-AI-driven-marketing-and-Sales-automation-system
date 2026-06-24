@@ -13,6 +13,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { icon: "monitoring", label: "Báo cáo thống kê", to: "/analytics" },
   { icon: "notifications", label: "Trung tâm thông báo", to: "/notifications" },
   { icon: "account_tree", label: "Sơ đồ tiến trình", to: "/workflow" },
+  { icon: "hub", label: "Điều phối tự động", to: "/orchestration" },
   { icon: "apartment", label: "Không gian agents", to: "/agents-office" },
   { icon: "receipt_long", label: "Nhật ký tác vụ", to: "/logs" },
   { icon: "toll", label: "Quản lý chi phí AI", to: "/tokens" },

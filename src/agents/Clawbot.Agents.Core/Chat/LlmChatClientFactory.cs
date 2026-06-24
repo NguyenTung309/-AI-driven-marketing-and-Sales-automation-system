@@ -18,7 +18,7 @@ public sealed class LlmChatClientFactory(IHttpClientFactory httpClientFactory) :
         return config.Provider switch
         {
             "anthropic" => new AnthropicChatClient(CreateAnthropicHttpClient(config), config),
-            "openai" => new OpenAiChatClient(config),
+            "openai" or "openai-compatible" => new OpenAiChatClient(config),
             _ => throw new NotSupportedException($"Unsupported LLM provider '{config.Provider}'."),
         };
     }

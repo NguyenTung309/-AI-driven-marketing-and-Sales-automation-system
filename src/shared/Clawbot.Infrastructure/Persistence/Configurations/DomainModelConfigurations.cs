@@ -337,6 +337,81 @@ public sealed class AgentTraceConfiguration : IEntityTypeConfiguration<AgentTrac
     }
 }
 
+public sealed class AgentDefinitionConfiguration : IEntityTypeConfiguration<AgentDefinition>
+{
+    public void Configure(EntityTypeBuilder<AgentDefinition> builder)
+    {
+        builder.ToTable("agent_definitions");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.DisplayName).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.AgentType).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.PersonaPrompt).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.AllowedToolsJson).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.InputSchemaJson).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.OutputSchemaJson).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.MemoryScope).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.Version).HasDefaultValue(1);
+        builder.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.IsOrchestratable });
+        builder.HasIndex(x => x.LlmConfigId);
+        builder.HasOne<LlmConfig>().WithMany().HasForeignKey(x => x.LlmConfigId).OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+public sealed class AgentA2AMessageConfiguration : IEntityTypeConfiguration<AgentA2AMessage>
+{
+    public void Configure(EntityTypeBuilder<AgentA2AMessage> builder)
+    {
+        builder.ToTable("agent_a2a_messages");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.TaskId).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.Intent).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.PayloadJson).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.Error).HasMaxLength(1024);
+        builder.HasIndex(x => new { x.TenantId, x.SessionId, x.Status, x.CreatedAt });
+        builder.HasOne<AgentSession>().WithMany().HasForeignKey(x => x.SessionId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<AgentDefinition>().WithMany().HasForeignKey(x => x.FromAgentDefinitionId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<AgentDefinition>().WithMany().HasForeignKey(x => x.ToAgentDefinitionId).OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+public sealed class AgentScheduleConfiguration : IEntityTypeConfiguration<AgentSchedule>
+{
+    public void Configure(EntityTypeBuilder<AgentSchedule> builder)
+    {
+        builder.ToTable("agent_schedules");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Name).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.GoalTemplate).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.Cadence).HasMaxLength(16).IsRequired();
+        builder.Property(x => x.CronExpression).HasMaxLength(128);
+        builder.Property(x => x.TimezoneId).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.OverlapPolicy).HasMaxLength(32).HasDefaultValue("skip").IsRequired();
+        builder.Property(x => x.MisfirePolicy).HasMaxLength(32).HasDefaultValue("skip_missed").IsRequired();
+        builder.Property(x => x.ApprovalPolicyJson).HasColumnType("nvarchar(max)");
+        builder.HasIndex(x => new { x.TenantId, x.IsActive, x.NextRunAt });
+        builder.HasIndex(x => new { x.TenantId, x.Name });
+    }
+}
+
+public sealed class AgentScheduleRunConfiguration : IEntityTypeConfiguration<AgentScheduleRun>
+{
+    public void Configure(EntityTypeBuilder<AgentScheduleRun> builder)
+    {
+        builder.ToTable("agent_schedule_runs");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.WindowKey).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.Error).HasMaxLength(1024);
+        builder.HasIndex(x => new { x.ScheduleId, x.WindowKey }).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.Status, x.StartedAt });
+        builder.HasOne<AgentSchedule>().WithMany().HasForeignKey(x => x.ScheduleId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<AgentSession>().WithMany().HasForeignKey(x => x.SessionId).OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
 public sealed class QuickReplyTemplateConfiguration : IEntityTypeConfiguration<QuickReplyTemplate>
 {
     public void Configure(EntityTypeBuilder<QuickReplyTemplate> builder)

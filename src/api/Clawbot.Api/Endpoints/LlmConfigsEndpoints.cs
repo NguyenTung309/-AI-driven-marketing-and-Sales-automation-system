@@ -17,7 +17,7 @@ namespace Clawbot.Api.Endpoints;
 public static class LlmConfigsEndpoints
 {
     private static readonly HashSet<string> AllowedProviders =
-        new(StringComparer.OrdinalIgnoreCase) { "anthropic", "openai" };
+        new(StringComparer.OrdinalIgnoreCase) { "anthropic", "openai", "openai-compatible" };
 
     public static IEndpointRouteBuilder MapLlmConfigs(this IEndpointRouteBuilder app)
     {
@@ -229,7 +229,7 @@ public static class LlmConfigsEndpoints
         var url = baseUrl.Trim().TrimEnd('/');
         return provider switch
         {
-            "openai" => url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? url : url + "/v1",
+            "openai" or "openai-compatible" => url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? url : url + "/v1",
             "anthropic" => url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? url[..^"/v1".Length] : url,
             _ => url,
         };

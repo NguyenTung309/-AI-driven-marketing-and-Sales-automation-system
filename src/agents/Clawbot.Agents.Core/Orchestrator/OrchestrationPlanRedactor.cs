@@ -20,6 +20,8 @@ public static class OrchestrationPlanRedactor
             {
                 Description = await RedactTextAsync(task.Description, redactor, ct).ConfigureAwait(false),
                 Input = input,
+                Output = await RedactTextOrNullAsync(task.Output, redactor, ct).ConfigureAwait(false),
+                Error = await RedactTextOrNullAsync(task.Error, redactor, ct).ConfigureAwait(false),
             });
         }
 
@@ -30,4 +32,7 @@ public static class OrchestrationPlanRedactor
         string.IsNullOrEmpty(text)
             ? string.Empty
             : (await redactor.RedactAsync(text, ct).ConfigureAwait(false)).RedactedText;
+
+    private static async Task<string?> RedactTextOrNullAsync(string? text, IPiiRedactor redactor, CancellationToken ct) =>
+        text is null ? null : await RedactTextAsync(text, redactor, ct).ConfigureAwait(false);
 }
