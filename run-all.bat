@@ -103,6 +103,9 @@ if errorlevel 1 exit /b 1
 call :apply_migrations_if_needed
 if errorlevel 1 exit /b 1
 
+call :apply_ef_migrations
+if errorlevel 1 exit /b 1
+
 call :ensure_seed_tenant
 if errorlevel 1 exit /b 1
 
@@ -305,6 +308,16 @@ for %%F in (*.sql) do (
         echo [ERROR] Seed failed: %%F
         exit /b 1
     )
+)
+popd >nul
+exit /b 0
+
+:apply_ef_migrations
+echo [INFO] Applying Entity Framework migrations...
+pushd "%ROOT%src\api\Clawbot.Api" >nul
+dotnet ef database update --project "..\..\shared\Clawbot.Infrastructure\Clawbot.Infrastructure.csproj"
+if errorlevel 1 (
+    echo [WARN] EF migrations failed; continuing startup...
 )
 popd >nul
 exit /b 0

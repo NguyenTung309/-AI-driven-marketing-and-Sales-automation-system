@@ -74,7 +74,7 @@ public static class AdminEndpoints
                 a.ResourceType,
                 a.ResourceId,
                 a.DiffJson,
-                a.IpAddress,
+                IpAddress = a.IpAddress != null ? a.IpAddress.ToString() : null,
                 a.UserAgent,
                 a.OccurredAt,
             })
