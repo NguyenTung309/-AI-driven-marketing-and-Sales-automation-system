@@ -1,4 +1,4 @@
-﻿using Clawbot.Domain.Common;
+using Clawbot.Domain.Common;
 
 namespace Clawbot.Domain.Channels;
 
@@ -16,6 +16,12 @@ public sealed class Inbox : AggregateRoot<Guid>, ITenantOwned
     public DateTimeOffset? DeletedAt { get; private set; }
 
     private Inbox() { }
+
+    public void UpdateName(string name, DateTimeOffset at)
+    {
+        Name = name ?? throw new ArgumentNullException(nameof(name));
+        UpdatedAt = at;
+    }
 
     public static Inbox Create(Guid tenantId, string name, string platform, string externalPageId)
     {
