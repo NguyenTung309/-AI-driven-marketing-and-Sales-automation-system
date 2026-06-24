@@ -1,4 +1,4 @@
-﻿namespace Clawbot.Api.Contracts.Inbox;
+namespace Clawbot.Api.Contracts.Inbox;
 
 public sealed record ConversationListItemDto(
     Guid Id,
@@ -7,6 +7,10 @@ public sealed record ConversationListItemDto(
     string Status,
     Guid? ContactId,
     string? ContactDisplayName,
+    string? ContactAvatarUrl,
+    Guid? InboxId,
+    string? InboxName,
+    string? InboxAvatarUrl,
     Guid? AssignedTo,
     DateTimeOffset? LastMessageAt,
     string? LastMessagePreview,
@@ -20,6 +24,10 @@ public sealed record ConversationDetailDto(
     string Status,
     Guid? ContactId,
     string? ContactDisplayName,
+    string? ContactAvatarUrl,
+    Guid? InboxId,
+    string? InboxName,
+    string? InboxAvatarUrl,
     Guid? AssignedTo,
     DateTimeOffset? LastMessageAt,
     DateTimeOffset CreatedAt,
@@ -33,7 +41,8 @@ public sealed record MessageDto(
     Guid? SenderUserId,
     string Content,
     string ContentType,
-    DateTimeOffset SentAt);
+    DateTimeOffset SentAt,
+    string? SenderDisplayName);
 
 public sealed record AssignConversationRequest(Guid UserId);
 

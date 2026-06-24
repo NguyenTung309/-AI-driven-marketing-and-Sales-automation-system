@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Security.Claims;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Inbox;
@@ -80,6 +80,7 @@ public static class InboxEndpoints
                 c.ContactId,
                 c.AssignedTo,
                 c.LastMessageAt,
+                c.InboxId,
                 RowVersion = c.RowVersion ?? Array.Empty<byte>(),
                 LastMessage = c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault(),
             })
@@ -90,9 +91,15 @@ public static class InboxEndpoints
             .Where(c => contactIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, c => c.DisplayName, ct).ConfigureAwait(false);
 
+        var contactAvatars = await db.Contacts.AsNoTracking()
+            .Where(c => contactIds.Contains(c.Id))
+            .ToDictionaryAsync(c => c.Id, c => c.AvatarUrl, ct).ConfigureAwait(false);
+
         var items = rows.Select(r => new ConversationListItemDto(
             r.Id, r.Platform, r.ExternalThreadId, r.Status, r.ContactId,
             r.ContactId.HasValue && contactNames.TryGetValue(r.ContactId.Value, out var n) ? n : null,
+            r.ContactId.HasValue && contactAvatars.TryGetValue(r.ContactId.Value, out var a) ? a : null,
+            r.InboxId, null, null,
             r.AssignedTo, r.LastMessageAt,
             r.LastMessage is null ? null : Preview(r.LastMessage),
             r.RowVersion,
@@ -122,12 +129,28 @@ public static class InboxEndpoints
                 .Select(c => c.DisplayName).FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
         var messages = conv.Messages.OrderBy(m => m.SentAt)
-            .Select(m => new MessageDto(m.Id, m.Direction, m.SenderType, m.SenderUserId, m.Content, m.ContentType, m.SentAt))
+            .Select(m => new MessageDto(m.Id, m.Direction, m.SenderType, m.SenderUserId, m.Content, m.ContentType, m.SentAt, m.SenderDisplayName))
             .ToList();
+
+        string? inboxName = null;
+        string? inboxAvatarUrl = null;
+        if (conv.InboxId.HasValue)
+        {
+            var inbox = await db.Inboxes.IgnoreQueryFilters()
+                .Where(i => i.Id == conv.InboxId.Value)
+                .Select(i => new { i.Name, i.AvatarUrl })
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            if (inbox != null)
+            {
+                inboxName = inbox.Name;
+                inboxAvatarUrl = inbox.AvatarUrl;
+            }
+        }
 
         return Results.Ok(new ConversationDetailDto(
             conv.Id, conv.Platform, conv.ExternalThreadId, conv.Status, conv.ContactId,
-            contactName, conv.AssignedTo, conv.LastMessageAt, conv.CreatedAt,
+            contactName, null, conv.InboxId, inboxName, inboxAvatarUrl,
+            conv.AssignedTo, conv.LastMessageAt, conv.CreatedAt,
             conv.RowVersion, messages));
     }
 
@@ -285,7 +308,7 @@ public static class InboxEndpoints
         await notifier.NotifyMessageAsync(tenant.TenantId,
             new InboxMessageEvent(conv.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt, conv.AssignedTo), ct).ConfigureAwait(false);
 
-        return Results.Ok(new MessageDto(msg.Id, msg.Direction, msg.SenderType, msg.SenderUserId, msg.Content, msg.ContentType, msg.SentAt));
+        return Results.Ok(new MessageDto(msg.Id, msg.Direction, msg.SenderType, msg.SenderUserId, msg.Content, msg.ContentType, msg.SentAt, null));
     }
 
     private static string Preview(string text) =>

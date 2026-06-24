@@ -1,4 +1,4 @@
-﻿using Clawbot.Api.Contracts.Inbox;
+using Clawbot.Api.Contracts.Inbox;
 using Clawbot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -68,10 +68,10 @@ internal sealed class InboxSearchService(AppDbContext db)
                 c.ExternalThreadId,
                 c.Status,
                 c.ContactId,
+                c.InboxId,
                 c.AssignedTo,
                 c.LastMessageAt,
-                RowVersion = c.RowVersion ?? Array.Empty<byte>(),
-                LastMessage = c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault(),
+                RowVersion = c.RowVersion ?? Array.Empty<byte>(),                LastMessage = c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault(),
             })
             .ToListAsync(ct).ConfigureAwait(false);
 
@@ -87,6 +87,8 @@ internal sealed class InboxSearchService(AppDbContext db)
             r.Status,
             r.ContactId,
             r.ContactId.HasValue && contactNames.TryGetValue(r.ContactId.Value, out var n) ? n : null,
+            null,
+            r.InboxId, null, null,
             r.AssignedTo,
             r.LastMessageAt,
             r.LastMessage is null ? null : Preview(r.LastMessage),
