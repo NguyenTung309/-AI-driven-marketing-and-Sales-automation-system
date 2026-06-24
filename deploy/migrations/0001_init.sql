@@ -79,7 +79,7 @@ CREATE TABLE api_keys (
     tenant_id   UNIQUEIDENTIFIER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name        NVARCHAR(128) NOT NULL,
     key_hash    NVARCHAR(MAX) NOT NULL,
-    scopes      NVARCHAR(MAX) NOT NULL DEFAULT '[]',
+    scopes_json NVARCHAR(MAX) NOT NULL DEFAULT '[]',
     expires_at  DATETIMEOFFSET,
     revoked_at  DATETIMEOFFSET,
     created_by  UNIQUEIDENTIFIER REFERENCES users(id) ON DELETE NO ACTION,
