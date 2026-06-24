@@ -31,7 +31,7 @@ CREATE TABLE users (
     tenant_id           UNIQUEIDENTIFIER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     display_name        NVARCHAR(256) NOT NULL,
     email               NVARCHAR(256) NOT NULL,
-    phone               NVARCHAR(32),
+    phone_number        NVARCHAR(32),
     password_hash       NVARCHAR(MAX) NOT NULL,
     security_stamp      NVARCHAR(64),
     access_failed_count INT NOT NULL DEFAULT 0,
@@ -147,13 +147,13 @@ CREATE TABLE conversations (
     external_thread_id NVARCHAR(256) NOT NULL,
     status             NVARCHAR(32) NOT NULL DEFAULT 'open', -- open|pending|resolved|escalated
     assigned_to        UNIQUEIDENTIFIER REFERENCES users(id) ON DELETE NO ACTION,
-    last_msg_at        DATETIMEOFFSET,
+    last_message_at    DATETIMEOFFSET,
     created_at         DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
     updated_at         DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
     deleted_at         DATETIMEOFFSET,
     UNIQUE (tenant_id, platform, external_thread_id)
 );
-CREATE INDEX ix_conv_tenant_status_last ON conversations (tenant_id, status, last_msg_at DESC);
+CREATE INDEX ix_conv_tenant_status_last ON conversations (tenant_id, status, last_message_at DESC);
 CREATE INDEX ix_conv_contact            ON conversations (contact_id) WHERE contact_id IS NOT NULL;
 
 -- IMMUTABLE message log — no updated_at, no soft-delete

@@ -112,7 +112,7 @@ VALUES
 MERGE conversations AS target
 USING (
     SELECT v.code, c.id AS contact_id, v.platform, v.external_thread_id, v.status,
-           DATEADD(MINUTE, v.last_msg_offset_min, @base_time) AS last_msg_at
+           DATEADD(MINUTE, v.last_msg_offset_min, @base_time) AS last_message_at
     FROM @conversations AS v
     JOIN @contacts AS seed_contact ON seed_contact.code = v.contact_code
     JOIN contacts AS c ON c.tenant_id = @tenant_id AND c.email = seed_contact.email
@@ -123,13 +123,12 @@ WHEN MATCHED THEN
         contact_id = source.contact_id,
         status = source.status,
         assigned_to = @owner_user_id,
-        last_msg_at = source.last_msg_at,
-        last_message_at = source.last_msg_at,
+        last_message_at = source.last_message_at,
         updated_at = @now,
         deleted_at = NULL
 WHEN NOT MATCHED THEN
-    INSERT (id, tenant_id, contact_id, platform, external_thread_id, status, assigned_to, last_msg_at, last_message_at, created_at, updated_at)
-    VALUES (NEWID(), @tenant_id, source.contact_id, source.platform, source.external_thread_id, source.status, @owner_user_id, source.last_msg_at, source.last_msg_at, @base_time, @now);
+    INSERT (id, tenant_id, contact_id, platform, external_thread_id, status, assigned_to, last_message_at, created_at, updated_at)
+    VALUES (NEWID(), @tenant_id, source.contact_id, source.platform, source.external_thread_id, source.status, @owner_user_id, source.last_message_at, @base_time, @now);
 
 DECLARE @messages TABLE (
     conversation_code NVARCHAR(32) NOT NULL,
