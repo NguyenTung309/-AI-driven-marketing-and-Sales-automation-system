@@ -1,4 +1,4 @@
-﻿using Clawbot.Domain.Common;
+using Clawbot.Domain.Common;
 
 namespace Clawbot.Domain.Conversations;
 
@@ -28,7 +28,8 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
         string platform,
         string externalThreadId,
         DateTimeOffset createdAt,
-        Guid? contactId = null) =>
+        Guid? contactId = null,
+        Guid? inboxId = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -37,7 +38,10 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
             Platform = platform,
             ExternalThreadId = externalThreadId,
             CreatedAt = createdAt,
+            InboxId = inboxId,
         };
+
+    public void SetInboxId(Guid inboxId) => InboxId = inboxId;
 
     public void Assign(Guid userId) => AssignedTo = userId;
 
@@ -49,9 +53,9 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
         Raise(new Events.ConversationEscalated(TenantId, Id, DateTimeOffset.UtcNow));
     }
 
-    public Message AppendMessage(string direction, string senderType, string content, string contentType, DateTimeOffset sentAt, Guid? senderUserId = null, string? externalMessageId = null, string? originalContent = null, string? redactedContent = null, string messageType = "text", string? parentPostId = null)
+    public Message AppendMessage(string direction, string senderType, string content, string contentType, DateTimeOffset sentAt, Guid? senderUserId = null, string? externalMessageId = null, string? originalContent = null, string? redactedContent = null, string messageType = "text", string? parentPostId = null, string? senderDisplayName = null)
     {
-        var msg = Message.Create(Id, TenantId, direction, senderType, content, contentType, sentAt, senderUserId, externalMessageId, originalContent, redactedContent, messageType, parentPostId);
+        var msg = Message.Create(Id, TenantId, direction, senderType, content, contentType, sentAt, senderUserId, externalMessageId, originalContent, redactedContent, messageType, parentPostId, senderDisplayName);
         _messages.Add(msg);
         LastMessageAt = sentAt;
         return msg;
