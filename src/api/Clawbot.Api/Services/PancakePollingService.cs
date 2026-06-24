@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Clawbot.Domain.Channels;
 using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Persistence;
@@ -277,7 +278,39 @@ public sealed record PancakeConversationsResponse(bool? Success, PancakeConversa
 public sealed record PancakeMessagesResponse(bool? Success, PancakeMessage[]? Messages);
 public sealed record PancakeMessage(string? Id, PancakeMessageSender? From);
 public sealed record PancakeMessageSender(string? Id, string? AdminId, bool? IsAutomated);
+/// <summary>
+/// The other party in the conversation (customer contact or group info).
+/// </summary>
+public sealed record PancakeFrom(
+    string? Id,
+    string? Name,
+    string? AvatarUrl,
+    bool? IsGroup);
+
+/// <summary>
+/// The user who sent the last message in this conversation.
+/// When LastSentBy.Id == PageId, the sender is the page owner/admin.
+/// </summary>
+public sealed record PancakeLastSentBy(
+    string? Id,
+    string? Name,
+    string? DisplayName,
+    string? AvatarUrl,
+    string? AdminName);
+
+/// <summary>
+/// A customer/participant in the conversation (used for group chats).
+/// </summary>
+public sealed record PancakeCustomer(
+    string? Id,
+    string? Name,
+    string? AvatarUrl,
+    string? FbId);
+
 public sealed record PancakeConversation(
     string? Id, string? Type, string? Snippet, int? MessageCount,
-    DateTime? UpdatedAt, DateTime? InsertedAt, string? PageId);
+    DateTime? UpdatedAt, DateTime? InsertedAt, string? PageId,
+    PancakeFrom? From, PancakeLastSentBy? LastSentBy,
+    IReadOnlyList<PancakeCustomer>? Customers);
+
 
