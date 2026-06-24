@@ -6,6 +6,7 @@ public sealed class SeedSqlSafetyTests
 {
     [Theory]
     [InlineData("ads-rules.sql")]
+    [InlineData("agent-definitions.sql")]
     [InlineData("chat-scenarios.sql")]
     [InlineData("content-briefs.sql")]
     [InlineData("document-templates.sql")]

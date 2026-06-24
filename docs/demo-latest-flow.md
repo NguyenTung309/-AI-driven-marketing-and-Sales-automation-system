@@ -2,6 +2,8 @@
 
 > Tài liệu này dùng để demo ClawBot theo đúng trạng thái code mới nhất đã triển khai. Nội dung viết cho ban giám đốc, nhà đầu tư và người ra quyết định. Mục tiêu là kể một câu chuyện sản phẩm rõ ràng, dễ hiểu, có giá trị kinh doanh, nhưng vẫn trung thực về phần nào đã có thể demo và phần nào cần credential hoặc dữ liệu thật.
 
+> **Trạng thái orchestration:** V1 đã có nền agent/session/trace/token/cost/LLM provider config và plan executor. V2 là hướng cần bổ sung: Semantic Kernel autonomous multi-agent orchestration nhận input từ chat/tài liệu/manual, tự lập plan, tạo/chọn sub-agent dạng dữ liệu, agent-to-agent phối hợp, chạy lặp theo ngày/tuần/tháng/quý, có trace/cost/RBAC/approval. Không trình bày V2 như feature production đã hoàn chỉnh nếu chưa chạy live.
+
 ---
 
 ## 1. Mục tiêu demo
@@ -14,7 +16,7 @@ Buổi demo cần chứng minh ClawBot không chỉ là một chatbot đơn lẻ
 4. Lead được chấm điểm, phân loại, giao cho người phụ trách và theo dõi trong pipeline.
 5. Hệ thống có thể tạo báo giá, brochure, onboarding kit và nội dung marketing.
 6. Ban quản lý xem được KPI, chi phí AI, hiệu quả agent, cảnh báo và trace vận hành.
-7. Admin kiểm soát người dùng, quyền, tích hợp, prompt, model, token quota và orchestration.
+7. Admin kiểm soát người dùng, quyền, tích hợp, prompt, model, token quota và nền orchestration; V2 mở rộng thành scheduled agent-to-agent orchestration.
 
 Thông điệp chính cho người nghe:
 
@@ -54,7 +56,7 @@ Nên trình bày theo kiểu:
 ### 3.1. Tài khoản và quyền
 
 - Có một tài khoản admin hoặc sales lead.
-- Tài khoản có quyền xem dashboard, inbox, sale assist, leads, documents, content, analytics, notifications, agents, prompts, tokens, system admin và orchestration.
+- Tài khoản có quyền xem dashboard, inbox, sale assist, leads, documents, content, analytics, notifications, agents, prompts, tokens và system admin. Nếu demo nền orchestration hoặc V2, cần thêm quyền `orchestration:view`, `orchestration:run`, `orchestration:manage` hoặc `orchestration:approve` theo vai trò.
 - Nếu demo 2FA, chuẩn bị sẵn mã hoặc flow fallback.
 
 ### 3.2. Dữ liệu mẫu
@@ -95,7 +97,7 @@ Nếu demo live, cần kiểm tra:
 - API và frontend chạy được.
 - AgentService chạy được.
 - Database có dữ liệu demo.
-- LLM provider config có API key hợp lệ nếu muốn gọi AI live.
+- LLM provider config có API key hợp lệ nếu muốn gọi AI live. Với demo local OpenAI-compatible: provider `openai-compatible`, model `cx/gpt-5.5`, base URL `http://localhost:20128/v1`; API key seed vào DB ở dạng mã hóa, không ghi plaintext trong repo/docs.
 - Pancake credential hoặc webhook sample nếu muốn demo omnichannel live.
 - SMTP/MinIO nếu muốn demo gửi tài liệu hoặc mở link production-like.
 - Qdrant/embedder nếu muốn nói sâu về RAG/KB accuracy.
@@ -342,23 +344,31 @@ Lời thoại:
 
 ---
 
-### Cảnh 12 — LLM Provider Config và Dynamic Orchestration (1–2 phút)
+### Cảnh 12 — LLM Provider Config và Scheduled Agent-to-Agent Orchestration v2 (1–2 phút)
 
-**Màn hình:** LLM provider settings, Orchestration nếu đã có UI/route phù hợp.
+**Màn hình:** LLM provider settings, `/orchestration`, Agent dashboard/trace.
 
-**Điểm cần chứng minh:** hệ thống tiến tới cấu hình model theo tenant/agent và điều phối nhiều agent theo mục tiêu.
+**Điểm cần chứng minh:** hệ thống có nền cấu hình model theo tenant/agent; V2 mở rộng thành orchestration tự động, có sub-agent và lịch chạy định kỳ.
 
 Lời thoại gợi ý cho LLM config:
 
-> “ClawBot không nên bị khóa cứng vào một API key hoặc một model trong file cấu hình. Phần LLM provider config cho phép tenant admin thêm provider, chọn model, cấu hình base URL, test connection, xoay key và bind provider cho từng agent. API key được lưu mã hóa và không trả plaintext về UI.”
+> “ClawBot không nên bị khóa cứng vào một API key hoặc một model trong file cấu hình. Tenant admin có thể thêm OpenAI-compatible provider, chọn model, cấu hình base URL, test connection, xoay key và bind provider cho orchestrator hoặc từng agent. API key được lưu mã hóa và không trả plaintext về UI.”
 
-Lời thoại gợi ý cho orchestration:
+Nếu dùng local test config:
 
-> “Bước tiếp theo của vận hành AI là không chỉ bấm từng agent riêng lẻ. Dynamic orchestration cho phép người dùng nhập mục tiêu, hệ thống lập kế hoạch thành các task cho nhiều agent, chạy theo dependency và ghi trace. Đây là nền cho các chiến dịch phức tạp như ra mắt khóa học mới: research, content, ads, report cùng phối hợp.”
+> “Với môi trường demo local, ta có thể seed provider OpenAI-compatible vào DB với model `cx/gpt-5.5`, base URL `http://localhost:20128/v1`. Key chỉ đi qua seed/test flow và được lưu mã hóa trong DB; không đưa plaintext vào repo hoặc tài liệu.”
 
-Nếu orchestration cần LLM config hoặc dữ liệu:
+Lời thoại gợi ý cho orchestration V2:
 
-> “Phần này cần LLM provider config hợp lệ cho orchestrator. Nếu chưa có key live, ta demo bằng plan/trace mẫu hoặc trình bày UI và dữ liệu đã ghi.”
+> “V2 hiện có route `/orchestration`: danh sách sub-agent dạng dữ liệu, lịch daily/weekly/monthly/quarterly, run-now smoke path, danh sách run và trace/A2A messages. Semantic Kernel coordinator vẫn là lõi thực thi; API/UI mới giúp demo luồng scheduled multi-agent thay vì chỉ nói roadmap.”
+
+Smoke path local:
+
+1. Set `CLAWBOT_DEMO_LLM_API_KEY` trong terminal chạy API.
+2. Chạy API ở Development để `DemoLlmConfigSeeder` seed provider `openai-compatible` mã hóa.
+3. Mở `/llm-providers` xác nhận provider local active.
+4. Mở `/orchestration`, tạo schedule “Daily lead triage”, bấm `Run now` để đưa lịch về trạng thái due.
+5. Sau nhịp `AgentScheduleWorker` kế tiếp, mở run mới, xác nhận status + trace/A2A messages. Không đọc/ghi plaintext key trong UI/log/docs.
 
 ---
 
@@ -391,7 +401,7 @@ Lời thoại kết thúc:
 
 Nếu muốn nêu roadmap:
 
-> “Các phần cần credential hoặc dữ liệu thật như Pancake live payload, real LLM/embedder, SMTP/MinIO, publisher hoặc ads vendor sẽ là checklist go-live vận hành, không phải thay đổi kiến trúc lớn.”
+> “Các phần cần credential hoặc dữ liệu thật như Pancake live payload, real LLM/embedder, SMTP/MinIO, publisher hoặc ads vendor sẽ là checklist go-live vận hành. Riêng scheduled agent-to-agent orchestration là V2: cần hoàn thiện Semantic Kernel coordinator, sub-agent as data, A2A mailbox, scheduler daily/weekly/monthly/quarterly, guardrails và smoke test live.”
 
 ---
 
@@ -412,7 +422,7 @@ Nếu muốn nêu roadmap:
 | Prompt configs | Chạy prompt sandbox live. | Mở config và giải thích sandbox cần LLM key. | Sandbox cần LLM provider hợp lệ. |
 | Token quota | Hiển thị usage từ ledger thật. | Dùng token ledger mẫu. | Cần sample usage đủ rõ. |
 | LLM provider config | Test connection live bằng key demo. | Demo masked config và trạng thái not configured/configured. | Không lộ plaintext key. |
-| Dynamic orchestration | Nhập goal nhỏ và chạy plan live. | Mở plan/trace mẫu đã seed. | Cần LLM config cho orchestrator nếu chạy live. |
+| Orchestration V1 / V2 | V1: nhập goal nhỏ và xem plan/trace foundation nếu môi trường đã có route/data. V2: chạy scheduled A2A nếu feature đã implement và local LLM config đã seed encrypted. | V1: mở plan/trace mẫu đã seed. V2: trình bày requirement/design/plan và nói rõ chưa phải feature hoàn chỉnh nếu chưa chạy live. | V2 cần Semantic Kernel coordinator, sub-agent as data, A2A mailbox, scheduler, RBAC/cost/approval guard và LLM config cho orchestrator. |
 | Admin system | Demo user/RBAC/API key/Pancake/branding live. | Chỉ mở cấu hình mẫu, không sửa nếu sợ ảnh hưởng môi trường. | Cần admin role. |
 
 Cách nói khi chuyển sang fallback:
@@ -457,13 +467,19 @@ Trả lời gợi ý:
 
 Trả lời gợi ý:
 
-> “Có agent sessions, agent traces, task runs, audit logs và prompt sandbox. Khi có phản hồi sai hoặc chi phí bất thường, đội vận hành có thể xem lại agent nào chạy, input/output nào, prompt nào và trace nào liên quan.”
+> “Có agent sessions, agent traces, task runs, audit logs và prompt sandbox. Khi có phản hồi sai hoặc chi phí bất thường, đội vận hành có thể xem lại agent nào chạy, input/output nào, prompt nào và trace nào liên quan. Với V2 agent-to-agent, trace cần mở rộng thêm A2A message timeline để thấy coordinator giao task cho sub-agent nào, reviewer phản hồi gì và vì sao hệ thống stop/replan.”
+
+### Hỏi: Agent orchestration có tự tạo sub-agent và chạy theo ngày/tuần/tháng/quý chưa?
+
+Trả lời gợi ý:
+
+> “Đó là mục tiêu V2. Ý định là Semantic Kernel coordinator nhận input từ chat/tài liệu/form, tự nhận diện công việc, lập plan, tạo hoặc chọn sub-agent dạng dữ liệu, cho các agent trao đổi agent-to-agent và chạy định kỳ theo daily/weekly/monthly/quarterly schedule. V1 hiện là nền plan/session/trace/cost/LLM config; không nói V2 đã production-ready nếu chưa chạy live.”
 
 ### Hỏi: Phần nào còn cần chuẩn bị để go-live?
 
 Trả lời gợi ý:
 
-> “Các phần code chính đã có nhiều, nhưng go-live cần checklist vận hành: credential live cho Pancake/LLM/SMTP/MinIO/publisher/vendor, KB tiếng Trung thật, test set accuracy, dữ liệu demo/production sạch, và smoke test môi trường.”
+> “V1 foundation đã có nhiều, nhưng go-live cần checklist vận hành: credential live cho Pancake/LLM/SMTP/MinIO/publisher/vendor, KB tiếng Trung thật, test set accuracy, dữ liệu demo/production sạch, và smoke test môi trường. Scheduled agent-to-agent orchestration là V2 riêng, cần implement coordinator, sub-agent data model, A2A mailbox, scheduler và guardrails trước khi demo như feature hoàn chỉnh.”
 
 ---
 
@@ -491,5 +507,8 @@ Cập nhật tài liệu này sau mỗi lần rehearsal hoặc demo thật nếu
 - [docs/login-flow.md](./login-flow.md) — chi tiết login/auth.
 - [docs/ai/requirements/2026-06-19-feature-llm-provider-config.md](./ai/requirements/2026-06-19-feature-llm-provider-config.md) — yêu cầu LLM provider config.
 - [docs/ai/design/2026-06-19-feature-llm-provider-config.md](./ai/design/2026-06-19-feature-llm-provider-config.md) — thiết kế LLM provider config.
-- [docs/ai/requirements/2026-06-20-feature-dynamic-agent-orchestration.md](./ai/requirements/2026-06-20-feature-dynamic-agent-orchestration.md) — yêu cầu dynamic orchestration.
-- [docs/ai/design/2026-06-20-feature-dynamic-agent-orchestration.md](./ai/design/2026-06-20-feature-dynamic-agent-orchestration.md) — thiết kế dynamic orchestration.
+- [docs/ai/requirements/2026-06-20-feature-dynamic-agent-orchestration.md](./ai/requirements/2026-06-20-feature-dynamic-agent-orchestration.md) — yêu cầu dynamic orchestration V1 foundation.
+- [docs/ai/design/2026-06-20-feature-dynamic-agent-orchestration.md](./ai/design/2026-06-20-feature-dynamic-agent-orchestration.md) — thiết kế dynamic orchestration V1 foundation.
+- [docs/ai/requirements/2026-06-24-feature-dynamic-agent-orchestration-v2.md](./ai/requirements/2026-06-24-feature-dynamic-agent-orchestration-v2.md) — yêu cầu V2 scheduled agent-to-agent orchestration.
+- [docs/ai/design/2026-06-24-feature-dynamic-agent-orchestration-v2.md](./ai/design/2026-06-24-feature-dynamic-agent-orchestration-v2.md) — thiết kế V2 autonomous Semantic Kernel A2A orchestration.
+- [docs/ai/planning/2026-06-24-feature-dynamic-agent-orchestration-v2.md](./ai/planning/2026-06-24-feature-dynamic-agent-orchestration-v2.md) — kế hoạch triển khai V2.

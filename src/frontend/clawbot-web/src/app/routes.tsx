@@ -13,6 +13,7 @@ import {
   LlmProvidersPage,
   LoginPage,
   NotificationsPage,
+  OrchestrationV2Page,
   PixelAgentsOfficePage,
   ProfilePage,
   PromptConfigurationPage,
@@ -99,6 +100,14 @@ export const router = createBrowserRouter([
     element: (
       <RequireAuth>
         <AgentDashboardPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/orchestration",
+    element: (
+      <RequireAuth>
+        <OrchestrationV2Page />
       </RequireAuth>
     ),
   },

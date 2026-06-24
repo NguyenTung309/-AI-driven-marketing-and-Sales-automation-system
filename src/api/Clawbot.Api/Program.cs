@@ -258,6 +258,7 @@ app.MapProfile();
 app.MapNotifications();
 app.MapAgents();
 app.MapOrchestration();
+app.MapOrchestrationV2();
 app.MapLlmConfigs();
 app.MapCompetitors();
 app.MapPublicWidget();
@@ -278,6 +279,7 @@ if (app.Environment.IsDevelopment())
 {
     await DevDataSeeder.SeedAdminAsync(app.Services).ConfigureAwait(false);
     await DevDataSeeder.SeedAutoReplyTemplateAsync(app.Services).ConfigureAwait(false);
+    await DemoLlmConfigSeeder.SeedAsync(app.Services).ConfigureAwait(false);
 }
 
 app.Run();

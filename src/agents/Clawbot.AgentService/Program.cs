@@ -31,6 +31,14 @@ builder.Services.AddScoped<Microsoft.SemanticKernel.ChatCompletion.IChatCompleti
 builder.Services.AddScoped<SemanticKernelPlanGenerator>();
 builder.Services.AddSingleton<OrchestratorCostGuard>();
 builder.Services.AddScoped<SemanticKernelOrchestrator>();
+// Dynamic agent orchestration v2: data-defined sub-agents + A2A mailbox + autonomous coordinator.
+builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IAgentDefinitionCatalog, Clawbot.Infrastructure.Agents.AgentDefinitionCatalog>();
+builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IA2AMailbox, Clawbot.Infrastructure.Agents.EfA2AMailbox>();
+builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IAutonomousPlanner, Clawbot.AgentService.Services.AutonomousPlanner>();
+builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IAutonomousRunSink, Clawbot.AgentService.Services.AutonomousRunSink>();
+builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.AutonomousOrchestrator>();
+builder.Services.AddScoped<Clawbot.AgentService.Services.AgentScheduleRunner>();
+builder.Services.AddHostedService<Clawbot.AgentService.Services.AgentScheduleWorker>();
 builder.Services.AddScoped<IAgent, ChatAgentAdapter>();
 builder.Services.AddScoped<IAgent, ContentAgentAdapter>();
 builder.Services.AddScoped<IAgent, ResearchAgentAdapter>();

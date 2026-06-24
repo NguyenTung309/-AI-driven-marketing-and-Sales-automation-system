@@ -70,6 +70,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
     // Agents
     public DbSet<AgentConfig> AgentConfigs => Set<AgentConfig>();
+    public DbSet<AgentDefinition> AgentDefinitions => Set<AgentDefinition>();
+    public DbSet<AgentA2AMessage> AgentA2AMessages => Set<AgentA2AMessage>();
+    public DbSet<AgentSchedule> AgentSchedules => Set<AgentSchedule>();
+    public DbSet<AgentScheduleRun> AgentScheduleRuns => Set<AgentScheduleRun>();
     public DbSet<AgentSession> AgentSessions => Set<AgentSession>();
     public DbSet<AgentTrace> AgentTraces => Set<AgentTrace>();
     public DbSet<ClaudeCostEntry> ClaudeCostLedger => Set<ClaudeCostEntry>();
