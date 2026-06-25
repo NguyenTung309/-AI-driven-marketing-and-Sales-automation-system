@@ -1,4 +1,4 @@
-import type { InboxMessage } from "@/shared/api/inbox";
+﻿import type { InboxMessage } from "@/shared/api/inbox";
 
 interface Props {
   readonly messages: readonly InboxMessage[];
@@ -53,7 +53,7 @@ export default function ChatMessageThread({ messages, loading, contactAvatarUrl,
       {messages.map((msg) => {
         const isOwner = msg.direction === "out";
         return (
-          <div key={msg.id} className={lex gap-2 }>
+          <div key={msg.id} className={`flex gap-2 ${isOwner ? "justify-end" : "justify-start"}`}>
             {!isOwner && (
               <MessageAvatar url={contactAvatarUrl} name={msg.senderDisplayName ?? contactDisplayName} />
             )}
