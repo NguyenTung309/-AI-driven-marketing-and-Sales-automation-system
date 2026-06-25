@@ -85,11 +85,46 @@ public sealed partial class PancakePollingService : BackgroundService
 
     private async Task PollConversationsAsync(DemoRuntimeConfig cfg, CancellationToken ct)
     {
-        var client = _httpFactory.CreateClient("Pancake");
         var baseUrl = string.IsNullOrEmpty(cfg.PancakeBaseUrl) ? DefaultBaseUrl : cfg.PancakeBaseUrl;
-        var pageId = cfg.PancakePageId!;
-        var token = cfg.PancakePageAccessToken!;
+        var client = _httpFactory.CreateClient("Pancake");
 
+        // 1. Poll all inboxes with tokens from DB
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<Clawbot.Infrastructure.Persistence.AppDbContext>();
+            var encryptor = scope.ServiceProvider.GetRequiredService<Clawbot.SharedKernel.Security.IEncryptor>();
+            
+            var inboxes = await db.Inboxes
+                .IgnoreQueryFilters()
+                .Where(i => i.EncryptedAccessToken != null && i.IsActive)
+                .ToListAsync(ct);
+
+            foreach (var inbox in inboxes)
+            {
+                string? token = null;
+                try { token = encryptor.Decrypt(inbox.EncryptedAccessToken!); }
+                catch { continue; }
+                if (string.IsNullOrEmpty(token)) continue;
+
+                await PollPageAsync(client, baseUrl, inbox.ExternalPageId, token, ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            #pragma warning disable CA1848
+            _log.LogWarning(ex, "Failed to poll inboxes from DB, falling back to env-var page");
+        }
+
+        // 2. Fallback: poll the env-var page (demo mode)
+        if (!string.IsNullOrEmpty(cfg.PancakePageId) && !string.IsNullOrEmpty(cfg.PancakePageAccessToken))
+        {
+            await PollPageAsync(client, baseUrl, cfg.PancakePageId, cfg.PancakePageAccessToken, ct);
+        }
+    }
+
+    private async Task PollPageAsync(HttpClient client, string baseUrl, string pageId, string token, CancellationToken ct)
+    {
         var convUrl = $"https://pages.fm/api/public_api/v2/pages/{pageId}/conversations?page_access_token={token}&per_page=50";
         var convResp = await client.GetAsync(convUrl, ct);
         if (!convResp.IsSuccessStatusCode) return;
@@ -104,7 +139,6 @@ public sealed partial class PancakePollingService : BackgroundService
             var snippet = conv.Snippet ?? "";
             if (string.IsNullOrWhiteSpace(snippet)) continue;
 
-            // Fetch latest message to get real message_id for dedup
             var msgUrl = $"{baseUrl}/pages/{pageId}/conversations/{conv.Id}/messages?page_access_token={token}&limit=1";
             var msgResp = await client.GetAsync(msgUrl, ct);
             if (!msgResp.IsSuccessStatusCode) continue;
@@ -115,205 +149,70 @@ public sealed partial class PancakePollingService : BackgroundService
 
             var convId = conv.Id ?? "unknown";
 
-            // DB-backed dedup: only process each external_message_id once
             using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<Clawbot.Infrastructure.Persistence.AppDbContext>();
 
             var alreadyProcessed = await db.ProcessedMessages
                 .AnyAsync(p => p.Platform == "zalo" && p.ExternalMessageId == latestMsg.Id, ct);
+            if (alreadyProcessed) { LogSkippedProcessed(_log, latestMsg.Id, convId); continue; }
 
-            if (alreadyProcessed)
-            {
-                LogSkippedProcessed(_log, latestMsg.Id, convId);
-                continue;
-            }
-
-            // Skip automated/admin messages (only process real customers)
             if (latestMsg.From?.IsAutomated == true) continue;
             if (!string.IsNullOrEmpty(latestMsg.From?.AdminId)) continue;
 
-            // Mark processed immediately to prevent re-processing
             db.ProcessedMessages.Add(new ProcessedMessage("zalo", latestMsg.Id, convId));
             await db.SaveChangesAsync(ct);
-
             LogProcessedNew(_log, latestMsg.Id, convId);
 
-            // ===== Ingest message to inbox DB =====
             try
             {
-                var resolver = scope.ServiceProvider.GetRequiredService<ITenantResolver>();
-                var ingestor = scope.ServiceProvider.GetRequiredService<IChannelMessageIngestor>();
+                var resolver = scope.ServiceProvider.GetRequiredService<Clawbot.SharedKernel.Multitenancy.ITenantResolver>();
+                var ingestor = scope.ServiceProvider.GetRequiredService<Clawbot.Infrastructure.Channels.IChannelMessageIngestor>();
                 var tenantId = await resolver.ResolveTenantIdAsync(ct);
 
-                // Build enriched metadata from Pancake conversation data
                 var metadata = new Dictionary<string, string>
                 {
                     ["external_message_id"] = latestMsg.Id,
                     ["content_type"] = "text",
                 };
-
                 if (conv.From != null)
                 {
-                    if (!string.IsNullOrEmpty(conv.From.Name))
-                        metadata["display_name"] = conv.From.Name;
-                    if (!string.IsNullOrEmpty(conv.From.AvatarUrl))
-                        metadata["avatar_url"] = conv.From.AvatarUrl;
-                    if (conv.From.IsGroup == true)
-                        metadata["is_group"] = "true";
+                    if (!string.IsNullOrEmpty(conv.From.Name)) metadata["display_name"] = conv.From.Name;
+                    if (!string.IsNullOrEmpty(conv.From.AvatarUrl)) metadata["avatar_url"] = conv.From.AvatarUrl;
+                    if (conv.From.IsGroup == true) metadata["is_group"] = "true";
                     metadata["from_id"] = conv.From.Id ?? "";
                 }
-
                 if (conv.LastSentBy != null)
                 {
                     var senderName = conv.LastSentBy.DisplayName ?? conv.LastSentBy.Name ?? conv.LastSentBy.AdminName;
-                    if (!string.IsNullOrEmpty(senderName))
-                        metadata["sender_name"] = senderName;
+                    if (!string.IsNullOrEmpty(senderName)) metadata["sender_name"] = senderName;
                     metadata["sender_id"] = conv.LastSentBy.Id ?? "";
-
-                    if (!string.IsNullOrEmpty(conv.PageId)
-                        && string.Equals(conv.LastSentBy.Id, conv.PageId, StringComparison.Ordinal)
-                        && !string.IsNullOrEmpty(senderName))
-                    {
-                        metadata["page_admin_name"] = senderName;
-                    }
                 }
-
-                if (!string.IsNullOrEmpty(conv.PageId))
-                    metadata["page_id"] = conv.PageId;
-
+                if (!string.IsNullOrEmpty(conv.PageId)) metadata["page_id"] = conv.PageId;
                 if (conv.Customers != null && conv.Customers.Count > 0)
                 {
-                    var firstCustomer = conv.Customers[0];
-                    if (!string.IsNullOrEmpty(firstCustomer.Name) && !metadata.ContainsKey("display_name"))
-                        metadata["display_name"] = firstCustomer.Name;
-                    if (!string.IsNullOrEmpty(firstCustomer.AvatarUrl) && !metadata.ContainsKey("avatar_url"))
-                        metadata["avatar_url"] = firstCustomer.AvatarUrl;
+                    var c0 = conv.Customers[0];
+                    if (!string.IsNullOrEmpty(c0.Name) && !metadata.ContainsKey("display_name")) metadata["display_name"] = c0.Name;
+                    if (!string.IsNullOrEmpty(c0.AvatarUrl) && !metadata.ContainsKey("avatar_url")) metadata["avatar_url"] = c0.AvatarUrl;
                 }
 
-                var channelMsg = new ChannelMessage(
-                    Channel: "zalo",
-                    ExternalThreadId: convId,
-                    ExternalUserId: latestMsg.From?.Id ?? "unknown",
-                    Text: snippet,
-                    SentAt: conv.UpdatedAt.HasValue
-                        ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero)
-                        : DateTimeOffset.UtcNow,
+                var channelMsg = new Clawbot.SharedKernel.Channels.ChannelMessage(
+                    Channel: "zalo", ExternalThreadId: convId,
+                    ExternalUserId: latestMsg.From?.Id ?? "unknown", Text: snippet,
+                    SentAt: conv.UpdatedAt.HasValue ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow,
                     Metadata: metadata);
                 await ingestor.IngestAsync(tenantId, channelMsg, ct);
             }
-            catch (Exception ex)
-            {
-                LogIngestFailed(_log, latestMsg.Id, ex.Message);
-            }
+            catch (Exception ex) { LogIngestFailed(_log, latestMsg.Id, ex.Message); }
 
-            // Trace the poll step
             var traceId = await _traces.CreateTraceAsync();
-
             await _traces.AppendStepAsync(traceId, new DemoTraceStep
             {
-                Layer = "pancake_poll",
-                Status = DemoTraceStepStatus.Success,
-                Output = new()
-                {
-                    ["action"] = "inbound_message",
-                    ["platform"] = "zalo",
-                    ["text"] = snippet,
-                    ["conversation_id"] = convId,
-                    ["message_count"] = conv.MessageCount,
-                },
+                Layer = "pancake_poll", Status = DemoTraceStepStatus.Success,
+                Output = new() { ["action"] = "inbound_message", ["platform"] = "zalo", ["text"] = snippet, ["conversation_id"] = convId, ["message_count"] = conv.MessageCount },
             });
-
-//             // Resolve auto-reply text from QuickReplyTemplate
-//             string draft;
-//             try
-//             {
-//                 var qrt = await db.QuickReplyTemplates
-//                     .AsNoTracking()
-//                     .Where(q => q.Code == "auto_reply")
-//                     .FirstOrDefaultAsync(ct);
-//                 draft = qrt?.Body ?? "Cảm ơn bạn đã liên hệ, chúng tôi sẽ phản hồi sớm";
-//             }
-//             catch
-//             {
-//                 draft = "Cảm ơn bạn đã liên hệ, chúng tôi sẽ phản hồi sớm";
-//             }
-// 
-//             // Trace agent step
-//             await _traces.AppendStepAsync(traceId, new DemoTraceStep
-//             {
-//                 Layer = "agent",
-//                 Status = DemoTraceStepStatus.Success,
-//                 DurationMs = 100 + new Random().Next(50, 300),
-//                 Output = new()
-//                 {
-//                     ["agent"] = "AutoReplyAgent",
-//                     ["intent"] = "general",
-//                     ["confidence"] = 95,
-//                     ["action"] = "auto_send",
-//                     ["draftLength"] = draft.Length,
-//                 },
-//             });
-// 
-//             // Send reply via Pancake API
-//             if (cfg.IsPageTokenConfigured && !string.IsNullOrEmpty(cfg.PancakePageId) && conv.Id is not null)
-//             {
-//                 var sendBaseUrl = string.IsNullOrEmpty(cfg.PancakeBaseUrl) ? DefaultBaseUrl : cfg.PancakeBaseUrl;
-//                 var apiUrl = $"{sendBaseUrl}/pages/{cfg.PancakePageId}/conversations/{conv.Id}/messages?page_access_token={cfg.PancakePageAccessToken}";
-//                 var outboundStatus = DemoTraceStepStatus.Success;
-//                 string? outboundReason = null;
-// 
-//                 try
-//                 {
-//                     var sendPayload = new { action = "reply_inbox", message = draft };
-//                     var jsonContent = new StringContent(
-//                         JsonSerializer.Serialize(sendPayload, JsonOpts),
-//                         System.Text.Encoding.UTF8,
-//                         "application/json");
-// 
-//                     using var httpReq = new HttpRequestMessage(HttpMethod.Post, apiUrl)
-//                     {
-//                         Content = jsonContent,
-//                     };
-//                     using var apiResp = await client.SendAsync(httpReq, ct);
-// 
-//                     if (!apiResp.IsSuccessStatusCode)
-//                     {
-//                         outboundStatus = DemoTraceStepStatus.Failed;
-//                         outboundReason = "pancake_api_error: " + (int)apiResp.StatusCode;
-//                     }
-//                 }
-//                 catch (Exception ex)
-//                 {
-//                     outboundStatus = DemoTraceStepStatus.Failed;
-//                     outboundReason = "api_exception: " + ex.Message;
-//                 }
-// 
-//                 await _traces.AppendStepAsync(traceId, new DemoTraceStep
-//                 {
-//                     Layer = "outbound",
-//                     Status = outboundStatus,
-//                     DurationMs = 200,
-//                     Reason = outboundReason,
-//                 });
-//             }
-//             else
-//             {
-//                 await _traces.AppendStepAsync(traceId, new DemoTraceStep
-//                 {
-//                     Layer = "outbound",
-//                     Status = DemoTraceStepStatus.Skipped,
-//                     Reason = "page_token_not_configured",
-//                     Output = new() { ["pageTokenConfigured"] = false, ["suggestedDraft"] = draft },
-//                 });
-//             }
-
             await _traces.CompleteTraceAsync(traceId);
         }
-
-        _lastPollUtc = DateTime.UtcNow;
     }
-}
-
 public sealed record PancakeConversationsResponse(bool? Success, PancakeConversation[]? Conversations);
 public sealed record PancakeMessagesResponse(bool? Success, PancakeMessage[]? Messages);
 public sealed record PancakeMessage(string? Id, PancakeMessageSender? From);
@@ -352,5 +251,6 @@ public sealed record PancakeConversation(
     DateTime? UpdatedAt, DateTime? InsertedAt, string? PageId,
     PancakeFrom? From, PancakeLastSentBy? LastSentBy,
     IReadOnlyList<PancakeCustomer>? Customers);
+}
 
 
