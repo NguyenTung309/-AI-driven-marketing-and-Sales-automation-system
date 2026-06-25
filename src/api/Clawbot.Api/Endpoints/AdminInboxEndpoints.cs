@@ -193,14 +193,15 @@ public static class AdminInboxEndpoints
     }
 
     private static async Task<IResult> CreateInboxAsync(
+        HttpContext ctx, // for logger
         CreateInboxRequest body,
         AppDbContext db,
         ITenantAccessor tenants,
         IClock clock,
-        ILogger logger,
         CancellationToken ct)
     {
         var tenant = tenants.Require();
+        var logger = ctx.RequestServices.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>().CreateLogger("AdminInbox");
         var pageName = await FetchPageNameAsync(body.ExternalPageId, body.PageAccessToken ?? string.Empty, logger, ct);
         if (string.IsNullOrEmpty(pageName))
         {
