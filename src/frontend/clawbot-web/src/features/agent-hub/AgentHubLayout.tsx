@@ -30,6 +30,12 @@ export default function AgentHubLayout() {
   const [showSummary, setShowSummary] = useState(false);
   const [tabs, setTabs] = useState<string[]>([]);
 
+  // Reset activeId + tabs when switching channels
+  useEffect(() => {
+    setActiveId(null);
+    setTabs([]);
+  }, [channelId]);
+
   const meQuery = useQuery({ queryKey: ["me"], queryFn: getMe });
   const meId = meQuery.data?.sub;
   const isAdmin = meQuery.data?.permissions?.includes("admin:inboxes") ?? false;
@@ -166,8 +172,7 @@ export default function AgentHubLayout() {
                   onClick={() => selectConversation(item.id)}
                   className="w-full text-left px-4 py-3 border-b border-outline/50 hover:bg-surface-container-high transition-colors"
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-3">
+                  <div className="flex items-start gap-3">
                     {item.contactAvatarUrl ? (
                       <img src={item.contactAvatarUrl} alt="" className="size-9 rounded-full object-cover shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                     ) : (
@@ -176,21 +181,24 @@ export default function AgentHubLayout() {
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
-                      <span className="font-semibold text-body-md text-secondary truncate">
-                        {item.contactDisplayName ?? item.externalThreadId}
-                      </span>
-                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-label-xs">
-                      {item.status}
-                    </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-body-md text-secondary truncate">
+                          {item.contactDisplayName ?? item.externalThreadId}
+                        </span>
+                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-label-xs">
+                          {item.status}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-body-sm text-on-surface-variant truncate">
+                        {item.lastMessagePreview ?? "Chưa có tin nhắn"}
+                      </p>
+                      <p className="mt-1 text-label-xs text-on-surface-variant">
+                        {item.lastMessageAt
+                          ? new Date(item.lastMessageAt).toLocaleString("vi-VN")
+                          : "Chưa có tin nhắn"}
+                      </p>
+                    </div>
                   </div>
-                  <p className="mt-1 text-body-sm text-on-surface-variant truncate">
-                    {item.lastMessagePreview ?? "Chưa có tin nhắn"}
-                  </p>
-                  <p className="mt-1 text-label-xs text-on-surface-variant">
-                    {item.lastMessageAt
-                      ? new Date(item.lastMessageAt).toLocaleString("vi-VN")
-                      : "Chưa có tin nhắn"}
-                  </p>
                 </button>
               ))
             )}
