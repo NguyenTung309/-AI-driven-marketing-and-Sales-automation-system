@@ -1,4 +1,4 @@
-﻿import type { InboxMessage } from "@/shared/api/inbox";
+import type { InboxMessage } from "@/shared/api/inbox";
 
 interface Props {
   readonly messages: readonly InboxMessage[];
@@ -63,8 +63,7 @@ export default function ChatMessageThread({ messages, loading, contactAvatarUrl,
                   {msg.senderDisplayName ?? contactDisplayName}
                 </span>
               )}
-              <div className={
-ounded-2xl px-4 py-2 text-body-md }>
+              <div className={`rounded-2xl px-4 py-2 text-body-md }>
                 <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                 <p className={mt-1 text-label-xs }>
                   {formatTime(msg.sentAt)}
