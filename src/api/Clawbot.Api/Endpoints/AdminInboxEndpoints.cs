@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using System.Text.Json;
 using Clawbot.Api.Auth;
 using Clawbot.Domain.Channels;
@@ -15,7 +15,7 @@ namespace Clawbot.Api.Endpoints;
 
 public sealed record UpdateMemberRequest(Guid? AgentId);
 public sealed record ReassignRequest(Guid NewAgentId);
-public sealed record CreateInboxRequest(string Name, string Platform, string ExternalPageId, string? PageAccessToken, Guid? AgentId);
+public sealed record CreateInboxRequest(string Platform, string ExternalPageId, string? PageAccessToken, Guid? AgentId);
 
 public static class AdminInboxEndpoints
 {
@@ -78,7 +78,7 @@ public static class AdminInboxEndpoints
         var existing = await db.InboxMembers.Where(m => m.InboxId == id).ToListAsync(ct);
         var oldMembers = existing.Select(e => e.AgentId).ToList();
         db.InboxMembers.RemoveRange(existing);
-        db.InboxMembers.Add(InboxMember.Create(id, body.AgentId.Value));
+        db.InboxMembers.Add(InboxMember.Create(tenantId, id, body.AgentId.Value));
 
         var oldConvs = await db.Conversations
             .Where(c => c.InboxId == id && oldMembers.Contains(c.AssignedTo!.Value))
@@ -111,7 +111,7 @@ public static class AdminInboxEndpoints
         var oldMembers = await db.InboxMembers.Where(m => m.InboxId == id).Select(m => m.AgentId).ToListAsync(ct);
         var existing = await db.InboxMembers.Where(m => m.InboxId == id).ToListAsync(ct);
         db.InboxMembers.RemoveRange(existing);
-        db.InboxMembers.Add(InboxMember.Create(id, body.NewAgentId));
+        db.InboxMembers.Add(InboxMember.Create(tenantId, id, body.NewAgentId));
 
         var convs = await db.Conversations
             .Where(c => c.InboxId == id && c.AssignedTo.HasValue && oldMembers.Contains(c.AssignedTo.Value))
@@ -197,10 +197,18 @@ public static class AdminInboxEndpoints
         AppDbContext db,
         ITenantAccessor tenants,
         IClock clock,
+        ILogger logger,
         CancellationToken ct)
     {
         var tenant = tenants.Require();
-        var inbox = Inbox.Create(tenant.TenantId, body.Name, body.Platform, body.ExternalPageId);
+        var pageName = await FetchPageNameAsync(body.ExternalPageId, body.PageAccessToken ?? string.Empty, logger, ct);
+        if (string.IsNullOrEmpty(pageName))
+        {
+            #pragma warning disable CA1848
+            logger.LogWarning("Could not fetch page name for {PageId}, using fallback", body.ExternalPageId);
+            pageName = $"{body.Platform} OA - {body.ExternalPageId}";
+        }
+        var inbox = Inbox.Create(tenant.TenantId, pageName, body.Platform, body.ExternalPageId);
 
         if (!string.IsNullOrEmpty(body.PageAccessToken))
             inbox.SetAccessToken(body.PageAccessToken, clock.UtcNow);
@@ -209,7 +217,7 @@ public static class AdminInboxEndpoints
 
         if (body.AgentId.HasValue)
         {
-            db.InboxMembers.Add(InboxMember.Create(inbox.Id, body.AgentId.Value));
+            db.InboxMembers.Add(InboxMember.Create(tenant.TenantId, inbox.Id, body.AgentId.Value));
         }
 
         await db.SaveChangesAsync(ct);
@@ -224,5 +232,38 @@ public static class AdminInboxEndpoints
             inbox.CreatedAt,
         });
     }
+
+    #pragma warning disable CA1848, CA1869
+    private static async Task<string?> FetchPageNameAsync(string pageId, string token, ILogger logger, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(pageId) || string.IsNullOrWhiteSpace(token))
+            return null;
+        try
+        {
+            using var http = new HttpClient();
+            var url = $"https://pages.fm/api/public_api/v2/pages/{pageId}/conversations?page_access_token={token}&per_page=5";
+            var resp = await http.GetAsync(url, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) return null;
+            var json = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var data = System.Text.Json.JsonSerializer.Deserialize<PancakeLookupResponse>(json, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower });
+            if (data?.Conversations is null) return null;
+            foreach (var conv in data.Conversations)
+            {
+                if (conv.LastSentBy?.Id == pageId && !string.IsNullOrEmpty(conv.LastSentBy.Name))
+                    return conv.LastSentBy.Name;
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            #pragma warning disable CA1848
+            logger.LogWarning(ex, "Failed to fetch page name from Pancake for {PageId}", pageId);
+            return null;
+        }
+    }
+
+    private sealed record PancakeLookupResponse(IReadOnlyList<PancakeConvLookup>? Conversations);
+    private sealed record PancakeConvLookup(string? PageId, PancakeLookupSender? LastSentBy);
+    private sealed record PancakeLookupSender(string? Id, string? Name, string? DisplayName);
 }
 

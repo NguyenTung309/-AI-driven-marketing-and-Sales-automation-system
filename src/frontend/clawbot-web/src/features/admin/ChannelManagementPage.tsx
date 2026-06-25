@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, Modal } from "@/shared/ui";
@@ -13,11 +13,11 @@ import {
 } from "@/shared/api/admin";
 
 function errorMessage(error: unknown): string {
-  return toUserFriendlyError(error, "Khong xu ly duoc yeu cau. Vui long thu lai.");
+  return toUserFriendlyError(error, "Không xử lý được yêu cầu. Vui lòng thử lại.");
 }
 
 const emptyForm = {
-  name: "",
+
   platform: "facebook",
   externalPageId: "",
   pageAccessToken: "",
@@ -64,7 +64,7 @@ export default function ChannelManagementPage() {
     onSuccess: () => {
       setEditInboxId(null);
       setTokenInput("");
-      setNotice("Da cap nhat kenh.");
+      setNotice("Đã cập nhật kênh.");
       void queryClient.invalidateQueries({ queryKey: ["admin", "inboxes"] });
     },
   });
@@ -72,7 +72,7 @@ export default function ChannelManagementPage() {
   const createMutation = useMutation({
     mutationFn: () =>
       createInbox({
-        name: createForm.name,
+
         platform: createForm.platform,
         externalPageId: createForm.externalPageId,
         pageAccessToken: createForm.pageAccessToken || null,
@@ -81,13 +81,13 @@ export default function ChannelManagementPage() {
     onSuccess: () => {
       setShowCreate(false);
       setCreateForm(emptyForm);
-      setNotice("Da tao kenh moi.");
+      setNotice("Đã tạo kênh mới.");
       void queryClient.invalidateQueries({ queryKey: ["admin", "inboxes"] });
     },
   });
 
   function memberInfo(inbox: InboxItem): string {
-    return inbox.memberCount > 0 ? inbox.memberCount + " sale" : "Chua gan";
+    return inbox.memberCount > 0 ? inbox.memberCount + " sale" : "Chưa gán";
   }
 
   function resetEdit(inbox: InboxItem) {
@@ -96,17 +96,17 @@ export default function ChannelManagementPage() {
   }
 
   return (
-    <AppShell title="Kenh giao tiep">
+    <AppShell title="Kênh giao tiếp">
       <section className="mb-gutter rounded-lg border border-primary/20 bg-primary/5 p-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <h1 className="text-headline-md text-secondary">Kenh giao tiep</h1>
+            <h1 className="text-headline-md text-secondary">Kênh giao tiếp</h1>
             <p className="mt-1 text-body-md text-on-surface-variant">
-              Quan ly inbox va gan sale vao tung kenh.
+              Quản lý inbox và gán sale vào từng kênh.
             </p>
           </div>
           <Button type="button" onClick={() => setShowCreate(true)}>
-            + Tao kenh
+            + Tạo kênh
           </Button>
         </div>
       </section>
@@ -125,16 +125,16 @@ export default function ChannelManagementPage() {
 
       <Card className="overflow-hidden p-0">
         <div className="border-b border-outline p-card-padding">
-          <h2 className="text-headline-sm text-secondary">Danh sach kenh</h2>
+          <h2 className="text-headline-sm text-secondary">Danh sách kênh</h2>
           <p className="mt-1 text-body-md text-on-surface-variant">
-            Nhan vao mot kenh de gan sale phu trach.
+            Nhấn vào một kênh để gán sale phụ trách.
           </p>
         </div>
 
         {inboxes.length === 0 ? (
           <div className="p-card-padding">
             <div className="rounded-lg border border-dashed border-outline bg-surface p-6 text-center text-body-md text-on-surface-variant">
-              Chua co kenh giao tiep nao.
+              Chưa có kênh giao tiếp nào.
             </div>
           </div>
         ) : (
@@ -142,11 +142,11 @@ export default function ChannelManagementPage() {
             <table className="min-w-[700px] w-full border-collapse text-left">
               <thead className="bg-surface-variant text-label-sm uppercase text-secondary">
                 <tr>
-                  <th className="px-4 py-3 font-bold">Ten kenh</th>
-                  <th className="px-4 py-3 font-bold">Nen tang</th>
-                  <th className="px-4 py-3 font-bold">Trang thai</th>
+                  <th className="px-4 py-3 font-bold">Tên kênh</th>
+                  <th className="px-4 py-3 font-bold">Nền tảng</th>
+                  <th className="px-4 py-3 font-bold">Trạng thái</th>
                   <th className="px-4 py-3 font-bold">Token</th>
-                  <th className="px-4 py-3 font-bold">Sale phu trach</th>
+                  <th className="px-4 py-3 font-bold">Sale phụ trách</th>
                   <th className="px-4 py-3 font-bold"></th>
                 </tr>
               </thead>
@@ -169,7 +169,7 @@ export default function ChannelManagementPage() {
                             : "bg-surface-variant text-on-surface-variant")
                         }
                       >
-                        {inbox.isActive ? "Hoat dong" : "Tat"}
+                        {inbox.isActive ? "Hoạt động" : "Tắt"}
                       </span>
                     </td>
                     <td className="px-4 py-4">
@@ -181,13 +181,13 @@ export default function ChannelManagementPage() {
                             : "bg-warning-container text-warning")
                         }
                       >
-                        {inbox.hasToken ? "Co token" : "Thieu token"}
+                        {inbox.hasToken ? "Có token" : "Thiếu token"}
                       </span>
                     </td>
                     <td className="px-4 py-4 text-body-md text-on-surface-variant">{memberInfo(inbox)}</td>
                     <td className="px-4 py-4 text-right">
                       <Button type="button" variant="outline" onClick={() => resetEdit(inbox)}>
-                        Chinh sua
+                        Chỉnh sửa
                       </Button>
                     </td>
                   </tr>
@@ -202,14 +202,14 @@ export default function ChannelManagementPage() {
       <Modal
         open={editInboxId !== null}
         onClose={() => setEditInboxId(null)}
-        title="Chinh sua kenh"
+        title="Chỉnh sửa kênh"
         footer={
           <>
             <Button type="button" variant="ghost" onClick={() => setEditInboxId(null)} disabled={saveMutation.isPending}>
-              Huy
+              Hủy
             </Button>
             <Button type="submit" form="channel-edit-form" disabled={saveMutation.isPending}>
-              Luu
+              Lưu
             </Button>
           </>
         }
@@ -225,13 +225,13 @@ export default function ChannelManagementPage() {
           className="space-y-4"
         >
           <label className="block">
-            <span className="mb-1 block text-label-sm font-semibold text-secondary">Sale phu trach</span>
+            <span className="mb-1 block text-label-sm font-semibold text-secondary">Sale phụ trách</span>
             <select
               className="w-full rounded border border-outline bg-surface-container-lowest px-3 py-2 text-body-md"
               value={selectedAgentId ?? ""}
               onChange={(e) => setSelectedAgentId(e.target.value || null)}
             >
-              <option value="">-- Chon sale --</option>
+              <option value="">-- Chọn sale --</option>
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.displayName || u.email}
@@ -244,11 +244,11 @@ export default function ChannelManagementPage() {
             <input
               type="password"
               className="w-full rounded border border-outline bg-surface-container-lowest px-3 py-2 text-body-md"
-              placeholder="Nhap token tu Pancake (de trong neu khong doi)"
+              placeholder="Nhập token từ Pancake (để trống nếu không đổi)"
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
             />
-            <p className="mt-1 text-label-xs text-on-surface-variant">Token duoc luu tru bao mat.</p>
+            <p className="mt-1 text-label-xs text-on-surface-variant">Token được lưu trữ bảo mật.</p>
           </label>
         </form>
       </Modal>
@@ -257,14 +257,14 @@ export default function ChannelManagementPage() {
       <Modal
         open={showCreate}
         onClose={() => setShowCreate(false)}
-        title="Tao kenh moi"
+        title="Tạo kênh mới"
         footer={
           <>
             <Button type="button" variant="ghost" onClick={() => setShowCreate(false)} disabled={createMutation.isPending}>
-              Huy
+              Hủy
             </Button>
-            <Button type="submit" form="channel-create-form" disabled={createMutation.isPending || !createForm.name || !createForm.externalPageId}>
-              Tao kenh
+            <Button type="submit" form="channel-create-form" disabled={createMutation.isPending || !createForm.externalPageId}>
+              Tạo kênh
             </Button>
           </>
         }
@@ -278,20 +278,10 @@ export default function ChannelManagementPage() {
           }}
           className="space-y-4"
         >
-          <label className="block">
-            <span className="mb-1 block text-label-sm font-semibold text-secondary">Ten kenh *</span>
-            <input
-              type="text"
-              className="w-full rounded border border-outline bg-surface-container-lowest px-3 py-2 text-body-md"
-              placeholder="VD: Facebook Page Chinh"
-              value={createForm.name}
-              onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-              required
-            />
-          </label>
+
 
           <label className="block">
-            <span className="mb-1 block text-label-sm font-semibold text-secondary">Nen tang</span>
+            <span className="mb-1 block text-label-sm font-semibold text-secondary">Nền tảng</span>
             <select
               className="w-full rounded border border-outline bg-surface-container-lowest px-3 py-2 text-body-md"
               value={createForm.platform}
@@ -320,21 +310,21 @@ export default function ChannelManagementPage() {
             <input
               type="password"
               className="w-full rounded border border-outline bg-surface-container-lowest px-3 py-2 text-body-md"
-              placeholder="Token tu Pancake (co the de trong)"
+              placeholder="Token từ Pancake (có thể để trống)"
               value={createForm.pageAccessToken}
               onChange={(e) => setCreateForm({ ...createForm, pageAccessToken: e.target.value })}
             />
-            <p className="mt-1 text-label-xs text-on-surface-variant">Token duoc luu tru bao mat. Co them sau.</p>
+            <p className="mt-1 text-label-xs text-on-surface-variant">Token được lưu trữ bảo mật. Có thể thêm sau.</p>
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-label-sm font-semibold text-secondary">Gan cho sale</span>
+            <span className="mb-1 block text-label-sm font-semibold text-secondary">Gán cho sale</span>
             <select
               className="w-full rounded border border-outline bg-surface-container-lowest px-3 py-2 text-body-md"
               value={createForm.agentId}
               onChange={(e) => setCreateForm({ ...createForm, agentId: e.target.value })}
             >
-              <option value="">-- Chon sale (khong bat buoc) --</option>
+              <option value="">-- Chọn sale (không bắt buộc) --</option>
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.displayName || u.email}

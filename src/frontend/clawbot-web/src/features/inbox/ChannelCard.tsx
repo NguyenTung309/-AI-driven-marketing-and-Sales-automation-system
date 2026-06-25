@@ -52,7 +52,7 @@ export default function ChannelCard({ channel, onClick }: ChannelCardProps) {
           <span className="text-label-sm text-secondary block truncate">
             {channel.memberDisplayName ?? "Chua gan sale"}
           </span>
-          <span className="text-label-xs text-tertiary block truncate mt-0.5">{channel.platform} &middot; {channel.externalPageId}</span>
+          
         </div>
         {channel.unreadCount > 0 && (
           <span className="flex size-6 items-center justify-center rounded-full bg-error text-label-xs font-bold text-on-error">

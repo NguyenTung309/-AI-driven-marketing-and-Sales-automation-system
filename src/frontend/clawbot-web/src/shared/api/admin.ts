@@ -264,6 +264,19 @@ export async function getInboxMembers(inboxId: string): Promise<readonly string[
   return res.data;
 }
 
-export async function updateInboxMember(inboxId: string, agentIds: readonly string[]): Promise<void> {
-  await apiClient.put(`/api/admin/inboxes/${inboxId}/members`, { agentIds });
+export async function updateInboxMember(inboxId: string, agentId: string | null): Promise<void> {
+  await apiClient.put(`/api/admin/inboxes/${inboxId}/members`, { agentId });
+}
+
+export interface CreateInboxRequest {
+  readonly name: string;
+  readonly platform: string;
+  readonly externalPageId: string;
+  readonly pageAccessToken?: string | null;
+  readonly agentId?: string | null;
+}
+
+export async function createInbox(body: CreateInboxRequest): Promise<any> {
+  const res = await apiClient.post("/api/admin/inboxes", body);
+  return res.data;
 }
