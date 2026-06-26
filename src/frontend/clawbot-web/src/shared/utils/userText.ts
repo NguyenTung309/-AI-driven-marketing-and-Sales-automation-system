@@ -58,7 +58,12 @@ export function operationalPhaseLabel(value: string | null | undefined): string 
   if (!normalized) return "Thông tin";
   if (normalized.includes("error") || normalized.includes("fail")) return "Lỗi";
   if (normalized.includes("warn")) return "Cảnh báo";
+  if (normalized === "input") return "Đầu vào";
+  if (normalized === "reply") return "Phản hồi";
+  if (normalized.includes("plan")) return "Lập kế hoạch";
+  if (normalized.includes("block") || normalized.includes("missing")) return "Bị chặn";
+  if (normalized.includes("prompt")) return "Prompt";
   if (normalized.includes("complete") || normalized.includes("success")) return "Hoàn tất";
   if (normalized.includes("start") || normalized.includes("running") || normalized.includes("process")) return "Đang xử lý";
-  return "Thông tin";
+  return value?.trim() || "Thông tin";
 }

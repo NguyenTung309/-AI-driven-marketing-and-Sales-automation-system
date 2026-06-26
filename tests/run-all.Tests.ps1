@@ -7,7 +7,10 @@ foreach ($needle in @(
     'require_orchestration_approval',
     'requires_approval',
     'llm_config_id',
-    'IX_agent_sessions_tenant_status_started_at'
+    'IX_agent_sessions_tenant_status_started_at',
+    'HAS_PANCAKE_CONFIG_RUNTIME_COLUMNS',
+    'auth_mode',
+    'send_path_template'
 )) {
     if (-not $script.Contains($needle)) {
         throw "run-all.bat schema gate missing $needle"
@@ -42,6 +45,20 @@ if ($migration0027.Contains('ON DELETE SET NULL')) {
 }
 if (-not $migration0027.Contains('ON DELETE NO ACTION')) {
     throw '0027 FK missing explicit ON DELETE NO ACTION'
+}
+
+$migration0034 = Get-Content (Join-Path $root 'deploy\migrations\0034_pancake_config_runtime_columns.sql') -Raw
+foreach ($needle in @('base_url', 'auth_mode', 'send_path_template', 'signature_algo', 'signature_encoding', 'signature_header')) {
+    if (-not $migration0034.Contains($needle)) {
+        throw "0034 missing pancake config column $needle"
+    }
+}
+
+$initSql = Get-Content (Join-Path $root 'deploy\migrations\0001_init.sql') -Raw
+foreach ($needle in @('base_url', 'auth_mode', 'send_path_template', 'signature_algo', 'signature_encoding', 'signature_header')) {
+    if (-not $initSql.Contains($needle)) {
+        throw "0001 missing pancake config column $needle"
+    }
 }
 
 $repairStart = $script.IndexOf(':repair_runtime_columns')

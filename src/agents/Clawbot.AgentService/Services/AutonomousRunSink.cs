@@ -23,13 +23,23 @@ public sealed class AutonomousRunSink(AppDbContext db, IPiiRedactor pii, IClock 
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
-    public async Task PersistPlanAsync(Guid tenantId, Guid sessionId, OrchestrationPlanDocument plan, CancellationToken ct = default)
+    public async Task PersistPlanAsync(Guid tenantId, Guid sessionId, OrchestrationPlanDocument plan, bool requiresApproval = false, CancellationToken ct = default)
     {
         var session = await LoadAsync(tenantId, sessionId, ct).ConfigureAwait(false);
         if (session is null) return;
         var redacted = await OrchestrationPlanRedactor.RedactAsync(plan, _pii, ct).ConfigureAwait(false);
-        session.RecordRun(OrchestrationPlanJson.Serialize(redacted));
+        var planJson = OrchestrationPlanJson.Serialize(redacted);
+        if (requiresApproval && session.Status == AgentSessionStatuses.Running)
+            session.ApplyGeneratedPlan(planJson, requiresApproval: true);
+        else
+            session.RecordRun(planJson);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> IsStoppedAsync(Guid tenantId, Guid sessionId, CancellationToken ct = default)
+    {
+        var session = await LoadAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+        return session?.Status is AgentSessionStatuses.Paused or AgentSessionStatuses.Cancelled;
     }
 
     public async Task CompleteAsync(Guid tenantId, Guid sessionId, DateTimeOffset at, CancellationToken ct = default)

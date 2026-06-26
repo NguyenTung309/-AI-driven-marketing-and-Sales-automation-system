@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { Alert } from "@/shared/ui/Alert";
 import { Button } from "@/shared/ui/Button";
 import { Card } from "@/shared/ui/Card";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import { useAuthStore } from "@/shared/auth/authStore";
+import { toSafeOperationalText, operationalPhaseLabel } from "@/shared/utils/userText";
 import {
   approveOrchestration,
   controlOrchestration,
@@ -15,8 +17,10 @@ import {
   type OrchestrationControlAction,
   type OrchestrationSessionDto,
   type OrchestrationStatus,
-  type OrchestrationTraceDto,
 } from "@/shared/api/orchestration";
+
+const ACTIVE_STATUSES = new Set<OrchestrationStatus>(["draft", "pending_approval", "running", "paused"]);
+const POLL_INTERVAL_MS = 3_000;
 
 function statusTone(status: OrchestrationStatus): StatusTone {
   switch (status) {
@@ -31,6 +35,27 @@ function statusTone(status: OrchestrationStatus): StatusTone {
       return "warning";
     default:
       return "neutral";
+  }
+}
+
+function statusLabel(status: OrchestrationStatus): string {
+  switch (status) {
+    case "draft":
+      return "Nháp";
+    case "pending_approval":
+      return "Chờ phê duyệt";
+    case "running":
+      return "Đang chạy";
+    case "paused":
+      return "Tạm dừng";
+    case "completed":
+      return "Hoàn tất";
+    case "failed":
+      return "Thất bại";
+    case "cancelled":
+      return "Đã hủy";
+    default:
+      return status;
   }
 }
 
@@ -55,50 +80,86 @@ function errorMessage(error: unknown): string {
 export function OrchestrationPanel() {
   const permissions = useAuthStore((s) => s.permissions);
   const can = (code: string) => permissions.includes(code);
+  const queryClient = useQueryClient();
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sessionId = searchParams.get("sessionId");
 
   const [goal, setGoal] = useState("");
-  const [session, setSession] = useState<OrchestrationSessionDto | null>(null);
-  const [planDraft, setPlanDraft] = useState("");
-  const [traceItems, setTraceItems] = useState<readonly OrchestrationTraceDto[]>([]);
+  // Editable plan draft. `planSource` tracks which fetched plan the draft was seeded from, so we can
+  // re-seed during render when a new plan arrives (React's "adjust state on prop change" pattern)
+  // without an effect-driven cascading render.
+  const [draft, setDraft] = useState<{ source: string; text: string } | null>(null);
 
-  const applySession = (nextSession: OrchestrationSessionDto): void => {
-    setSession(nextSession);
-    setPlanDraft(nextSession.planJson);
+  const setSessionId = (next: string | null): void => {
+    setSearchParams(
+      (params) => {
+        if (next) params.set("sessionId", next);
+        else params.delete("sessionId");
+        return params;
+      },
+      { replace: true },
+    );
+  };
+
+  // Durable session state: read by sessionId from the URL so it survives route changes and F5.
+  const sessionQuery = useQuery({
+    queryKey: ["orchestration", "session", sessionId],
+    queryFn: () => getOrchestrationPlan(sessionId!),
+    enabled: Boolean(sessionId),
+    refetchInterval: (query) =>
+      query.state.data && ACTIVE_STATUSES.has(query.state.data.status) ? POLL_INTERVAL_MS : false,
+  });
+  const session = sessionQuery.data ?? null;
+
+  const traceQuery = useQuery({
+    queryKey: ["orchestration", "trace", sessionId],
+    queryFn: () => getOrchestrationTrace(sessionId!),
+    enabled: Boolean(sessionId),
+    refetchInterval: () => (session && ACTIVE_STATUSES.has(session.status) ? POLL_INTERVAL_MS : false),
+  });
+  const traceItems = traceQuery.data ?? [];
+
+  // Re-seed the editable draft when the fetched plan changes (keyed by sessionId + planJson).
+  const planSource = session ? `${session.sessionId}:${session.planJson}` : null;
+  if (planSource && draft?.source !== planSource) {
+    setDraft({ source: planSource, text: session!.planJson });
+  }
+  const planDraft = draft?.text ?? "";
+  const setPlanDraft = (text: string): void =>
+    setDraft((current) => ({ source: current?.source ?? planSource ?? "", text }));
+
+  const onSession = (next: OrchestrationSessionDto): void => {
+    queryClient.setQueryData(["orchestration", "session", next.sessionId], next);
+    setSessionId(next.sessionId);
   };
 
   const submit = useMutation({
     mutationFn: () => submitOrchestration(goal.trim()),
-    onSuccess: applySession,
+    onSuccess: onSession,
   });
   const approve = useMutation({
     mutationFn: (vars: { sessionId: string; etag: string }) => approveOrchestration(vars.sessionId, vars.etag),
-    onSuccess: applySession,
+    onSuccess: onSession,
   });
   const control = useMutation({
     mutationFn: (vars: { sessionId: string; action: OrchestrationControlAction; etag: string }) =>
       controlOrchestration(vars.sessionId, vars.action, vars.etag),
-    onSuccess: applySession,
-  });
-  const refresh = useMutation({
-    mutationFn: (sessionId: string) => getOrchestrationPlan(sessionId),
-    onSuccess: applySession,
+    onSuccess: onSession,
   });
   const updatePlan = useMutation({
     mutationFn: (vars: { sessionId: string; planJson: string; etag: string }) =>
       updateOrchestrationPlan(vars.sessionId, vars.planJson, vars.etag),
-    onSuccess: applySession,
-  });
-  const trace = useMutation({
-    mutationFn: (sessionId: string) => getOrchestrationTrace(sessionId),
-    onSuccess: setTraceItems,
+    onSuccess: onSession,
   });
 
-  const busy = submit.isPending || approve.isPending || control.isPending || refresh.isPending || updatePlan.isPending || trace.isPending;
-  const activeError = submit.error ?? approve.error ?? control.error ?? refresh.error ?? updatePlan.error ?? trace.error;
+  const busy = submit.isPending || approve.isPending || control.isPending || updatePlan.isPending;
+  const activeError = submit.error ?? approve.error ?? control.error ?? updatePlan.error ?? sessionQuery.error;
   const canRun = can("orchestration:run");
   const canApprove = can("orchestration:approve");
   const canManage = can("orchestration:manage");
   const canEditPlan = Boolean(session && canRun && (session.status === "draft" || session.status === "pending_approval"));
+  const isPlanning = submit.isPending || (session !== null && session.status === "running" && session.tasks.every((t) => t.status === "pending"));
 
   return (
     <Card className="flex flex-col gap-4">
@@ -109,9 +170,7 @@ export function OrchestrationPanel() {
             Nhập mục tiêu, hệ thống lập kế hoạch nhiều tác nhân và thực thi theo DAG.
           </p>
         </div>
-        {session && (
-          <StatusPill tone={statusTone(session.status)}>{session.status}</StatusPill>
-        )}
+        {session && <StatusPill tone={statusTone(session.status)}>{statusLabel(session.status)}</StatusPill>}
       </div>
 
       <div className="flex flex-col gap-2">
@@ -124,26 +183,48 @@ export function OrchestrationPanel() {
           disabled={!canRun || busy}
         />
         <div className="flex items-center gap-2">
-          <Button
-            onClick={() => submit.mutate()}
-            disabled={!canRun || busy || goal.trim().length === 0}
-          >
+          <Button onClick={() => submit.mutate()} disabled={!canRun || busy || goal.trim().length === 0}>
             Gửi mục tiêu
           </Button>
           {session && (
-            <Button variant="outline" onClick={() => refresh.mutate(session.sessionId)} disabled={busy}>
+            <Button variant="outline" onClick={() => void sessionQuery.refetch()} disabled={busy || sessionQuery.isFetching}>
               Làm mới
+            </Button>
+          )}
+          {session && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setGoal("");
+                setSessionId(null);
+              }}
+              disabled={busy}
+            >
+              Mục tiêu mới
             </Button>
           )}
         </div>
         {!canRun && (
-          <p className="text-label-sm text-on-surface-variant">
-            Bạn không có quyền chạy điều phối (orchestration:run).
-          </p>
+          <p className="text-label-sm text-on-surface-variant">Bạn không có quyền chạy điều phối (orchestration:run).</p>
         )}
       </div>
 
+      {isPlanning && (
+        <Alert tone="info">
+          <span className="inline-flex items-center gap-2">
+            <span aria-hidden="true" className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>
+            Agent đang lập kế hoạch... Bạn có thể rời trang, tiến trình vẫn được lưu.
+          </span>
+        </Alert>
+      )}
+
       {activeError && <Alert tone="error">{errorMessage(activeError)}</Alert>}
+
+      {session?.status === "failed" && (
+        <Alert tone="error">
+          Lập kế hoạch hoặc thực thi thất bại. Xem nhật ký bên dưới để biết bước bị lỗi, chỉnh lại mục tiêu rồi gửi lại.
+        </Alert>
+      )}
 
       {session?.costBlocked && (
         <Alert tone="warning">
@@ -159,42 +240,34 @@ export function OrchestrationPanel() {
             {session.replanCount > 0 && <span>Lập lại kế hoạch: {session.replanCount}</span>}
           </div>
 
-          <div className="flex flex-col gap-2">
-            <label className="text-label-sm text-on-surface-variant" htmlFor="orchestration-plan-json">
-              Kế hoạch JSON có thể chỉnh sửa
-            </label>
-            <textarea
-              id="orchestration-plan-json"
-              value={planDraft}
-              onChange={(e) => setPlanDraft(e.target.value)}
-              rows={6}
-              className="w-full rounded-lg border border-outline bg-surface-container-lowest p-3 font-mono text-mono-status text-on-surface focus:border-primary focus:outline-none"
-              disabled={!canEditPlan || busy}
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                onClick={() => session && updatePlan.mutate({ sessionId: session.sessionId, planJson: planDraft, etag: session.etag })}
-                disabled={!canEditPlan || busy || planDraft.trim().length === 0}
-              >
-                Lưu kế hoạch
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => session && trace.mutate(session.sessionId)}
-                disabled={busy}
-              >
-                Tải trace
-              </Button>
+          {session.tasks.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <label className="text-label-sm text-on-surface-variant" htmlFor="orchestration-plan-json">
+                Kế hoạch JSON có thể chỉnh sửa
+              </label>
+              <textarea
+                id="orchestration-plan-json"
+                value={planDraft}
+                onChange={(e) => setPlanDraft(e.target.value)}
+                rows={6}
+                className="w-full rounded-lg border border-outline bg-surface-container-lowest p-3 font-mono text-mono-status text-on-surface focus:border-primary focus:outline-none"
+                disabled={!canEditPlan || busy}
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => session && updatePlan.mutate({ sessionId: session.sessionId, planJson: planDraft, etag: session.etag })}
+                  disabled={!canEditPlan || busy || planDraft.trim().length === 0}
+                >
+                  Lưu kế hoạch
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
 
           <ul className="flex flex-col gap-2">
             {session.tasks.map((task) => (
-              <li
-                key={task.id}
-                className="flex items-start justify-between gap-3 rounded-lg border border-outline p-3"
-              >
+              <li key={task.id} className="flex items-start justify-between gap-3 rounded-lg border border-outline p-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-mono-status text-on-surface-variant">{task.agent}</span>
@@ -213,25 +286,28 @@ export function OrchestrationPanel() {
             ))}
           </ul>
 
-          {traceItems.length > 0 && (
-            <div className="rounded-lg border border-outline p-3">
-              <h3 className="text-label-md text-on-surface">Trace điều phối</h3>
+          <div className="rounded-lg border border-outline p-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-label-md text-on-surface">Nhật ký điều phối</h3>
+              {traceQuery.isFetching && <span className="text-label-sm text-on-surface-variant">đang cập nhật...</span>}
+            </div>
+            {traceItems.length > 0 ? (
               <ul className="mt-2 flex flex-col gap-1">
                 {traceItems.map((item, index) => (
                   <li key={`${item.taskId}-${item.phase}-${index}`} className="text-label-sm text-on-surface-variant">
-                    <span className="font-mono">{item.phase}</span> · {item.agentName || item.taskId || "session"} · {item.message}
+                    <span className="font-mono">{operationalPhaseLabel(item.phase)}</span> ·{" "}
+                    {item.agentName || item.taskId || "session"} · {toSafeOperationalText(item.message)}
                   </li>
                 ))}
               </ul>
-            </div>
-          )}
+            ) : (
+              <p className="mt-2 text-label-sm text-on-surface-variant">Chưa có nhật ký. Tiến trình sẽ tự cập nhật.</p>
+            )}
+          </div>
 
           <div className="flex flex-wrap items-center gap-2">
             {session.status === "pending_approval" && (
-              <Button
-                onClick={() => approve.mutate({ sessionId: session.sessionId, etag: session.etag })}
-                disabled={!canApprove || busy}
-              >
+              <Button onClick={() => approve.mutate({ sessionId: session.sessionId, etag: session.etag })} disabled={!canApprove || busy}>
                 Phê duyệt &amp; chạy
               </Button>
             )}
@@ -253,8 +329,7 @@ export function OrchestrationPanel() {
                 Tiếp tục
               </Button>
             )}
-            {(session.status === "running" ||
-              session.status === "paused") && (
+            {(session.status === "running" || session.status === "paused") && (
               <Button
                 variant="ghost"
                 onClick={() => control.mutate({ sessionId: session.sessionId, action: "cancel", etag: session.etag })}

@@ -307,35 +307,6 @@ export default function NotificationsPage() {
 
         <aside className="space-y-gutter">
           <Card>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-label-caps uppercase text-on-surface-variant">Kênh Telegram</p>
-                <h2 className="mt-2 text-headline-sm font-bold text-secondary">Đang ưu tiên thông báo trong ứng dụng</h2>
-              </div>
-              <span className="rounded-full bg-surface-container px-2 py-1 font-mono text-[11px] font-bold uppercase text-on-surface-variant">
-                Chưa bật
-              </span>
-            </div>
-            <p className="mt-3 text-body-md text-on-surface-variant">
-              Cảnh báo hiện đang gửi qua Trung tâm thông báo. Kênh Telegram sẽ được bật khi cấu hình tích hợp hoàn tất.
-            </p>
-            <div className="mt-4 rounded-lg border border-outline bg-surface-container-low p-3">
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-mono text-mono-status text-secondary">@HocBaAlertBot</span>
-                <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-bold uppercase text-amber-700">Tạm dừng</span>
-              </div>
-            </div>
-            <button
-              aria-disabled="true"
-              className="mt-4 w-full rounded border border-outline px-4 py-2 text-body-md font-bold text-on-surface-variant opacity-70"
-              disabled
-              type="button"
-            >
-              Kết nối Telegram
-            </button>
-          </Card>
-
-          <Card>
             <p className="text-label-caps uppercase text-on-surface-variant">Luồng cảnh báo</p>
             <div className="mt-3 space-y-3 text-body-md text-secondary">
               <div className="flex items-center gap-2">

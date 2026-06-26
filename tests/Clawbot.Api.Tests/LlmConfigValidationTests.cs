@@ -1,5 +1,8 @@
 using Clawbot.Api.Endpoints;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace Clawbot.Api.Tests;
@@ -54,6 +57,19 @@ public sealed class LlmConfigValidationTests
         var error = LlmConfigsEndpoints.SafeTestConnectionError(new InvalidOperationException("https://internal.local secret stack"));
 
         error.Should().Be("llm_connection_test_failed");
+    }
+
+    [Theory]
+    [InlineData("Development", "true", true)]
+    [InlineData("Development", "false", false)]
+    [InlineData("Production", "true", false)]
+    public void AllowPrivateBaseUrls_is_config_enabled_only_in_development(string environment, string enabled, bool expected)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["LlmBaseUrl:AllowPrivate"] = enabled })
+            .Build();
+
+        LlmConfigsEndpoints.AllowPrivateBaseUrls(config, new TestHostEnvironment(environment)).Should().Be(expected);
     }
 
     // D9 — cross-provider model guard.
@@ -127,6 +143,14 @@ public sealed class LlmConfigValidationTests
             text.Should().NotContain("Temperature");
             text.Should().NotContain("temperature");
         }
+    }
+
+    private sealed class TestHostEnvironment(string environmentName) : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = environmentName;
+        public string ApplicationName { get; set; } = "Clawbot.Api.Tests";
+        public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 
     private static string FindRepositoryRoot()

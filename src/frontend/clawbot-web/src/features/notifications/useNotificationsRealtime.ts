@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import * as signalR from "@microsoft/signalr";
 import { useQueryClient } from "@tanstack/react-query";
+import { getRealtimeAccessToken } from "@/shared/api/client";
 import type { AppNotification, NotificationEvent, NotificationListResponse } from "@/shared/api/notifications";
 
 type ConnectionState = "disabled" | "connecting" | "connected" | "reconnecting" | "disconnected" | "error";
@@ -37,7 +38,7 @@ export function useNotificationsRealtime(enabled: boolean) {
 
     const connection = new signalR.HubConnectionBuilder()
       .withUrl(getHubUrl(), {
-        accessTokenFactory: () => localStorage.getItem("clawbot.access_token") ?? "",
+        accessTokenFactory: getRealtimeAccessToken,
       })
       .configureLogging(signalR.LogLevel.None)
       .withAutomaticReconnect()

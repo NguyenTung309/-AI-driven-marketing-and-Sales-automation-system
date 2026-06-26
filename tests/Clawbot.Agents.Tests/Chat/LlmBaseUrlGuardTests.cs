@@ -41,4 +41,12 @@ public sealed class LlmBaseUrlGuardTests
             LlmBaseUrlGuard.ResolveHostAddresses = original;
         }
     }
+
+    [Fact]
+    public void IsAllowedBaseUrl_allows_private_http_only_when_explicitly_enabled()
+    {
+        LlmBaseUrlGuard.IsAllowedBaseUrl("http://localhost:11434").Should().BeFalse();
+        LlmBaseUrlGuard.IsAllowedBaseUrl("http://localhost:11434", allowPrivateHosts: true).Should().BeTrue();
+        LlmBaseUrlGuard.IsAllowedBaseUrl("http://api.example", allowPrivateHosts: true).Should().BeFalse();
+    }
 }

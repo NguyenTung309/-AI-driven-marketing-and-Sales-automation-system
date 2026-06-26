@@ -53,10 +53,12 @@ public static class LlmConfigsEndpoints
         ITenantAccessor tenants,
         IEncryptor encryptor,
         IClock clock,
+        IConfiguration config,
+        IHostEnvironment env,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(req.ApiKey)) return Results.BadRequest(new { error = "api_key_required" });
-        if (Validate(req.Provider, req.ModelId, req.BaseUrl, req.InputUsdPer1M, req.OutputUsdPer1M) is { } err)
+        if (Validate(req.Provider, req.ModelId, req.BaseUrl, req.InputUsdPer1M, req.OutputUsdPer1M, AllowPrivateBaseUrls(config, env)) is { } err)
             return Results.BadRequest(new { error = err });
 
         var tenantId = tenants.Require().TenantId;
@@ -84,9 +86,11 @@ public static class LlmConfigsEndpoints
         AppDbContext db,
         ITenantAccessor tenants,
         IClock clock,
+        IConfiguration config,
+        IHostEnvironment env,
         CancellationToken ct)
     {
-        if (Validate(req.Provider, req.ModelId, req.BaseUrl, req.InputUsdPer1M, req.OutputUsdPer1M) is { } err)
+        if (Validate(req.Provider, req.ModelId, req.BaseUrl, req.InputUsdPer1M, req.OutputUsdPer1M, AllowPrivateBaseUrls(config, env)) is { } err)
             return Results.BadRequest(new { error = err });
 
         var row = await FindAsync(db, tenants, id, ct).ConfigureAwait(false);
@@ -238,21 +242,25 @@ public static class LlmConfigsEndpoints
     // Boundary validation: provider enum, https-only baseUrl (SSRF guard), non-negative cost rates.
     private static string? Validate(
         string? provider, string? modelId, string? baseUrl,
-        decimal? inputRate, decimal? outputRate)
+        decimal? inputRate, decimal? outputRate,
+        bool allowPrivateBaseUrls = false)
     {
         if (string.IsNullOrWhiteSpace(provider) || !AllowedProviders.Contains(provider.Trim()))
             return "invalid_provider";
         if (string.IsNullOrWhiteSpace(modelId) || modelId.Trim().Length > 128)
             return "invalid_model_id";
-        if (!string.IsNullOrWhiteSpace(baseUrl) && !IsAllowedBaseUrl(baseUrl.Trim()))
+        if (!string.IsNullOrWhiteSpace(baseUrl) && !IsAllowedBaseUrl(baseUrl.Trim(), allowPrivateBaseUrls))
             return "invalid_base_url";
         if (inputRate is < 0m || outputRate is < 0m)
             return "invalid_rate";
         return null;
     }
 
-    internal static bool IsAllowedBaseUrl(string baseUrl) =>
-        LlmBaseUrlGuard.IsAllowedBaseUrl(baseUrl);
+    internal static bool AllowPrivateBaseUrls(IConfiguration config, IHostEnvironment env) =>
+        env.IsDevelopment() && config.GetValue<bool>($"{LlmBaseUrlOptions.SectionName}:AllowPrivate");
+
+    internal static bool IsAllowedBaseUrl(string baseUrl, bool allowPrivateBaseUrls = false) =>
+        LlmBaseUrlGuard.IsAllowedBaseUrl(baseUrl, allowPrivateBaseUrls);
 
     internal static bool AreBoundAgentModelsCompatible(
         string provider,

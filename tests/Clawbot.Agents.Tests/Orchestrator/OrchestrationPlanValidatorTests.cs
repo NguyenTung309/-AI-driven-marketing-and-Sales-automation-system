@@ -38,7 +38,7 @@ public sealed class OrchestrationPlanValidatorTests
         var result = OrchestrationPlanValidator.Validate(plan, [Content]);
 
         result.IsValid.Should().BeFalse();
-        result.Error.Should().Be("unknown_agent:t1:missing");
+        result.Error.Should().StartWith("unknown_agent:t1:missing");
     }
 
     [Fact]

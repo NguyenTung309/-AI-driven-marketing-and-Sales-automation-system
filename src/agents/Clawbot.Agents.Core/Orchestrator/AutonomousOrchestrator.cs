@@ -1,4 +1,5 @@
 using Clawbot.Agents.Core.Chat;
+using Clawbot.Agents.Core.Rag;
 using Clawbot.SharedKernel.Time;
 
 namespace Clawbot.Agents.Core.Orchestrator;
@@ -15,6 +16,8 @@ public sealed class AutonomousOrchestrator
     private readonly OrchestratorCostGuard _costGuard;
     private readonly ILlmCallScope _llmScope;
     private readonly IAutonomousRunSink _sink;
+    private readonly IRagRetriever _ragRetriever;
+    private readonly IClaudeChatClient _chatClient;
     private readonly IClock _clock;
     private readonly AutonomousOrchestratorOptions _options;
 
@@ -28,6 +31,8 @@ public sealed class AutonomousOrchestrator
         OrchestratorCostGuard costGuard,
         ILlmCallScope llmScope,
         IAutonomousRunSink sink,
+        IRagRetriever ragRetriever,
+        IClaudeChatClient chatClient,
         IClock clock,
         AutonomousOrchestratorOptions? options = null)
     {
@@ -38,6 +43,8 @@ public sealed class AutonomousOrchestrator
         _costGuard = costGuard;
         _llmScope = llmScope;
         _sink = sink;
+        _ragRetriever = ragRetriever;
+        _chatClient = chatClient;
         _clock = clock;
         _options = options ?? new AutonomousOrchestratorOptions();
     }
@@ -61,14 +68,31 @@ public sealed class AutonomousOrchestrator
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "planned", $"Plan failed: {ex.Message}", _clock.UtcNow, ct).ConfigureAwait(false);
+            await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "planning_failed", ex.Message, _clock.UtcNow, ct).ConfigureAwait(false);
             await _sink.FailAsync(request.TenantId, request.SessionId, "plan_failed", _clock.UtcNow, ct).ConfigureAwait(false);
             return AutonomousRunResult.Failed("plan_failed", 0);
         }
 
-        await _sink.PersistPlanAsync(request.TenantId, request.SessionId, plan, ct).ConfigureAwait(false);
-        await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "planned", $"Planned {plan.Tasks.Count} task(s).", _clock.UtcNow, ct).ConfigureAwait(false);
+        await _sink.PersistPlanAsync(request.TenantId, request.SessionId, plan, request.RequiresApproval, ct).ConfigureAwait(false);
+        await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "planning_completed", $"Planned {plan.Tasks.Count} task(s).", _clock.UtcNow, ct).ConfigureAwait(false);
+        if (request.RequiresApproval)
+            return AutonomousRunResult.PendingApproval(0);
 
+        return await ExecutePlanAsync(request, plan, entries, ct).ConfigureAwait(false);
+    }
+
+    public async Task<AutonomousRunResult> RunExistingPlanAsync(AutonomousRunRequest request, OrchestrationPlanDocument plan, CancellationToken ct = default)
+    {
+        var entries = await _catalog.ListAsync(request.TenantId, ct).ConfigureAwait(false);
+        return await ExecutePlanAsync(request, plan, entries, ct).ConfigureAwait(false);
+    }
+
+    private async Task<AutonomousRunResult> ExecutePlanAsync(
+        AutonomousRunRequest request,
+        OrchestrationPlanDocument plan,
+        IReadOnlyList<AgentDefinitionCatalogEntry> entries,
+        CancellationToken ct)
+    {
         var preflight = await _costGuard.CanStartAsync(request.TenantId, plan.Tasks.Count * _options.PerTaskEstimateUsd, _clock.UtcNow, ct).ConfigureAwait(false);
         if (!preflight.Allowed)
         {
@@ -76,7 +100,7 @@ public sealed class AutonomousOrchestrator
             return AutonomousRunResult.Failed(preflight.Reason ?? "cost_cap_preflight", 0);
         }
 
-        var byCode = entries.ToDictionary(e => e.Code, StringComparer.OrdinalIgnoreCase);
+        var byCode = BuildDefinitionLookup(entries);
 
         for (var round = 1; round <= _options.MaxRounds; round++)
         {
@@ -103,6 +127,9 @@ public sealed class AutonomousOrchestrator
             {
                 ct.ThrowIfCancellationRequested();
                 plan = await ExecuteTaskAsync(request, plan, task, byCode, ct).ConfigureAwait(false);
+                await _sink.PersistPlanAsync(request.TenantId, request.SessionId, plan, ct: ct).ConfigureAwait(false);
+                if (await _sink.IsStoppedAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false))
+                    return AutonomousRunResult.Failed("stopped", round);
             }
 
             var failed = plan.Tasks.Where(t => string.Equals(t.Status, "failed", StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -120,7 +147,7 @@ public sealed class AutonomousOrchestrator
             {
                 plan = await _planner.ReplanAsync(request.TenantId, request.Goal, entries.Select(e => e.ToPlannerEntry()).ToArray(), failed, ct).ConfigureAwait(false);
             }
-            await _sink.PersistPlanAsync(request.TenantId, request.SessionId, plan, ct).ConfigureAwait(false);
+            await _sink.PersistPlanAsync(request.TenantId, request.SessionId, plan, ct: ct).ConfigureAwait(false);
         }
 
         await _sink.FailAsync(request.TenantId, request.SessionId, "max_rounds", _clock.UtcNow, ct).ConfigureAwait(false);
@@ -134,11 +161,7 @@ public sealed class AutonomousOrchestrator
         Dictionary<string, AgentDefinitionCatalogEntry> byCode,
         CancellationToken ct)
     {
-        if (!byCode.TryGetValue(task.Agent, out var definition))
-        {
-            await _sink.TraceAsync(request.TenantId, request.SessionId, task.Id, task.Agent, "failed", $"Agent definition '{task.Agent}' not found.", _clock.UtcNow, ct).ConfigureAwait(false);
-            return plan.WithTaskStatus(task.Id, "failed", null, "agent_not_found");
-        }
+        byCode.TryGetValue(task.Agent, out var definition);
 
         var reservation = await _costGuard.TryReserveAsync(request.TenantId, _options.PerTaskEstimateUsd, _clock.UtcNow, ct).ConfigureAwait(false);
         if (!reservation.Allowed)
@@ -147,14 +170,15 @@ public sealed class AutonomousOrchestrator
             return plan.WithTaskStatus(task.Id, "failed", null, reservation.Reason ?? "cost_cap_midrun");
         }
 
-        await _mailbox.SendAsync(request.TenantId, request.SessionId, null, definition.Id, task.Id, "delegate", SerializeTaskInput(task), ct).ConfigureAwait(false);
+        if (definition is not null)
+            await _mailbox.SendAsync(request.TenantId, request.SessionId, null, definition.Id, task.Id, "delegate", SerializeTaskInput(task), ct).ConfigureAwait(false);
         await _sink.TraceAsync(request.TenantId, request.SessionId, task.Id, task.Agent, "started", task.Description, _clock.UtcNow, ct).ConfigureAwait(false);
 
         AgentResult result;
         try
         {
             using var _costScope = _llmScope.Begin(request.TenantId, task.Agent, _clock.UtcNow, reservation.ReservationId);
-            var agent = ResolveAgent(task.Agent);
+            var agent = ResolveAgent(task.Agent, definition);
             result = await agent.ExecuteAsync(ToAgentTask(task, request.TenantId), ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -180,10 +204,31 @@ public sealed class AutonomousOrchestrator
         return plan.WithTaskStatus(task.Id, "failed", result.Output, result.Error);
     }
 
-    private IAgent ResolveAgent(string name)
+    private IAgent ResolveAgent(string name, AgentDefinitionCatalogEntry? definition)
     {
+        if (definition is not null)
+            return new GenericLlmAgentWorker(definition, _ragRetriever, _chatClient, _costGuard, _llmScope);
+
         try { return _registry.Resolve(name); }
         catch (KeyNotFoundException) { throw new InvalidOperationException($"No runtime adapter for agent '{name}'."); }
+    }
+
+    private static Dictionary<string, AgentDefinitionCatalogEntry> BuildDefinitionLookup(IReadOnlyList<AgentDefinitionCatalogEntry> entries)
+    {
+        var lookup = new Dictionary<string, AgentDefinitionCatalogEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries)
+        {
+            Add(entry.Code, entry);
+            Add(entry.ShortName, entry);
+            Add(entry.AgentType, entry);
+        }
+        return lookup;
+
+        void Add(string? key, AgentDefinitionCatalogEntry entry)
+        {
+            if (!string.IsNullOrWhiteSpace(key))
+                lookup.TryAdd(key, entry);
+        }
     }
 
     private static List<OrchestrationPlanTask> ReadyTasks(OrchestrationPlanDocument plan)

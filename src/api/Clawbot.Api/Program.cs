@@ -32,7 +32,8 @@ builder.Host.UseSerilog((ctx, lc) => lc.ReadFrom.Configuration(ctx.Configuration
 
 builder.Services.AddApplication();
 builder.Services.AddClawbotChatSupport(builder.Configuration);
-Clawbot.Agents.Core.Chat.ChatModule.AddClawbotChat(builder.Services, builder.Configuration);
+builder.Services.AddClawbotForecasting();
+Clawbot.Agents.Core.Chat.ChatModule.AddClawbotChat(builder.Services, builder.Configuration, builder.Environment);
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddClawbotRag(builder.Configuration);
 builder.Services.AddClawbotJobs(builder.Configuration);

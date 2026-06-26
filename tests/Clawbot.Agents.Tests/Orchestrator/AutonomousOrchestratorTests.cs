@@ -1,6 +1,7 @@
 using Clawbot.Agents.Core;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Orchestrator;
+using Clawbot.Agents.Core.Rag;
 using Clawbot.Agents.Core.Skills.Ops;
 using Clawbot.SharedKernel.Time;
 using FluentAssertions;
@@ -14,8 +15,8 @@ public sealed class AutonomousOrchestratorTests
     private static readonly DateTimeOffset Now = new(2026, 6, 24, 0, 0, 0, TimeSpan.Zero);
     private static readonly Guid Tenant = Guid.NewGuid();
     private static readonly Guid Session = Guid.NewGuid();
-    private static readonly AgentDefinitionCatalogEntry Research = new(Guid.NewGuid(), "research-agent", "research", "Research", "research", "Research the goal.", "{}", true);
-    private static readonly AgentDefinitionCatalogEntry Content = new(Guid.NewGuid(), "content-agent", "content", "Content", "content", "Write content.", "{}", true);
+    private static readonly AgentDefinitionCatalogEntry Research = new(Guid.NewGuid(), "research-agent", "research", "Research", "research", "Research the goal.", "{}", true, null);
+    private static readonly AgentDefinitionCatalogEntry Content = new(Guid.NewGuid(), "content-agent", "content", "Content", "content", "Write content.", "{}", true, null);
 
     [Fact]
     public async Task RunAsync_Completes_WhenAllTasksSucceed()
@@ -30,6 +31,36 @@ public sealed class AutonomousOrchestratorTests
 
         result.Status.Should().Be("completed");
         await planner.DidNotReceive().ReplanAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<IReadOnlyList<AgentCatalogEntry>>(), Arg.Any<IReadOnlyList<OrchestrationPlanTask>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunAsync_UsesDynamicDefinitionPersonaAndKbSnippets()
+    {
+        var definition = new AgentDefinitionCatalogEntry(Guid.NewGuid(), "dynamic-agent", "dynamic", "Dynamic", "content", "Use persona.", "{}", true, "sales");
+        var planner = FakePlanner(SingleTaskPlan("dynamic"));
+        var catalog = Substitute.For<IAgentDefinitionCatalog>();
+        catalog.ListAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(new[] { definition });
+        var rag = Substitute.For<IRagRetriever>();
+        rag.RetrieveAsync(Arg.Any<RagRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new[] { new RagChunk("v1", "sales", "KB fact", 0.9f) });
+        var chat = Substitute.For<IClaudeChatClient>();
+        chat.CompleteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ClaudeReply("dynamic-ok", 11, 7, 0.02m, "test-model"));
+        var tracker = AllowedTracker();
+        var sut = Build(planner, Registry(), tracker: tracker, catalog: catalog, rag: rag, chat: chat);
+
+        var result = await sut.RunAsync(Request("manual"), CancellationToken.None);
+
+        result.Status.Should().Be("completed");
+        await rag.Received(1).RetrieveAsync(Arg.Is<RagRequest>(r => r.TenantId == Tenant && r.KbModuleCode == "sales" && r.Query == "Do"), Arg.Any<CancellationToken>());
+        await chat.Received(1).CompleteAsync(
+            Arg.Is<string>(prompt => prompt.Contains("Use persona.") && prompt.Contains("KB fact") && prompt.Contains("untrusted reference data")),
+            Arg.Any<IReadOnlyList<ChatTurn>>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+        await tracker.Received(1).RecordAsync(
+            Arg.Is<CostEntry>(entry => entry.TenantId == Tenant && entry.AgentCode == "dynamic" && entry.InputTokens == 11 && entry.OutputTokens == 7 && entry.UsdCost == 0.02m),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -78,18 +109,31 @@ public sealed class AutonomousOrchestratorTests
         IAutonomousPlanner planner,
         AgentRegistry registry,
         AutonomousOrchestratorOptions? options = null,
-        IClaudeCostTracker? tracker = null)
+        IClaudeCostTracker? tracker = null,
+        IAgentDefinitionCatalog? catalog = null,
+        IRagRetriever? rag = null,
+        IClaudeChatClient? chat = null)
     {
         tracker ??= AllowedTracker();
-        var catalog = Substitute.For<IAgentDefinitionCatalog>();
-        catalog.ListAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-            .Returns(new[] { Research, Content });
+        if (catalog is null)
+        {
+            catalog = Substitute.For<IAgentDefinitionCatalog>();
+            catalog.ListAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+                .Returns(new[] { Research, Content });
+        }
         var mailbox = Substitute.For<IA2AMailbox>();
         var sink = Substitute.For<IAutonomousRunSink>();
+        rag ??= Substitute.For<IRagRetriever>();
+        if (chat is null)
+        {
+            chat = Substitute.For<IClaudeChatClient>();
+            chat.CompleteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns(new ClaudeReply("ok", 0, 0, 0m));
+        }
         return new AutonomousOrchestrator(
             planner, catalog, registry, mailbox,
             new OrchestratorCostGuard(tracker),
-            new LlmCallScope(), sink, new FixedClock(Now), options);
+            new LlmCallScope(), sink, rag, chat, new FixedClock(Now), options);
     }
 
     private static AutonomousRunRequest Request(string source) => new(Tenant, Session, "Launch HSK4 campaign", source, RequiresApproval: false);

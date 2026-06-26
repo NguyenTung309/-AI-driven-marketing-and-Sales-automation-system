@@ -1,3 +1,4 @@
+using Clawbot.Api.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Application.Abstractions;
 using Clawbot.Infrastructure.Identity;
@@ -17,7 +18,7 @@ public static class AdminUsersEndpoints
     public static IEndpointRouteBuilder MapAdminUsers(this IEndpointRouteBuilder app)
     {
         var grp = app.MapGroup("/api/admin/users")
-            .RequireAuthorization("perm:admin.system")
+            .RequirePermission("admin.system")
             .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/", ListAsync);

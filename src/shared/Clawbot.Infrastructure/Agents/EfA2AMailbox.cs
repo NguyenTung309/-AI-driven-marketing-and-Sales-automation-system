@@ -1,4 +1,5 @@
 using Clawbot.Agents.Core.Orchestrator;
+using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Domain.Agents;
 using Clawbot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -8,9 +9,10 @@ namespace Clawbot.Infrastructure.Agents;
 // EF-backed A2A mailbox. ponytail: claim is read-then-update, not atomic across processes;
 // safe for the single-worker V2 scheduler. Upgrade to SELECT ... WITH (UPDLOCK) / queue if
 // multiple workers fire the same session.
-public sealed class EfA2AMailbox(AppDbContext db) : IA2AMailbox
+public sealed class EfA2AMailbox(AppDbContext db, IPiiRedactor pii) : IA2AMailbox
 {
     private readonly AppDbContext _db = db;
+    private readonly IPiiRedactor _pii = pii;
 
     public async Task<AgentA2AMessage> SendAsync(
         Guid tenantId,
@@ -22,7 +24,8 @@ public sealed class EfA2AMailbox(AppDbContext db) : IA2AMailbox
         string payloadJson,
         CancellationToken ct = default)
     {
-        var message = AgentA2AMessage.Send(tenantId, sessionId, fromAgentDefinitionId, toAgentDefinitionId, taskId, intent, payloadJson, DateTimeOffset.UtcNow);
+        var redactedPayload = await RedactAsync(payloadJson, ct).ConfigureAwait(false);
+        var message = AgentA2AMessage.Send(tenantId, sessionId, fromAgentDefinitionId, toAgentDefinitionId, taskId, intent, redactedPayload, DateTimeOffset.UtcNow);
         _db.AgentA2AMessages.Add(message);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
         return message;
@@ -47,7 +50,7 @@ public sealed class EfA2AMailbox(AppDbContext db) : IA2AMailbox
     {
         var message = await LoadAsync(tenantId, messageId, ct).ConfigureAwait(false);
         if (message is null) return;
-        message.Complete(payloadJson, at);
+        message.Complete(await RedactAsync(payloadJson, ct).ConfigureAwait(false), at);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
@@ -55,7 +58,7 @@ public sealed class EfA2AMailbox(AppDbContext db) : IA2AMailbox
     {
         var message = await LoadAsync(tenantId, messageId, ct).ConfigureAwait(false);
         if (message is null) return;
-        message.Fail(reason, at);
+        message.Fail(await RedactAsync(reason, ct).ConfigureAwait(false), at);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
@@ -70,4 +73,9 @@ public sealed class EfA2AMailbox(AppDbContext db) : IA2AMailbox
         await _db.AgentA2AMessages
             .FirstOrDefaultAsync(m => m.TenantId == tenantId && m.Id == messageId, ct)
             .ConfigureAwait(false);
+
+    private async Task<string> RedactAsync(string? text, CancellationToken ct) =>
+        string.IsNullOrEmpty(text)
+            ? string.Empty
+            : (await _pii.RedactAsync(text, ct).ConfigureAwait(false)).RedactedText;
 }

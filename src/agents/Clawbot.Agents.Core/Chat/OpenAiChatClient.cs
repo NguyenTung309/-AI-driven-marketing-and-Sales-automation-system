@@ -16,7 +16,7 @@ public sealed class OpenAiChatClient : IClaudeChatClient
     private readonly ResolvedLlmConfig _config;
     private readonly ChatClient _client;
 
-    public OpenAiChatClient(ResolvedLlmConfig config)
+    public OpenAiChatClient(ResolvedLlmConfig config, bool allowPrivateBaseUrls = false)
     {
         ArgumentNullException.ThrowIfNull(config);
         if (string.IsNullOrWhiteSpace(config.ApiKey))
@@ -28,7 +28,7 @@ public sealed class OpenAiChatClient : IClaudeChatClient
         {
             var endpoint = new Uri(config.BaseUrl, UriKind.Absolute);
             options.Endpoint = endpoint;
-            options.Transport = new HttpClientPipelineTransport(LlmBaseUrlGuard.CreateGuardedHttpClient(endpoint));
+            options.Transport = new HttpClientPipelineTransport(LlmBaseUrlGuard.CreateGuardedHttpClient(endpoint, allowPrivateBaseUrls));
         }
 
         _client = new ChatClient(config.Model, new ApiKeyCredential(config.ApiKey), options);

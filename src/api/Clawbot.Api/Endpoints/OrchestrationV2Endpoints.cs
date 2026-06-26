@@ -3,6 +3,7 @@ using Clawbot.Agents.Core.Orchestrator;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Agents;
+using Clawbot.Infrastructure.Auth;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
@@ -12,11 +13,11 @@ using Microsoft.EntityFrameworkCore;
 namespace Clawbot.Api.Endpoints;
 
 public sealed record OrchestrationV2RunRequest(string Goal, string? Source = null);
-public sealed record OrchestrationV2AgentRequest(string Code, string DisplayName, string AgentType, string PersonaPrompt, bool IsOrchestratable = true);
+public sealed record OrchestrationV2AgentRequest(string Code, string DisplayName, string AgentType, string PersonaPrompt, bool IsOrchestratable = true, string? KbModuleCode = null);
 public sealed record OrchestrationV2ScheduleRequest(string Name, string GoalTemplate, string Cadence, string TimezoneId, DateTimeOffset? NextRunAt = null, bool RequiresApproval = false);
 public sealed record OrchestrationV2ControlRequest(string Action, string? Etag = null);
 
-public sealed record OrchestrationV2AgentDto(Guid Id, string Code, string DisplayName, string AgentType, bool IsOrchestratable, int Version);
+public sealed record OrchestrationV2AgentDto(Guid Id, string Code, string DisplayName, string AgentType, bool IsOrchestratable, int Version, string? KbModuleCode);
 public sealed record OrchestrationV2ScheduleDto(Guid Id, string Name, string GoalTemplate, string Cadence, string TimezoneId, DateTimeOffset NextRunAt, DateTimeOffset? LastRunAt, bool IsActive, bool RequiresApproval);
 public sealed record OrchestrationV2TraceDto(string TaskId, string AgentName, string Phase, string Message, DateTimeOffset OccurredAt);
 public sealed record OrchestrationV2MessageDto(Guid Id, string TaskId, string Intent, string Status, string PayloadJson, string? Error, DateTimeOffset CreatedAt, DateTimeOffset? ProcessedAt);
@@ -111,30 +112,34 @@ public static class OrchestrationV2Endpoints
         var agents = await db.AgentDefinitions.IgnoreQueryFilters().AsNoTracking()
             .Where(a => a.TenantId == tenant.TenantId && a.DeletedAt == null)
             .OrderBy(a => a.Code)
-            .Select(a => new OrchestrationV2AgentDto(a.Id, a.Code, a.DisplayName, a.AgentType, a.IsOrchestratable, a.Version))
+            .Select(a => new OrchestrationV2AgentDto(a.Id, a.Code, a.DisplayName, a.AgentType, a.IsOrchestratable, a.Version, a.KbModuleCode))
             .ToListAsync(ct).ConfigureAwait(false);
         return Results.Ok(new { items = agents });
     }
 
-    private static async Task<IResult> UpsertAgentAsync(OrchestrationV2AgentRequest body, AppDbContext db, ITenantAccessor tenants, IClock clock, CancellationToken ct)
+    private static async Task<IResult> UpsertAgentAsync(OrchestrationV2AgentRequest body, AppDbContext db, ITenantAccessor tenants, IClock clock, IPermissionResolver permissions, HttpContext http, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(body.Code) || string.IsNullOrWhiteSpace(body.DisplayName) || string.IsNullOrWhiteSpace(body.PersonaPrompt))
             return Results.BadRequest(new { error = "agent_required_fields" });
+        if (!string.IsNullOrWhiteSpace(body.KbModuleCode) && !await HasPermissionAsync(http, permissions, "kb:read", ct).ConfigureAwait(false))
+            return Forbidden(http);
         var tenant = tenants.Require();
         var code = body.Code.Trim();
         var existing = await db.AgentDefinitions.IgnoreQueryFilters()
             .FirstOrDefaultAsync(a => a.TenantId == tenant.TenantId && a.Code == code && a.DeletedAt == null, ct).ConfigureAwait(false);
         if (existing is null)
         {
-            existing = AgentDefinition.Create(tenant.TenantId, code, body.DisplayName, body.AgentType, body.PersonaPrompt, clock.UtcNow, isOrchestratable: body.IsOrchestratable);
+            existing = AgentDefinition.Create(tenant.TenantId, code, body.DisplayName, body.AgentType, body.PersonaPrompt, clock.UtcNow,
+                isOrchestratable: body.IsOrchestratable, kbModuleCode: body.KbModuleCode);
             db.AgentDefinitions.Add(existing);
         }
         else
         {
-            existing.UpdateDefinition(body.DisplayName, body.AgentType, body.PersonaPrompt, existing.AllowedToolsJson, existing.InputSchemaJson, existing.OutputSchemaJson, existing.MemoryScope, existing.LlmConfigId, body.IsOrchestratable, clock.UtcNow);
+            existing.UpdateDefinition(body.DisplayName, body.AgentType, body.PersonaPrompt, existing.AllowedToolsJson, existing.InputSchemaJson,
+                existing.OutputSchemaJson, existing.MemoryScope, existing.LlmConfigId, body.IsOrchestratable, clock.UtcNow, body.KbModuleCode);
         }
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return Results.Ok(new OrchestrationV2AgentDto(existing.Id, existing.Code, existing.DisplayName, existing.AgentType, existing.IsOrchestratable, existing.Version));
+        return Results.Ok(new OrchestrationV2AgentDto(existing.Id, existing.Code, existing.DisplayName, existing.AgentType, existing.IsOrchestratable, existing.Version, existing.KbModuleCode));
     }
 
     private static async Task<IResult> ListSchedulesAsync(AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
@@ -179,6 +184,17 @@ public static class OrchestrationV2Endpoints
         new(s.Id, s.Name, s.GoalTemplate, s.Cadence, s.TimezoneId, s.NextRunAt, s.LastRunAt, s.IsActive, s.RequiresApproval);
 
     private static bool IsKnownCadence(string cadence) => cadence.Trim().ToLowerInvariant() is "daily" or "weekly" or "monthly" or "quarterly";
+
+    private static async Task<bool> HasPermissionAsync(HttpContext http, IPermissionResolver permissions, string code, CancellationToken ct)
+    {
+        if (http.User.HasClaim("perm", code)) return true;
+        if (!Guid.TryParse(http.User.FindFirst("role_id")?.Value, out var roleId) || roleId == Guid.Empty) return false;
+        var granted = await permissions.GetPermissionsAsync(roleId, ct).ConfigureAwait(false);
+        return granted.Contains(code);
+    }
+
+    private static IResult Forbidden(HttpContext http) =>
+        Results.Json(new { errorCode = "forbidden", message = "Không có quyền", requestId = http.TraceIdentifier }, statusCode: StatusCodes.Status403Forbidden);
 
     private static IResult ToGrpcResult(RpcException ex) => ex.StatusCode switch
     {

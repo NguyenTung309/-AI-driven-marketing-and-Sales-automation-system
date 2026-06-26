@@ -78,6 +78,31 @@ public sealed class SemanticKernelPlanGeneratorTests
     }
 
     [Fact]
+    public async Task GenerateAsync_tolerates_string_version_and_rich_input_values()
+    {
+        var chat = new FixedClaudeChatClient("""
+        {
+          "version": "1.0",
+          "tasks": [
+            { "id": "t1", "agent": "content", "description": "schedule posts",
+              "input": { "durationDays": 30, "platforms": ["Facebook", "Zalo"], "config": { "tz": "Asia/Ho_Chi_Minh" }, "active": true },
+              "dependsOn": [], "status": "pending" }
+          ]
+        }
+        """);
+        var generator = new SemanticKernelPlanGenerator(new ClawbotChatCompletionService(chat));
+
+        var plan = await generator.GenerateAsync("launch HSK4", [Content], CancellationToken.None);
+
+        plan.Version.Should().Be(1);
+        var input = plan.Tasks.Should().ContainSingle().Which.Input;
+        input["durationDays"].Should().Be("30");
+        input["platforms"].Should().Contain("Facebook").And.Contain("Zalo");
+        input["config"].Should().Contain("Asia/Ho_Chi_Minh");
+        input["active"].Should().Be("true");
+    }
+
+    [Fact]
     public async Task GenerateAsync_rejects_invalid_json()
     {
         var generator = new SemanticKernelPlanGenerator(new ClawbotChatCompletionService(new FixedClaudeChatClient("not-json")));
@@ -85,7 +110,7 @@ public sealed class SemanticKernelPlanGeneratorTests
         Func<Task> act = async () => await generator.GenerateAsync("launch HSK4", [Content], CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Planner returned invalid plan JSON.");
+            .WithMessage("Mô hình trả về JSON không hợp lệ*");
     }
 
     [Fact]
@@ -99,7 +124,7 @@ public sealed class SemanticKernelPlanGeneratorTests
         Func<Task> act = async () => await generator.GenerateAsync("launch HSK4", [Content], CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Planner returned invalid plan: unknown_agent:t1:missing");
+            .WithMessage("Kế hoạch sai cấu trúc: unknown_agent:t1:missing*");
     }
 
     private sealed class FixedClaudeChatClient(string response) : IClaudeChatClient

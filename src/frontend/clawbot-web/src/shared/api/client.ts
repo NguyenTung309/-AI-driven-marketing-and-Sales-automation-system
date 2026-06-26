@@ -44,6 +44,10 @@ export function refreshAccessToken(): Promise<string | null> {
   return refreshPromise;
 }
 
+export async function getRealtimeAccessToken(): Promise<string> {
+  return useAuthStore.getState().accessToken ?? (await refreshAccessToken()) ?? "";
+}
+
 // SPEC-11: fetch the user's permissions (for UI gating) after a token is in RAM.
 export async function loadPermissions(): Promise<void> {
   try {

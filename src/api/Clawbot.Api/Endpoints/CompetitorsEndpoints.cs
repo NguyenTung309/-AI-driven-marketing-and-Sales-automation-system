@@ -1,3 +1,4 @@
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Competitors;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Competitors;
@@ -17,11 +18,11 @@ public static class CompetitorsEndpoints
     {
         var grp = app.MapGroup("/api/competitors").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
-        grp.MapGet("/sources", ListSourcesAsync).RequireAuthorization("perm:content.read");
-        grp.MapPost("/sources", CreateSourceAsync).RequireAuthorization("perm:content.write");
-        grp.MapPut("/sources/{id:guid}", UpdateSourceAsync).RequireAuthorization("perm:content.write");
-        grp.MapDelete("/sources/{id:guid}", DeleteSourceAsync).RequireAuthorization("perm:content.write");
-        grp.MapGet("/posts", ListPostsAsync).RequireAuthorization("perm:content.read");
+        grp.MapGet("/sources", ListSourcesAsync).RequirePermission("content.read");
+        grp.MapPost("/sources", CreateSourceAsync).RequirePermission("content.write");
+        grp.MapPut("/sources/{id:guid}", UpdateSourceAsync).RequirePermission("content.write");
+        grp.MapDelete("/sources/{id:guid}", DeleteSourceAsync).RequirePermission("content.write");
+        grp.MapGet("/posts", ListPostsAsync).RequirePermission("content.read");
 
         return app;
     }

@@ -29,7 +29,8 @@ public static class OrchestrationPlanValidator
             if (InputSize(task.Input) > MaxTaskInputChars)
                 return OrchestrationPlanValidationResult.Invalid($"input_too_large:{task.Id}");
             if (!KnownAgent(task.Agent, catalog))
-                return OrchestrationPlanValidationResult.Invalid($"unknown_agent:{task.Id}:{task.Agent}");
+                return OrchestrationPlanValidationResult.Invalid(
+                    $"unknown_agent:{task.Id}:{task.Agent}. Agent hợp lệ: {AllowedCodes(catalog)}");
         }
 
         foreach (var task in plan.Tasks)
@@ -46,6 +47,9 @@ public static class OrchestrationPlanValidator
 
     private static int InputSize(IReadOnlyDictionary<string, string> input) =>
         input.Sum(pair => pair.Key.Length + (pair.Value?.Length ?? 0));
+
+    private static string AllowedCodes(IReadOnlyList<AgentCatalogEntry> catalog) =>
+        string.Join(", ", catalog.Where(entry => entry.Orchestratable).Select(entry => entry.Code));
 
     private static bool KnownAgent(string name, IReadOnlyList<AgentCatalogEntry> catalog) =>
         catalog.Any(entry => entry.Orchestratable &&

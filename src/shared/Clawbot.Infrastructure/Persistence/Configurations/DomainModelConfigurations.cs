@@ -351,6 +351,7 @@ public sealed class AgentDefinitionConfiguration : IEntityTypeConfiguration<Agen
         builder.Property(x => x.InputSchemaJson).HasColumnType("nvarchar(max)").IsRequired();
         builder.Property(x => x.OutputSchemaJson).HasColumnType("nvarchar(max)").IsRequired();
         builder.Property(x => x.MemoryScope).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.KbModuleCode).HasMaxLength(64);
         builder.Property(x => x.Version).HasDefaultValue(1);
         builder.HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
         builder.HasIndex(x => new { x.TenantId, x.IsOrchestratable });
