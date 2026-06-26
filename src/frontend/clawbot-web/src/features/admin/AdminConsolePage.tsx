@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isAxiosError } from "axios";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, Modal, StatusPill, type StatusTone } from "@/shared/ui";
 import { toUserFriendlyError } from "@/shared/utils/userText";
@@ -87,6 +88,12 @@ function formatDate(value: string | null | undefined): string {
 
 function errorMessage(error: unknown): string {
   return toUserFriendlyError(error, "Không xử lý được yêu cầu quản trị. Vui lòng thử lại.");
+}
+
+function adminFormErrorMessage(error: unknown): string {
+  const data = isAxiosError(error) ? error.response?.data : null;
+  if (Array.isArray(data) && data.every((item) => typeof item === "string")) return data.join("\n");
+  return errorMessage(error);
 }
 
 function parseScopes(value: string): readonly string[] {
@@ -188,6 +195,8 @@ function Field({
 }
 
 const inputClass = "w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary";
+const tempPasswordPattern = "(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).{8,}";
+const tempPasswordHint = "Ít nhất 8 ký tự, gồm chữ hoa, chữ thường, số và ký tự đặc biệt.";
 
 export default function AdminConsolePage() {
   const queryClient = useQueryClient();
@@ -1077,7 +1086,7 @@ export default function AdminConsolePage() {
           </>
         }
       >
-        {userMutation.error ? <Alert tone="error">{errorMessage(userMutation.error)}</Alert> : null}
+        {userMutation.error ? <Alert tone="error">{adminFormErrorMessage(userMutation.error)}</Alert> : null}
         <form
           id="admin-user-form"
           className="space-y-4"
@@ -1095,7 +1104,17 @@ export default function AdminConsolePage() {
                 <input className={inputClass} required type="email" value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} />
               </Field>
               <Field label="Mật khẩu tạm">
-                <input className={inputClass} required type="password" minLength={8} value={userForm.password} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} />
+                <input
+                  className={inputClass}
+                  required
+                  type="password"
+                  minLength={8}
+                  pattern={tempPasswordPattern}
+                  title={tempPasswordHint}
+                  value={userForm.password}
+                  onChange={(event) => setUserForm({ ...userForm, password: event.target.value })}
+                />
+                <p className="mt-1 text-label-sm text-on-surface-variant">{tempPasswordHint}</p>
               </Field>
               <div>
                 <p className="mb-2 text-label-sm font-semibold text-secondary">Vai trò ban đầu</p>

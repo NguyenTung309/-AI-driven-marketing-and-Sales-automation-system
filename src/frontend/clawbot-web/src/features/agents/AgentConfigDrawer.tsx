@@ -1,5 +1,7 @@
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { AgentListItem, UpdateAgentSettingsPayload } from "@/shared/api/agents";
-import type { LlmConfig } from "@/shared/api/llmConfigs";
+import { createLlmConfig, type CreateLlmConfigPayload, type LlmConfig, type LlmProvider } from "@/shared/api/llmConfigs";
 
 export type AgentConfigTab = "prompt" | "model" | "tools";
 
@@ -22,6 +24,26 @@ export interface SandboxMessage {
   readonly time: string;
 }
 
+interface LlmConfigDraft {
+  readonly provider: LlmProvider;
+  readonly modelId: string;
+  readonly displayName: string;
+  readonly apiKey: string;
+  readonly baseUrl: string;
+  readonly inputUsdPer1M: string;
+  readonly outputUsdPer1M: string;
+}
+
+const EMPTY_LLM_CONFIG_DRAFT: LlmConfigDraft = {
+  provider: "openai",
+  modelId: "",
+  displayName: "",
+  apiKey: "",
+  baseUrl: "",
+  inputUsdPer1M: "",
+  outputUsdPer1M: "",
+};
+
 function listToText(values: readonly string[]): string {
   return values.join("\n");
 }
@@ -32,6 +54,43 @@ function textToList(value: string): readonly string[] {
     .map((item) => item.trim())
     .filter(Boolean);
 }
+
+function toNullableNumber(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toCreateLlmPayload(draft: LlmConfigDraft): CreateLlmConfigPayload {
+  return {
+    provider: draft.provider,
+    modelId: draft.modelId.trim(),
+    apiKey: draft.apiKey,
+    displayName: draft.displayName.trim() || null,
+    baseUrl: draft.baseUrl.trim() || null,
+    inputUsdPer1M: toNullableNumber(draft.inputUsdPer1M),
+    outputUsdPer1M: toNullableNumber(draft.outputUsdPer1M),
+  };
+}
+
+const CREATIVITY_PRESETS = [
+  {
+    label: "Bám sát",
+    description: "Ổn định, ưu tiên đúng hướng dẫn.",
+    value: 0.4,
+  },
+  {
+    label: "Cân bằng",
+    description: "Linh hoạt vừa đủ cho hội thoại thường ngày.",
+    value: 1,
+  },
+  {
+    label: "Sáng tạo",
+    description: "Nhiều biến tấu hơn cho nội dung và ý tưởng.",
+    value: 1.5,
+  },
+] as const;
 
 function ConfigTabButton({
   active,
@@ -54,6 +113,17 @@ function ConfigTabButton({
       {label}
     </button>
   );
+}
+
+function providerLabel(provider: string): string {
+  const normalized = provider.toLowerCase();
+  if (normalized === "anthropic" || normalized === "claude") return "Claude";
+  if (normalized === "openai" || normalized === "openai-compatible") return "Chuẩn OpenAI";
+  return provider;
+}
+
+function configLabel(config: LlmConfig): string {
+  return `${config.displayName || config.modelId} · ${providerLabel(config.provider)} · ${config.modelId}${config.isActive ? "" : " (tắt)"}`;
 }
 
 export function AgentConfigDrawer({
@@ -89,8 +159,24 @@ export function AgentConfigDrawer({
   readonly onSendSandbox: (message?: string) => void;
   readonly onTabChange: (tab: AgentConfigTab) => void;
 }) {
+  const queryClient = useQueryClient();
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [sandboxMinimized, setSandboxMinimized] = useState(false);
+  const [llmDraft, setLlmDraft] = useState<LlmConfigDraft>(EMPTY_LLM_CONFIG_DRAFT);
+  const [llmError, setLlmError] = useState<string | null>(null);
   const boundConfig = llmConfigs.find((c) => c.id === form.llmConfigId);
   const isUnbound = !boundConfig || !boundConfig.isActive;
+  const createLlmMutation = useMutation({
+    mutationFn: () => createLlmConfig(toCreateLlmPayload(llmDraft)),
+    onSuccess: async (config) => {
+      onDraftChange({ llmConfigId: config.id, model: config.modelId, provider: config.provider });
+      setLlmDraft(EMPTY_LLM_CONFIG_DRAFT);
+      setLlmError(null);
+      setModelPickerOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ["llm-configs"] });
+    },
+    onError: (error) => setLlmError(error instanceof Error ? error.message : "Không tạo được cấu hình LLM."),
+  });
   return (
     <>
       <button aria-label="Đóng cấu hình agent" className="fixed inset-0 z-[60] bg-black/20 backdrop-blur-[8px]" onClick={onClose} type="button" />
@@ -107,7 +193,7 @@ export function AgentConfigDrawer({
 
         <div className="flex shrink-0 overflow-x-auto border-b border-outline-variant bg-surface-container-low px-6">
           <ConfigTabButton active={tab === "prompt"} label="Hướng dẫn trả lời" onClick={() => onTabChange("prompt")} />
-          <ConfigTabButton active={tab === "model"} label="Mô hình AI" onClick={() => onTabChange("model")} />
+          <ConfigTabButton active={tab === "model"} label="Cấu hình LLM" onClick={() => onTabChange("model")} />
           <ConfigTabButton active={tab === "tools"} label="Công cụ & kết nối" onClick={() => onTabChange("tools")} />
         </div>
 
@@ -148,45 +234,60 @@ export function AgentConfigDrawer({
                   Agent chưa gắn cấu hình nhà cung cấp đang hoạt động — agent sẽ báo lỗi khi chạy cho đến khi được gắn cấu hình.
                 </div>
               ) : null}
-              <label className="space-y-2">
-                <span className="text-label-caps uppercase text-tertiary">Cấu hình nhà cung cấp (LLM)</span>
-                <select className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" onChange={(event) => onDraftChange({ llmConfigId: event.target.value })} value={form.llmConfigId}>
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-label-caps uppercase text-tertiary">Cấu hình nhà cung cấp (LLM)</span>
+                  <button className="rounded border border-outline bg-white px-3 py-1.5 text-body-md font-bold text-secondary transition-colors hover:border-primary hover:text-primary" onClick={() => setModelPickerOpen(true)} type="button">
+                    Chọn model/provider
+                  </button>
+                </div>
+                <select
+                  className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
+                  onChange={(event) => {
+                    const selected = llmConfigs.find((config) => config.id === event.target.value);
+                    onDraftChange({
+                      llmConfigId: event.target.value,
+                      model: selected?.modelId ?? form.model,
+                      provider: selected?.provider ?? form.provider,
+                    });
+                  }}
+                  value={form.llmConfigId}
+                >
                   <option value="">— Chưa gắn —</option>
                   {llmConfigs.map((config) => (
                     <option key={config.id} value={config.id}>
-                      {`${config.displayName || config.modelId} · ${config.provider}${config.isActive ? "" : " (tắt)"}`}
+                      {configLabel(config)}
                     </option>
                   ))}
                 </select>
-              </label>
+              </div>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <label className="space-y-2">
-                <span className="text-label-caps uppercase text-tertiary">Tên hiển thị</span>
-                <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" onChange={(event) => onDraftChange({ displayName: event.target.value })} value={form.displayName} />
-              </label>
-              <label className="space-y-2">
-                <span className="text-label-caps uppercase text-tertiary">Nhà cung cấp AI</span>
-                <select className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" onChange={(event) => onDraftChange({ provider: event.target.value })} value={form.provider}>
-                  <option value="claude">Claude</option>
-                  <option value="openai-compatible">Chuẩn OpenAI</option>
-                  <option value="local">Máy nội bộ</option>
-                </select>
-              </label>
-              <label className="space-y-2 md:col-span-2">
-                <span className="text-label-caps uppercase text-tertiary">Mô hình AI</span>
-                <input className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" onChange={(event) => onDraftChange({ model: event.target.value })} value={form.model} />
-              </label>
-              <label className="space-y-2">
-                <span className="text-label-caps uppercase text-tertiary">Độ sáng tạo</span>
-                <div className="rounded border border-outline bg-white px-3 py-2">
-                  <input className="w-full accent-primary" max={2} min={0} onChange={(event) => onDraftChange({ temperature: Number(event.target.value) })} step={0.1} type="range" value={form.temperature} />
-                  <div className="mt-1 font-mono text-mono-status text-secondary">{form.temperature.toFixed(1)}</div>
-                </div>
-              </label>
-              <label className="space-y-2">
-                <span className="text-label-caps uppercase text-tertiary">Giới hạn độ dài</span>
-                <input className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" min={128} onChange={(event) => onDraftChange({ maxTokens: Number(event.target.value) })} step={128} type="number" value={form.maxTokens} />
-              </label>
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-label-caps uppercase text-tertiary">Tên hiển thị</span>
+                  <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" onChange={(event) => onDraftChange({ displayName: event.target.value })} value={form.displayName} />
+                </label>
+                <fieldset className="space-y-2 md:col-span-2">
+                  <legend className="text-label-caps uppercase text-tertiary">Phong cách trả lời</legend>
+                  <div className="grid gap-2 md:grid-cols-3">
+                    {CREATIVITY_PRESETS.map((preset) => {
+                      const selected = Math.abs(form.temperature - preset.value) < 0.01;
+                      return (
+                        <button
+                          className={[
+                            "rounded-lg border p-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
+                            selected ? "border-primary bg-primary/5 text-primary" : "border-outline bg-white text-on-surface hover:border-primary/60",
+                          ].join(" ")}
+                          key={preset.label}
+                          onClick={() => onDraftChange({ temperature: preset.value })}
+                          type="button"
+                        >
+                          <span className="block font-bold">{preset.label}</span>
+                          <span className="mt-1 block text-body-md text-on-surface-variant">{preset.description}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
               </div>
             </div>
           ) : null}
@@ -208,25 +309,29 @@ export function AgentConfigDrawer({
             Các thiết lập này áp dụng cho agent đang chọn. Khu vực thử phản hồi giúp kiểm tra cách agent trả lời trước khi đưa vào vận hành.
           </div>
 
-          <section className="absolute bottom-6 right-6 flex h-96 w-[calc(100%-3rem)] flex-col overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-2xl lg:w-80">
-            <header className="flex items-center justify-between bg-primary-container p-3">
+          <section className={["absolute bottom-6 right-6 flex w-[calc(100%-3rem)] flex-col overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-2xl lg:w-80", sandboxMinimized ? "h-12" : "h-96"].join(" ")}>
+            <button className="flex items-center justify-between bg-primary-container p-3 text-left" onClick={() => setSandboxMinimized((value) => !value)} type="button">
               <span className="text-label-caps uppercase text-on-primary">Thử phản hồi</span>
-              <span aria-hidden="true" className="material-symbols-outlined text-sm text-on-primary">expand_more</span>
-            </header>
-            <div className="flex-1 space-y-3 overflow-y-auto bg-surface-container-low p-4">
-              {sandboxMessages.map((message) => (
-                <div className={["max-w-[82%] rounded-lg p-2 text-body-md", message.side === "user" ? "ml-auto rounded-tr-none bg-primary-container text-on-primary" : "mr-auto rounded-tl-none bg-white text-on-surface shadow-sm"].join(" ")} key={message.id}>
-                  {message.text}
+              <span aria-hidden="true" className="material-symbols-outlined text-sm text-on-primary">{sandboxMinimized ? "expand_less" : "expand_more"}</span>
+            </button>
+            {!sandboxMinimized ? (
+              <>
+                <div className="flex-1 space-y-3 overflow-y-auto bg-surface-container-low p-4">
+                  {sandboxMessages.map((message) => (
+                    <div className={["max-w-[82%] rounded-lg p-2 text-body-md", message.side === "user" ? "ml-auto rounded-tr-none bg-primary-container text-on-primary" : "mr-auto rounded-tl-none bg-white text-on-surface shadow-sm"].join(" ")} key={message.id}>
+                      {message.text}
+                    </div>
+                  ))}
+                  {sandboxPending ? <div className="text-body-md text-on-surface-variant">Đang kiểm tra hướng dẫn...</div> : null}
                 </div>
-              ))}
-              {sandboxPending ? <div className="text-body-md text-on-surface-variant">Đang kiểm tra hướng dẫn...</div> : null}
-            </div>
-            <footer className="flex gap-2 border-t border-outline-variant p-3">
-              <input className="min-w-0 flex-1 bg-transparent text-body-md outline-none placeholder:text-on-surface-variant/60" onChange={(event) => onSandboxInputChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onSendSandbox(); } }} placeholder="Nhập tin nhắn thử nghiệm..." value={sandboxInput} />
-              <button aria-label="Gửi tin nhắn thử nghiệm" className="text-primary disabled:opacity-50" disabled={sandboxPending} onClick={() => onSendSandbox()} type="button">
-                <span aria-hidden="true" className="material-symbols-outlined">send</span>
-              </button>
-            </footer>
+                <footer className="flex gap-2 border-t border-outline-variant p-3">
+                  <input className="min-w-0 flex-1 bg-transparent text-body-md outline-none placeholder:text-on-surface-variant/60" onChange={(event) => onSandboxInputChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onSendSandbox(); } }} placeholder="Nhập tin nhắn thử nghiệm..." value={sandboxInput} />
+                  <button aria-label="Gửi tin nhắn thử nghiệm" className="text-primary disabled:opacity-50" disabled={sandboxPending} onClick={() => onSendSandbox()} type="button">
+                    <span aria-hidden="true" className="material-symbols-outlined">send</span>
+                  </button>
+                </footer>
+              </>
+            ) : null}
           </section>
         </div>
 
@@ -239,6 +344,99 @@ export function AgentConfigDrawer({
           </button>
         </footer>
       </aside>
+      {modelPickerOpen ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 p-4">
+          <div className="max-h-[80vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-outline bg-surface-container-lowest shadow-2xl">
+            <header className="flex items-center justify-between border-b border-outline-variant px-5 py-4">
+              <div>
+                <h3 className="text-headline-sm font-bold text-on-surface">Chọn model/provider cho {agent.displayName || agent.code}</h3>
+                <p className="mt-1 text-body-md text-on-surface-variant">Chọn cấu hình LLM đã khai báo rồi bấm “Lưu cấu hình”.</p>
+              </div>
+              <button aria-label="Đóng chọn model/provider" className="rounded-full p-2 transition-colors hover:bg-surface-variant" onClick={() => setModelPickerOpen(false)} type="button">
+                <span aria-hidden="true" className="material-symbols-outlined">close</span>
+              </button>
+            </header>
+            <div className="grid gap-3 p-5">
+              <div className="grid gap-3 rounded-lg border border-outline bg-surface p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="text-title-sm font-bold text-secondary">Khai báo LLM config mới</h4>
+                  <button
+                    className="rounded bg-primary-container px-3 py-1.5 text-body-md font-bold text-on-primary disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={createLlmMutation.isPending || !llmDraft.modelId.trim() || !llmDraft.apiKey.trim()}
+                    onClick={() => {
+                      setLlmError(null);
+                      createLlmMutation.mutate();
+                    }}
+                    type="button"
+                  >
+                    Tạo & chọn
+                  </button>
+                </div>
+                {llmError ? <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-mono-status text-red-700">{llmError}</div> : null}
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="space-y-1">
+                    <span className="text-label-caps uppercase text-tertiary">Tên hiển thị</span>
+                    <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" onChange={(event) => setLlmDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="gpt local" value={llmDraft.displayName} />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-label-caps uppercase text-tertiary">Nhà cung cấp</span>
+                    <select className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" onChange={(event) => setLlmDraft((current) => ({ ...current, provider: event.target.value as LlmProvider }))} value={llmDraft.provider}>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="openai">Chuẩn OpenAI</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-label-caps uppercase text-tertiary">Model</span>
+                    <input className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" onChange={(event) => setLlmDraft((current) => ({ ...current, modelId: event.target.value }))} placeholder="cx/gpt-5.5-review" value={llmDraft.modelId} />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-label-caps uppercase text-tertiary">API key</span>
+                    <input autoComplete="off" className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" onChange={(event) => setLlmDraft((current) => ({ ...current, apiKey: event.target.value }))} placeholder="sk-..." type="password" value={llmDraft.apiKey} />
+                  </label>
+                  <label className="space-y-1 md:col-span-2">
+                    <span className="text-label-caps uppercase text-tertiary">Base URL</span>
+                    <input className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" onChange={(event) => setLlmDraft((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="http://localhost:20128/v1" value={llmDraft.baseUrl} />
+                  </label>
+                </div>
+              </div>
+              {llmConfigs.map((config) => {
+                const selected = config.id === form.llmConfigId;
+                return (
+                  <button
+                    className={[
+                      "rounded-lg border p-4 text-left transition-colors hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
+                      selected ? "border-primary bg-primary/5" : "border-outline bg-white",
+                    ].join(" ")}
+                    key={config.id}
+                    onClick={() => {
+                      onDraftChange({ llmConfigId: config.id, model: config.modelId, provider: config.provider });
+                      setModelPickerOpen(false);
+                    }}
+                    type="button"
+                  >
+                    <span className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-title-sm font-bold text-secondary">{config.displayName || config.modelId}</span>
+                      <span className={config.isActive ? "text-mono-status text-green-700" : "text-mono-status text-amber-700"}>
+                        {config.isActive ? "Đang bật" : "Đang tắt"}
+                      </span>
+                    </span>
+                    <span className="mt-2 grid gap-2 text-body-md text-on-surface-variant md:grid-cols-3">
+                      <span>{providerLabel(config.provider)}</span>
+                      <span className="font-mono text-mono-status">{config.modelId}</span>
+                      <span className="truncate font-mono text-mono-status">{config.baseUrl || "endpoint mặc định"}</span>
+                    </span>
+                  </button>
+                );
+              })}
+              {llmConfigs.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-outline p-6 text-center text-body-md text-on-surface-variant">
+                  Chưa có cấu hình LLM. Tạo nhà cung cấp ở phần quản trị hệ thống trước khi gắn agent.
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

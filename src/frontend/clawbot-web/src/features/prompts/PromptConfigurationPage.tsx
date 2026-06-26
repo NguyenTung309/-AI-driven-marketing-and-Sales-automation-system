@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert } from "@/shared/ui/Alert";
 import { Button } from "@/shared/ui/Button";
@@ -14,12 +14,10 @@ import {
   updatePromptConfig,
   type PromptConfig,
   type PromptSandboxResponse,
-  type PromptUsageLog,
   type UpdatePromptConfigPayload,
 } from "@/shared/api/prompts";
 
 const EMPTY_CONFIGS: readonly PromptConfig[] = [];
-const EMPTY_USAGE: readonly PromptUsageLog[] = [];
 const DEFAULT_SANDBOX_INPUT = "Giới thiệu ngắn về lộ trình học tiếng Trung cho học viên mới.";
 
 const inputClass = "w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary";
@@ -75,19 +73,6 @@ function statusLabel(config: PromptConfig): string {
   return "Sẵn sàng cấu hình";
 }
 
-function agentTypeLabel(type: string): string {
-  const value = normalize(type);
-  if (value === "sale_assist") return "Trợ lý tư vấn";
-  if (value === "content") return "Nội dung";
-  if (value === "lead") return "Chấm điểm lead";
-  if (value === "docs") return "Tài liệu";
-  if (value === "ads") return "Quảng cáo";
-  if (value === "report") return "Báo cáo";
-  if (value === "research") return "Nghiên cứu";
-  if (value === "chat") return "Trò chuyện";
-  return type || "Agent";
-}
-
 function providerInitial(provider: string): string {
   const value = provider.trim();
   return value ? value.slice(0, 1).toUpperCase() : "A";
@@ -110,19 +95,16 @@ function toPayload(config: PromptConfig, draft: PromptDraft): UpdatePromptConfig
   };
 }
 
-function usagePercent(config: PromptConfig): number {
-  const maxTokens = Math.max(1, config.maxTokens);
-  return Math.min(100, (config.totalTokensLast7Days / maxTokens) * 100);
-}
-
 function PromptConfigCard({
   config,
   selected,
+  onEdit,
   onSelect,
   onSandbox,
 }: {
   readonly config: PromptConfig;
   readonly selected: boolean;
+  readonly onEdit: () => void;
   readonly onSelect: () => void;
   readonly onSandbox: () => void;
 }) {
@@ -160,7 +142,7 @@ function PromptConfigCard({
       </div>
 
       <div className="mt-auto grid grid-cols-2 gap-2 border-t border-outline pt-4">
-        <button className="rounded-lg py-2 text-label-caps uppercase text-on-surface-variant hover:bg-surface hover:text-primary" onClick={onSelect} type="button">
+        <button className="rounded-lg py-2 text-label-caps uppercase text-on-surface-variant hover:bg-surface hover:text-primary" onClick={onEdit} type="button">
           <span aria-hidden="true" className="material-symbols-outlined mr-1 align-middle text-[18px]">edit</span>
           Sửa hướng dẫn
         </button>
@@ -173,81 +155,70 @@ function PromptConfigCard({
   );
 }
 
-function UsageBars({ config }: { readonly config: PromptConfig }) {
-  const total = Math.max(1, config.inputTokensLast7Days + config.outputTokensLast7Days);
-  const inputPct = Math.max(4, (config.inputTokensLast7Days / total) * 100);
-  const outputPct = Math.max(4, (config.outputTokensLast7Days / total) * 100);
-  const barHeights = [38, 56, 34, 78, 64, 44, Math.max(16, usagePercent(config))];
-
-  return (
-    <Card>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-headline-sm text-secondary">Mức tiêu thụ</h3>
-          <p className="mt-1 text-body-md text-on-surface-variant">7 ngày gần nhất theo sổ chi phí AI.</p>
-        </div>
-        <StatusPill tone="neutral">{formatUsd(config.usdLast7Days)}</StatusPill>
-      </div>
-      <div className="mb-4 flex h-36 items-end gap-2 rounded-lg border border-outline bg-surface p-4">
-        {barHeights.map((height, index) => (
-          <div className="flex flex-1 items-end gap-1" key={`${height}-${index}`}>
-            <div className="w-1/2 rounded-t bg-success" style={{ height: `${Math.min(100, height * (inputPct / 100))}%` }} />
-            <div className="w-1/2 rounded-t bg-primary" style={{ height: `${Math.min(100, height * (outputPct / 100))}%` }} />
-          </div>
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-4 text-body-md text-on-surface-variant">
-        <span className="inline-flex items-center gap-2">
-          <span className="size-3 rounded-full bg-success" />
-          Đầu vào {formatNumber(config.inputTokensLast7Days)}
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <span className="size-3 rounded-full bg-primary" />
-          Đầu ra {formatNumber(config.outputTokensLast7Days)}
-        </span>
-      </div>
-    </Card>
-  );
-}
-
-function UsageTable({ rows }: { readonly rows: readonly PromptUsageLog[] }) {
-  if (rows.length === 0) {
-    return (
-      <Card>
-        <h3 className="mb-3 text-headline-sm text-secondary">Nhật ký sử dụng gần nhất</h3>
-        <div className="rounded-lg border border-dashed border-outline bg-surface p-6 text-center text-body-md text-on-surface-variant">
-          Chưa có dữ liệu tiêu thụ cho cấu hình này trong 7 ngày qua.
-        </div>
-      </Card>
-    );
+function PromptEditorModal({
+  config,
+  prompt,
+  dirty,
+  saving,
+  onClose,
+  onPromptChange,
+  onSave,
+  onSandbox,
+}: {
+  readonly config: PromptConfig;
+  readonly prompt: string;
+  readonly dirty: boolean;
+  readonly saving: boolean;
+  readonly onClose: () => void;
+  readonly onPromptChange: (value: string) => void;
+  readonly onSave: () => void;
+  readonly onSandbox: () => void;
+}) {
+  function closeIfSafe() {
+    if (!dirty || window.confirm("Bỏ thay đổi hướng dẫn chưa lưu?")) onClose();
   }
 
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") closeIfSafe();
+    }
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   return (
-    <Card className="overflow-hidden">
-      <h3 className="mb-4 text-headline-sm text-secondary">Nhật ký 5 lần sử dụng gần nhất</h3>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] text-left">
-          <thead className="border-b border-outline text-label-caps uppercase text-on-surface-variant">
-            <tr>
-              <th className="py-3 pr-4">Mã tác vụ</th>
-              <th className="px-4 py-3">Thời gian</th>
-              <th className="px-4 py-3">Mô hình</th>
-              <th className="py-3 pl-4">Lượng dùng</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-outline">
-            {rows.map((row) => (
-              <tr className="hover:bg-surface" key={row.id}>
-                <td className="py-4 pr-4 font-mono text-mono-status text-secondary">#{row.id.slice(0, 8)}</td>
-                <td className="px-4 py-4 text-body-md text-secondary">{formatDateTime(row.createdAt)}</td>
-                <td className="px-4 py-4 font-mono text-mono-status text-on-surface-variant">{row.model}</td>
-                <td className="py-4 pl-4 font-mono text-mono-status text-primary">{formatNumber(row.totalTokens)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-gutter backdrop-blur-sm" onClick={closeIfSafe} role="presentation">
+      <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-surface-container-lowest shadow-2xl" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Sửa hướng dẫn">
+        <div className="flex items-center justify-between border-b border-outline bg-surface px-gutter py-4">
+          <div>
+            <h3 className="text-headline-md text-secondary">Sửa hướng dẫn</h3>
+            <p className="mt-1 text-body-md text-on-surface-variant">{config.displayName} · {config.model}</p>
+          </div>
+          <button className="rounded-full p-2 text-on-surface-variant hover:bg-error/10 hover:text-error" onClick={closeIfSafe} type="button" aria-label="Đóng chỉnh sửa">
+            <span aria-hidden="true" className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        <div className="overflow-y-auto p-gutter">
+          <label className="block">
+            <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Hướng dẫn gốc</span>
+            <textarea className={`${textAreaClass} min-h-[52vh] font-mono text-mono-status`} value={prompt} onChange={(event) => onPromptChange(event.target.value)} />
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 border-t border-outline bg-surface px-gutter py-4 md:grid-cols-2">
+          <Button disabled={!dirty || saving} onClick={onSave} type="button">
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">save</span>
+            Lưu hướng dẫn
+          </Button>
+          <Button variant="outline" onClick={onSandbox} type="button">
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">bolt</span>
+            Chạy thử
+          </Button>
+        </div>
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -329,6 +300,7 @@ export default function PromptConfigurationPage() {
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const [draft, setDraft] = useState<PromptDraft>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [sandboxInput, setSandboxInput] = useState(DEFAULT_SANDBOX_INPUT);
   const [sandboxResult, setSandboxResult] = useState<PromptSandboxResponse | null>(null);
@@ -375,6 +347,7 @@ export default function PromptConfigurationPage() {
           : current
       );
       setDraft({});
+      setEditorOpen(false);
       setNotice("Đã lưu cấu hình hướng dẫn cho agent.");
     },
   });
@@ -395,7 +368,6 @@ export default function PromptConfigurationPage() {
 
   const currentError = listQuery.error ?? detailQuery.error ?? saveMutation.error;
   const stats = listQuery.data?.stats;
-  const recentUsage = selectedConfig?.recentUsage ?? EMPTY_USAGE;
   const dirty = Object.keys(draft).length > 0;
 
   const providerMix = useMemo(() => {
@@ -404,15 +376,26 @@ export default function PromptConfigurationPage() {
     return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
   }, [configs]);
 
-  function selectConfig(code: string) {
+  function confirmDiscardDraft(): boolean {
+    return !dirty || window.confirm("Bỏ thay đổi cấu hình chưa lưu?");
+  }
+
+  function selectConfig(code: string): boolean {
+    if (code === effectiveSelectedCode) return true;
+    if (!confirmDiscardDraft()) return false;
     setSelectedCode(code);
     setDraft({});
     setNotice(null);
     setSandboxResult(null);
+    return true;
+  }
+
+  function openEditor(config: PromptConfig) {
+    if (selectConfig(config.code)) setEditorOpen(true);
   }
 
   function openSandbox(config: PromptConfig) {
-    selectConfig(config.code);
+    if (!selectConfig(config.code)) return;
     setSandboxInput(DEFAULT_SANDBOX_INPUT);
     setSandboxResult(null);
     setSandboxOpen(true);
@@ -469,6 +452,7 @@ export default function PromptConfigurationPage() {
           <PromptConfigCard
             config={config}
             key={config.code}
+            onEdit={() => openEditor(config)}
             onSandbox={() => openSandbox(config)}
             onSelect={() => selectConfig(config.code)}
             selected={config.code === effectiveSelectedCode}
@@ -483,83 +467,17 @@ export default function PromptConfigurationPage() {
         ) : null}
       </section>
 
-      {selectedConfig && effectiveForm ? (
-        <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1.05fr)_minmax(420px,0.95fr)]">
-          <Card>
-            <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-label-caps uppercase text-on-surface-variant">Chi tiết cấu hình</p>
-                <h2 className="mt-1 text-headline-md text-secondary">{selectedConfig.displayName}</h2>
-                <p className="mt-1 text-body-md text-on-surface-variant">
-                  {agentTypeLabel(selectedConfig.agentType)} · cập nhật {formatDateTime(selectedConfig.updatedAt)}
-                </p>
-              </div>
-              <StatusPill tone={statusTone(selectedConfig)}>{statusLabel(selectedConfig)}</StatusPill>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <label>
-                <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Tên cấu hình</span>
-                <input className={inputClass} value={effectiveForm.displayName} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} />
-              </label>
-              <label>
-                <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Nhà cung cấp</span>
-                <input className={inputClass} value={effectiveForm.provider} onChange={(event) => setDraft((current) => ({ ...current, provider: event.target.value }))} />
-              </label>
-              <label>
-                <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Mô hình</span>
-                <input className={inputClass} value={effectiveForm.model} onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))} />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label>
-                  <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Độ sáng tạo</span>
-                  <input
-                    className={inputClass}
-                    max={2}
-                    min={0}
-                    onChange={(event) => setDraft((current) => ({ ...current, temperature: Number(event.target.value) }))}
-                    step={0.1}
-                    type="number"
-                    value={effectiveForm.temperature}
-                  />
-                </label>
-                <label>
-                  <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Giới hạn độ dài</span>
-                  <input
-                    className={inputClass}
-                    max={32000}
-                    min={128}
-                    onChange={(event) => setDraft((current) => ({ ...current, maxTokens: Number(event.target.value) }))}
-                    step={128}
-                    type="number"
-                    value={effectiveForm.maxTokens}
-                  />
-                </label>
-              </div>
-            </div>
-
-            <label className="mt-4 block">
-              <span className="mb-1 block text-label-caps uppercase text-on-surface-variant">Hướng dẫn gốc</span>
-              <textarea className={`${textAreaClass} min-h-64 font-mono text-mono-status`} value={effectiveForm.systemPrompt} onChange={(event) => setDraft((current) => ({ ...current, systemPrompt: event.target.value }))} />
-            </label>
-
-            <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2">
-              <Button disabled={!dirty || saveMutation.isPending} onClick={() => saveMutation.mutate()} type="button">
-                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">save</span>
-                Lưu cấu hình
-              </Button>
-              <Button variant="outline" onClick={() => setSandboxOpen(true)} type="button">
-                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">bolt</span>
-                Chạy thử
-              </Button>
-            </div>
-          </Card>
-
-          <div className="space-y-gutter">
-            <UsageBars config={selectedConfig} />
-            <UsageTable rows={recentUsage} />
-          </div>
-        </section>
+      {editorOpen && selectedConfig && effectiveForm ? (
+        <PromptEditorModal
+          config={selectedConfig}
+          dirty={dirty}
+          onClose={() => setEditorOpen(false)}
+          onPromptChange={(value) => setDraft((current) => ({ ...current, systemPrompt: value }))}
+          onSandbox={() => setSandboxOpen(true)}
+          onSave={() => saveMutation.mutate()}
+          prompt={effectiveForm.systemPrompt}
+          saving={saveMutation.isPending}
+        />
       ) : null}
 
       {sandboxOpen && selectedConfig && effectiveForm ? (

@@ -13,6 +13,7 @@ public sealed class AgentDefinition : AggregateRoot<Guid>, ITenantOwned
     public string InputSchemaJson { get; private set; } = "{}";
     public string OutputSchemaJson { get; private set; } = "{}";
     public string MemoryScope { get; private set; } = "none";
+    public string? KbModuleCode { get; private set; }
     public Guid? LlmConfigId { get; private set; }
     public bool IsOrchestratable { get; private set; } = true;
     public int Version { get; private set; } = 1;
@@ -34,7 +35,8 @@ public sealed class AgentDefinition : AggregateRoot<Guid>, ITenantOwned
         string outputSchemaJson = "{}",
         string memoryScope = "none",
         Guid? llmConfigId = null,
-        bool isOrchestratable = true) =>
+        bool isOrchestratable = true,
+        string? kbModuleCode = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -47,6 +49,7 @@ public sealed class AgentDefinition : AggregateRoot<Guid>, ITenantOwned
             InputSchemaJson = string.IsNullOrWhiteSpace(inputSchemaJson) ? "{}" : inputSchemaJson,
             OutputSchemaJson = string.IsNullOrWhiteSpace(outputSchemaJson) ? "{}" : outputSchemaJson,
             MemoryScope = string.IsNullOrWhiteSpace(memoryScope) ? "none" : memoryScope.Trim().ToLowerInvariant(),
+            KbModuleCode = NormalizeKbModuleCode(kbModuleCode),
             LlmConfigId = llmConfigId,
             IsOrchestratable = isOrchestratable,
             CreatedAt = createdAt,
@@ -63,7 +66,8 @@ public sealed class AgentDefinition : AggregateRoot<Guid>, ITenantOwned
         string memoryScope,
         Guid? llmConfigId,
         bool isOrchestratable,
-        DateTimeOffset updatedAt)
+        DateTimeOffset updatedAt,
+        string? kbModuleCode = null)
     {
         DisplayName = displayName.Trim();
         AgentType = agentType.Trim().ToLowerInvariant();
@@ -72,6 +76,7 @@ public sealed class AgentDefinition : AggregateRoot<Guid>, ITenantOwned
         InputSchemaJson = string.IsNullOrWhiteSpace(inputSchemaJson) ? "{}" : inputSchemaJson;
         OutputSchemaJson = string.IsNullOrWhiteSpace(outputSchemaJson) ? "{}" : outputSchemaJson;
         MemoryScope = string.IsNullOrWhiteSpace(memoryScope) ? "none" : memoryScope.Trim().ToLowerInvariant();
+        KbModuleCode = NormalizeKbModuleCode(kbModuleCode);
         LlmConfigId = llmConfigId;
         IsOrchestratable = isOrchestratable;
         Version++;
@@ -84,4 +89,7 @@ public sealed class AgentDefinition : AggregateRoot<Guid>, ITenantOwned
         IsOrchestratable = false;
         UpdatedAt = updatedAt;
     }
+
+    private static string? NormalizeKbModuleCode(string? kbModuleCode) =>
+        string.IsNullOrWhiteSpace(kbModuleCode) ? null : kbModuleCode.Trim();
 }

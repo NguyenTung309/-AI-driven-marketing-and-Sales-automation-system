@@ -16,8 +16,8 @@ namespace Clawbot.AgentService.Services;
 
 public sealed partial class OrchestratorGrpcService(
     PlanningOrchestrator legacyOrchestrator,
-    SemanticKernelOrchestrator skOrchestrator,
     SemanticKernelPlanGenerator planGenerator,
+    AutonomousOrchestrator autonomousOrchestrator,
     IAgentCatalog catalog,
     IEnumerable<IAgent> adapters,
     ILlmCallScope llmScope,
@@ -36,8 +36,8 @@ public sealed partial class OrchestratorGrpcService(
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, CancellationTokenSource> RunningSessions = new();
 
     private readonly PlanningOrchestrator _legacy = legacyOrchestrator;
-    private readonly SemanticKernelOrchestrator _sk = skOrchestrator;
     private readonly SemanticKernelPlanGenerator _planGenerator = planGenerator;
+    private readonly AutonomousOrchestrator _autonomous = autonomousOrchestrator;
     private readonly IAgentCatalog _catalog = catalog;
     private readonly IReadOnlyList<IAgent> _adapters = adapters.ToArray();
     private readonly ILlmCallScope _llmScope = llmScope;
@@ -136,37 +136,73 @@ public sealed partial class OrchestratorGrpcService(
             throw new RpcException(new Status(StatusCode.InvalidArgument, "goal_required"));
 
         var ct = context.CancellationToken;
-        var requireApproval = await _db.Tenants
-            .IgnoreQueryFilters()
-            .Where(t => t.Id == tenantId)
-            .Select(t => t.RequireOrchestrationApproval)
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        var now = _clock.UtcNow;
+        var redactedGoal = (await _redactor.RedactAsync(request.Goal, ct).ConfigureAwait(false)).RedactedText;
 
-        OrchestrationPlanResult result;
-        try
-        {
-            using (_llmScope.Begin(tenantId, OrchestratorAgentCode))
-            {
-                result = await _sk.PlanAsync(tenantId, request.Goal, requireApproval, _clock.UtcNow, ct).ConfigureAwait(false);
-            }
-        }
-        catch (InvalidOperationException ex)
-        {
-            throw new RpcException(new Status(StatusCode.FailedPrecondition, ex.Message));
-        }
-        catch (ArgumentException ex)
-        {
-            throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
-        }
-
-        var session = result.Session;
+        // Persist a running placeholder BEFORE the planner runs, so a durable sessionId exists immediately.
+        // The FE stores this id in the URL; planning progress + trace then survive navigation and F5, and
+        // the planner call no longer races the HTTP request lifetime. Tie it to the orchestrator AgentConfig
+        // so planning traces surface under that agent's "Sự kiện lỗi" tab on the dashboard.
+        var orchestratorAgentId = await ResolveOrchestratorAgentIdAsync(tenantId, ct).ConfigureAwait(false);
+        var session = AgentSession.Start(tenantId, orchestratorAgentId, conversationId: null, redactedGoal, now);
+        session.AppendTrace(string.Empty, OrchestratorAgentCode, "planning_started", "Đang lập kế hoạch cho mục tiêu.", now);
         _db.AgentSessions.Add(session);
         await SaveAsync(ct).ConfigureAwait(false);
 
-        if (session.Status == AgentSessionStatuses.Running)
-            await StartExecutionAsync(session.Id, request.Goal, ct).ConfigureAwait(false);
+        // Production: plan + execute in the background, return the placeholder now so the UI polls progress.
+        if (_scopeFactory is not null)
+        {
+            var sessionId = session.Id;
+            var goal = request.Goal;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var service = ActivatorUtilities.CreateInstance<OrchestratorGrpcService>(scope.ServiceProvider);
+                    await service.PlanAndRunPersistedAsync(sessionId, goal, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    LogBackgroundRunFailed(_logger, ex, sessionId);
+                    await MarkBackgroundRunFailedAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+                }
+            }, CancellationToken.None);
+            return ToResponse(session);
+        }
 
-        return ToResponse(session, result.CostBlocked, result.CostReason);
+        // No scope factory (tests / inline host): plan + execute synchronously within the request.
+        var (costBlocked, costReason) = await PlanAndExecuteAsync(session, request.Goal, ct).ConfigureAwait(false);
+        return ToResponse(session, costBlocked, costReason);
+    }
+
+    private async Task PlanAndRunPersistedAsync(Guid sessionId, string goal, CancellationToken ct)
+    {
+        var session = await _db.AgentSessions
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(s => s.Id == sessionId, ct)
+            .ConfigureAwait(false);
+        if (session is null)
+            return;
+
+        await PlanAndExecuteAsync(session, goal, ct).ConfigureAwait(false);
+    }
+
+    // Generate and execute through V2. The session placeholder already exists, so progress survives F5.
+    private async Task<(bool CostBlocked, string? CostReason)> PlanAndExecuteAsync(AgentSession session, string goal, CancellationToken ct)
+    {
+        var requireApproval = await _db.Tenants
+            .IgnoreQueryFilters()
+            .Where(t => t.Id == session.TenantId)
+            .Select(t => t.RequireOrchestrationApproval)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+        var existingPlan = OrchestrationPlanJson.TryParse(session.PlanJson);
+        var result = existingPlan?.Tasks is { Count: > 0 } && session.Status == AgentSessionStatuses.Running
+            ? await _autonomous.RunExistingPlanAsync(new AutonomousRunRequest(session.TenantId, session.Id, goal, "manual", RequiresApproval: false), existingPlan, ct).ConfigureAwait(false)
+            : await _autonomous.RunAsync(new AutonomousRunRequest(session.TenantId, session.Id, goal, "manual", requireApproval), ct).ConfigureAwait(false);
+
+        return (result.Reason == "cost_cap_preflight", result.Reason);
     }
 
     public override async Task<SessionResponse> GetPlan(SessionRef request, ServerCallContext context)
@@ -268,7 +304,7 @@ public sealed partial class OrchestratorGrpcService(
                 .IgnoreQueryFilters()
                 .FirstAsync(s => s.Id == sessionId, requestCt)
                 .ConfigureAwait(false);
-            await RunAsync(session, goal, requestCt).ConfigureAwait(false);
+            await PlanAndExecuteAsync(session, goal, requestCt).ConfigureAwait(false);
             return;
         }
 
@@ -278,7 +314,7 @@ public sealed partial class OrchestratorGrpcService(
             {
                 using var scope = _scopeFactory.CreateScope();
                 var service = ActivatorUtilities.CreateInstance<OrchestratorGrpcService>(scope.ServiceProvider);
-                await service.RunPersistedAsync(sessionId, goal, CancellationToken.None).ConfigureAwait(false);
+                await service.PlanAndRunPersistedAsync(sessionId, goal, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -286,18 +322,6 @@ public sealed partial class OrchestratorGrpcService(
                 await MarkBackgroundRunFailedAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
             }
         }, CancellationToken.None);
-    }
-
-    private async Task RunPersistedAsync(Guid sessionId, string goal, CancellationToken ct)
-    {
-        var session = await _db.AgentSessions
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(s => s.Id == sessionId, ct)
-            .ConfigureAwait(false);
-        if (session is null)
-            return;
-
-        await RunAsync(session, goal, ct).ConfigureAwait(false);
     }
 
     private async Task MarkBackgroundRunFailedAsync(Guid sessionId, CancellationToken ct)
@@ -492,6 +516,17 @@ public sealed partial class OrchestratorGrpcService(
         return session ?? throw new RpcException(new Status(StatusCode.NotFound, "session_not_found"));
     }
 
+    // Resolve the orchestrator AgentConfig id for the tenant so planning sessions/traces are attributed to
+    // it on the dashboard. Null if not seeded — session simply stays unattributed (no failure).
+    private async Task<Guid?> ResolveOrchestratorAgentIdAsync(Guid tenantId, CancellationToken ct) =>
+        await _db.AgentConfigs
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(a => a.TenantId == tenantId && a.Code == OrchestratorAgentCode)
+            .Select(a => (Guid?)a.Id)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
     private static Guid ParseTenant(string raw)
     {
         if (!Guid.TryParse(raw, out var tenantId) || tenantId == Guid.Empty)
@@ -533,7 +568,7 @@ public sealed partial class OrchestratorGrpcService(
         };
 
         var plan = OrchestrationPlanJson.TryParse(session.PlanJson);
-        if (plan is not null)
+        if (plan?.Tasks is not null)
         {
             response.Tasks.AddRange(plan.Tasks.Select(task =>
             {

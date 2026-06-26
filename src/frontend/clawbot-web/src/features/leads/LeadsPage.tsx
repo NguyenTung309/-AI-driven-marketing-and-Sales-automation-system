@@ -62,7 +62,6 @@ function sourceLabel(source: string | null): string {
   if (value.includes("zalo")) return "Zalo";
   if (value.includes("facebook") || value === "fb") return "FB Page";
   if (value.includes("website") || value.includes("web")) return "Website";
-  if (value.includes("telegram")) return "Telegram";
   return source ?? "Không rõ nguồn";
 }
 

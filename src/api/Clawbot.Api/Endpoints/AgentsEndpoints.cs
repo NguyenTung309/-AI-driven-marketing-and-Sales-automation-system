@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Clawbot.Agents.Core.Chat;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Agents.Core.Skills.Nlp;
@@ -177,6 +178,8 @@ public static class AgentsEndpoints
         ITenantAccessor tenants,
         IClock clock,
         IPiiRedactor pii,
+        IClaudeChatClient chatClient,
+        ILlmCallScope llmScope,
         CancellationToken ct = default)
     {
         var tenant = tenants.Require();
@@ -191,13 +194,24 @@ public static class AgentsEndpoints
         var session = AgentSession.Start(tenant.TenantId, agent.Id, null, "Agent configuration sandbox", now);
         session.AppendTrace("sandbox", agent.DisplayName, "input", redactedMessage, now);
 
-        var reply = BuildSandboxReply(agent, config, redactedMessage);
-        session.AppendTrace("sandbox", agent.DisplayName, "reply", reply, now.AddMilliseconds(1));
+        ClaudeReply reply;
+        try
+        {
+            using var _ = llmScope.Begin(tenant.TenantId, agent.Code, now);
+            reply = await chatClient.CompleteAsync(config.SystemPrompt, Array.Empty<ChatTurn>(), redactedMessage, ct).ConfigureAwait(false);
+        }
+        catch (LlmConfigNotConfiguredException)
+        {
+            return Results.BadRequest(new { error = "llm_config_not_configured" });
+        }
+
+        var redactedReply = (await pii.RedactAsync(reply.Text, ct).ConfigureAwait(false)).RedactedText;
+        session.AppendTrace("sandbox", agent.DisplayName, "reply", redactedReply, now.AddMilliseconds(1));
         session.Finish(now.AddMilliseconds(2));
         db.AgentSessions.Add(session);
 
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new AgentSandboxResponse(session.Id, reply, now.AddMilliseconds(1)));
+        return Results.Ok(new AgentSandboxResponse(session.Id, reply.Text, now.AddMilliseconds(1)));
     }
 
     private static Task<IResult> EnableAsync(string code, AppDbContext db, ITenantAccessor tenants, CancellationToken ct = default)
@@ -329,14 +343,6 @@ public static class AgentsEndpoints
         {
             return new AgentRuntimeConfig();
         }
-    }
-
-    private static string BuildSandboxReply(AgentConfig agent, AgentRuntimeConfig config, string message)
-    {
-        var promptHint = string.IsNullOrWhiteSpace(config.SystemPrompt)
-            ? "chưa có system prompt tùy chỉnh"
-            : $"đang dùng system prompt {Math.Min(config.SystemPrompt.Length, 120)} ký tự";
-        return $"{agent.DisplayName} đã nhận tin nhắn thử nghiệm \"{message}\". Provider {config.Provider}, model {agent.Model}, temperature {config.Temperature:0.##}, max {config.MaxTokens} tokens; {promptHint}.";
     }
 
     private sealed class AgentRuntimeConfig

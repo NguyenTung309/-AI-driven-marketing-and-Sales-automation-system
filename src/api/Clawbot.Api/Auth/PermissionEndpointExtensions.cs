@@ -17,6 +17,9 @@ public static class PermissionEndpointExtensions
         {
             var http = ctx.HttpContext;
 
+            // API keys carry exact scopes as perm claims; JWT users resolve role_id through role_permissions.
+            if (http.User.HasClaim("perm", code)) return await next(ctx);
+
             // 0 role / role outside the seeded set / no role_id claim → default-deny (AC).
             if (!Guid.TryParse(http.User.FindFirst("role_id")?.Value, out var roleId) || roleId == Guid.Empty)
                 return Forbidden(http);

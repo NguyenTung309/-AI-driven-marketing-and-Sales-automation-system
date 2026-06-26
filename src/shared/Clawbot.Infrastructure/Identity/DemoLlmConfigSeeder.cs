@@ -85,7 +85,7 @@ public static partial class DemoLlmConfigSeeder
             .ToListAsync(ct).ConfigureAwait(false);
         foreach (var def in definitions)
             def.UpdateDefinition(def.DisplayName, def.AgentType, def.PersonaPrompt, def.AllowedToolsJson, def.InputSchemaJson,
-                def.OutputSchemaJson, def.MemoryScope, llmConfigId, def.IsOrchestratable, now);
+                def.OutputSchemaJson, def.MemoryScope, llmConfigId, def.IsOrchestratable, now, def.KbModuleCode);
 
         if (agents.Count > 0 || definitions.Count > 0)
             await db.SaveChangesAsync(ct).ConfigureAwait(false);

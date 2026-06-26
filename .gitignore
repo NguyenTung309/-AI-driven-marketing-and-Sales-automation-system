@@ -18,3 +18,4 @@ coverage/
 appsettings*.Local.json
 *.log
 .DS_Store
+.tmp-build/

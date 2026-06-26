@@ -73,6 +73,12 @@ public static class SkillsModule
         return services;
     }
 
+    public static IServiceCollection AddClawbotForecasting(this IServiceCollection services)
+    {
+        services.TryAddSingleton<IForecaster, MlNetForecaster>();
+        return services;
+    }
+
     public static IServiceCollection AddClawbotChatSupport(this IServiceCollection services, IConfiguration cfg)
     {
         services.Configure<ToxicityOptions>(cfg.GetSection(ToxicityOptions.SectionName));

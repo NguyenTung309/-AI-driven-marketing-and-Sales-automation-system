@@ -50,11 +50,52 @@ public sealed class LlmConfigResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_returns_definition_bound_config_without_model_override()
+    {
+        using var fx = new TestAppDb();
+        var config = LlmConfig.Create(fx.TenantId, "openai-compatible", "definition-model", "cipher-key", Now);
+        var definition = AgentDefinition.Create(fx.TenantId, "dynamic-agent", "Dynamic", "content", "Persona", Now, llmConfigId: config.Id);
+        fx.Db.LlmConfigs.Add(config);
+        fx.Db.AgentDefinitions.Add(definition);
+        await fx.Db.SaveChangesAsync();
+
+        var decryptor = Substitute.For<IEncryptor>();
+        decryptor.Decrypt("cipher-key").Returns("plain-key");
+        var sut = new LlmConfigResolver(BuildScopeFactory(fx), decryptor);
+
+        var resolved = await sut.ResolveAsync(fx.TenantId, "dynamic-agent");
+
+        resolved.Provider.Should().Be("openai-compatible");
+        resolved.Model.Should().Be("definition-model");
+        resolved.ApiKey.Should().Be("plain-key");
+    }
+
+    [Fact]
     public async Task ResolveAsync_throws_when_agent_has_no_bound_config()
     {
         using var fx = new TestAppDb();
         var agent = AgentConfig.Create(fx.TenantId, "chat-agent", "Chat", "chat", "claude-sonnet", Now);
         fx.Db.AgentConfigs.Add(agent);
+        await fx.Db.SaveChangesAsync();
+
+        var sut = new LlmConfigResolver(BuildScopeFactory(fx), Substitute.For<IEncryptor>());
+
+        var act = async () => await sut.ResolveAsync(fx.TenantId, "chat-agent");
+
+        await act.Should().ThrowAsync<LlmConfigNotConfiguredException>()
+            .Where(ex => ex.TenantId == fx.TenantId && ex.AgentCode == "chat-agent");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_does_not_fallback_to_definition_when_agent_config_is_unbound()
+    {
+        using var fx = new TestAppDb();
+        var config = LlmConfig.Create(fx.TenantId, "anthropic", "definition-model", "cipher-key", Now);
+        var agent = AgentConfig.Create(fx.TenantId, "chat-agent", "Chat", "chat", "agent-model", Now);
+        var definition = AgentDefinition.Create(fx.TenantId, "chat-agent", "Dynamic", "chat", "Persona", Now, llmConfigId: config.Id);
+        fx.Db.LlmConfigs.Add(config);
+        fx.Db.AgentConfigs.Add(agent);
+        fx.Db.AgentDefinitions.Add(definition);
         await fx.Db.SaveChangesAsync();
 
         var sut = new LlmConfigResolver(BuildScopeFactory(fx), Substitute.For<IEncryptor>());

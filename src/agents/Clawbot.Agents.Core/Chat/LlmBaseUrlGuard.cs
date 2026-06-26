@@ -10,28 +10,39 @@ public static class LlmBaseUrlGuard
 
     internal static Func<string, IPAddress[]> ResolveHostAddresses { get; set; } = Dns.GetHostAddresses;
 
-    public static bool IsAllowedBaseUrl(string baseUrl)
+    public static bool IsAllowedBaseUrl(string baseUrl, bool allowPrivateHosts = false)
     {
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)) return false;
-        if (uri.Scheme != Uri.UriSchemeHttps) return false;
         if (!string.IsNullOrWhiteSpace(uri.UserInfo)) return false;
-        return !IsPrivateHost(uri);
+        if (uri.Scheme == Uri.UriSchemeHttps) return allowPrivateHosts || !IsPrivateHost(uri);
+        return allowPrivateHosts && uri.Scheme == Uri.UriSchemeHttp && IsKnownPrivateHost(uri);
     }
 
-    public static HttpClient CreateGuardedHttpClient(Uri baseUri)
+    public static HttpClient CreateGuardedHttpClient(Uri baseUri, bool allowPrivateHosts = false)
     {
         var origin = baseUri.GetLeftPart(UriPartial.Authority);
-        return GuardedClients.GetOrAdd(origin, key => new Lazy<HttpClient>(() => CreateClient(new Uri(key, UriKind.Absolute)))).Value;
+        var allowDirectPrivate = allowPrivateHosts && IsKnownPrivateHost(baseUri);
+        var cacheKey = $"{allowDirectPrivate}:{origin}";
+        return GuardedClients.GetOrAdd(cacheKey, _ => new Lazy<HttpClient>(() => CreateClient(new Uri(origin, UriKind.Absolute), allowDirectPrivate))).Value;
     }
 
-    private static HttpClient CreateClient(Uri baseUri) =>
-        new(CreateHandler()) { BaseAddress = baseUri };
-
-    private static SocketsHttpHandler CreateHandler() =>
-        new()
+    private static HttpClient CreateClient(Uri baseUri, bool allowDirectPrivate) =>
+        new(CreateHandler(allowDirectPrivate))
         {
+            BaseAddress = baseUri,
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+
+    private static SocketsHttpHandler CreateHandler(bool allowDirectPrivate)
+    {
+        var handler = new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-            ConnectCallback = async (context, cancellationToken) =>
+        };
+        if (allowDirectPrivate) return handler;
+
+        handler.ConnectCallback = async (context, cancellationToken) =>
             {
                 var addresses = ResolvePublicAddresses(context.DnsEndPoint.Host);
                 var port = context.DnsEndPoint.Port;
@@ -50,10 +61,26 @@ public static class LlmBaseUrlGuard
                 }
 
                 throw new SocketException((int)SocketError.HostUnreachable);
-            },
-        };
+            };
+        return handler;
+    }
 
     private static bool IsPrivateHost(Uri uri)
+    {
+        if (IsKnownPrivateHost(uri)) return true;
+
+        try
+        {
+            var addresses = ResolvePublicAddresses(uri.Host);
+            return addresses.Length == 0;
+        }
+        catch (Exception ex) when (ex is SocketException or ArgumentException)
+        {
+            return true;
+        }
+    }
+
+    private static bool IsKnownPrivateHost(Uri uri)
     {
         var host = uri.Host;
         if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
@@ -63,12 +90,12 @@ public static class LlmBaseUrlGuard
 
         try
         {
-            var addresses = ResolvePublicAddresses(host);
-            return addresses.Length == 0;
+            var addresses = ResolveHostAddresses(host);
+            return addresses.Length > 0 && addresses.All(IsPrivateOrLocalAddress);
         }
         catch (Exception ex) when (ex is SocketException or ArgumentException)
         {
-            return true;
+            return false;
         }
     }
 

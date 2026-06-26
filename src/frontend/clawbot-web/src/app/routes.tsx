@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 import {
   AdminConsolePage,
   AgentDashboardPage,
@@ -96,10 +96,18 @@ export const router = createBrowserRouter([
     ),
   },
   {
-    path: "/workflow",
+    path: "/agents",
     element: (
       <RequireAuth>
         <AgentDashboardPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/workflow",
+    element: (
+      <RequireAuth>
+        <Navigate replace to="/agents" />
       </RequireAuth>
     ),
   },

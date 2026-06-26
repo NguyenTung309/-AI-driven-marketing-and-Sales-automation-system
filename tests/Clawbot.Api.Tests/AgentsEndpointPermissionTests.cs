@@ -24,7 +24,20 @@ public sealed class AgentsEndpointPermissionTests
         source.Should().Contain("IPiiRedactor pii");
         source.Should().Contain("redactedMessage = (await pii.RedactAsync(req.Message.Trim(), ct)");
         source.Should().Contain("AppendTrace(\"sandbox\", agent.DisplayName, \"input\", redactedMessage");
-        source.Should().Contain("BuildSandboxReply(agent, config, redactedMessage)");
+        source.Should().Contain("redactedReply = (await pii.RedactAsync(reply.Text, ct)");
+        source.Should().Contain("AppendTrace(\"sandbox\", agent.DisplayName, \"reply\", redactedReply");
+    }
+
+    [Fact]
+    public void Sandbox_uses_real_llm_client_with_agent_scope()
+    {
+        var source = File.ReadAllText(FindRepoFile("src", "api", "Clawbot.Api", "Endpoints", "AgentsEndpoints.cs"));
+
+        source.Should().Contain("IClaudeChatClient chatClient");
+        source.Should().Contain("ILlmCallScope llmScope");
+        source.Should().Contain("llmScope.Begin(tenant.TenantId, agent.Code, now)");
+        source.Should().Contain("chatClient.CompleteAsync(config.SystemPrompt, Array.Empty<ChatTurn>(), redactedMessage, ct)");
+        source.Should().NotContain("BuildSandboxReply");
     }
 
     [Fact]

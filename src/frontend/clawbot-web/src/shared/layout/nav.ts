@@ -12,14 +12,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { icon: "description", label: "Thư viện tài liệu", to: "/documents" },
   { icon: "monitoring", label: "Báo cáo thống kê", to: "/analytics" },
   { icon: "notifications", label: "Trung tâm thông báo", to: "/notifications" },
-  { icon: "account_tree", label: "Sơ đồ tiến trình", to: "/workflow" },
-  { icon: "hub", label: "Điều phối tự động", to: "/orchestration" },
-  { icon: "apartment", label: "Không gian agents", to: "/agents-office" },
-  { icon: "receipt_long", label: "Nhật ký tác vụ", to: "/logs" },
-  { icon: "toll", label: "Quản lý chi phí AI", to: "/tokens" },
+  { icon: "smart_toy", label: "Agents", to: "/agents" },
   { icon: "inventory_2", label: "Kho tri thức", to: "/kb" },
-  { icon: "settings_suggest", label: "Hướng dẫn agent", to: "/prompts" },
-  { icon: "smart_toy", label: "Cấu hình mô hình AI", to: "/llm-providers" },
 ];
 
 export const NAV_SYSTEM: NavItem = { icon: "settings", label: "Hệ thống", to: "/system" };

@@ -3,6 +3,7 @@ using Clawbot.Agents.Contracts.Orchestrator;
 using Clawbot.Agents.Core;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Orchestrator;
+using Clawbot.Agents.Core.Rag;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Agents.Core.Skills.Ops;
 using Clawbot.Domain.Agents;
@@ -137,7 +138,56 @@ public sealed class OrchestratorGrpcServiceTests
             Goal = "launch HSK4 campaign",
         }, TestServerCallContext.Create());
 
-        harness.Db.AgentTraces.Select(t => t.Phase).Should().Contain(["planned", "started", "completed"]);
+        harness.Db.AgentTraces.Select(t => t.Phase).Should().Contain(["planning_completed", "started", "completed"]);
+    }
+
+    [Fact]
+    public async Task Submit_persists_failed_session_and_trace_when_planner_returns_invalid_json()
+    {
+        using var harness = Harness.Build("not-json");
+
+        var response = await harness.Service.Submit(new SubmitRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            Goal = "launch HSK4 campaign",
+        }, TestServerCallContext.Create());
+
+        response.SessionId.Should().NotBeNullOrEmpty();
+        response.Status.Should().Be(AgentSessionStatuses.Failed);
+        harness.Db.AgentSessions.Should().ContainSingle();
+        harness.Db.AgentTraces.Select(t => t.Phase).Should().Contain(["planning_started", "planning_failed"]);
+    }
+
+    [Fact]
+    public async Task Submit_attributes_session_to_orchestrator_agent_so_traces_surface_on_dashboard()
+    {
+        using var harness = Harness.Build(OneTaskPlan);
+        var orchestrator = AgentConfig.Create(TenantId, "orchestrator", "Agent-Orchestrator", "planner", "test-model", DateTimeOffset.UnixEpoch);
+        harness.Db.AgentConfigs.Add(orchestrator);
+        await harness.Db.SaveChangesAsync();
+
+        await harness.Service.Submit(new SubmitRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            Goal = "launch HSK4 campaign",
+        }, TestServerCallContext.Create());
+
+        harness.Db.AgentSessions.Single().AgentId.Should().Be(orchestrator.Id);
+    }
+
+    [Fact]
+    public async Task Submit_persists_planning_started_trace_before_running_the_plan()
+    {
+        using var harness = Harness.Build(OneTaskPlan);
+
+        await harness.Service.Submit(new SubmitRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            Goal = "launch HSK4 campaign",
+        }, TestServerCallContext.Create());
+
+        harness.Db.AgentTraces.Select(t => t.Phase)
+            .Should().Contain(["planning_started", "planning_completed", "completed"]);
     }
 
     [Fact]
@@ -394,7 +444,8 @@ public sealed class OrchestratorGrpcServiceTests
             dbHarness,
             new SequencedTracker([
                 new CostSummary(TenantId, 1m, 200m, 0.005f),
-                new CostSummary(TenantId, 199.98m, 200m, 0.9999f),
+                new CostSummary(TenantId, 1m, 200m, 0.005f),
+                new CostSummary(TenantId, 200m, 200m, 1f),
             ]));
 
         var response = await harness.Service.Submit(new SubmitRequest
@@ -532,15 +583,29 @@ public sealed class OrchestratorGrpcServiceTests
             var catalog = new FakeCatalog();
             var planGen = new SemanticKernelPlanGenerator(new ClawbotChatCompletionService(new FixedChatClient(planJson)));
             var costGuard = new OrchestratorCostGuard(tracker ?? new FixedTracker());
-            var sk = new SemanticKernelOrchestrator(catalog, planGen, new RegexPiiRedactor(), costGuard);
             var legacy = new PlanningOrchestrator(new AgentRegistry([ChatAgentStub()]));
             var adapters = new IAgent[] { adapter };
             var clock = Substitute.For<IClock>();
             clock.UtcNow.Returns(clockAt ?? new DateTimeOffset(2026, 6, 21, 0, 0, 0, TimeSpan.Zero));
-
+            var llmScopeValue = llmScope ?? new LlmCallScope();
             var redactor = new RegexPiiRedactor();
+            var definitionCatalog = new FakeDefinitionCatalog();
+            var rag = Substitute.For<IRagRetriever>();
+            var chat = new AdapterBackedChatClient(adapter, llmScopeValue);
+            var autonomous = new AutonomousOrchestrator(
+                new AutonomousPlanner(planGen, llmScopeValue),
+                definitionCatalog,
+                new AgentRegistry(adapters),
+                Substitute.For<IA2AMailbox>(),
+                costGuard,
+                llmScopeValue,
+                new AutonomousRunSink(dbHarness.Db, redactor, clock),
+                rag,
+                chat,
+                clock);
+
             var service = new OrchestratorGrpcService(
-                legacy, sk, planGen, catalog, adapters, llmScope ?? new LlmCallScope(), redactor, costGuard,
+                legacy, planGen, autonomous, catalog, adapters, llmScopeValue, redactor, costGuard,
                 dbHarness.Db, clock, NullLogger<OrchestratorGrpcService>.Instance);
 
             return new Harness(dbHarness, service);
@@ -566,6 +631,22 @@ public sealed class OrchestratorGrpcServiceTests
 
         public Task<AgentCatalogEntry> ResolveAsync(string name, CancellationToken ct = default) =>
             Task.FromResult(Content);
+    }
+
+    private sealed class FakeDefinitionCatalog : IAgentDefinitionCatalog
+    {
+        private static readonly AgentDefinitionCatalogEntry Content = new(
+            Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), "content-agent", "content", "Content", "content", "Run content", "{}", true, null);
+
+        public Task<IReadOnlyList<AgentDefinitionCatalogEntry>> ListAsync(Guid tenantId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<AgentDefinitionCatalogEntry>>([Content]);
+
+        public Task<AgentDefinitionCatalogEntry?> FindByCodeAsync(Guid tenantId, string code, CancellationToken ct = default) =>
+            Task.FromResult<AgentDefinitionCatalogEntry?>(string.Equals(code, Content.Code, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(code, Content.ShortName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(code, Content.AgentType, StringComparison.OrdinalIgnoreCase)
+                    ? Content
+                    : null);
     }
 
     private sealed class FakeContentAdapter(string output) : IAgent
@@ -642,6 +723,39 @@ public sealed class OrchestratorGrpcServiceTests
         {
             var index = Math.Min(Interlocked.Increment(ref _index) - 1, summaries.Count - 1);
             return Task.FromResult(summaries[index]);
+        }
+    }
+
+    private sealed class AdapterBackedChatClient(IAgent adapter, ILlmCallScope scope) : IClaudeChatClient
+    {
+        public async Task<ClaudeReply> CompleteAsync(
+            string systemPrompt, IReadOnlyList<ChatTurn> history, string userMessage, CancellationToken ct = default)
+        {
+            var agentCode = scope.Current?.AgentCode ?? adapter.Name;
+            var input = ExtractInput(userMessage);
+            var result = await adapter.ExecuteAsync(new AgentTask("t1", agentCode, "Do", input), ct).ConfigureAwait(false);
+            if (!result.Success)
+                throw new InvalidOperationException(result.Error ?? "agent_failed");
+            return new ClaudeReply(result.Output, 0, 0, 0m, "test");
+        }
+
+        private static Dictionary<string, string> ExtractInput(string userMessage)
+        {
+            var marker = "Input JSON:";
+            var index = userMessage.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+                return new Dictionary<string, string>();
+
+            var json = userMessage[(index + marker.Length)..].Trim();
+            return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>();
+        }
+
+        public async IAsyncEnumerable<ClaudeStreamChunk> StreamAsync(
+            string systemPrompt, IReadOnlyList<ChatTurn> history, string userMessage,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            var reply = await CompleteAsync(systemPrompt, history, userMessage, ct).ConfigureAwait(false);
+            yield return new ClaudeStreamChunk(reply.Text, Final: true, reply.InputTokens, reply.OutputTokens, reply.UsdCost, reply.Model);
         }
     }
 

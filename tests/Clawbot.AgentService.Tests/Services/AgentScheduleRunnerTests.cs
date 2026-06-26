@@ -2,6 +2,7 @@ using Clawbot.AgentService.Services;
 using Clawbot.Agents.Core;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Orchestrator;
+using Clawbot.Agents.Core.Rag;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Agents.Core.Skills.Ops;
 using Clawbot.Domain.Agents;
@@ -80,7 +81,7 @@ public sealed class AgentScheduleRunnerTests
             }));
         var catalog = Substitute.For<IAgentDefinitionCatalog>();
         catalog.ListAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-            .Returns(new[] { new AgentDefinitionCatalogEntry(Guid.NewGuid(), "content-agent", "content", "Content", "content", "Do", "{}", true) });
+            .Returns(new[] { new AgentDefinitionCatalogEntry(Guid.NewGuid(), "content-agent", "content", "Content", "content", "Do", "{}", true, null) });
         var mailbox = Substitute.For<IA2AMailbox>();
         var agent = Substitute.For<IAgent>();
         agent.Name.Returns("content-agent");
@@ -90,6 +91,10 @@ public sealed class AgentScheduleRunnerTests
         tracker.SummaryAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(new CostSummary(fx.TenantId, 0m, 100m, 0));
         var clock = new FixedClock(Now);
+        var rag = Substitute.For<IRagRetriever>();
+        var chat = Substitute.For<IClaudeChatClient>();
+        chat.CompleteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ClaudeReply("ok", 0, 0, 0m));
         var orchestrator = new AutonomousOrchestrator(
             planner,
             catalog,
@@ -98,6 +103,8 @@ public sealed class AgentScheduleRunnerTests
             new OrchestratorCostGuard(tracker),
             new LlmCallScope(),
             new AutonomousRunSink(fx.Db, new RegexPiiRedactor(), clock),
+            rag,
+            chat,
             clock);
         return new AgentScheduleRunner(fx.Db, orchestrator, clock);
     }

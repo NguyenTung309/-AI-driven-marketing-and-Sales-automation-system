@@ -90,6 +90,21 @@ public sealed class AgentSession : AggregateRoot<Guid>, ITenantOwned
         Status = AgentSessionStatuses.Running;
     }
 
+    /// <summary>
+    /// Finalize a running planning placeholder with the generated plan. Moves to pending approval when
+    /// the tenant or a cost pre-flight requires it; otherwise stays running for auto-execution.
+    /// </summary>
+    public void ApplyGeneratedPlan(string planJson, bool requiresApproval)
+    {
+        if (Status != AgentSessionStatuses.Running)
+            throw new InvalidOperationException("Only a running planning session can receive a generated plan.");
+
+        PlanJson = string.IsNullOrWhiteSpace(planJson) ? "{}" : planJson;
+        RequiresApproval = requiresApproval;
+        if (requiresApproval)
+            Status = AgentSessionStatuses.PendingApproval;
+    }
+
     public void IncrementReplan() => ReplanCount++;
 
     /// <summary>Persist the executed plan (with per-task statuses/outputs) after a run. No state guard.</summary>

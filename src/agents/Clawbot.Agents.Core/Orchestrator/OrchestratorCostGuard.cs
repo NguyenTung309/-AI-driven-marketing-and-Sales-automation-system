@@ -1,3 +1,4 @@
+using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Skills.Ops;
 
 namespace Clawbot.Agents.Core.Orchestrator;
@@ -44,6 +45,17 @@ public sealed class OrchestratorCostGuard(IClaudeCostTracker tracker)
             ? CostGuardResult.Allow(result.ReservationId)
             : CostGuardResult.Deny(result.Reason ?? "cost_cap_midrun");
     }
+
+    public Task RecordAsync(
+        Guid tenantId,
+        string agentCode,
+        ClaudeReply reply,
+        DateTimeOffset at,
+        Guid? reservationId,
+        CancellationToken ct = default) =>
+        reply.UsdCost <= 0m
+            ? Task.CompletedTask
+            : _tracker.RecordAsync(new CostEntry(tenantId, agentCode, reply.Model, reply.InputTokens, reply.OutputTokens, reply.UsdCost, at, reservationId), ct);
 
     public Task AdjustReservationAsync(
         Guid tenantId,

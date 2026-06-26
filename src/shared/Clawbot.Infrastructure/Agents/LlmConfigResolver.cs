@@ -26,20 +26,30 @@ public sealed class LlmConfigResolver(IServiceScopeFactory scopeFactory, IEncryp
             .Select(a => new { a.LlmConfigId, a.Model })
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
-        if (agent?.LlmConfigId is not { } configId)
+        var definitionConfigId = agent is null
+            ? await db.AgentDefinitions
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Where(a => a.TenantId == tenantId && a.Code == agentCode && a.DeletedAt == null)
+                .Select(a => a.LlmConfigId)
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false)
+            : null;
+
+        var configId = agent?.LlmConfigId ?? definitionConfigId;
+        if (configId is null)
             throw new LlmConfigNotConfiguredException(tenantId, agentCode);
 
         var cfg = await db.LlmConfigs
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(c => c.Id == configId && c.TenantId == tenantId && c.IsActive)
+            .Where(c => c.Id == configId.Value && c.TenantId == tenantId && c.IsActive)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
         if (cfg is null)
             throw new LlmConfigNotConfiguredException(tenantId, agentCode);
 
-        // D2: the per-agent model string overrides the config's model when set.
-        var effectiveModel = string.IsNullOrWhiteSpace(agent.Model) ? cfg.ModelId : agent.Model;
+        // D2: compiled agents may override the config model. Data-defined agents use LlmConfig.ModelId.
+        var effectiveModel = string.IsNullOrWhiteSpace(agent?.Model) ? cfg.ModelId : agent.Model;
         string apiKey;
         try
         {

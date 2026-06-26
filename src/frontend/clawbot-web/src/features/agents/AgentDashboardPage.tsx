@@ -33,6 +33,7 @@ const EMPTY_COSTS: readonly AgentCostItem[] = [];
 const EMPTY_TRACES: readonly AgentTraceItem[] = [];
 
 type AgentConfigTab = "prompt" | "model" | "tools";
+type TerminalTab = "events" | "queue" | "errors";
 
 interface AgentSettingsForm {
   readonly displayName: string;
@@ -111,6 +112,10 @@ function formatCurrency(value: number): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
 }
 
+function firstNonBlank(...values: readonly (string | null | undefined)[]): string {
+  return values.find((value) => value?.trim())?.trim() ?? "";
+}
+
 function costForAgent(costs: readonly AgentCostItem[], code: string): AgentCostItem | null {
   return costs.find((item) => item.agentCode.toLowerCase() === code.toLowerCase()) ?? null;
 }
@@ -125,7 +130,14 @@ function agentTypeLabel(type: string): string {
   if (value === "report") return "Báo cáo";
   if (value === "research") return "Nghiên cứu";
   if (value === "chat") return "Trò chuyện";
+  if (value === "orchestrator") return "Điều phối";
   return type || "Agent";
+}
+
+function isOrchestrator(agent: AgentListItem): boolean {
+  const code = normalize(agent.code);
+  const type = normalize(agent.agentType);
+  return code.includes("orchestrator") || type.includes("orchestrator") || type.includes("planner");
 }
 
 function defaultPromptFor(agent: AgentListItem | null): string {
@@ -187,7 +199,7 @@ function AgentNode({
   readonly cost: AgentCostItem | null;
   readonly selected: boolean;
   readonly onSelect: () => void;
-  readonly onConfigure: () => void;
+  readonly onConfigure: (tab: AgentConfigTab) => void;
   readonly onToggle: () => void;
   readonly pending: boolean;
 }) {
@@ -195,8 +207,8 @@ function AgentNode({
   return (
     <div
       className={[
-        "cursor-pointer text-left transition-transform hover:-translate-y-0.5 focus:outline-none",
-        selected ? "ring-2 ring-primary ring-offset-2 ring-offset-surface" : "",
+        "w-fit cursor-pointer text-left transition-transform hover:-translate-y-0.5 focus:outline-none",
+        selected ? "rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-surface" : "",
       ].join(" ")}
       onClick={onSelect}
       onKeyDown={(event) => {
@@ -222,16 +234,19 @@ function AgentNode({
           <span>{cost ? formatCurrency(cost.usd) : "$0.00"}</span>
         </div>
         <div className="grid grid-cols-2 gap-2 pt-2">
-          <button
-            className="w-full rounded border border-outline bg-white px-3 py-1.5 text-body-md font-bold text-secondary transition-colors hover:border-primary hover:text-primary"
-            onClick={(event) => {
-              event.stopPropagation();
-              onConfigure();
-            }}
-            type="button"
-          >
-            Cấu hình
-          </button>
+          {(["prompt", "model", "tools"] as const).map((tab) => (
+            <button
+              className="w-full rounded border border-outline bg-white px-3 py-1.5 text-body-md font-bold text-secondary transition-colors hover:border-primary hover:text-primary"
+              key={tab}
+              onClick={(event) => {
+                event.stopPropagation();
+                onConfigure(tab);
+              }}
+              type="button"
+            >
+              {tab === "prompt" ? "Prompt" : tab === "model" ? "LLM" : "Công cụ"}
+            </button>
+          ))}
           <button
             className={[
               "w-full rounded px-3 py-1.5 text-body-md font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60",
@@ -244,7 +259,7 @@ function AgentNode({
             }}
             type="button"
           >
-            {running ? "Dừng agent" : "Chạy agent"}
+            {running ? "Dừng" : "Chạy"}
           </button>
         </div>
       </WorkflowNode>
@@ -263,22 +278,40 @@ function TerminalLog({
   readonly loading: boolean;
   readonly onExport: () => void;
 }) {
+  const [activeTab, setActiveTab] = useState<TerminalTab>("events");
+  const visibleTraces = traces.filter((trace) => {
+    const phase = normalize(trace.phase);
+    if (activeTab === "errors") return phase.includes("error") || phase.includes("fail");
+    if (activeTab === "queue")
+      return phase.includes("queue") || phase.includes("pending") || phase.includes("waiting")
+        || phase.includes("planning_started") || phase === "planned" || phase.includes("started") || phase.includes("running");
+    return true;
+  });
+  const emptyText = activeTab === "errors" ? "Chưa có sự kiện lỗi cho agent này." : activeTab === "queue" ? "Chưa có sự kiện hàng đợi cho agent này." : "Chưa có sự kiện vận hành cho agent này. Khi có hoạt động mới, danh sách sẽ tự cập nhật.";
+  const tabs: readonly { readonly key: TerminalTab; readonly icon: string; readonly label: string }[] = [
+    { key: "events", icon: "terminal", label: "Sự kiện vận hành" },
+    { key: "queue", icon: "queue", label: "Hàng đợi" },
+    { key: "errors", icon: "bug_report", label: "Sự kiện lỗi" },
+  ];
+
   return (
     <section className="flex min-h-[520px] flex-col overflow-hidden rounded-xl border border-slate-700 bg-[#0f172a] shadow-lg">
       <div className="flex flex-col gap-3 border-b border-slate-700 bg-[#1e293b] px-4 pt-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="flex flex-wrap gap-1">
-          <button className="flex items-center gap-2 rounded-t-lg border-b-2 border-error bg-[#0f172a] px-4 py-3 text-label-caps uppercase text-white">
-            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">terminal</span>
-            Sự kiện vận hành
-          </button>
-          <button className="flex items-center gap-2 rounded-t-lg px-4 py-3 text-label-caps uppercase text-slate-400">
-            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">queue</span>
-            Hàng đợi
-          </button>
-          <button className="flex items-center gap-2 rounded-t-lg px-4 py-3 text-label-caps uppercase text-slate-400">
-            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">bug_report</span>
-            Sự kiện lỗi
-          </button>
+          {tabs.map((item) => (
+            <button
+              className={[
+                "flex items-center gap-2 rounded-t-lg border-b-2 px-4 py-3 text-label-caps uppercase transition-colors",
+                activeTab === item.key ? "border-error bg-[#0f172a] text-white" : "border-transparent text-slate-400 hover:text-white",
+              ].join(" ")}
+              key={item.key}
+              onClick={() => setActiveTab(item.key)}
+              type="button"
+            >
+              <span aria-hidden="true" className="material-symbols-outlined text-[16px]">{item.icon}</span>
+              {item.label}
+            </button>
+          ))}
         </div>
         <div className="flex items-center gap-3 pb-3">
           <div className="hidden items-center gap-2 rounded border border-slate-600 bg-[#0f172a] px-3 py-1.5 font-mono text-mono-status text-slate-300 sm:flex">
@@ -303,8 +336,8 @@ function TerminalLog({
             <span className="size-3 animate-pulse rounded-full bg-slate-400" />
             Đang tải sự kiện vận hành...
           </div>
-        ) : traces.length ? (
-          traces.map((trace) => (
+        ) : visibleTraces.length ? (
+          visibleTraces.map((trace) => (
             <div
               className={[
                 "grid gap-2 rounded p-1 hover:bg-slate-800/60 md:grid-cols-[150px_92px_minmax(0,1fr)]",
@@ -319,7 +352,7 @@ function TerminalLog({
           ))
         ) : (
           <div className="rounded border border-slate-700 bg-slate-900/60 p-4 text-slate-400">
-            Chưa có sự kiện vận hành cho agent này. Khi có hoạt động mới, danh sách sẽ tự cập nhật.
+            {emptyText}
           </div>
         )}
       </div>
@@ -350,7 +383,7 @@ export default function AgentDashboardPage() {
   const [sandboxMessages, setSandboxMessages] = useState<readonly SandboxMessage[]>(DEFAULT_SANDBOX_MESSAGES);
   const selectedAgent = useMemo(() => {
     if (!agents.length) return null;
-    return agents.find((agent) => agent.code === selectedCode) ?? agents[0];
+    return agents.find((agent) => agent.code === selectedCode) ?? agents.find(isOrchestrator) ?? agents[0];
   }, [agents, selectedCode]);
   const configAgent = useMemo(() => agents.find((agent) => agent.code === configAgentCode) ?? null, [agents, configAgentCode]);
   const selectedCost = selectedAgent ? costForAgent(costs, selectedAgent.code) : null;
@@ -361,11 +394,18 @@ export default function AgentDashboardPage() {
     enabled: Boolean(configAgentCode),
   });
   const settings: AgentSettings | undefined = settingsQuery.data;
+  const llmConfigsQuery = useQuery({
+    queryKey: ["llm-configs"],
+    queryFn: listLlmConfigs,
+    enabled: Boolean(configAgentCode),
+  });
+  const llmConfigs: readonly LlmConfig[] = llmConfigsQuery.data ?? [];
+  const selectedLlmConfig = llmConfigs.find((config) => config.id === (settingsDraft.llmConfigId ?? settings?.llmConfigId));
   const settingsForm: AgentSettingsForm = useMemo(
     () => ({
       displayName: settingsDraft.displayName ?? settings?.displayName ?? configAgent?.displayName ?? "",
-      model: settingsDraft.model ?? settings?.model ?? configAgent?.model ?? "claude",
-      provider: settingsDraft.provider ?? settings?.provider ?? "claude",
+      model: firstNonBlank(settingsDraft.model, selectedLlmConfig?.modelId, settings?.model, configAgent?.model, "claude"),
+      provider: firstNonBlank(settingsDraft.provider, selectedLlmConfig?.provider, settings?.provider, "claude"),
       systemPrompt: settingsDraft.systemPrompt ?? settings?.systemPrompt ?? defaultPromptFor(configAgent),
       temperature: settingsDraft.temperature ?? settings?.temperature ?? 0.4,
       maxTokens: settingsDraft.maxTokens ?? settings?.maxTokens ?? 2048,
@@ -373,15 +413,8 @@ export default function AgentDashboardPage() {
       kbModules: settingsDraft.kbModules ?? settings?.kbModules ?? [],
       llmConfigId: settingsDraft.llmConfigId ?? settings?.llmConfigId ?? "",
     }),
-    [configAgent, settings, settingsDraft],
+    [configAgent, selectedLlmConfig, settings, settingsDraft],
   );
-
-  const llmConfigsQuery = useQuery({
-    queryKey: ["llm-configs"],
-    queryFn: listLlmConfigs,
-    enabled: Boolean(configAgentCode),
-  });
-  const llmConfigs: readonly LlmConfig[] = llmConfigsQuery.data ?? [];
 
   const tracesQuery = useQuery({
     queryKey: ["agents", selectedAgent?.code, "traces"],
@@ -443,10 +476,10 @@ export default function AgentDashboardPage() {
     },
   });
 
-  function openAgentConfig(agent: AgentListItem) {
+  function openAgentConfig(agent: AgentListItem, tab: AgentConfigTab = "prompt") {
     setSelectedCode(agent.code);
     setConfigAgentCode(agent.code);
-    setConfigTab("prompt");
+    setConfigTab(tab);
     setSettingsDraft({});
     setSandboxInput("");
     setSandboxMessages(DEFAULT_SANDBOX_MESSAGES);
@@ -468,8 +501,9 @@ export default function AgentDashboardPage() {
     sandboxMutation.mutate({ code: configAgentCode, message });
   }
 
-  const runningAgents = agents.filter((agent) => normalize(agent.status) === "running");
-  const errorCount = agents.filter((agent) => normalize(agent.status) === "error").length;
+  const visibleOrchestrator = agents.find(isOrchestrator) ?? null;
+  const runningAgents = visibleOrchestrator && normalize(visibleOrchestrator.status) === "running" ? [visibleOrchestrator] : [];
+  const errorCount = visibleOrchestrator && normalize(visibleOrchestrator.status) === "error" ? 1 : 0;
   const totalUsd = costs.reduce((sum, item) => sum + item.usd, 0);
   const totalCalls = costs.reduce((sum, item) => sum + item.calls, 0);
 
@@ -493,7 +527,7 @@ export default function AgentDashboardPage() {
             type="button"
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">warning</span>
-            Dừng agent đang chạy
+            Dừng orchestrator đang chạy
           </Button>
         </div>
       </div>
@@ -510,13 +544,13 @@ export default function AgentDashboardPage() {
 
       <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          label="Agent đang chạy"
-          value={`${runningAgents.length}/${agents.length}`}
-          delta="Bật/tắt trực tiếp"
+          label="Orchestrator"
+          value={visibleOrchestrator ? statusLabel(visibleOrchestrator.status) : "Chưa có"}
+          delta=""
           icon="memory"
-          tone={runningAgents.length ? "success" : "neutral"}
+          tone={visibleOrchestrator ? statusTone(visibleOrchestrator.status) : "neutral"}
         />
-        <MetricCard label="Agent lỗi" value={String(errorCount)} delta="Cần kiểm tra" icon="bug_report" tone={errorCount ? "error" : "success"} />
+        <MetricCard label="Orchestrator lỗi" value={String(errorCount)} delta="Cần kiểm tra" icon="bug_report" tone={errorCount ? "error" : "success"} />
         <MetricCard label="Chi phí AI" value={formatCurrency(totalUsd)} delta="30 ngày gần nhất" icon="toll" tone="warning" />
         <MetricCard label="Lượt gọi AI" value={totalCalls.toLocaleString("vi-VN")} delta="Theo sổ chi phí" icon="analytics" tone="neutral" />
       </section>
@@ -527,9 +561,6 @@ export default function AgentDashboardPage() {
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-headline-sm font-bold text-secondary">Sơ đồ agent</h2>
-                <p className="mt-1 text-body-md text-on-surface-variant">
-                  Chọn một agent để xem trạng thái, sự kiện vận hành gần nhất và chi phí tương ứng.
-                </p>
               </div>
               <StatusPill tone={costQuery.isError ? "warning" : "success"}>
                 {costQuery.isError ? "Chưa có dữ liệu chi phí" : "Dữ liệu chi phí sẵn sàng"}
@@ -544,24 +575,27 @@ export default function AgentDashboardPage() {
               </div>
             ) : agents.length ? (
               <div
-                className="grid gap-5 rounded-lg border border-outline bg-surface p-5 sm:grid-cols-2 xl:grid-cols-3"
+                className="rounded-lg border border-outline bg-surface p-5"
                 style={{
                   backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)",
                   backgroundSize: "18px 18px",
                 }}
               >
-                {agents.map((agent) => (
-                  <AgentNode
-                    agent={agent}
-                    cost={costForAgent(costs, agent.code)}
-                    key={agent.code}
-                    onConfigure={() => openAgentConfig(agent)}
-                    onSelect={() => setSelectedCode(agent.code)}
-                    onToggle={() => setStatusMutation.mutate(agent)}
-                    pending={setStatusMutation.isPending}
-                    selected={selectedAgent?.code === agent.code}
-                  />
-                ))}
+                {visibleOrchestrator ? (
+                  <div className="flex flex-col items-center">
+                    <AgentNode
+                      agent={visibleOrchestrator}
+                      cost={costForAgent(costs, visibleOrchestrator.code)}
+                      onConfigure={(tab) => openAgentConfig(visibleOrchestrator, tab)}
+                      onSelect={() => setSelectedCode(visibleOrchestrator.code)}
+                      onToggle={() => setStatusMutation.mutate(visibleOrchestrator)}
+                      pending={setStatusMutation.isPending}
+                      selected={selectedAgent?.code === visibleOrchestrator.code}
+                    />
+                    <div className="h-8 w-px bg-outline" />
+                    <div className="h-px w-full max-w-3xl bg-outline" />
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="rounded-lg border border-outline bg-surface p-6 text-body-md text-on-surface-variant">

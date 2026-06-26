@@ -25,6 +25,7 @@ public sealed class AgentDefinitionCatalog(AppDbContext db) : IAgentDefinitionCa
                 d.PersonaPrompt,
                 d.InputSchemaJson,
                 d.IsOrchestratable,
+                d.KbModuleCode,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -38,7 +39,8 @@ public sealed class AgentDefinitionCatalog(AppDbContext db) : IAgentDefinitionCa
                 d.AgentType,
                 string.IsNullOrWhiteSpace(d.PersonaPrompt) ? $"Run {d.DisplayName}." : d.PersonaPrompt,
                 string.IsNullOrWhiteSpace(d.InputSchemaJson) ? "{}" : d.InputSchemaJson,
-                d.IsOrchestratable))
+                d.IsOrchestratable,
+                string.IsNullOrWhiteSpace(d.KbModuleCode) ? null : d.KbModuleCode))
             .ToArray();
     }
 

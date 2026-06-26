@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type PointerEvent, type ReactNode } from "react";
 
 export interface ModalProps {
   readonly open: boolean;
@@ -10,6 +10,17 @@ export interface ModalProps {
 
 // Level 2 surface: centered dialog over a dimmed, blurred backdrop. Closes on Esc / backdrop click.
 export function Modal({ open, onClose, title, children, footer }: ModalProps) {
+  const didPointerStartOnBackdrop = useRef(false);
+
+  function handleBackdropPointerDown(e: PointerEvent<HTMLDivElement>) {
+    didPointerStartOnBackdrop.current = e.target === e.currentTarget;
+  }
+
+  function handleBackdropPointerUp(e: PointerEvent<HTMLDivElement>) {
+    if (didPointerStartOnBackdrop.current && e.target === e.currentTarget) onClose();
+    didPointerStartOnBackdrop.current = false;
+  }
+
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
@@ -24,7 +35,8 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-      onClick={onClose}
+      onPointerDown={handleBackdropPointerDown}
+      onPointerUp={handleBackdropPointerUp}
       role="presentation"
     >
       <div

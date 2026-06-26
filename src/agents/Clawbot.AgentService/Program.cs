@@ -59,7 +59,7 @@ builder.Services.AddSingleton<Clawbot.Agents.Core.Chat.IAgentToggleGate, Clawbot
 builder.Services.AddSingleton<Clawbot.SharedKernel.Notifications.INotificationPublisher, Clawbot.Infrastructure.Notifications.DbOnlyNotificationPublisher>();
 builder.Services.TryAddSingleton<Clawbot.SharedKernel.Inbox.IInboxNotifier, Clawbot.Infrastructure.Notifications.NoopInboxNotifier>();
 builder.Services.AddClawbotRag(builder.Configuration);
-builder.Services.AddClawbotChat(builder.Configuration);
+builder.Services.AddClawbotChat(builder.Configuration, builder.Environment);
 builder.Services.AddClawbotContent(builder.Configuration);
 builder.Services.AddClawbotResearch(builder.Configuration);
 builder.Services.AddClawbotSaleAssist();
