@@ -1,4 +1,4 @@
-using Clawbot.Agents.Core.Skills.Nlp;
+﻿using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Vectors;
 using Clawbot.SharedKernel.Channels;
@@ -161,31 +161,7 @@ public sealed class ChannelMessageIngestorTests
         contact.AvatarUrl.Should().Be("https://cdn.example.com/avatar.jpg");
     }
 
-    [Fact]
-    public async Task Inbox_name_updated_from_page_admin_name()
-    {
-        using var fx = new TestAppDb();
-        var inbox = Clawbot.Domain.Channels.Inbox.Create(fx.TenantId, "Old Name",
-            "facebook", "fb_page_1");
-        fx.Db.Inboxes.Add(inbox);
-        await fx.Db.SaveChangesAsync();
-        var (sut, _) = Build(fx);
-        var meta = new Dictionary<string, string>
-        {
-            ["sender_id"] = "fb_page_1",
-            ["page_id"] = "fb_page_1",
-            ["page_admin_name"] = "Le Minh Thang",
-            ["sender_name"] = "Le Minh Thang",
-        };
-        await sut.IngestAsync(fx.TenantId, Msg("hello",
-            thread: "fb_page_1:thread_x",
-            user: "user1",
-            meta: meta));
-        var updatedInbox = await fx.Db.Inboxes.IgnoreQueryFilters()
-            .FirstAsync(i => i.Id == inbox.Id);
-        updatedInbox.Name.Should().Be("Le Minh Thang");
-    }
-    [Fact]
+   [Fact]
     public async Task Contact_display_name_updated_from_pzl_to_real_name()
     {
         using var fx = new TestAppDb();

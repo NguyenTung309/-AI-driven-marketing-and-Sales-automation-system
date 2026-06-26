@@ -1,4 +1,4 @@
-using Clawbot.Infrastructure.Persistence;
+﻿using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Time;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
@@ -111,8 +111,8 @@ public sealed partial class OutOfHoursAutoReplyJob(
                 || section.ValueKind != JsonValueKind.Object)
                 return OutOfHoursSettings.Default;
 
-            var enabled = !section.TryGetProperty("enabled", out var enabledProp)
-                || enabledProp.ValueKind != JsonValueKind.False;
+            var enabled = section.TryGetProperty("enabled", out var enabledProp)
+                && enabledProp.ValueKind == JsonValueKind.True;
             var start = ReadTime(section, "workStart", WorkStart);
             var end = ReadTime(section, "workEnd", WorkEnd);
             var offset = ReadOffset(section);
@@ -155,7 +155,7 @@ public sealed partial class OutOfHoursAutoReplyJob(
         string ReplyText)
     {
         public static OutOfHoursSettings Default { get; } =
-            new(true, WorkStart, WorkEnd, Gmt7Offset, DefaultReplyText);
+            new(false, WorkStart, WorkEnd, Gmt7Offset, DefaultReplyText);
 
         public bool IsWithinBusinessHours(DateTimeOffset utcNow)
         {

@@ -1,4 +1,4 @@
-﻿using Clawbot.Infrastructure.Auth;
+using Clawbot.Infrastructure.Auth;
 using Clawbot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;

@@ -1,4 +1,4 @@
-using System.Net.Http.Headers;
+﻿using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -78,6 +78,7 @@ public sealed class PancakeChannelAdapter(
             if (!string.IsNullOrEmpty(evt.SenderName)) meta["display_name"] = evt.SenderName;
             if (!string.IsNullOrEmpty(evt.PageId)) meta["page_id"] = evt.PageId;
             if (!string.IsNullOrEmpty(evt.Type)) meta["event_type"] = evt.Type;
+            if (!string.IsNullOrEmpty(evt.SenderId)) meta["sender_id"] = evt.SenderId;
 
             var messageType = NormalizeMessageType(evt.Type);
             var externalThreadId = string.IsNullOrEmpty(evt.PageId) ? evt.ThreadId : $"{evt.PageId}:{evt.ThreadId}";

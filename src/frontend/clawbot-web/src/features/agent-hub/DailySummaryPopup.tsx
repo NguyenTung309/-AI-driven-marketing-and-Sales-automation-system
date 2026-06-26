@@ -1,4 +1,4 @@
-﻿import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { getDailySummary } from "@/shared/api/inbox";
 
 interface DailySummaryPopupProps {
@@ -20,7 +20,7 @@ export default function DailySummaryPopup({ onClose }: DailySummaryPopupProps) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-heading-sm font-bold text-secondary">Bao cao cuoi ngay</h3>
+          <h3 className="text-heading-sm font-bold text-secondary">Báo cáo cuối ngày</h3>
           <button type="button" onClick={onClose} className="text-on-surface-variant hover:text-secondary">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M18 6 6 18M6 6l12 12" />
@@ -36,28 +36,28 @@ export default function DailySummaryPopup({ onClose }: DailySummaryPopupProps) {
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-lg bg-primary/5 p-3 text-center">
               <p className="text-heading-lg font-bold text-primary">{data.conversationsHandled}</p>
-              <p className="text-label-sm text-on-surface-variant">Hoi thoai</p>
+              <p className="text-label-sm text-on-surface-variant">Hội thoại</p>
             </div>
             <div className="rounded-lg bg-primary/5 p-3 text-center">
               <p className="text-heading-lg font-bold text-primary">{data.messagesSent}</p>
-              <p className="text-label-sm text-on-surface-variant">Tin nhan</p>
+              <p className="text-label-sm text-on-surface-variant">Tin nhắn</p>
             </div>
             <div className="rounded-lg bg-warning-container/30 p-3 text-center">
               <p className="text-heading-lg font-bold text-warning">{data.openConversations}</p>
-              <p className="text-label-sm text-on-surface-variant">Dang mo</p>
+              <p className="text-label-sm text-on-surface-variant">Đang mở</p>
             </div>
             <div className="rounded-lg bg-success-container/30 p-3 text-center">
               <p className="text-heading-lg font-bold text-success">{data.closeRate}%</p>
-              <p className="text-label-sm text-on-surface-variant">Chot</p>
+              <p className="text-label-sm text-on-surface-variant">Chốt</p>
             </div>
           </div>
         ) : (
-          <p className="text-center text-body-md text-on-surface-variant py-6">Chua co du lieu hom nay.</p>
+          <p className="text-center text-body-md text-on-surface-variant py-6">Chưa có dữ liệu hôm nay.</p>
         )}
 
         {data && (
           <p className="mt-4 text-center text-label-sm text-on-surface-variant">
-            Ngay: {data.date}
+            Ngày: {data.date}
           </p>
         )}
       </div>

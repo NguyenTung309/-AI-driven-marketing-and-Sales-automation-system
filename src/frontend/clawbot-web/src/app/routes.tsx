@@ -1,10 +1,9 @@
-﻿import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 import {
   AdminConsolePage,
   AgentDashboardPage,
   AnalyticsReportsPage,
   ContentWorkspacePage,
-  ConversationsPage,
   DashboardPage,
   DocumentsPage,
   ForgotPasswordPage,
@@ -44,7 +43,7 @@ export const router = createBrowserRouter([
     path: "/conversations",
     element: (
       <RequireAuth>
-        <ConversationsPage />
+        <Navigate to="/inbox" replace />
       </RequireAuth>
     ),
   },

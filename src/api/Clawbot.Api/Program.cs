@@ -301,6 +301,7 @@ if (app.Environment.IsDevelopment())
 {
     await DevDataSeeder.SeedAdminAsync(app.Services).ConfigureAwait(false);
     await DevDataSeeder.SeedAutoReplyTemplateAsync(app.Services).ConfigureAwait(false);
+    await DevDataSeeder.BackfillConversationInboxesAsync(app.Services).ConfigureAwait(false);
 }
 
 app.Run();

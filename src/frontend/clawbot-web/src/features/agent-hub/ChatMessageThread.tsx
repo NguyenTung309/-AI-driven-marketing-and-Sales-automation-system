@@ -63,9 +63,17 @@ export default function ChatMessageThread({ messages, loading, contactAvatarUrl,
                   {msg.senderDisplayName ?? contactDisplayName}
                 </span>
               )}
-              <div className={`rounded-2xl px-4 py-2 text-body-md }>
+              <div
+                className={`rounded-2xl px-4 py-2 text-body-md ${isOwner
+                    ? "bg-primary text-on-primary"
+                    : "bg-surface-variant text-on-surface-variant"
+                  }`}
+              >
                 <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                <p className={mt-1 text-label-xs }>
+                <p
+                  className={`mt-1 text-label-xs ${isOwner ? "text-on-primary/70" : "text-on-surface-variant/70"
+                    }`}
+                >
                   {formatTime(msg.sentAt)}
                 </p>
               </div>

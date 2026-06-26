@@ -1,4 +1,4 @@
-﻿using Clawbot.Agents.Core.Lead;
+using Clawbot.Agents.Core.Lead;
 using Clawbot.Api.Contracts.Tenants;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
@@ -241,7 +241,11 @@ public static class PublicWidgetEndpoints
 
         if (conversation is not null) return conversation;
 
-        conversation = Conversation.Open(tenantId, Platform, $"widget:{contactId:N}", now, contactId);
+        var inbox = await db.Inboxes
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.Platform == Platform && i.DeletedAt == null, ct);
+
+        conversation = Conversation.Open(tenantId, Platform, $"widget:{contactId:N}", now, contactId, inbox?.Id);
         db.Conversations.Add(conversation);
         return conversation;
     }

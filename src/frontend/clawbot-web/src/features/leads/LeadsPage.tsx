@@ -530,7 +530,7 @@ function LeadDrawer({
         <div className="border-t border-outline p-4">
           <Link
             className="flex w-full items-center justify-center gap-2 rounded bg-primary px-4 py-3 text-body-md font-bold text-on-primary hover:bg-primary-hover"
-            to="/conversations"
+            to="/inbox"
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">forum</span>
             Xem chi tiết cuộc trò chuyện

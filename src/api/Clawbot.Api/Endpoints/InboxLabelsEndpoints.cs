@@ -1,10 +1,12 @@
-﻿using Clawbot.Api.Auth;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Conversations;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
+using Clawbot.Infrastructure.Auth;
 
 namespace Clawbot.Api.Endpoints;
 
@@ -42,9 +44,20 @@ public static class InboxLabelsEndpoints
 
     private static async Task<IResult> AttachAsync(
         Guid conversationId, AttachLabelRequest body,
-        AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
+        AppDbContext db, ITenantAccessor tenants,
+        ClaimsPrincipal user, IPermissionResolver permResolver,
+        CancellationToken ct)
     {
         var tenant = tenants.Require();
+
+        var roleLabel = user.FindFirstValue("role_id");
+        if (Guid.TryParse(roleLabel, out var ridLabel))
+        {
+            var permsLabel = await permResolver.GetPermissionsAsync(ridLabel, ct);
+            if (permsLabel.Contains("admin:inboxes"))
+                return Results.Forbid();
+        }
+
         var conv = await db.Conversations
             .FirstOrDefaultAsync(c => c.Id == conversationId && c.TenantId == tenant.TenantId, ct);
         if (conv is null) return Results.NotFound();
@@ -64,9 +77,20 @@ public static class InboxLabelsEndpoints
 
     private static async Task<IResult> DetachAsync(
         Guid conversationId, Guid labelId,
-        AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
+        AppDbContext db, ITenantAccessor tenants,
+        ClaimsPrincipal user, IPermissionResolver permResolver,
+        CancellationToken ct)
     {
         var tenant = tenants.Require();
+
+        var roleLabelDel = user.FindFirstValue("role_id");
+        if (Guid.TryParse(roleLabelDel, out var ridLabelDel))
+        {
+            var permsLabelDel = await permResolver.GetPermissionsAsync(ridLabelDel, ct);
+            if (permsLabelDel.Contains("admin:inboxes"))
+                return Results.Forbid();
+        }
+
         var conv = await db.Conversations
             .FirstOrDefaultAsync(c => c.Id == conversationId && c.TenantId == tenant.TenantId, ct);
         if (conv is null) return Results.NotFound();

@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Clawbot.Api.Services;
 using Clawbot.Domain.Channels;
 using Clawbot.Domain.Conversations;
@@ -67,7 +67,7 @@ public sealed class UserInboxResolverTests
 
         var inbox = Inbox.Create(TenantId, "FB Page", "facebook", "page-123");
         fx.Db.Inboxes.Add(inbox);
-        fx.Db.InboxMembers.Add(InboxMember.Create(inbox.Id, SaleUserId));
+        fx.Db.InboxMembers.Add(InboxMember.Create(TenantId, inbox.Id, SaleUserId));
         await fx.Db.SaveChangesAsync();
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
@@ -114,7 +114,7 @@ public sealed class UserInboxResolverTests
 
         var inbox = Inbox.Create(TenantId, "Zalo OA", "zalo", "oa-456");
         fx.Db.Inboxes.Add(inbox);
-        fx.Db.InboxMembers.Add(InboxMember.Create(inbox.Id, SaleUserId));
+        fx.Db.InboxMembers.Add(InboxMember.Create(TenantId, inbox.Id, SaleUserId));
         await fx.Db.SaveChangesAsync();
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(new[]

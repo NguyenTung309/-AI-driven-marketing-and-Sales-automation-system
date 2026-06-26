@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Clawbot.Domain.Channels;
 using Clawbot.Infrastructure.Channels;
@@ -44,6 +44,9 @@ public sealed partial class PancakePollingService : BackgroundService
 
     [LoggerMessage(EventId = 5001, Level = LogLevel.Information, Message = "PancakePollingService started")]
     private static partial void LogStarted(ILogger logger);
+
+    [LoggerMessage(EventId = 5010, Level = LogLevel.Information, Message = "Polling: found {Count} inboxes with tokens")]
+    private static partial void LogPollCount(ILogger logger, int Count);
 
     [LoggerMessage(EventId = 5002, Level = LogLevel.Warning, Message = "Pancake poll failed: {Msg}")]
     private static partial void LogPollFailed(ILogger logger, string msg);
@@ -93,18 +96,16 @@ public sealed partial class PancakePollingService : BackgroundService
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<Clawbot.Infrastructure.Persistence.AppDbContext>();
-            var encryptor = scope.ServiceProvider.GetRequiredService<Clawbot.SharedKernel.Security.IEncryptor>();
-            
             var inboxes = await db.Inboxes
                 .IgnoreQueryFilters()
                 .Where(i => i.EncryptedAccessToken != null && i.IsActive)
                 .ToListAsync(ct);
 
+            LogPollCount(_log, inboxes.Count);
+
             foreach (var inbox in inboxes)
             {
-                string? token = null;
-                try { token = encryptor.Decrypt(inbox.EncryptedAccessToken!); }
-                catch { continue; }
+                var token = inbox.EncryptedAccessToken;
                 if (string.IsNullOrEmpty(token)) continue;
 
                 await PollPageAsync(client, baseUrl, inbox.ExternalPageId, token, ct);
@@ -139,7 +140,7 @@ public sealed partial class PancakePollingService : BackgroundService
             var snippet = conv.Snippet ?? "";
             if (string.IsNullOrWhiteSpace(snippet)) continue;
 
-            var msgUrl = $"{baseUrl}/pages/{pageId}/conversations/{conv.Id}/messages?page_access_token={token}&limit=1";
+            var msgUrl = $"{baseUrl}/pages/{pageId}/conversations/{conv.Id}/messages?page_access_token={token}&limit=50";
             var msgResp = await client.GetAsync(msgUrl, ct);
             if (!msgResp.IsSuccessStatusCode) continue;
             var msgJson = await msgResp.Content.ReadAsStringAsync(ct);
@@ -156,8 +157,7 @@ public sealed partial class PancakePollingService : BackgroundService
                 .AnyAsync(p => p.Platform == "zalo" && p.ExternalMessageId == latestMsg.Id, ct);
             if (alreadyProcessed) { LogSkippedProcessed(_log, latestMsg.Id, convId); continue; }
 
-            if (latestMsg.From?.IsAutomated == true) continue;
-            if (!string.IsNullOrEmpty(latestMsg.From?.AdminId)) continue;
+            // ponytail: was skipping admin/automated; now ingest all for correct backfill
 
             db.ProcessedMessages.Add(new ProcessedMessage("zalo", latestMsg.Id, convId));
             await db.SaveChangesAsync(ct);

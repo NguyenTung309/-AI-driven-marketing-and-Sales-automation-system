@@ -1,4 +1,4 @@
-﻿import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
 import { listChannels, type InboxChannel } from "@/shared/api/inbox";

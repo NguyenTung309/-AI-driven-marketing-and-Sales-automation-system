@@ -1,4 +1,4 @@
-﻿interface ToneCheckResult {
+interface ToneCheckResult {
   readonly hasIssue: boolean;
   readonly message: string;
 }
@@ -19,7 +19,7 @@ export function checkTone(content: string): ToneCheckResult {
     if (lower.includes(word)) {
       return {
         hasIssue: true,
-        message: "Tin nhan co chua tu ngu khong phu hop. Ban co muon chinh sua?",
+        message: "Tin nhắn có chứa từ ngữ không phù hợp. Bạn có muốn chỉnh sửa?",
       };
     }
   }
@@ -29,7 +29,7 @@ export function checkTone(content: string): ToneCheckResult {
   if (capsPattern.test(content)) {
     return {
       hasIssue: true,
-      message: "Tin nhan co nhieu chu viet hoa, co the gay hieu lam ve thai do.",
+      message: "Tin nhắn có nhiều chữ viết hoa, có thể gây hiểu lầm về thái độ.",
     };
   }
 
@@ -37,7 +37,7 @@ export function checkTone(content: string): ToneCheckResult {
   if (/!{2,}|\?{2,}/.test(content)) {
     return {
       hasIssue: true,
-      message: "Tin nhan co nhieu dau cau, co the gay ap luc cho khach.",
+      message: "Tin nhắn có nhiều dấu câu, có thể gây áp lực cho khách.",
     };
   }
 

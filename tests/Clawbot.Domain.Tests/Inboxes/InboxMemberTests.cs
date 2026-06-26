@@ -1,4 +1,4 @@
-﻿using Clawbot.Domain.Channels;
+using Clawbot.Domain.Channels;
 using FluentAssertions;
 using Xunit;
 
@@ -9,11 +9,13 @@ public sealed class InboxMemberTests
     [Fact]
     public void Create_sets_inboxId_and_agentId()
     {
+        var tenantId = Guid.NewGuid();
         var inboxId = Guid.NewGuid();
         var agentId = Guid.NewGuid();
 
-        var member = InboxMember.Create(inboxId, agentId);
+        var member = InboxMember.Create(tenantId, inboxId, agentId);
 
+        member.TenantId.Should().Be(tenantId);
         member.InboxId.Should().Be(inboxId);
         member.AgentId.Should().Be(agentId);
     }

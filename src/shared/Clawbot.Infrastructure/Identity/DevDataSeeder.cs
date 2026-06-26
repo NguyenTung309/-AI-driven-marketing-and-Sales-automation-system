@@ -1,4 +1,5 @@
-﻿using Clawbot.Domain.SaleAssist;
+using Clawbot.Domain.Channels;
+using Clawbot.Domain.SaleAssist;
 using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -184,6 +185,100 @@ public static partial class DevDataSeeder
         }
     }
 
+    public static async Task BackfillConversationInboxesAsync(IServiceProvider services, CancellationToken ct = default)
+    {
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("DevDataSeeder");
+
+        var conversationsToFix = await db.Conversations
+            .IgnoreQueryFilters()
+            .ToListAsync(ct);
+
+        if (conversationsToFix.Count == 0) return;
+
+        LogConversationsToResolve(logger, conversationsToFix.Count);
+
+        var changed = false;
+        foreach (var conv in conversationsToFix)
+        {
+            Guid? resolvedInboxId = null;
+
+            var inboxes = await db.Inboxes
+                .IgnoreQueryFilters()
+                .Where(i => i.TenantId == conv.TenantId && i.Platform == conv.Platform)
+                .ToListAsync(ct);
+
+            var matchedInboxes = new List<Inbox>();
+            foreach (var inbox in inboxes)
+            {
+                if (IsPageIdMatch(conv.ExternalThreadId, inbox.ExternalPageId))
+                {
+                    matchedInboxes.Add(inbox);
+                }
+            }
+
+            if (matchedInboxes.Count > 0)
+            {
+                if (matchedInboxes.Count == 1)
+                {
+                    resolvedInboxId = matchedInboxes[0].Id;
+                }
+                else
+                {
+                    var matchedInboxIds = matchedInboxes.Select(i => i.Id).ToList();
+                    var inboxesWithMembers = await db.InboxMembers
+                        .IgnoreQueryFilters()
+                        .Where(m => matchedInboxIds.Any(id => id == m.InboxId))
+                        .Select(m => m.InboxId)
+                        .Distinct()
+                        .ToListAsync(ct);
+
+                    if (inboxesWithMembers.Count > 0)
+                    {
+                        resolvedInboxId = matchedInboxes.First(i => inboxesWithMembers.Any(id => id == i.Id)).Id;
+                    }
+                    else
+                    {
+                        resolvedInboxId = matchedInboxes[0].Id;
+                    }
+                }
+            }
+
+            if (resolvedInboxId == null && inboxes.Count == 1)
+            {
+                resolvedInboxId = inboxes[0].Id;
+            }
+
+            if (resolvedInboxId != null && conv.InboxId != resolvedInboxId)
+            {
+                conv.SetInboxId(resolvedInboxId.Value);
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            await db.SaveChangesAsync(ct);
+            LogBackfillSuccess(logger);
+        }
+    }
+
+    private static bool IsPageIdMatch(string externalThreadId, string externalPageId)
+    {
+        if (string.IsNullOrWhiteSpace(externalThreadId) || string.IsNullOrWhiteSpace(externalPageId))
+            return false;
+
+        if (externalThreadId.Contains(externalPageId, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var pageDigits = new string(externalPageId.Where(char.IsDigit).ToArray());
+        if (!string.IsNullOrEmpty(pageDigits) && externalThreadId.Contains(pageDigits, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
     [LoggerMessage(EventId = 1101, Level = LogLevel.Information,
         Message = "DevDataSeeder: seeded test admin {Email}")]
     private static partial void LogAdminSeeded(ILogger logger, string email);
@@ -195,6 +290,14 @@ public static partial class DevDataSeeder
     [LoggerMessage(EventId = 1103, Level = LogLevel.Information,
         Message = "DevDataSeeder: seeded auto_reply QuickReplyTemplate")]
     private static partial void LogAutoReplySeeded(ILogger logger);
+
+    [LoggerMessage(EventId = 1105, Level = LogLevel.Information,
+        Message = "BackfillConversationInboxesAsync: Found {Count} conversations with NULL InboxId to resolve.")]
+    private static partial void LogConversationsToResolve(ILogger logger, int count);
+
+    [LoggerMessage(EventId = 1106, Level = LogLevel.Information,
+        Message = "BackfillConversationInboxesAsync: Successfully backfilled InboxId for conversations.")]
+    private static partial void LogBackfillSuccess(ILogger logger);
 
     [LoggerMessage(EventId = 1104, Level = LogLevel.Warning,
         Message = "DevDataSeeder: no tenant found, skipped auto_reply seeding")]

@@ -12,8 +12,8 @@ interface TimelineEvent {
 function mockTimeline(contactId: string | null): TimelineEvent[] {
   if (!contactId) return [];
   return [
-    { id: '1', type: 'inbound', summary: 'Khach gui tin nhan', timestamp: new Date(Date.now() - 3600000).toISOString() },
-    { id: '2', type: 'outbound', summary: 'Sale da phan hoi', timestamp: new Date(Date.now() - 1800000).toISOString() },
+    { id: '1', type: 'inbound', summary: 'Khách gửi tin nhắn', timestamp: new Date(Date.now() - 3600000).toISOString() },
+    { id: '2', type: 'outbound', summary: 'Sale đã phản hồi', timestamp: new Date(Date.now() - 1800000).toISOString() },
   ];
 }
 
@@ -21,11 +21,11 @@ export default function CustomerTimeline({ contactId }: CustomerTimelineProps) {
   const events = mockTimeline(contactId);
 
   if (!contactId) {
-    return <p className='text-label-sm text-on-surface-variant'>Chua co du lieu khach hang.</p>;
+    return <p className='text-label-sm text-on-surface-variant'>Chưa có dữ liệu khách hàng.</p>;
   }
 
   if (events.length === 0) {
-    return <p className='text-label-sm text-on-surface-variant'>Chua co hoat dong.</p>;
+    return <p className='text-label-sm text-on-surface-variant'>Chưa có hoạt động.</p>;
   }
 
   return (

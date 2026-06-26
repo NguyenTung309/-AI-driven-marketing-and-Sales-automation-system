@@ -81,25 +81,6 @@ public sealed partial class ChannelMessageIngestor(
             parentPostId: message.ParentPostId,
             senderDisplayName: senderDisplayName);
 
-        // Update Inbox.Name from page_admin_name metadata
-        var pageAdminName = message.Metadata.TryGetValue("page_admin_name", out var pan) ? pan : null;
-        if (!string.IsNullOrEmpty(pageAdminName))
-        {
-            var inboxId = conversation.InboxId;
-            if (!inboxId.HasValue)
-            {
-                inboxId = await ResolveInboxIdAsync(tenantId, message, ct).ConfigureAwait(false);
-                if (inboxId.HasValue)
-                    conversation.SetInboxId(inboxId.Value);
-            }
-            if (inboxId.HasValue)
-            {
-                var inbox = await _db.Inboxes.IgnoreQueryFilters()
-                    .FirstOrDefaultAsync(i => i.Id == inboxId.Value, ct).ConfigureAwait(false);
-                if (inbox != null && inbox.Name != pageAdminName)
-                    inbox.UpdateName(pageAdminName, _clock.UtcNow);
-            }
-        }
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await _notifier.NotifyMessageAsync(tenantId, new InboxMessageEvent(

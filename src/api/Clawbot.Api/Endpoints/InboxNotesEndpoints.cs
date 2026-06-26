@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Conversations;
@@ -104,9 +104,19 @@ public static class InboxNotesEndpoints
 
     private static async Task<IResult> DeleteAsync(
         Guid conversationId, Guid id,
-        AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
+        AppDbContext db, ITenantAccessor tenants,
+        ClaimsPrincipal user, IPermissionResolver permResolver,
+        CancellationToken ct)
     {
         var tenant = tenants.Require();
+
+        var roleNoteDel = user.FindFirstValue("role_id");
+        if (Guid.TryParse(roleNoteDel, out var ridNoteDel))
+        {
+            var permsNoteDel = await permResolver.GetPermissionsAsync(ridNoteDel, ct);
+            if (permsNoteDel.Contains("admin:inboxes"))
+                return Results.Forbid();
+        }
 
         var note = await db.ConversationNotes
             .FirstOrDefaultAsync(n => n.Id == id && n.TenantId == tenant.TenantId && n.ConversationId == conversationId, ct);

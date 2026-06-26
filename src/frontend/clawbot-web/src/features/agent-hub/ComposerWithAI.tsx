@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiClient } from "@/shared/api/client";
 import { checkTone } from "./toneWarning";
 
@@ -71,7 +71,7 @@ export default function ComposerWithAI({ conversationId, onSend, disabled }: Pro
             </svg>
             <p className="text-label-sm text-warning flex-1">{toneWarning}</p>
             <button type="button" onClick={() => setToneWarning(null)} className="text-label-xs text-primary hover:underline shrink-0">
-              Bo qua
+              Bỏ qua
             </button>
           </div>
         )}
@@ -79,7 +79,7 @@ export default function ComposerWithAI({ conversationId, onSend, disabled }: Pro
           ref={textareaRef}
           className="w-full rounded-lg border border-outline bg-white px-3 py-2 text-body-md outline-none resize-none focus:border-primary min-h-[44px] max-h-[120px]"
           rows={1}
-          placeholder={conversationId ? "Nhap tin nhan... (Tab de chap nhan goi y)" : "Chon mot cuoc hoi thoai..."}
+          placeholder={conversationId ? "Nhập tin nhắn... (Tab để chấp nhận gợi ý)" : "Chọn một cuộc hội thoại..."}
           value={text}
           disabled={!conversationId || disabled}
           onChange={(e) => setText(e.target.value)}

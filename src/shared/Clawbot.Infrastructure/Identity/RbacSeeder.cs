@@ -59,6 +59,7 @@ public static partial class RbacSeeder
         ("rbac:manage", [Admin]),
         ("users:manage", [Admin]),
         ("system:config", [Admin]),
+        ("admin:inboxes", [Admin]),
     ];
 
     private static readonly (string Code, string DisplayName, string AgentType)[] DefaultAgents =

@@ -21,7 +21,7 @@ export default function SideDrawer({ open, onClose, contactDisplayName, contactI
         }
       >
         <div className='flex items-center justify-between border-b border-outline px-4 py-3'>
-          <h3 className='text-label-md font-bold text-secondary'>Khach hang</h3>
+          <h3 className='text-label-md font-bold text-secondary'>Khách hàng</h3>
           <button type='button' onClick={onClose} className='text-on-surface-variant hover:text-secondary md:hidden'>
             <svg width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2'>
               <path d='M18 6 6 18M6 6l12 12' />
@@ -30,16 +30,16 @@ export default function SideDrawer({ open, onClose, contactDisplayName, contactI
         </div>
 
         <div className='overflow-y-auto h-full pb-8'>
-          {/* Thong tin co ban */}
+          {/* Thông tin cơ bản */}
           <div className='border-b border-outline px-4 py-3'>
-            <p className='text-body-md font-semibold text-secondary'>{contactDisplayName ?? 'Chua co ten'}</p>
+            <p className='text-body-md font-semibold text-secondary'>{contactDisplayName ?? 'Chưa có tên'}</p>
             <p className='text-label-sm text-on-surface-variant capitalize'>{platform}</p>
             {contactId && <p className='text-label-xs text-on-surface-variant font-mono mt-1'>ID: {contactId}</p>}
           </div>
 
           {/* Timeline */}
           <div className='px-4 py-3'>
-            <h4 className='mb-2 text-label-sm font-bold uppercase text-secondary'>Hoat dong</h4>
+            <h4 className='mb-2 text-label-sm font-bold uppercase text-secondary'>Hoạt động</h4>
             <CustomerTimeline contactId={contactId} />
           </div>
 
