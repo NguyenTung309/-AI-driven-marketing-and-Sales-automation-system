@@ -12,7 +12,7 @@ namespace Clawbot.Api.Endpoints;
 public sealed record CreateUserRequest(string Email, string DisplayName, string Password, string[]? Roles);
 public sealed record UpdateUserRequest(string? DisplayName, string[]? Roles, bool? IsActive);
 
-// M23 — admin user management (perm: admin.system). Operates on Identity AppUser (`users` table).
+// M23 — admin user management (permission: admin.system). Operates on Identity AppUser (`users` table).
 public static class AdminUsersEndpoints
 {
     public static IEndpointRouteBuilder MapAdminUsers(this IEndpointRouteBuilder app)
