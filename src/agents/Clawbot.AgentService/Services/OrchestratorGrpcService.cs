@@ -144,7 +144,9 @@ public sealed partial class OrchestratorGrpcService(
         // the planner call no longer races the HTTP request lifetime. Tie it to the orchestrator AgentConfig
         // so planning traces surface under that agent's "Sự kiện lỗi" tab on the dashboard.
         var orchestratorAgentId = await ResolveOrchestratorAgentIdAsync(tenantId, ct).ConfigureAwait(false);
-        var session = AgentSession.Start(tenantId, orchestratorAgentId, conversationId: null, redactedGoal, now);
+        var userId = ParseOptionalGuid(request.UserId);
+        // SPEC-16 P3-3: attribute the session to the initiating user so terminal notifications target them.
+        var session = AgentSession.Start(tenantId, orchestratorAgentId, conversationId: null, redactedGoal, now, userId: userId);
         session.AppendTrace(string.Empty, OrchestratorAgentCode, "planning_started", "Đang lập kế hoạch cho mục tiêu.", now);
         _db.AgentSessions.Add(session);
         await SaveAsync(ct).ConfigureAwait(false);
@@ -165,7 +167,7 @@ public sealed partial class OrchestratorGrpcService(
                 catch (Exception ex)
                 {
                     LogBackgroundRunFailed(_logger, ex, sessionId);
-                    await MarkBackgroundRunFailedAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+                    await MarkBackgroundRunFailedAsync(sessionId, ex, CancellationToken.None).ConfigureAwait(false);
                 }
             }, CancellationToken.None);
             return ToResponse(session);
@@ -319,12 +321,14 @@ public sealed partial class OrchestratorGrpcService(
             catch (Exception ex)
             {
                 LogBackgroundRunFailed(_logger, ex, sessionId);
-                await MarkBackgroundRunFailedAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+                await MarkBackgroundRunFailedAsync(sessionId, ex, CancellationToken.None).ConfigureAwait(false);
             }
         }, CancellationToken.None);
     }
 
-    private async Task MarkBackgroundRunFailedAsync(Guid sessionId, CancellationToken ct)
+    // Records a user-safe failure trace before failing the session, so an exception escaping the
+    // background task (e.g. planner LLM error) shows a reason in the FE instead of a bare "failed".
+    private async Task MarkBackgroundRunFailedAsync(Guid sessionId, Exception? error, CancellationToken ct)
     {
         using var scope = _scopeFactory?.CreateScope();
         if (scope is null)
@@ -339,6 +343,14 @@ public sealed partial class OrchestratorGrpcService(
         if (session is null || session.Status is AgentSessionStatuses.Completed or AgentSessionStatuses.Failed or AgentSessionStatuses.Cancelled)
             return;
 
+        var reason = error switch
+        {
+            PlanGenerationException => error.Message,
+            LlmConfigNotConfiguredException => "Agent orchestrator chưa gắn cấu hình LLM đang hoạt động. Vào Cấu hình LLM để gắn provider/model.",
+            null => "Lỗi không xác định khi lập kế hoạch.",
+            _ => $"Lập kế hoạch thất bại: {error.Message}",
+        };
+        session.AppendTrace(string.Empty, OrchestratorAgentCode, "planning_failed", reason, scopedClock.UtcNow);
         session.Fail(scopedClock.UtcNow);
         await scopedDb.SaveChangesAsync(ct).ConfigureAwait(false);
     }
@@ -532,6 +544,13 @@ public sealed partial class OrchestratorGrpcService(
         if (!Guid.TryParse(raw, out var tenantId) || tenantId == Guid.Empty)
             throw new RpcException(new Status(StatusCode.InvalidArgument, "tenant_id required"));
         return tenantId;
+    }
+
+    private static Guid? ParseOptionalGuid(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw) || !Guid.TryParse(raw, out var id) || id == Guid.Empty)
+            return null;
+        return id;
     }
 
     private static void EnsureEtagMatches(AgentSession session, string? expectedEtag)

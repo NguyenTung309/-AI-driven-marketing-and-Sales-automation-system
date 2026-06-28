@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Clawbot.Agents.Contracts.Content;
 using Clawbot.Agents.Contracts.Research;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Content;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Content;
@@ -19,28 +20,29 @@ public static class ContentEndpoints
 {
     public static IEndpointRouteBuilder MapContent(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/content").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var grp = app.MapGroup("/api/content").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
-        grp.MapGet("/briefs", ListBriefsAsync);
-        grp.MapGet("/briefs/{id:guid}", GetBriefAsync);
-        grp.MapPost("/briefs", CreateBriefAsync);
-        grp.MapPut("/briefs/{id:guid}", UpdateBriefAsync);
-        grp.MapDelete("/briefs/{id:guid}", DeleteBriefAsync);
+        grp.MapGet("/briefs", ListBriefsAsync).RequirePermission("content:read");
+        grp.MapGet("/briefs/{id:guid}", GetBriefAsync).RequirePermission("content:read");
+        grp.MapPost("/briefs", CreateBriefAsync).RequirePermission("content:write");
+        grp.MapPut("/briefs/{id:guid}", UpdateBriefAsync).RequirePermission("content:write");
+        grp.MapDelete("/briefs/{id:guid}", DeleteBriefAsync).RequirePermission("content:write");
 
-        grp.MapGet("/trends", TrendsAsync);
-        grp.MapPost("/trends/scan", ScanTrendsAsync);
+        grp.MapGet("/trends", TrendsAsync).RequirePermission("content:read");
+        grp.MapPost("/trends/scan", ScanTrendsAsync).RequirePermission("content:write");
 
-        grp.MapPost("/items/generate", GenerateItemAsync);
-        grp.MapPost("/image-prompts", GenerateImagePromptAsync);
-        grp.MapGet("/queue", QueueAsync);
-        grp.MapPut("/items/{id:guid}", UpdateItemAsync);
-        grp.MapDelete("/items/{id:guid}", DeleteItemAsync);
-        grp.MapPost("/items/{id:guid}/approve", ApproveItemAsync);
-        grp.MapPost("/items/{id:guid}/reject", RejectItemAsync);
-        grp.MapPost("/items/{id:guid}/schedule", ScheduleItemAsync);
-        grp.MapPost("/items/{id:guid}/repurpose", RepurposeItemAsync);
-        grp.MapGet("/calendar", CalendarAsync);
-        grp.MapDelete("/schedule/{id:guid}", DeleteScheduleAsync);
+        grp.MapPost("/items/generate", GenerateItemAsync).RequirePermission("content:write");
+        grp.MapPost("/image-prompts", GenerateImagePromptAsync).RequirePermission("content:write");
+        grp.MapGet("/queue", QueueAsync).RequirePermission("content:read");
+        grp.MapGet("/items", QueueAsync).RequirePermission("content:read");
+        grp.MapPut("/items/{id:guid}", UpdateItemAsync).RequirePermission("content:write");
+        grp.MapDelete("/items/{id:guid}", DeleteItemAsync).RequirePermission("content:write");
+        grp.MapPost("/items/{id:guid}/approve", ApproveItemAsync).RequirePermission("content:write");
+        grp.MapPost("/items/{id:guid}/reject", RejectItemAsync).RequirePermission("content:write");
+        grp.MapPost("/items/{id:guid}/schedule", ScheduleItemAsync).RequirePermission("content:write");
+        grp.MapPost("/items/{id:guid}/repurpose", RepurposeItemAsync).RequirePermission("content:write");
+        grp.MapGet("/calendar", CalendarAsync).RequirePermission("content:read");
+        grp.MapDelete("/schedule/{id:guid}", DeleteScheduleAsync).RequirePermission("content:write");
 
         return app;
     }
@@ -651,7 +653,7 @@ public static class ContentEndpoints
 
     private static IResult Error(HttpContext http, int statusCode, string errorCode, string message) =>
         Results.Json(
-            new ContentApiError(errorCode, message, http.TraceIdentifier),
+            new { code = errorCode, errorCode, message, requestId = http.TraceIdentifier },
             statusCode: statusCode);
 
     private sealed record GenerateInput(Guid? BriefId, string Platform, string Brief, IResult? Error);

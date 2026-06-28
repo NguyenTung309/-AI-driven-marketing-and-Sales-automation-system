@@ -7,9 +7,14 @@ public sealed record ConversationListItemDto(
     string Status,
     Guid? ContactId,
     string? ContactDisplayName,
+    string? ContactAvatarUrl,
+    Guid? InboxId,
+    string? InboxName,
+    string? InboxAvatarUrl,
     Guid? AssignedTo,
     DateTimeOffset? LastMessageAt,
     string? LastMessagePreview,
+    byte[]? RowVersion,
     int UnreadCount);
 
 public sealed record ConversationDetailDto(
@@ -19,9 +24,14 @@ public sealed record ConversationDetailDto(
     string Status,
     Guid? ContactId,
     string? ContactDisplayName,
+    string? ContactAvatarUrl,
+    Guid? InboxId,
+    string? InboxName,
+    string? InboxAvatarUrl,
     Guid? AssignedTo,
     DateTimeOffset? LastMessageAt,
     DateTimeOffset CreatedAt,
+    byte[]? RowVersion,
     IReadOnlyList<MessageDto> Messages);
 
 public sealed record MessageDto(
@@ -31,7 +41,8 @@ public sealed record MessageDto(
     Guid? SenderUserId,
     string Content,
     string ContentType,
-    DateTimeOffset SentAt);
+    DateTimeOffset SentAt,
+    string? SenderDisplayName);
 
 public sealed record AssignConversationRequest(Guid UserId);
 

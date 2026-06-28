@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using Clawbot.Api.Auth;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Kb;
@@ -15,9 +15,13 @@ namespace Clawbot.Api.Endpoints;
 
 public static class KbEndpoints
 {
+    private static readonly Action<ILogger, Guid, Exception> LogUploadFailed =
+        LoggerMessage.Define<Guid>(LogLevel.Error, new EventId(7101, "KbUploadExtractionFailed"),
+            "KB upload extraction failed for module {ModuleId}");
+
     public static IEndpointRouteBuilder MapKb(this IEndpointRouteBuilder app)
     {
-var modules = app.MapGroup("/api/kb/modules").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var modules = app.MapGroup("/api/kb/modules").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         modules.MapGet("/", ListModulesAsync).RequirePermission("kb:read");
         modules.MapGet("/{id:guid}", GetModuleAsync).RequirePermission("kb:read");
@@ -27,6 +31,11 @@ var modules = app.MapGroup("/api/kb/modules").RequireRateLimiting(RateLimitingEx
 
         modules.MapGet("/{id:guid}/versions", ListVersionsAsync).RequirePermission("kb:read");
         modules.MapPost("/{id:guid}/versions", CreateVersionAsync).RequirePermission("kb:write");
+        // DisableAntiforgery: JWT bearer auth carries no cookie credential, so CSRF doesn't apply.
+        modules.MapPost("/{id:guid}/upload", UploadVersionAsync)
+            .RequirePermission("kb:write")
+            .RequireRateLimiting(RateLimitingExtensions.UploadPolicy)
+            .DisableAntiforgery();
         modules.MapGet("/{id:guid}/versions/{versionId:guid}", GetVersionDetailAsync).RequirePermission("kb:read");
         modules.MapPost("/{id:guid}/versions/{versionId:guid}/deploy", DeployVersionAsync).RequirePermission("kb:write");
         modules.MapPost("/{id:guid}/versions/{versionId:guid}/rollback", RollbackToVersionAsync).RequirePermission("kb:write");
@@ -171,6 +180,57 @@ var modules = app.MapGroup("/api/kb/modules").RequireRateLimiting(RateLimitingEx
         return Results.Created($"/api/kb/modules/{id}/versions/{version.Id}",
             new KbVersionDto(version.Id, version.KbModuleId, version.Version, version.Status,
                 version.AccuracyScore, version.DeployedAt, version.CreatedAt));
+    }
+
+    private const long MaxUploadBytes = 10 * 1024 * 1024;
+
+    // Upload a file (docx/xlsx/csv/pdf/txt/md) → auto-convert to markdown → save as a DRAFT version.
+    // Deliberately does NOT deploy: the operator reviews/edits the converted text, then deploys.
+    private static async Task<IResult> UploadVersionAsync(
+        Guid id,
+        IFormFile file,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        IDocumentTextExtractor extractor,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        if (file is null || file.Length == 0) return Results.BadRequest("file_required");
+        if (file.Length > MaxUploadBytes) return Results.BadRequest("file_too_large");
+        if (!extractor.CanExtract(file.FileName))
+            return Results.BadRequest("unsupported_format");
+
+        var tenantId = tenants.Require().TenantId;
+        var module = await db.KbModules.FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId, ct);
+        if (module is null) return Results.NotFound();
+
+        ExtractedDocument extracted;
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            extracted = await extractor.ExtractAsync(stream, file.FileName, ct);
+        }
+        catch (DocumentExtractionException ex)
+        {
+            return Results.BadRequest(new { error = "extraction_failed", message = ex.Message });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Don't leak parser internals (paths, stack) to the client.
+            LogUploadFailed(loggerFactory.CreateLogger("KbUpload"), id, ex);
+            return Results.BadRequest(new { error = "extraction_failed", message = "Không đọc được nội dung tệp." });
+        }
+
+        var nextVersion = await db.KbVersions.Where(v => v.KbModuleId == id).MaxAsync(v => (int?)v.Version, ct) ?? 0;
+        var version = KbVersion.Create(id, nextVersion + 1, extracted.Markdown, clock.UtcNow);
+        db.KbVersions.Add(version);
+        await db.SaveChangesAsync(ct);
+
+        var dto = new KbVersionDto(version.Id, version.KbModuleId, version.Version, version.Status,
+            version.AccuracyScore, version.DeployedAt, version.CreatedAt);
+        return Results.Created($"/api/kb/modules/{id}/versions/{version.Id}",
+            new KbUploadResult(dto, extracted.SourceFormat, extracted.CharCount, extracted.Markdown));
     }
 
     private static async Task<IResult> GetVersionDetailAsync(

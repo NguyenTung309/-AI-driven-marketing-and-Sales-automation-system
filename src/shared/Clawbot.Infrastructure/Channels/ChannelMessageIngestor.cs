@@ -1,4 +1,5 @@
-using Clawbot.Agents.Core.Skills.Nlp;
+﻿using Clawbot.Agents.Core.Skills.Nlp;
+using Clawbot.Domain.Channels;
 using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Conversations;
 using Clawbot.Infrastructure.Persistence;
@@ -40,6 +41,12 @@ public sealed partial class ChannelMessageIngestor(
 
         var conversation = await UpsertConversationAsync(tenantId, message, ct).ConfigureAwait(false);
 
+        // Update contact display name / avatar even for existing conversations
+        await UpdateContactMetadataAsync(tenantId, conversation, message, ct).ConfigureAwait(false);
+
+        // Section 9: Auto-reopen resolved/snoozed on inbound message
+        conversation.ReopenIfNeeded();
+
         if (await IsDuplicateAsync(conversation.Id, message, ct).ConfigureAwait(false))
         {
             LogDuplicate(_logger, conversation.Id, message.ExternalThreadId);
@@ -51,17 +58,28 @@ public sealed partial class ChannelMessageIngestor(
         // PII redaction: store original + redacted versions
         var redacted = await _pii.RedactAsync(message.Text, ct).ConfigureAwait(false);
 
+        // Xac dinh direction: so sanh sender_id vs page_id
+        var senderId = message.Metadata.TryGetValue("sender_id", out var sid) ? sid : "";
+        var pageId = message.Metadata.TryGetValue("page_id", out var pid) ? pid : "";
+        var isOwner = !string.IsNullOrEmpty(senderId) && !string.IsNullOrEmpty(pageId)
+            && string.Equals(senderId, pageId, StringComparison.Ordinal);
+        var direction = isOwner ? "out" : "in";
+        var senderType = isOwner ? "user" : "contact";
+        var senderDisplayName = message.Metadata.TryGetValue("sender_name", out var sn) ? sn : null;
+
         var msg = conversation.AppendMessage(
-            direction: "in",
-            senderType: "contact",
+            direction: direction,
+            senderType: senderType,
             content: redacted.RedactedText,
             contentType: message.Metadata.TryGetValue("content_type", out var ct2) ? ct2 : "text",
             sentAt: message.SentAt,
+            senderUserId: null,
             externalMessageId: externalMsgId,
             originalContent: message.Text,
             redactedContent: redacted.RedactedText,
             messageType: message.MessageType,
-            parentPostId: message.ParentPostId);
+            parentPostId: message.ParentPostId,
+            senderDisplayName: senderDisplayName);
 
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -83,10 +101,85 @@ public sealed partial class ChannelMessageIngestor(
         if (existing is not null) return existing;
 
         var contact = await UpsertContactAsync(tenantId, message, ct).ConfigureAwait(false);
-        var conv = Conversation.Open(tenantId, message.Channel, message.ExternalThreadId, _clock.UtcNow, contact?.Id);
+        var inboxId = await ResolveInboxIdAsync(tenantId, message, ct).ConfigureAwait(false);
+        var conv = Conversation.Open(tenantId, message.Channel, message.ExternalThreadId, _clock.UtcNow, contact?.Id, inboxId);
         _db.Conversations.Add(conv);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
         return conv;
+    }
+
+    private async Task UpdateContactMetadataAsync(Guid tenantId, Conversation conversation, ChannelMessage message, CancellationToken ct)
+    {
+        if (conversation.ContactId is null) return;
+
+        var contact = await _db.Contacts.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.Id == conversation.ContactId, ct).ConfigureAwait(false);
+        if (contact is null) return;
+
+        var newName = message.Metadata.TryGetValue("display_name", out var dn) && !string.IsNullOrWhiteSpace(dn) ? dn : null;
+        if (newName != null && (contact.DisplayName == message.ExternalUserId || contact.DisplayName.StartsWith("pzl_", StringComparison.Ordinal)))
+        {
+            contact.UpdateDisplayName(newName);
+        }
+
+        if (message.Metadata.TryGetValue("avatar_url", out var av) && !string.IsNullOrWhiteSpace(av))
+        {
+            contact.UpdateAvatar(av, _clock.UtcNow);
+        }
+    }
+    private async Task<Guid?> ResolveInboxIdAsync(Guid tenantId, ChannelMessage message, CancellationToken ct)
+    {
+        // 1. Query all inboxes for this platform
+        var inboxes = await _db.Inboxes
+            .IgnoreQueryFilters()
+            .Where(i => i.TenantId == tenantId && i.Platform == message.Channel)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var matchedInboxes = new List<Inbox>();
+
+        // Check metadata page_id first
+        if (message.Metadata.TryGetValue("page_id", out var pageId) && !string.IsNullOrWhiteSpace(pageId))
+        {
+            matchedInboxes.AddRange(inboxes.Where(i => i.ExternalPageId == pageId));
+        }
+
+        // Fallback: check ExternalThreadId page matching
+        if (matchedInboxes.Count == 0)
+        {
+            foreach (var inbox in inboxes)
+            {
+                if (IsPageIdMatch(message.ExternalThreadId, inbox.ExternalPageId))
+                {
+                    matchedInboxes.Add(inbox);
+                }
+            }
+        }
+
+        // Fallback 2: check platform fallback if there's only one inbox
+        if (matchedInboxes.Count == 0)
+        {
+            matchedInboxes.AddRange(inboxes);
+        }
+
+        if (matchedInboxes.Count == 0) return null;
+
+        return matchedInboxes[0].Id;
+    }
+
+    private static bool IsPageIdMatch(string externalThreadId, string externalPageId)
+    {
+        if (string.IsNullOrWhiteSpace(externalThreadId) || string.IsNullOrWhiteSpace(externalPageId))
+            return false;
+
+        if (externalThreadId.Contains(externalPageId, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var pageDigits = new string(externalPageId.Where(char.IsDigit).ToArray());
+        if (!string.IsNullOrEmpty(pageDigits) && externalThreadId.Contains(pageDigits, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
     }
 
     private async Task<Contact?> UpsertContactAsync(Guid tenantId, ChannelMessage message, CancellationToken ct)
@@ -100,12 +193,28 @@ public sealed partial class ChannelMessageIngestor(
             .Where(c => c.TenantId == tenantId)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
-        if (existing is not null) return existing;
+        if (existing is not null)
+        {
+            var newName = message.Metadata.TryGetValue("display_name", out var dn) && !string.IsNullOrWhiteSpace(dn) ? dn : null;
+            if (newName != null && (existing.DisplayName == message.ExternalUserId || existing.DisplayName.StartsWith("pzl_", StringComparison.Ordinal)))
+            {
+                existing.UpdateDisplayName(newName);
+            }
 
-        var displayName = message.Metadata.TryGetValue("display_name", out var dn) && !string.IsNullOrWhiteSpace(dn)
-            ? dn
+            if (message.Metadata.TryGetValue("avatar_url", out var av) && !string.IsNullOrWhiteSpace(av))
+            {
+                existing.UpdateAvatar(av, _clock.UtcNow);
+            }
+            return existing;
+        }
+
+        var displayName = message.Metadata.TryGetValue("display_name", out var existingDn) && !string.IsNullOrWhiteSpace(existingDn)
+            ? existingDn
             : message.ExternalUserId;
+        var avatarUrl = message.Metadata.TryGetValue("avatar_url", out var av2) ? av2 : null;
         var contact = Contact.Create(tenantId, displayName, _clock.UtcNow);
+        if (!string.IsNullOrEmpty(avatarUrl))
+            contact.UpdateAvatar(avatarUrl, _clock.UtcNow);
         contact.LinkExternalId(message.Channel, message.ExternalUserId, _clock.UtcNow);
         _db.Contacts.Add(contact);
 

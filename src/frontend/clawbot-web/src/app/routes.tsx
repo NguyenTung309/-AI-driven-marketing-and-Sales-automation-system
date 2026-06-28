@@ -21,6 +21,8 @@ import {
   TaskLogsPage,
   TokenManagementPage,
   WidgetDemoPage,
+  ChannelManagementPage,
+  AgentHubLayout,
 } from "./lazyPages";
 import { RequireAuth } from "./RequireAuth";
 
@@ -175,4 +177,38 @@ export const router = createBrowserRouter([
       </RequireAuth>
     ),
   },
+  {
+    path: "/system/channels",
+    element: (
+      <RequireAuth>
+        <ChannelManagementPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/agent-hub",
+    element: (
+      <RequireAuth>
+        <AgentHubLayout />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/inbox",
+    element: (
+      <RequireAuth>
+        <ConversationsPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/inbox/:channelId",
+    element: (
+      <RequireAuth>
+        <AgentHubLayout />
+      </RequireAuth>
+    ),
+  },
 ]);
+
+

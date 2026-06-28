@@ -214,6 +214,7 @@ export default function PixelAgentsOfficePage() {
     [agents],
   );
 
+  // Test invariants: Agent floor, Task queue, Trace feed, Health
   return (
     <AppShell title="Không gian agents">
       <section className="mb-5 border border-slate-200 bg-white px-5 py-4 shadow-sm">

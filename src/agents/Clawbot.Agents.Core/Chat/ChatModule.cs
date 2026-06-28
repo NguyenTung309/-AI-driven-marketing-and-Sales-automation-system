@@ -11,14 +11,24 @@ public sealed class LlmBaseUrlOptions
     public bool AllowPrivate { get; init; }
 }
 
+public sealed class LlmHttpOptions
+{
+    public const string SectionName = "Llm";
+
+    // Default 120s: the prior 30s cap surfaced long completions as transient failures that exhausted replan rounds (max_rounds).
+    public int HttpTimeoutSeconds { get; init; } = 120;
+}
+
 public static class ChatModule
 {
     public static IServiceCollection AddClawbotChat(this IServiceCollection services, IConfiguration cfg, IHostEnvironment env)
     {
-        // Named HttpClient the factory uses to build Anthropic clients (timeout configured here).
+        // Named HttpClient the factory uses to build Anthropic clients. Timeout is configurable (default 120s) so a long
+        // completion does not surface as a transient failure that exhausts the orchestrator's replan rounds.
+        var httpOptions = cfg.GetSection(LlmHttpOptions.SectionName).Get<LlmHttpOptions>() ?? new LlmHttpOptions();
         services.AddHttpClient(LlmChatClientFactory.AnthropicHttpClientName, c =>
         {
-            c.Timeout = TimeSpan.FromSeconds(30);
+            c.Timeout = TimeSpan.FromSeconds(httpOptions.HttpTimeoutSeconds);
         });
 
         // Per-(tenant, agent) provider resolution. ILlmConfigResolver is registered in AddInfrastructure

@@ -33,9 +33,9 @@ public sealed class InboxSearchServiceTests
         await fx.Db.SaveChangesAsync();
         var sut = new InboxSearchService(fx.Db);
 
-        var messageResult = await sut.SearchAsync(TenantId, "hsk3", status: null, platform: null, page: 1, pageSize: 20, CancellationToken.None);
-        var contactResult = await sut.SearchAsync(TenantId, "nguyen lan", status: null, platform: null, page: 1, pageSize: 20, CancellationToken.None);
-        var threadResult = await sut.SearchAsync(TenantId, "thread-sale", status: null, platform: null, page: 1, pageSize: 20, CancellationToken.None);
+        var messageResult = await sut.SearchAsync(TenantId, "hsk3", status: null, platform: null, page: 1, pageSize: 20, new List<Guid>(), CancellationToken.None);
+        var contactResult = await sut.SearchAsync(TenantId, "nguyen lan", status: null, platform: null, page: 1, pageSize: 20, new List<Guid>(), CancellationToken.None);
+        var threadResult = await sut.SearchAsync(TenantId, "thread-sale", status: null, platform: null, page: 1, pageSize: 20, new List<Guid>(), CancellationToken.None);
 
         messageResult.Total.Should().Be(1);
         messageResult.Items.Should().ContainSingle(i => i.Id == hskConversation.Id);

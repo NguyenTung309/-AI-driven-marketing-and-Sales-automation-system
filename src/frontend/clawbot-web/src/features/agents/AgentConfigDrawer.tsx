@@ -1,7 +1,16 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { AgentListItem, UpdateAgentSettingsPayload } from "@/shared/api/agents";
-import { createLlmConfig, type CreateLlmConfigPayload, type LlmConfig, type LlmProvider } from "@/shared/api/llmConfigs";
+import {
+  createLlmConfig,
+  updateLlmConfig,
+  deleteLlmConfig,
+  setLlmConfigActive,
+  rotateLlmKey,
+  type CreateLlmConfigPayload,
+  type LlmConfig,
+  type LlmProvider,
+} from "@/shared/api/llmConfigs";
 
 export type AgentConfigTab = "prompt" | "model" | "tools";
 
@@ -177,6 +186,66 @@ export function AgentConfigDrawer({
     },
     onError: (error) => setLlmError(error instanceof Error ? error.message : "Không tạo được cấu hình LLM."),
   });
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<LlmConfigDraft>(EMPTY_LLM_CONFIG_DRAFT);
+  const onLlmError = (error: unknown) =>
+    setLlmError(error instanceof Error ? error.message : "Thao tác cấu hình LLM thất bại.");
+  const refetchConfigs = () => queryClient.invalidateQueries({ queryKey: ["llm-configs"] });
+
+  const updateLlmMutation = useMutation({
+    mutationFn: async () => {
+      await updateLlmConfig(editingId!, {
+        provider: editDraft.provider,
+        modelId: editDraft.modelId.trim(),
+        displayName: editDraft.displayName.trim() || null,
+        baseUrl: editDraft.baseUrl.trim() || null,
+        inputUsdPer1M: toNullableNumber(editDraft.inputUsdPer1M),
+        outputUsdPer1M: toNullableNumber(editDraft.outputUsdPer1M),
+      });
+      if (editDraft.apiKey.trim()) await rotateLlmKey(editingId!, editDraft.apiKey);
+    },
+    onSuccess: async () => {
+      setEditingId(null);
+      setLlmError(null);
+      await refetchConfigs();
+    },
+    onError: onLlmError,
+  });
+
+  const toggleLlmMutation = useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) => setLlmConfigActive(id, active),
+    onSuccess: async () => {
+      setLlmError(null);
+      await refetchConfigs();
+    },
+    onError: onLlmError,
+  });
+
+  const deleteLlmMutation = useMutation({
+    mutationFn: (id: string) => deleteLlmConfig(id),
+    onSuccess: async (_data, id) => {
+      if (form.llmConfigId === id) onDraftChange({ llmConfigId: "" });
+      setLlmError(null);
+      await refetchConfigs();
+    },
+    onError: onLlmError,
+  });
+
+  const startEdit = (config: LlmConfig) => {
+    setEditingId(config.id);
+    setLlmError(null);
+    setEditDraft({
+      provider: config.provider,
+      modelId: config.modelId,
+      displayName: config.displayName ?? "",
+      apiKey: "",
+      baseUrl: config.baseUrl ?? "",
+      inputUsdPer1M: config.inputUsdPer1M?.toString() ?? "",
+      outputUsdPer1M: config.outputUsdPer1M?.toString() ?? "",
+    });
+  };
+
   return (
     <>
       <button aria-label="Đóng cấu hình agent" className="fixed inset-0 z-[60] bg-black/20 backdrop-blur-[8px]" onClick={onClose} type="button" />
@@ -401,31 +470,96 @@ export function AgentConfigDrawer({
               </div>
               {llmConfigs.map((config) => {
                 const selected = config.id === form.llmConfigId;
+                const isEditing = editingId === config.id;
+                const busy =
+                  (toggleLlmMutation.isPending && toggleLlmMutation.variables?.id === config.id) ||
+                  (deleteLlmMutation.isPending && deleteLlmMutation.variables === config.id);
                 return (
-                  <button
+                  <div
                     className={[
-                      "rounded-lg border p-4 text-left transition-colors hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
+                      "rounded-lg border p-4 transition-colors",
                       selected ? "border-primary bg-primary/5" : "border-outline bg-white",
                     ].join(" ")}
                     key={config.id}
-                    onClick={() => {
-                      onDraftChange({ llmConfigId: config.id, model: config.modelId, provider: config.provider });
-                      setModelPickerOpen(false);
-                    }}
-                    type="button"
                   >
-                    <span className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-title-sm font-bold text-secondary">{config.displayName || config.modelId}</span>
                       <span className={config.isActive ? "text-mono-status text-green-700" : "text-mono-status text-amber-700"}>
                         {config.isActive ? "Đang bật" : "Đang tắt"}
                       </span>
-                    </span>
-                    <span className="mt-2 grid gap-2 text-body-md text-on-surface-variant md:grid-cols-3">
+                    </div>
+                    <div className="mt-2 grid gap-2 text-body-md text-on-surface-variant md:grid-cols-3">
                       <span>{providerLabel(config.provider)}</span>
                       <span className="font-mono text-mono-status">{config.modelId}</span>
                       <span className="truncate font-mono text-mono-status">{config.baseUrl || "endpoint mặc định"}</span>
-                    </span>
-                  </button>
+                    </div>
+
+                    {isEditing ? (
+                      <div className="mt-3 grid gap-3 rounded border border-outline bg-surface p-3 md:grid-cols-2">
+                        <label className="space-y-1">
+                          <span className="text-label-caps uppercase text-tertiary">Tên hiển thị</span>
+                          <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" onChange={(event) => setEditDraft((current) => ({ ...current, displayName: event.target.value }))} value={editDraft.displayName} />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="text-label-caps uppercase text-tertiary">Nhà cung cấp</span>
+                          <select className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" onChange={(event) => setEditDraft((current) => ({ ...current, provider: event.target.value as LlmProvider }))} value={editDraft.provider}>
+                            <option value="anthropic">Anthropic</option>
+                            <option value="openai">Chuẩn OpenAI</option>
+                          </select>
+                        </label>
+                        <label className="space-y-1">
+                          <span className="text-label-caps uppercase text-tertiary">Model</span>
+                          <input className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" onChange={(event) => setEditDraft((current) => ({ ...current, modelId: event.target.value }))} value={editDraft.modelId} />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="text-label-caps uppercase text-tertiary">API key (để trống = giữ nguyên)</span>
+                          <input autoComplete="off" className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" onChange={(event) => setEditDraft((current) => ({ ...current, apiKey: event.target.value }))} placeholder="••• đổi key" type="password" value={editDraft.apiKey} />
+                        </label>
+                        <label className="space-y-1 md:col-span-2">
+                          <span className="text-label-caps uppercase text-tertiary">Base URL</span>
+                          <input className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" onChange={(event) => setEditDraft((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="http://localhost:20128/v1" value={editDraft.baseUrl} />
+                        </label>
+                        <div className="flex justify-end gap-2 md:col-span-2">
+                          <button className="rounded border border-outline px-3 py-1.5 text-body-md font-bold text-on-surface-variant hover:bg-surface-variant" onClick={() => setEditingId(null)} type="button">
+                            Hủy
+                          </button>
+                          <button className="rounded bg-primary px-3 py-1.5 text-body-md font-bold text-white disabled:opacity-60" disabled={updateLlmMutation.isPending || !editDraft.modelId.trim()} onClick={() => updateLlmMutation.mutate()} type="button">
+                            {updateLlmMutation.isPending ? "Đang lưu" : "Lưu thay đổi"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <button
+                          className="rounded border border-primary px-3 py-1.5 text-body-md font-bold text-primary hover:bg-primary/5 disabled:opacity-60"
+                          disabled={selected}
+                          onClick={() => {
+                            onDraftChange({ llmConfigId: config.id, model: config.modelId, provider: config.provider });
+                            setModelPickerOpen(false);
+                          }}
+                          type="button"
+                        >
+                          {selected ? "Đang chọn" : "Chọn"}
+                        </button>
+                        <button className="rounded border border-outline px-3 py-1.5 text-body-md font-bold text-secondary hover:border-primary hover:text-primary" onClick={() => startEdit(config)} type="button">
+                          Sửa
+                        </button>
+                        <button className="rounded border border-outline px-3 py-1.5 text-body-md font-bold text-secondary hover:border-primary hover:text-primary disabled:opacity-60" disabled={busy} onClick={() => toggleLlmMutation.mutate({ id: config.id, active: !config.isActive })} type="button">
+                          {config.isActive ? "Tắt" : "Bật"}
+                        </button>
+                        <button
+                          className="ml-auto rounded border border-red-300 px-3 py-1.5 text-body-md font-bold text-red-700 hover:bg-red-50 disabled:opacity-60"
+                          disabled={busy}
+                          onClick={() => {
+                            if (window.confirm(`Xoá cấu hình "${config.displayName || config.modelId}"?`)) deleteLlmMutation.mutate(config.id);
+                          }}
+                          type="button"
+                        >
+                          Xoá
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
               {llmConfigs.length === 0 ? (

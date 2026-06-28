@@ -12,7 +12,9 @@ public sealed partial class PancakeConfigResolver(
     IConfiguration cfg,
     ILogger<PancakeConfigResolver> logger) : IPancakeConfigResolver
 {
-    private const string DefaultBaseUrl = "https://pancake.vn/api/v1";
+    // Verified (SPEC-16 §5.1): page ops run under pages.fm/api/public_api/v1 with the page_access_token.
+    // The previous default (pancake.vn/api/v1) targeted the wrong host and sent the user token where a page token is required.
+    private const string DefaultBaseUrl = "https://pages.fm/api/public_api/v1";
     private const string DefaultSendPath = "/pages/{page_id}/conversations/{thread_id}/messages";
     private const string DefaultSigHeader = "x-pancake-signature";
 

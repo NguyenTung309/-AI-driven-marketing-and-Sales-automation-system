@@ -19,6 +19,18 @@ public sealed class OrchestrationV2EndpointPermissionTests
         source.Should().Contain("group.MapPost(\"/schedules/{id:guid}/run-now\", RunScheduleNowAsync).RequirePermission(\"orchestration:run\")");
     }
 
+    [Fact]
+    public void AdminChannelsEndpoints_require_channels_manage_permission()
+    {
+        // SPEC-16 Module M-2: admin channel config endpoints are gated by channels:manage.
+        var source = File.ReadAllText(FindRepoFile("src", "api", "Clawbot.Api", "Endpoints", "AdminChannelsEndpoints.cs"));
+
+        source.Should().Contain("RequirePermission(\"channels:manage\")");
+        source.Should().Contain("MapPost(\"/pancake/connect\", ConnectPancakeAsync)");
+        source.Should().Contain("MapPost(\"/pancake/pages\", MintPancakePagesAsync)");
+        source.Should().Contain("MapGet(\"/pancake/pages\", ListConnectedPagesAsync)");
+    }
+
     private static string FindRepoFile(params string[] segments)
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

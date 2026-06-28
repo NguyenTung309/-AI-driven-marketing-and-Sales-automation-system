@@ -1,18 +1,24 @@
 using Clawbot.Agents.Core;
 using Clawbot.Agents.Core.Orchestrator;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Multitenancy;
 using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Infrastructure.Agents;
 
 // V2 sub-agent catalog backed by agent_definitions (data-defined personas).
-public sealed class AgentDefinitionCatalog(AppDbContext db) : IAgentDefinitionCatalog
+public sealed class AgentDefinitionCatalog(AppDbContext db, ITenantAccessor tenants) : IAgentDefinitionCatalog
 {
     private readonly AppDbContext _db = db;
+    private readonly ITenantAccessor _tenants = tenants;
 
     public async Task<IReadOnlyList<AgentDefinitionCatalogEntry>> ListAsync(Guid tenantId, CancellationToken ct = default)
     {
+        if (_tenants.Current is { TenantId: var ambientTenantId } && ambientTenantId != tenantId)
+            return [];
+
         var rows = await _db.AgentDefinitions
+            .IgnoreQueryFilters()
             .AsNoTracking()
             .Where(d => d.TenantId == tenantId && d.DeletedAt == null && d.IsOrchestratable)
             .OrderBy(d => d.Code)
@@ -26,6 +32,7 @@ public sealed class AgentDefinitionCatalog(AppDbContext db) : IAgentDefinitionCa
                 d.InputSchemaJson,
                 d.IsOrchestratable,
                 d.KbModuleCode,
+                d.AllowedToolsJson,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -40,7 +47,8 @@ public sealed class AgentDefinitionCatalog(AppDbContext db) : IAgentDefinitionCa
                 string.IsNullOrWhiteSpace(d.PersonaPrompt) ? $"Run {d.DisplayName}." : d.PersonaPrompt,
                 string.IsNullOrWhiteSpace(d.InputSchemaJson) ? "{}" : d.InputSchemaJson,
                 d.IsOrchestratable,
-                string.IsNullOrWhiteSpace(d.KbModuleCode) ? null : d.KbModuleCode))
+                string.IsNullOrWhiteSpace(d.KbModuleCode) ? null : d.KbModuleCode,
+                string.IsNullOrWhiteSpace(d.AllowedToolsJson) ? "[]" : d.AllowedToolsJson))
             .ToArray();
     }
 

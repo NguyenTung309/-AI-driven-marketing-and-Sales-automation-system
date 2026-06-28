@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using Clawbot.Agents.Contracts.Report;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Analytics;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
@@ -16,7 +17,7 @@ public static class AnalyticsEndpoints
 {
     public static IEndpointRouteBuilder MapAnalytics(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/analytics").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var grp = app.MapGroup("/api/analytics").RequirePermission("analytics:read").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/omnichannel", GetOmnichannelAsync);
         grp.MapGet("/omnichannel-delta", GetOmnichannelDeltaAsync);

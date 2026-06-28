@@ -5,7 +5,8 @@ public sealed record AutonomousRunRequest(
     Guid SessionId,
     string Goal,
     string Source,
-    bool RequiresApproval);
+    bool RequiresApproval,
+    bool DryRun = false);
 
 public sealed record AutonomousRunResult(string Status, string? Reason, int RoundCount)
 {
@@ -20,4 +21,9 @@ public sealed class AutonomousOrchestratorOptions
     public int MaxRounds { get; init; } = 3;
     public int MaxConcurrency { get; init; } = 3;        // ponytail: sequential execution for now; cap reserved for parallel upgrade
     public decimal PerTaskEstimateUsd { get; init; } = 0.01m;
+
+    // Transient (timeout / 5xx / 429) failures retry the SAME task without burning a replan round.
+    // Only logical failures (non-transient exceptions or AgentResult.Success=false) count toward MaxRounds.
+    public int MaxTransientRetries { get; init; } = 2;
+    public int TransientBackoffBaseMs { get; init; } = 2000;
 }

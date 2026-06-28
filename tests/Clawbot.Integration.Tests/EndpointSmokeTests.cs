@@ -18,7 +18,10 @@ public sealed class EndpointSmokeTests : IClassFixture<SqlServerFixture>, IAsync
         _client = _factory.CreateClient();
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public async Task InitializeAsync()
+    {
+        await _factory.InitializeAsync();
+    }
     public Task DisposeAsync()
     {
         _client.Dispose();

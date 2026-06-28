@@ -127,15 +127,44 @@ public static class DependencyInjection
         services.AddScoped<IAssignmentPoolSource, EfAssignmentPoolSource>();
         services.AddClawbotLead(); // ILeadAssignmentService, consumed by LeadsEndpoints.
         services.AddScoped<IPancakeConfigResolver, PancakeConfigResolver>();
+        // SPEC-16 §5.1: per-page Pancake token model — page-token read resolver + mint/store service + HTTP gateway.
+        var pancakeUserApi = cfg.GetSection(PancakeUserApiOptions.SectionName).Get<PancakeUserApiOptions>() ?? new PancakeUserApiOptions();
+        services.AddSingleton(pancakeUserApi);
+        services.AddScoped<IPancakePageTokenResolver, PancakePageTokenResolver>();
+        services.AddScoped<IPancakePageTokenService, PancakePageTokenService>();
+        services.AddHttpClient<IPageTokenMintGateway, HttpPancakePageTokenMintGateway>()
+            .AddPolicyHandler(HttpResiliencePolicies.Retry())
+            .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
+            .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(15)));
+        // SPEC-16 Module M-3/M-4: same gateway also lists pages (IPageListGateway) for the admin connect flow.
+        services.AddScoped<IPageListGateway>(sp => sp.GetRequiredService<IPageTokenMintGateway>() as IPageListGateway
+            ?? throw new InvalidOperationException("IPageListGateway not available"));
 
         services.AddHttpClient<IChannelAdapter, PancakeChannelAdapter>()
             .AddPolicyHandler(HttpResiliencePolicies.Retry())
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
-        services.AddHttpClient<ISocialPublisher, HttpSocialPublisher>()
-            .AddPolicyHandler(HttpResiliencePolicies.Retry())
-            .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
-            .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
+        // SPEC-16 P2-8: graph publisher (FB Graph /feed + Zalo OA) when GraphPublisher is enabled; otherwise the
+        // legacy generic webhook publisher (HttpSocialPublisher) stays the default for backward compatibility.
+        services.Configure<GraphPublisherOptions>(cfg.GetSection(GraphPublisherOptions.SectionName));
+        // SPEC-16 Module M-1: encrypted DB credential resolver for FB/Zalo (falls back to options in GraphSocialPublisher).
+        services.AddScoped<ISocialCredentialResolver, EfSocialCredentialResolver>();
+        var graphPublisherEnabled = cfg.GetSection($"{GraphPublisherOptions.SectionName}:Facebook:Enabled").Exists()
+            || cfg.GetSection($"{GraphPublisherOptions.SectionName}:Zalo:Enabled").Exists();
+        if (graphPublisherEnabled)
+        {
+            services.AddHttpClient<ISocialPublisher, GraphSocialPublisher>()
+                .AddPolicyHandler(HttpResiliencePolicies.Retry())
+                .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
+                .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(15)));
+        }
+        else
+        {
+            services.AddHttpClient<ISocialPublisher, HttpSocialPublisher>()
+                .AddPolicyHandler(HttpResiliencePolicies.Retry())
+                .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
+                .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
+        }
 
         // Ads connectors
         services.Configure<MetaAdsOptions>(cfg.GetSection(MetaAdsOptions.SectionName));
@@ -166,6 +195,7 @@ public static class DependencyInjection
         services.Configure<SmtpOptions>(cfg.GetSection(SmtpOptions.SectionName));
         services.Configure<Documents.MinioOptions>(cfg.GetSection(Documents.MinioOptions.SectionName));
         services.AddScoped<IEmailSender, SmtpEmailSender>();
+        services.AddSingleton<Clawbot.Agents.Core.Kb.IDocumentTextExtractor, Documents.DocumentTextExtractor>();
 
         return services;
     }

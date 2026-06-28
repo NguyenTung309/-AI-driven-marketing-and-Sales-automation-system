@@ -1,6 +1,8 @@
 using Clawbot.Infrastructure.Identity;
+using Clawbot.Infrastructure.Persistence;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -15,7 +17,10 @@ public sealed class IdentityReconcileTests : IClassFixture<SqlServerFixture>, IA
 
     public IdentityReconcileTests(SqlServerFixture sql) => _factory = new ClawbotWebApplicationFactory(sql);
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public async Task InitializeAsync()
+    {
+        await _factory.InitializeAsync();
+    }
     public Task DisposeAsync() => _factory.DisposeAsync().AsTask();
     public void Dispose() => _factory.Dispose();
 
@@ -23,13 +28,17 @@ public sealed class IdentityReconcileTests : IClassFixture<SqlServerFixture>, IA
     public async Task UserManager_creates_and_finds_user_against_ddl_users_table()
     {
         using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenant = await db.Tenants.FirstAsync();
+        var tenantId = tenant.Id;
+
         var users = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
 
         var email = $"recon-{Guid.NewGuid():N}@hoc-ba.edu.vn";
         var user = new AppUser
         {
             Id = Guid.NewGuid(),
-            TenantId = Guid.NewGuid(),
+            TenantId = tenantId,
             Email = email,
             UserName = email,
             DisplayName = "Reconcile Test",

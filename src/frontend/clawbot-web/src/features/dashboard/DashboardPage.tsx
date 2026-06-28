@@ -331,7 +331,7 @@ function AgentStatus({ agents }: { readonly agents: readonly AgentPerformance[] 
 
 function QuickActions() {
   const actions = [
-    { to: "/conversations", icon: "add_comment", label: "Mở hộp thư ưu tiên", detail: "Duyệt hội thoại nóng" },
+    { to: "/inbox", icon: "add_comment", label: "Mở hộp thư ưu tiên", detail: "Duyệt hội thoại nóng" },
     { to: "/kb", icon: "upload_file", label: "Cập nhật tri thức", detail: "Phát hành phiên bản mới" },
     { to: "/notifications", icon: "notifications_active", label: "Xem cảnh báo", detail: "Lead nóng và bất thường" },
   ];

@@ -7,6 +7,11 @@ export interface OrchestrationV2Agent {
   readonly agentType: string;
   readonly isOrchestratable: boolean;
   readonly version: number;
+  readonly kbModuleCode?: string | null;
+  readonly personaPrompt?: string;
+  // SPEC-16 P1-7: tool allow-list + input schema for the ReAct worker.
+  readonly allowedToolsJson?: string;
+  readonly inputSchemaJson?: string;
 }
 
 export interface OrchestrationV2Schedule {
@@ -65,6 +70,21 @@ interface ListResponse<T> {
 export async function listOrchestrationV2Agents(): Promise<readonly OrchestrationV2Agent[]> {
   const res = await apiClient.get<ListResponse<OrchestrationV2Agent>>("/api/orchestration/v2/agents");
   return res.data.items;
+}
+
+// SPEC-16 P1-7: upsert a data-defined agent (allowedTools/inputSchema now editable).
+export async function upsertOrchestrationV2Agent(payload: {
+  readonly code: string;
+  readonly displayName: string;
+  readonly agentType: string;
+  readonly personaPrompt: string;
+  readonly isOrchestratable: boolean;
+  readonly kbModuleCode?: string | null;
+  readonly allowedToolsJson?: string;
+  readonly inputSchemaJson?: string;
+}): Promise<OrchestrationV2Agent> {
+  const res = await apiClient.post<OrchestrationV2Agent>("/api/orchestration/v2/agents", payload);
+  return res.data;
 }
 
 export async function listOrchestrationV2Schedules(): Promise<readonly OrchestrationV2Schedule[]> {

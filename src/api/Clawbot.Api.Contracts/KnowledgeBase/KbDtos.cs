@@ -36,6 +36,13 @@ public sealed record KbVersionDetailDto(
 
 public sealed record CreateKbVersionRequest(string ContentMd);
 
+// Result of uploading a file (docx/xlsx/csv/pdf/txt/md) auto-converted to a draft KB version.
+public sealed record KbUploadResult(
+    KbVersionDto Version,
+    string SourceFormat,
+    int CharCount,
+    string ContentMd);
+
 public sealed record KbTestCaseDto(Guid Id, string Question, string ExpectedAnswer, bool IsActive);
 
 public sealed record CreateKbTestCaseRequest(string Question, string ExpectedAnswer);

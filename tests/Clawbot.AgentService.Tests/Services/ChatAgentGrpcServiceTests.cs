@@ -34,10 +34,12 @@ public sealed class ChatAgentGrpcServiceTests
         await fx.Db.SaveChangesAsync();
 
         var claude = new CapturingClaude();
+        var clock = new FixedClock(Now);
         var service = new ChatAgentGrpcService(
             BuildAgent(claude),
             fx.Db,
-            new FixedClock(Now),
+            clock,
+            BuildLeadScorer(fx.Db, clock),
             NullLogger<ChatAgentGrpcService>.Instance);
         var stream = new CapturingChatStream();
 
@@ -70,10 +72,12 @@ public sealed class ChatAgentGrpcServiceTests
                 new ClaudeStreamChunk("chao", Final: false, 0, 0, 0m),
                 new ClaudeStreamChunk(string.Empty, Final: true, 10, 5, 0.000105m),
             });
+        var clock = new FixedClock(Now);
         var service = new ChatAgentGrpcService(
             BuildAgent(claude),
             fx.Db,
-            new FixedClock(Now),
+            clock,
+            BuildLeadScorer(fx.Db, clock),
             NullLogger<ChatAgentGrpcService>.Instance);
         var stream = new CapturingChatStream();
 
@@ -99,7 +103,73 @@ public sealed class ChatAgentGrpcServiceTests
         trace.Message.Should().Contain("usd=0.0001");
     }
 
-    private static CoreChat.ChatAgent BuildAgent(IClaudeChatClient claude)
+    [Fact]
+    public async Task Reply_sends_to_channel_when_conversation_has_external_thread()
+    {
+        // SPEC-16 P2-10: an unblocked reply to a conversation with an external thread is physically sent via the channel adapter.
+        using var fx = new AgentServiceTestAppDb(TenantId);
+        var conversation = Conversation.Open(TenantId, "pancake", "page_1:thread-ext", Now);
+        fx.Db.Add(conversation);
+        await fx.Db.SaveChangesAsync();
+
+        var claude = new CapturingClaude();
+        var clock = new FixedClock(Now);
+        var channel = Substitute.For<Clawbot.SharedKernel.Channels.IChannelAdapter>();
+        channel.Name.Returns("pancake");
+        var service = new ChatAgentGrpcService(
+            BuildAgent(claude),
+            fx.Db,
+            clock,
+            BuildLeadScorer(fx.Db, clock),
+            NullLogger<ChatAgentGrpcService>.Instance,
+            channel);
+        var stream = new CapturingChatStream();
+
+        await service.Reply(new ChatRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            ConversationId = conversation.Id.ToString("D"),
+            UserText = "xin chao",
+        }, stream, TestServerCallContext.Create());
+
+        await channel.Received(1).SendAsync("page_1:thread-ext", "Scenario reply", Arg.Any<CancellationToken>());
+        fx.Db.AgentTraces.Should().Contain(t => t.Phase == "sent" && (t.Message ?? string.Empty).Contains("page_1:thread-ext"));
+    }
+
+    [Fact]
+    public async Task Reply_does_not_send_when_blocked()
+    {
+        // EARS[WHEN the reply is blocked (safety/toxicity) THE SYSTEM SHALL not send it to the channel]
+        using var fx = new AgentServiceTestAppDb(TenantId);
+        var conversation = Conversation.Open(TenantId, "pancake", "thread-block", Now);
+        fx.Db.Add(conversation);
+        await fx.Db.SaveChangesAsync();
+
+        var claude = new CapturingClaude();
+        var clock = new FixedClock(Now);
+        var channel = Substitute.For<Clawbot.SharedKernel.Channels.IChannelAdapter>();
+        var service = new ChatAgentGrpcService(
+            BuildAgent(claude, toxicityBlocked: true),
+            fx.Db,
+            clock,
+            BuildLeadScorer(fx.Db, clock),
+            NullLogger<ChatAgentGrpcService>.Instance,
+            channel);
+        var stream = new CapturingChatStream();
+
+        await service.Reply(new ChatRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            ConversationId = conversation.Id.ToString("D"),
+            UserText = "spam spam",
+        }, stream, TestServerCallContext.Create());
+
+        await channel.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    private static CoreChat.ChatAgent BuildAgent(IClaudeChatClient claude) => BuildAgent(claude, toxicityBlocked: false);
+
+    private static CoreChat.ChatAgent BuildAgent(IClaudeChatClient claude, bool toxicityBlocked)
     {
         var injection = Substitute.For<IPromptInjectionDefender>();
         injection.InspectAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -119,7 +189,7 @@ public sealed class ChatAgentGrpcServiceTests
 
         var toxicity = Substitute.For<IToxicityFilter>();
         toxicity.IsBlockedAsync(Arg.Any<string>(), Arg.Any<float>(), Arg.Any<CancellationToken>())
-            .Returns(false);
+            .Returns(toxicityBlocked);
 
         var spam = Substitute.For<ISpamDetector>();
         spam.EvaluateAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
@@ -145,6 +215,9 @@ public sealed class ChatAgentGrpcServiceTests
             new AlwaysEnabledAgentToggleGate(),
             new CoreChat.LlmCallScope());
     }
+
+    private static LeadAutoScorer BuildLeadScorer(Clawbot.Infrastructure.Persistence.AppDbContext db, IClock clock) =>
+        new(db, new KeywordLeadSignalClassifier(), new CoreChat.LlmCallScope(), clock, NullLogger<LeadAutoScorer>.Instance);
 
     private sealed class CapturingClaude : IClaudeChatClient
     {

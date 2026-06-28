@@ -12,9 +12,11 @@ import {
   controlOrchestration,
   getOrchestrationPlan,
   getOrchestrationTrace,
+  listOrchestrationRuns,
   submitOrchestration,
   updateOrchestrationPlan,
   type OrchestrationControlAction,
+  type OrchestrationRunListItem,
   type OrchestrationSessionDto,
   type OrchestrationStatus,
 } from "@/shared/api/orchestration";
@@ -72,6 +74,28 @@ function taskTone(status: string): StatusTone {
   }
 }
 
+// SPEC-16 P3-2: order tasks by dependency depth (topological) so the DAG reads root→leaf, and expose each
+// task's depth for indentation — a lightweight graph visualization without a layout engine.
+function tasksByDepth(tasks: readonly OrchestrationTaskDto[]): readonly { task: OrchestrationTaskDto; depth: number }[] {
+  const depthById = new Map<string, number>();
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const resolve = (id: string): number => {
+    const cached = depthById.get(id);
+    if (cached !== undefined) return cached;
+    const task = byId.get(id);
+    if (!task || task.dependsOn.length === 0) {
+      depthById.set(id, 0);
+      return 0;
+    }
+    const d = 1 + Math.max(...task.dependsOn.map((dep) => resolve(dep)));
+    depthById.set(id, d);
+    return d;
+  };
+  return tasks
+    .map((task) => ({ task, depth: resolve(task.id) }))
+    .sort((a, b) => a.depth - b.depth || a.task.id.localeCompare(b.task.id));
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "Đã xảy ra lỗi không xác định.";
@@ -90,6 +114,8 @@ export function OrchestrationPanel() {
   // re-seed during render when a new plan arrives (React's "adjust state on prop change" pattern)
   // without an effect-driven cascading render.
   const [draft, setDraft] = useState<{ source: string; text: string } | null>(null);
+  // SPEC-16 P3-1: raw-JSON plan edit is behind an "advanced" toggle so the structured DAG is the primary view.
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const setSessionId = (next: string | null): void => {
     setSearchParams(
@@ -111,6 +137,13 @@ export function OrchestrationPanel() {
       query.state.data && ACTIVE_STATUSES.has(query.state.data.status) ? POLL_INTERVAL_MS : false,
   });
   const session = sessionQuery.data ?? null;
+
+  // SPEC-16 P3-6: recent/in-flight run list (URL-independent) so the user can switch runs without a sessionId in hand.
+  const runsQuery = useQuery({
+    queryKey: ["orchestration", "runs"],
+    queryFn: () => listOrchestrationRuns(false),
+    refetchInterval: POLL_INTERVAL_MS,
+  });
 
   const traceQuery = useQuery({
     queryKey: ["orchestration", "trace", sessionId],
@@ -209,6 +242,34 @@ export function OrchestrationPanel() {
         )}
       </div>
 
+      {/* SPEC-16 P3-6: recent/in-flight runs — click to load a run by id without typing the URL. */}
+      {runsQuery.data && runsQuery.data.length > 0 && (
+        <div className="rounded-lg border border-outline p-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-label-md text-on-surface">Phiên gần đây</h3>
+            {runsQuery.isFetching && <span className="text-label-sm text-on-surface-variant">đang cập nhật...</span>}
+          </div>
+          <ul className="mt-2 flex flex-col gap-1">
+            {runsQuery.data.map((run) => (
+              <li key={run.sessionId}>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-body-sm hover:bg-surface-container-low"
+                  onClick={() => setSessionId(run.sessionId)}
+                  disabled={busy}
+                >
+                  <StatusPill tone={statusTone(run.status)}>{statusLabel(run.status)}</StatusPill>
+                  <span className="truncate text-on-surface">{run.goal || "(không có mục tiêu)"}</span>
+                  <span className="ml-auto shrink-0 text-label-sm text-on-surface-variant">
+                    {new Date(run.startedAt).toLocaleString()}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {isPlanning && (
         <Alert tone="info">
           <span className="inline-flex items-center gap-2">
@@ -242,36 +303,61 @@ export function OrchestrationPanel() {
 
           {session.tasks.length > 0 && (
             <div className="flex flex-col gap-2">
-              <label className="text-label-sm text-on-surface-variant" htmlFor="orchestration-plan-json">
-                Kế hoạch JSON có thể chỉnh sửa
-              </label>
-              <textarea
-                id="orchestration-plan-json"
-                value={planDraft}
-                onChange={(e) => setPlanDraft(e.target.value)}
-                rows={6}
-                className="w-full rounded-lg border border-outline bg-surface-container-lowest p-3 font-mono text-mono-status text-on-surface focus:border-primary focus:outline-none"
-                disabled={!canEditPlan || busy}
-              />
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => session && updatePlan.mutate({ sessionId: session.sessionId, planJson: planDraft, etag: session.etag })}
-                  disabled={!canEditPlan || busy || planDraft.trim().length === 0}
-                >
-                  Lưu kế hoạch
-                </Button>
-              </div>
+              <button
+                type="button"
+                className="self-start text-label-sm text-primary hover:underline"
+                onClick={() => setShowAdvanced((v) => !v)}
+                aria-expanded={showAdvanced}
+              >
+                {showAdvanced ? "▾ Ẩn chỉnh sửa JSON nâng cao" : "▸ Chỉnh sửa JSON nâng cao"}
+              </button>
+              {showAdvanced && (
+                <>
+                  <label className="text-label-sm text-on-surface-variant" htmlFor="orchestration-plan-json">
+                    Kế hoạch JSON có thể chỉnh sửa
+                  </label>
+                  <textarea
+                    id="orchestration-plan-json"
+                    value={planDraft}
+                    onChange={(e) => setPlanDraft(e.target.value)}
+                    rows={6}
+                    className="w-full rounded-lg border border-outline bg-surface-container-lowest p-3 font-mono text-mono-status text-on-surface focus:border-primary focus:outline-none"
+                    disabled={!canEditPlan || busy}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => session && updatePlan.mutate({ sessionId: session.sessionId, planJson: planDraft, etag: session.etag })}
+                      disabled={!canEditPlan || busy || planDraft.trim().length === 0}
+                    >
+                      Lưu kế hoạch
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
           <ul className="flex flex-col gap-2">
-            {session.tasks.map((task) => (
-              <li key={task.id} className="flex items-start justify-between gap-3 rounded-lg border border-outline p-3">
+            {tasksByDepth(session.tasks).map(({ task, depth }) => (
+              <li
+                key={task.id}
+                className="flex items-start justify-between gap-3 rounded-lg border border-outline p-3"
+                style={{ marginLeft: `${depth * 20}px` }}
+              >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
+                    {depth > 0 && <span className="text-label-sm text-on-surface-variant" aria-hidden>↳</span>}
                     <span className="font-mono text-mono-status text-on-surface-variant">{task.agent}</span>
                     <StatusPill tone={taskTone(task.status)}>{task.status}</StatusPill>
+                    {task.useCount && task.useCount > 1 ? (
+                      <span className="rounded-full bg-surface-container-high px-2 text-label-sm text-on-surface-variant" title={`Agent ${task.agent} được dùng ${task.useCount} lần trong phiên`}>
+                        ×{task.useCount}
+                      </span>
+                    ) : null}
+                    {task.currentTaskId === task.id ? (
+                      <span className="rounded-full bg-primary/10 px-2 text-label-sm text-primary">đang chạy</span>
+                    ) : null}
                   </div>
                   <p className="truncate text-body-md text-on-surface">{task.description}</p>
                   {task.dependsOn.length > 0 && (

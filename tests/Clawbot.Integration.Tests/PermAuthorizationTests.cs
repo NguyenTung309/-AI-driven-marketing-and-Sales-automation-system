@@ -32,7 +32,11 @@ public sealed class PermAuthorizationTests : IClassFixture<SqlServerFixture>, IA
         _noPerms = _noPermsFactory.CreateClient();
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public async Task InitializeAsync()
+    {
+        await _withPermsFactory.InitializeAsync();
+        await _noPermsFactory.InitializeAsync();
+    }
     public Task DisposeAsync()
     {
         _withPerms.Dispose();

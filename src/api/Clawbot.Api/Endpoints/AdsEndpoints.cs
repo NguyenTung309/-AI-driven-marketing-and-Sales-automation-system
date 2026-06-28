@@ -1,4 +1,5 @@
 using Clawbot.Agents.Contracts.Ads;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Ads;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Ads;
@@ -15,19 +16,19 @@ public static class AdsEndpoints
 {
     public static IEndpointRouteBuilder MapAds(this IEndpointRouteBuilder app)
     {
-        var grp = app.MapGroup("/api/ads").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var grp = app.MapGroup("/api/ads").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
-        grp.MapGet("/rules", ListRulesAsync);
-        grp.MapPost("/rules", CreateRuleAsync);
-        grp.MapPut("/rules/{id:guid}", UpdateRuleAsync);
-        grp.MapDelete("/rules/{id:guid}", DeactivateRuleAsync);
+        grp.MapGet("/rules", ListRulesAsync).RequirePermission("ads:read");
+        grp.MapPost("/rules", CreateRuleAsync).RequirePermission("ads:write");
+        grp.MapPut("/rules/{id:guid}", UpdateRuleAsync).RequirePermission("ads:write");
+        grp.MapDelete("/rules/{id:guid}", DeactivateRuleAsync).RequirePermission("ads:write");
 
-        grp.MapGet("/campaigns", ListCampaignsAsync);
-        grp.MapPut("/campaigns/{id:guid}/target-cpl", UpdateTargetCplAsync);
+        grp.MapGet("/campaigns", ListCampaignsAsync).RequirePermission("ads:read");
+        grp.MapPut("/campaigns/{id:guid}/target-cpl", UpdateTargetCplAsync).RequirePermission("ads:write");
 
-        grp.MapGet("/actions", ListActionsAsync);
-        grp.MapPost("/campaigns/{id:guid}/evaluate", EvaluateCampaignAsync);
-        grp.MapPost("/lookalike", BuildLookalikeAsync);
+        grp.MapGet("/actions", ListActionsAsync).RequirePermission("ads:read");
+        grp.MapPost("/campaigns/{id:guid}/evaluate", EvaluateCampaignAsync).RequirePermission("ads:write");
+        grp.MapPost("/lookalike", BuildLookalikeAsync).RequirePermission("ads:write");
 
         return app;
     }

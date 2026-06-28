@@ -14,4 +14,6 @@ public sealed class AppUser : IdentityUser<Guid>
     public DateOnly? DateOfBirth { get; set; }
     public string? AvatarUrl { get; set; }
     public DateTimeOffset? LastLoginAt { get; set; }
+    public string? PancakeAccessTokenEncrypted { get; set; }
+    public DateTimeOffset? PancakeAccessTokenUpdatedAt { get; set; }
 }

@@ -5,6 +5,7 @@ import { Alert } from "@/shared/ui/Alert";
 import { Button } from "@/shared/ui/Button";
 import { Card } from "@/shared/ui/Card";
 import { Input } from "@/shared/ui/Input";
+import { Modal } from "@/shared/ui/Modal";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import {
   createOrchestrationV2Run,
@@ -14,6 +15,8 @@ import {
   listOrchestrationV2Runs,
   listOrchestrationV2Schedules,
   runOrchestrationV2ScheduleNow,
+  upsertOrchestrationV2Agent,
+  type OrchestrationV2Agent,
   type OrchestrationV2RunDetail,
 } from "@/shared/api/orchestrationV2";
 
@@ -70,6 +73,9 @@ export default function OrchestrationV2Page() {
   const [timezoneId, setTimezoneId] = useState("Asia/Ho_Chi_Minh");
   const [selectedRun, setSelectedRun] = useState<OrchestrationV2RunDetail | null>(null);
   const [queuedRunNow, setQueuedRunNow] = useState<string | null>(null);
+  // SPEC-16 P1-7: agent tool allow-list editor state.
+  const [editAgent, setEditAgent] = useState<OrchestrationV2Agent | null>(null);
+  const [editAllowedTools, setEditAllowedTools] = useState("");
 
   const agents = useQuery({ queryKey: ["orchestration-v2", "agents"], queryFn: listOrchestrationV2Agents });
   const schedules = useQuery({ queryKey: ["orchestration-v2", "schedules"], queryFn: listOrchestrationV2Schedules });
@@ -101,6 +107,25 @@ export default function OrchestrationV2Page() {
     },
   });
   const loadRun = useMutation({ mutationFn: getOrchestrationV2Run, onSuccess: setSelectedRun });
+
+  const saveAgent = useMutation({
+    mutationFn: () => {
+      if (!editAgent) throw new Error("No agent selected");
+      return upsertOrchestrationV2Agent({
+        code: editAgent.code,
+        displayName: editAgent.displayName,
+        agentType: editAgent.agentType,
+        personaPrompt: editAgent.personaPrompt ?? "",
+        isOrchestratable: editAgent.isOrchestratable,
+        kbModuleCode: editAgent.kbModuleCode ?? null,
+        allowedToolsJson: editAllowedTools.trim() || "[]",
+      });
+    },
+    onSuccess: async () => {
+      setEditAgent(null);
+      await queryClient.invalidateQueries({ queryKey: ["orchestration-v2", "agents"] });
+    },
+  });
 
   const busy = createRun.isPending || createSchedule.isPending || runNow.isPending || loadRun.isPending;
   const activeError = createRun.error ?? createSchedule.error ?? runNow.error ?? loadRun.error ?? agents.error ?? schedules.error ?? runs.error;
@@ -173,10 +198,26 @@ export default function OrchestrationV2Page() {
                 <div key={agent.id} className="rounded-lg border border-outline p-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-mono-status">{agent.code}</span>
-                    <StatusPill tone={agent.isOrchestratable ? "success" : "neutral"}>Phiên bản {agent.version}</StatusPill>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setEditAgent(agent);
+                          setEditAllowedTools(agent.allowedToolsJson ?? "[]");
+                        }}
+                      >
+                        Sửa tools
+                      </Button>
+                      <StatusPill tone={agent.isOrchestratable ? "success" : "neutral"}>Phiên bản {agent.version}</StatusPill>
+                    </div>
                   </div>
                   <p className="text-body-md text-on-surface">{agent.displayName}</p>
                   <p className="text-label-sm text-on-surface-variant">{agent.agentType}</p>
+                  {agent.allowedToolsJson && agent.allowedToolsJson !== "[]" ? (
+                    <p className="mt-1 font-mono text-label-sm text-primary">tools: {agent.allowedToolsJson}</p>
+                  ) : (
+                    <p className="mt-1 text-label-sm text-on-surface-variant">chỉ văn bản (không tool)</p>
+                  )}
                 </div>
               ))}
             </div>
@@ -221,6 +262,35 @@ export default function OrchestrationV2Page() {
           )}
         </div>
       </div>
+
+      {/* SPEC-16 P1-7: edit an agent's tool allow-list (drives the ReAct worker). */}
+      <Modal
+        open={editAgent !== null}
+        onClose={() => setEditAgent(null)}
+        title={`Cấu hình tools: ${editAgent?.code ?? ""}`}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setEditAgent(null)} disabled={saveAgent.isPending}>
+              Hủy
+            </Button>
+            <Button onClick={() => saveAgent.mutate()} disabled={saveAgent.isPending}>
+              Lưu
+            </Button>
+          </>
+        }
+      >
+        {saveAgent.error ? <Alert tone="error">{errorMessage(saveAgent.error)}</Alert> : null}
+        <p className="mb-2 text-body-sm text-on-surface-variant">
+          Danh sách tool agent được phép gọi trong vòng ReAct (JSON array, ví dụ <code>["content-agent","content.approve"]</code>).
+          Admin phải có quyền tương ứng của từng tool.
+        </p>
+        <textarea
+          value={editAllowedTools}
+          onChange={(e) => setEditAllowedTools(e.target.value)}
+          rows={4}
+          className="w-full rounded-lg border border-outline bg-surface-container-lowest p-3 font-mono text-mono-status text-on-surface focus:border-primary focus:outline-none"
+        />
+      </Modal>
     </AppShell>
   );
 }

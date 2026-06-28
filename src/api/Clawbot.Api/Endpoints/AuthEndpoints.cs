@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Auth;
 using Clawbot.Api.Middleware;
@@ -21,6 +22,11 @@ namespace Clawbot.Api.Endpoints;
 public static partial class AuthEndpoints
 {
     private const string RefreshCookie = "refresh_token";
+
+    private static readonly JsonSerializerOptions MeJsonOptions = new()
+    {
+        PropertyNamingPolicy = null // Preserve C# property names
+    };
 
     [LoggerMessage(EventId = 2001, Level = LogLevel.Information,
         Message = "Password reset OTP for {Email}: {Otp}")]
@@ -262,15 +268,15 @@ public static partial class AuthEndpoints
         var roleName = RbacSeeder.RoleIds.FirstOrDefault(kv => kv.Value == roleId).Key;
         var perms = await permissions.GetPermissionsAsync(roleId, ct);
 
-        return Results.Ok(new
+        return Results.Json(new
         {
             sub,
-            tenantId = principal.FindFirstValue("tenant_id"),
-            tenantSlug = principal.FindFirstValue("tenant_slug"),
-            roleId = roleId == Guid.Empty ? null : roleId.ToString(),
+            tenant_id = principal.FindFirstValue("tenant_id"),
+            tenant_slug = principal.FindFirstValue("tenant_slug"),
+            role_id = roleId == Guid.Empty ? null : roleId.ToString(),
             role = roleName,
             permissions = perms.OrderBy(p => p).ToArray(),
-        });
+        }, MeJsonOptions);
     }
 
     private static async Task<IResult> IssueSessionAsync(

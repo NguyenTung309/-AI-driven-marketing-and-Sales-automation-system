@@ -9,6 +9,8 @@ public sealed class AgentSession : AggregateRoot<Guid>, ITenantOwned
     public Guid TenantId { get; private set; }
     public Guid? AgentId { get; private set; }
     public Guid? ConversationId { get; private set; }
+    // SPEC-16 P3-3: the user who initiated the orchestration run, so terminal notifications can be targeted to them.
+    public Guid? UserId { get; private set; }
     public string? Goal { get; private set; }
     public string Status { get; private set; } = AgentSessionStatuses.Draft;
     public string PlanJson { get; private set; } = "{}";
@@ -22,13 +24,14 @@ public sealed class AgentSession : AggregateRoot<Guid>, ITenantOwned
 
     private AgentSession() { }
 
-    public static AgentSession Start(Guid tenantId, Guid? agentId, Guid? conversationId, string goal, DateTimeOffset startedAt) =>
+    public static AgentSession Start(Guid tenantId, Guid? agentId, Guid? conversationId, string goal, DateTimeOffset startedAt, Guid? userId = null) =>
         new()
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             AgentId = agentId,
             ConversationId = conversationId,
+            UserId = userId,
             Goal = goal,
             Status = AgentSessionStatuses.Running,
             StartedAt = startedAt,
@@ -39,11 +42,13 @@ public sealed class AgentSession : AggregateRoot<Guid>, ITenantOwned
         string goal,
         string planJson,
         bool requiresApproval,
-        DateTimeOffset startedAt) =>
+        DateTimeOffset startedAt,
+        Guid? userId = null) =>
         new()
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
+            UserId = userId,
             Goal = goal,
             PlanJson = string.IsNullOrWhiteSpace(planJson) ? "{}" : planJson,
             RequiresApproval = requiresApproval,

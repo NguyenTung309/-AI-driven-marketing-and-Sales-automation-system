@@ -1,4 +1,34 @@
 import { apiClient } from "./client";
+export interface InboxChannel {
+  readonly id: string;
+  readonly name: string;
+  readonly platform: string;
+  readonly externalPageId: string;
+  readonly isActive: boolean;
+  readonly avatarUrl: string | null;
+  readonly hasToken: boolean;
+  readonly unreadCount: number;
+  readonly memberDisplayName: string | null;
+}
+
+
+export interface DailySummary {
+  readonly conversationsHandled: number;
+  readonly messagesSent: number;
+  readonly openConversations: number;
+  readonly closeRate: number;
+  readonly date: string;
+}
+
+export async function getDailySummary(): Promise<DailySummary> {
+  const res = await apiClient.get<DailySummary>("/api/inbox/daily-summary");
+  return res.data;
+}
+
+export async function listChannels(): Promise<readonly InboxChannel[]> {
+  const res = await apiClient.get<readonly InboxChannel[]>("/api/inbox/channels");
+  return res.data;
+}
 
 export type ConversationStatus = "open" | "resolved" | "escalated" | string;
 
@@ -9,9 +39,14 @@ export interface ConversationListItem {
   readonly status: ConversationStatus;
   readonly contactId: string | null;
   readonly contactDisplayName: string | null;
+  readonly contactAvatarUrl: string | null;
+  readonly inboxId: string | null;
+  readonly inboxName: string | null;
+  readonly inboxAvatarUrl: string | null;
   readonly assignedTo: string | null;
   readonly lastMessageAt: string | null;
   readonly lastMessagePreview: string | null;
+  readonly rowVersion: string | null;
   readonly unreadCount: number;
 }
 
@@ -30,6 +65,7 @@ export interface InboxMessage {
   readonly content: string;
   readonly contentType: string;
   readonly sentAt: string;
+  readonly senderDisplayName: string | null;
 }
 
 export interface ConversationDetail {
@@ -39,9 +75,14 @@ export interface ConversationDetail {
   readonly status: ConversationStatus;
   readonly contactId: string | null;
   readonly contactDisplayName: string | null;
+  readonly contactAvatarUrl: string | null;
+  readonly inboxId: string | null;
+  readonly inboxName: string | null;
+  readonly inboxAvatarUrl: string | null;
   readonly assignedTo: string | null;
   readonly lastMessageAt: string | null;
   readonly createdAt: string;
+  readonly rowVersion: string | null;
   readonly messages: readonly InboxMessage[];
 }
 
@@ -63,6 +104,7 @@ export interface InboxMessageEvent {
 }
 
 export interface ListConversationsParams {
+  readonly inboxId?: string;
   readonly status?: string;
   readonly platform?: string;
   readonly page?: number;
@@ -89,16 +131,19 @@ export async function getConversation(id: string): Promise<ConversationDetail> {
   return res.data;
 }
 
-export async function assignConversation(id: string, userId: string): Promise<void> {
-  await apiClient.post(`/api/inbox/conversations/${id}/assign`, { userId });
+export async function assignConversation(id: string, userId: string, rowVersion?: string | null): Promise<void> {
+  const headers = rowVersion ? { "If-Match": rowVersion } : undefined;
+  await apiClient.post(`/api/inbox/conversations/${id}/assign`, { userId }, { headers });
 }
 
-export async function resolveConversation(id: string): Promise<void> {
-  await apiClient.post(`/api/inbox/conversations/${id}/resolve`);
+export async function resolveConversation(id: string, rowVersion?: string | null): Promise<void> {
+  const headers = rowVersion ? { "If-Match": rowVersion } : undefined;
+  await apiClient.post(`/api/inbox/conversations/${id}/resolve`, null, { headers });
 }
 
-export async function escalateConversation(id: string): Promise<void> {
-  await apiClient.post(`/api/inbox/conversations/${id}/escalate`);
+export async function escalateConversation(id: string, rowVersion?: string | null): Promise<void> {
+  const headers = rowVersion ? { "If-Match": rowVersion } : undefined;
+  await apiClient.post(`/api/inbox/conversations/${id}/escalate`, null, { headers });
 }
 
 export async function sendConversationMessage(id: string, content: string): Promise<InboxMessage> {
@@ -108,3 +153,7 @@ export async function sendConversationMessage(id: string, content: string): Prom
   });
   return res.data;
 }
+
+
+
+

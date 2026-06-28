@@ -55,6 +55,7 @@ V2 requires unit tests for schedule calculation and entity transitions, integrat
 - [ ] stops when cost cap denied.
 - [ ] stops on cancellation before claiming new message.
 - [ ] writes trace for delegate/result/critique/finalize.
+- [x] planner provider 401/403 failure persists safe trace without raw provider diagnostics (`OrchestratorGrpcServiceTests.Submit_persists_provider_auth_failure_trace_when_planner_is_forbidden`).
 
 ### DemoLlmConfigSeeder
 
@@ -92,6 +93,7 @@ V2 requires unit tests for schedule calculation and entity transitions, integrat
 - Run .NET unit/integration tests with existing solution test command.
 - Run frontend tests only if UI changes land.
 - Record smoke result in PR/test plan: seed status, schedule run ID, session ID, trace status.
+- 2026-06-27: `dotnet test d:/Clawbot/tests/Clawbot.AgentService.Tests/Clawbot.AgentService.Tests.csproj --filter "FullyQualifiedName~OrchestratorGrpcServiceTests.Submit_persists_provider_auth_failure_trace_when_planner_is_forbidden" -p:OutDir="C:/Users/AdminDatVo/AppData/Local/Temp/clawbot-test-out/"` passed (1/1). Default output path was locked by running `Clawbot.AgentService` PID 33868.
 
 ## Manual Testing
 

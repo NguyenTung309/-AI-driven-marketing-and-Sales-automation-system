@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as signalR from "@microsoft/signalr";
 import { useQueryClient } from "@tanstack/react-query";
 import { getRealtimeAccessToken } from "@/shared/api/client";
@@ -25,9 +25,12 @@ function eventToNotification(evt: NotificationEvent): AppNotification {
   };
 }
 
-export function useNotificationsRealtime(enabled: boolean) {
+export function useNotificationsRealtime(enabled: boolean, onNotification?: (n: AppNotification) => void) {
   const queryClient = useQueryClient();
   const [state, setState] = useState<ConnectionState>("connecting");
+  // Keep the latest callback without re-running the connection effect on every render.
+  const cbRef = useRef(onNotification);
+  cbRef.current = onNotification;
 
   useEffect(() => {
     if (!enabled) return;
@@ -59,6 +62,9 @@ export function useNotificationsRealtime(enabled: boolean) {
       queryClient.setQueryData<{ count: number }>(["notifications", "unread-count"], (old) =>
         old ? { count: old.count + 1 } : old
       );
+
+      // SPEC-16 P3-5: surface the notification as a transient toast so the user sees it on any page.
+      cbRef.current?.(nextNotification);
     });
 
     connection.onreconnecting(() => setConnectionState("reconnecting"));

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Card } from "@/shared/ui/Card";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
-import type { KbAccuracySummary, KbModule, KbVersion, KbVersionDiff } from "@/shared/api/kb";
+import { KB_UPLOAD_ACCEPT, type KbAccuracySummary, type KbModule, type KbVersion, type KbVersionDiff } from "@/shared/api/kb";
 
 function normalize(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
@@ -209,7 +209,9 @@ export function EditorWorkspace({
   saving,
   deploying,
   testPending,
+  uploading,
   onSave,
+  onUpload,
   onDeploy,
   onRollback,
   onCompare,
@@ -224,7 +226,9 @@ export function EditorWorkspace({
   readonly saving: boolean;
   readonly deploying: boolean;
   readonly testPending: boolean;
+  readonly uploading: boolean;
   readonly onSave: (content: string) => void;
+  readonly onUpload: (file: File) => void;
   readonly onDeploy: () => void;
   readonly onRollback: () => void;
   readonly onCompare: () => void;
@@ -233,8 +237,15 @@ export function EditorWorkspace({
   readonly onArchive: () => void;
 }) {
   const [content, setContent] = useState(initialContent);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const hasChanges = content !== initialContent;
   const isDeployed = normalize(version?.status) === "deployed";
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) onUpload(file);
+    event.target.value = "";
+  };
 
   return (
     <section className="flex min-w-0 flex-col bg-[#111827] text-slate-100 xl:min-h-[680px]">
@@ -250,6 +261,23 @@ export function EditorWorkspace({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <input
+            accept={KB_UPLOAD_ACCEPT}
+            className="hidden"
+            onChange={handleFileChange}
+            ref={fileInputRef}
+            type="file"
+          />
+          <button
+            className="inline-flex items-center gap-1.5 rounded border border-outline px-3 py-2 text-label-sm font-bold text-secondary hover:border-primary hover:text-primary disabled:opacity-50"
+            disabled={!module || uploading}
+            onClick={() => fileInputRef.current?.click()}
+            title="Tải tệp (docx, xlsx, csv, pdf, txt, md) và tự chuyển thành bản nháp"
+            type="button"
+          >
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">upload_file</span>
+            {uploading ? "Đang xử lý tệp" : "Tải tệp"}
+          </button>
           <button
             className="rounded border border-outline px-3 py-2 text-label-sm font-bold text-secondary hover:border-primary hover:text-primary disabled:opacity-50"
             disabled={!module}

@@ -159,6 +159,27 @@ public sealed class OrchestratorGrpcServiceTests
     }
 
     [Fact]
+    public async Task Submit_persists_provider_auth_failure_trace_when_planner_is_forbidden()
+    {
+        using var harness = Harness.Build(new HttpRequestException(
+            "Forbidden: raw provider diagnostic token=secret",
+            null,
+            System.Net.HttpStatusCode.Forbidden));
+
+        var response = await harness.Service.Submit(new SubmitRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            Goal = "launch HSK4 campaign",
+        }, TestServerCallContext.Create());
+
+        response.Status.Should().Be(AgentSessionStatuses.Failed);
+        var failure = harness.Db.AgentTraces.Should().ContainSingle(trace => trace.Phase == "planning_failed").Subject;
+        failure.Message.Should().Contain("LLM của orchestrator bị từ chối (401/403)");
+        failure.Message.Should().NotContain("raw provider diagnostic");
+        failure.Message.Should().NotContain("secret");
+    }
+
+    [Fact]
     public async Task Submit_attributes_session_to_orchestrator_agent_so_traces_surface_on_dashboard()
     {
         using var harness = Harness.Build(OneTaskPlan);
@@ -572,16 +593,23 @@ public sealed class OrchestratorGrpcServiceTests
             return Build(planJson, new FakeContentAdapter(adapterOutput), dbHarness);
         }
 
+        public static Harness Build(Exception plannerError)
+        {
+            var dbHarness = new AgentServiceTestAppDb(TenantId);
+            return Build(OneTaskPlan, new FakeContentAdapter("content-ok"), dbHarness, plannerError: plannerError);
+        }
+
         public static Harness Build(
             string planJson,
             IAgent adapter,
             AgentServiceTestAppDb dbHarness,
             IClaudeCostTracker? tracker = null,
             DateTimeOffset? clockAt = null,
-            ILlmCallScope? llmScope = null)
+            ILlmCallScope? llmScope = null,
+            Exception? plannerError = null)
         {
             var catalog = new FakeCatalog();
-            var planGen = new SemanticKernelPlanGenerator(new ClawbotChatCompletionService(new FixedChatClient(planJson)));
+            var planGen = new SemanticKernelPlanGenerator(new ClawbotChatCompletionService(new FixedChatClient(planJson, plannerError)));
             var costGuard = new OrchestratorCostGuard(tracker ?? new FixedTracker());
             var legacy = new PlanningOrchestrator(new AgentRegistry([ChatAgentStub()]));
             var adapters = new IAgent[] { adapter };
@@ -759,18 +787,20 @@ public sealed class OrchestratorGrpcServiceTests
         }
     }
 
-    private sealed class FixedChatClient(string response) : IClaudeChatClient
+    private sealed class FixedChatClient(string response, Exception? error = null) : IClaudeChatClient
     {
         public Task<ClaudeReply> CompleteAsync(
             string systemPrompt, IReadOnlyList<ChatTurn> history, string userMessage, CancellationToken ct = default) =>
-            Task.FromResult(new ClaudeReply(response, 1, 1, 0.01m, "test"));
+            error is null
+                ? Task.FromResult(new ClaudeReply(response, 1, 1, 0.01m, "test"))
+                : Task.FromException<ClaudeReply>(error);
 
         public async IAsyncEnumerable<ClaudeStreamChunk> StreamAsync(
             string systemPrompt, IReadOnlyList<ChatTurn> history, string userMessage,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
         {
-            await Task.Yield();
-            yield return new ClaudeStreamChunk(response, Final: true, 1, 1, 0.01m, "test");
+            var reply = await CompleteAsync(systemPrompt, history, userMessage, ct).ConfigureAwait(false);
+            yield return new ClaudeStreamChunk(reply.Text, Final: true, reply.InputTokens, reply.OutputTokens, reply.UsdCost, reply.Model);
         }
     }
 

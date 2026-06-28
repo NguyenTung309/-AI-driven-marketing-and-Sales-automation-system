@@ -1,3 +1,4 @@
+using System.Net;
 using Clawbot.Agents.Core;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Orchestrator;
@@ -103,6 +104,18 @@ public sealed class SemanticKernelPlanGeneratorTests
     }
 
     [Fact]
+    public async Task GenerateAsync_wraps_provider_auth_failures_with_operator_message()
+    {
+        var generator = new SemanticKernelPlanGenerator(new ClawbotChatCompletionService(new ThrowingClaudeChatClient(
+            new HttpRequestException("forbidden", null, HttpStatusCode.Forbidden))));
+
+        Func<Task> act = async () => await generator.GenerateAsync("launch HSK4", [Content], CancellationToken.None);
+
+        await act.Should().ThrowAsync<PlanGenerationException>()
+            .WithMessage("LLM của orchestrator bị từ chối*");
+    }
+
+    [Fact]
     public async Task GenerateAsync_rejects_invalid_json()
     {
         var generator = new SemanticKernelPlanGenerator(new ClawbotChatCompletionService(new FixedClaudeChatClient("not-json")));
@@ -125,6 +138,29 @@ public sealed class SemanticKernelPlanGeneratorTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Kế hoạch sai cấu trúc: unknown_agent:t1:missing*");
+    }
+
+    private sealed class ThrowingClaudeChatClient(Exception error) : IClaudeChatClient
+    {
+        public Task<ClaudeReply> CompleteAsync(
+            string systemPrompt,
+            IReadOnlyList<ChatTurn> history,
+            string userMessage,
+            CancellationToken ct = default) =>
+            Task.FromException<ClaudeReply>(error);
+
+        public async IAsyncEnumerable<ClaudeStreamChunk> StreamAsync(
+            string systemPrompt,
+            IReadOnlyList<ChatTurn> history,
+            string userMessage,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.Yield();
+            throw error;
+#pragma warning disable CS0162
+            yield break;
+#pragma warning restore CS0162
+        }
     }
 
     private sealed class FixedClaudeChatClient(string response) : IClaudeChatClient

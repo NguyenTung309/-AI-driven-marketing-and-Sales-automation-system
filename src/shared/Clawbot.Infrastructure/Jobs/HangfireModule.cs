@@ -34,6 +34,7 @@ public static class HangfireModule
         });
 
         services.AddScoped<RetentionPurgeJob>();
+        services.AddScoped<DailySummaryJob>();
         services.AddScoped<DailyKpiRollupJob>();
         services.AddScoped<RefreshTokenCleanupJob>();
         services.AddScoped<DailyReportJob>();
@@ -187,6 +188,12 @@ public static class HangfireModule
             "kpi",
             j => j.RunAsync(CancellationToken.None),
             Cron.Daily(1));
+        recurring.AddOrUpdate<DailySummaryJob>(
+            "inbox-daily-summary",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Daily(21),
+            new RecurringJobOptions { TimeZone = VietnamTimeZone });
         recurring.AddOrUpdate<CompetitorScanJob>(
             "competitor-scan",
             "content",

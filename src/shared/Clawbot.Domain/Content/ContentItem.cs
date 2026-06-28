@@ -12,6 +12,8 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
     public string AssetsJson { get; private set; } = "[]";
     public Guid? CreatedBy { get; private set; }
     public Guid? ApprovedBy { get; private set; }
+    // SPEC-16 P2-6: when a reviewer (lead-type) agent approves, attribution is the agent_definition id, not a human userId.
+    public Guid? ApprovedByAgentId { get; private set; }
     public DateTimeOffset? ApprovedAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -42,6 +44,17 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
     {
         Status = "approved";
         ApprovedBy = approverUserId;
+        ApprovedAt = at;
+        UpdatedAt = at;
+    }
+
+    // EARS[WHEN a reviewer agent approves a draft THE SYSTEM SHALL record the agent_definition id as the approver
+    // (not a human userId) so audit attribution distinguishes autonomous approval from human approval]
+    public void ApproveByAgent(Guid agentDefinitionId, DateTimeOffset at)
+    {
+        if (agentDefinitionId == Guid.Empty) throw new ArgumentException("agent definition id required", nameof(agentDefinitionId));
+        Status = "approved";
+        ApprovedByAgentId = agentDefinitionId;
         ApprovedAt = at;
         UpdatedAt = at;
     }

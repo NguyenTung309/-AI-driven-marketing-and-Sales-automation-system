@@ -15,6 +15,7 @@ internal sealed class InboxSearchService(AppDbContext db)
         string? platform,
         int page,
         int pageSize,
+        List<Guid> inboxIds,
         CancellationToken ct)
     {
         if (pageSize is < 1 or > 200) pageSize = 50;
@@ -29,6 +30,10 @@ internal sealed class InboxSearchService(AppDbContext db)
             .IgnoreQueryFilters()
             .AsNoTracking()
             .Where(c => c.TenantId == tenantId && c.DeletedAt == null);
+        if (inboxIds != null && inboxIds.Count > 0)
+        {
+            conversations = conversations.Where(c => c.InboxId != null && inboxIds.Contains(c.InboxId.Value));
+        }
 
         if (!string.IsNullOrWhiteSpace(status))
             conversations = conversations.Where(c => c.Status == status);
@@ -63,9 +68,10 @@ internal sealed class InboxSearchService(AppDbContext db)
                 c.ExternalThreadId,
                 c.Status,
                 c.ContactId,
+                c.InboxId,
                 c.AssignedTo,
                 c.LastMessageAt,
-                LastMessage = c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault(),
+                RowVersion = c.RowVersion ?? Array.Empty<byte>(),                LastMessage = c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault(),
             })
             .ToListAsync(ct).ConfigureAwait(false);
 
@@ -81,9 +87,12 @@ internal sealed class InboxSearchService(AppDbContext db)
             r.Status,
             r.ContactId,
             r.ContactId.HasValue && contactNames.TryGetValue(r.ContactId.Value, out var n) ? n : null,
+            null,
+            r.InboxId, null, null,
             r.AssignedTo,
             r.LastMessageAt,
             r.LastMessage is null ? null : Preview(r.LastMessage),
+            r.RowVersion,
             UnreadCount: 0)).ToList();
 
         return new ConversationListResponse(items, total, page, pageSize);
@@ -97,3 +106,4 @@ internal sealed class InboxSearchService(AppDbContext db)
             .Replace("%", "[%]", StringComparison.Ordinal)
             .Replace("_", "[_]", StringComparison.Ordinal);
 }
+

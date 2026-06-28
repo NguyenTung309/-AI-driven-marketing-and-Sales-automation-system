@@ -19,7 +19,12 @@ public sealed class AutonomousOrchestrator
     private readonly IRagRetriever _ragRetriever;
     private readonly IClaudeChatClient _chatClient;
     private readonly IClock _clock;
+    private readonly ToolRegistry? _toolRegistry;
+    private readonly IOrchestrationApprovalResolver? _approvalResolver;
     private readonly AutonomousOrchestratorOptions _options;
+    // SPEC-16 P4-4/P4-2: per-run flags set at the start of ExecutePlanAsync.
+    private bool _requireHighRiskApproval;
+    private bool _dryRun;
 
     private const string OrchestratorAgentCode = "orchestrator";
 
@@ -34,7 +39,9 @@ public sealed class AutonomousOrchestrator
         IRagRetriever ragRetriever,
         IClaudeChatClient chatClient,
         IClock clock,
-        AutonomousOrchestratorOptions? options = null)
+        AutonomousOrchestratorOptions? options = null,
+        ToolRegistry? toolRegistry = null,
+        IOrchestrationApprovalResolver? approvalResolver = null)
     {
         _planner = planner;
         _catalog = catalog;
@@ -47,6 +54,8 @@ public sealed class AutonomousOrchestrator
         _chatClient = chatClient;
         _clock = clock;
         _options = options ?? new AutonomousOrchestratorOptions();
+        _toolRegistry = toolRegistry;
+        _approvalResolver = approvalResolver;
     }
 
     public async Task<AutonomousRunResult> RunAsync(AutonomousRunRequest request, CancellationToken ct = default)
@@ -56,7 +65,13 @@ public sealed class AutonomousOrchestrator
 
         var entries = await _catalog.ListAsync(request.TenantId, ct).ConfigureAwait(false);
         if (entries.Count == 0)
+        {
+            // Surface the reason in the trace — otherwise the FE hangs on "planning_started" with no clue.
+            await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "planning_failed",
+                "Chưa có agent điều phối nào (agent_definitions). Seed sub-agent cho tenant trước khi lập kế hoạch.", _clock.UtcNow, ct).ConfigureAwait(false);
+            await _sink.FailAsync(request.TenantId, request.SessionId, "no_agents", _clock.UtcNow, ct).ConfigureAwait(false);
             return AutonomousRunResult.Failed("no_agents", 0);
+        }
 
         OrchestrationPlanDocument plan;
         try
@@ -74,6 +89,10 @@ public sealed class AutonomousOrchestrator
         }
 
         await _sink.PersistPlanAsync(request.TenantId, request.SessionId, plan, request.RequiresApproval, ct).ConfigureAwait(false);
+        // SPEC-16 P3-7: post a human-readable plan summary trace right after planning so the user can read the DAG,
+        // not just a raw JSON plan blob.
+        await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "plan_summary",
+            BuildPlanSummary(plan), _clock.UtcNow, ct).ConfigureAwait(false);
         await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "planning_completed", $"Planned {plan.Tasks.Count} task(s).", _clock.UtcNow, ct).ConfigureAwait(false);
         if (request.RequiresApproval)
             return AutonomousRunResult.PendingApproval(0);
@@ -101,6 +120,11 @@ public sealed class AutonomousOrchestrator
         }
 
         var byCode = BuildDefinitionLookup(entries);
+        // SPEC-16 P4-4: load the tenant's high-risk approval toggle once per run; the worker refuses High-risk tools when on.
+        _requireHighRiskApproval = _approvalResolver is not null
+            && await _approvalResolver.IsRequiredAsync(request.TenantId, ct).ConfigureAwait(false);
+        // SPEC-16 P4-2: capture the run's dry-run flag so the worker previews tool actions without side effects.
+        _dryRun = request.DryRun;
 
         for (var round = 1; round <= _options.MaxRounds; round++)
         {
@@ -113,6 +137,7 @@ public sealed class AutonomousOrchestrator
                 var anyFailed = plan.Tasks.Any(t => string.Equals(t.Status, "failed", StringComparison.OrdinalIgnoreCase));
                 if (anyFailed)
                     break; // fall through to replan/failed handling below
+                await EmitRunSummaryAsync(request, plan, ct).ConfigureAwait(false);
                 await _sink.CompleteAsync(request.TenantId, request.SessionId, _clock.UtcNow, ct).ConfigureAwait(false);
                 return AutonomousRunResult.Completed(round);
             }
@@ -134,7 +159,19 @@ public sealed class AutonomousOrchestrator
 
             var failed = plan.Tasks.Where(t => string.Equals(t.Status, "failed", StringComparison.OrdinalIgnoreCase)).ToArray();
             if (failed.Length == 0)
-                continue;
+            {
+                // Detect completion HERE so a successful DAG does not need an extra round. Previously completion was
+                // only checked at the top of the next round, so MaxRounds <= task count surfaced a false max_rounds on
+                // fully successful runs (the real root cause behind the reported max_rounds error).
+                var stillPending = plan.Tasks.Where(t => IsPending(t.Status)).ToArray();
+                if (stillPending.Length == 0)
+                {
+                    await EmitRunSummaryAsync(request, plan, ct).ConfigureAwait(false);
+                    await _sink.CompleteAsync(request.TenantId, request.SessionId, _clock.UtcNow, ct).ConfigureAwait(false);
+                    return AutonomousRunResult.Completed(round);
+                }
+                continue; // more tasks become ready next round; no replan round burned
+            }
 
             if (round >= _options.MaxRounds)
             {
@@ -178,10 +215,14 @@ public sealed class AutonomousOrchestrator
         try
         {
             using var _costScope = _llmScope.Begin(request.TenantId, task.Agent, _clock.UtcNow, reservation.ReservationId);
-            var agent = ResolveAgent(task.Agent, definition);
-            result = await agent.ExecuteAsync(ToAgentTask(task, request.TenantId), ct).ConfigureAwait(false);
+            var agent = ResolveAgent(task.Agent, definition, request, task);
+            // EARS[WHEN a delegated task suffers a transient LLM/HTTP failure THE SYSTEM SHALL retry the same task
+            // with backoff (up to MaxTransientRetries) without burning a replan round, so a slow completion no longer
+            // cascades into max_rounds]
+            result = await ExecuteAgentWithTransientRetryAsync(
+                agent, ToAgentTask(task, request.TenantId), request, task, ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
@@ -204,10 +245,92 @@ public sealed class AutonomousOrchestrator
         return plan.WithTaskStatus(task.Id, "failed", result.Output, result.Error);
     }
 
-    private IAgent ResolveAgent(string name, AgentDefinitionCatalogEntry? definition)
+    // SPEC-16 P2-11: post a human-readable run summary composed from the structured sub-agent results, so the
+    // orchestrator reports back to the user in prose, not just per-task traces.
+    private async Task EmitRunSummaryAsync(AutonomousRunRequest request, OrchestrationPlanDocument plan, CancellationToken ct)
+    {
+        var summary = BuildRunSummary(request, plan);
+        await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "run_summary",
+            summary, _clock.UtcNow, ct).ConfigureAwait(false);
+    }
+
+    private static string BuildRunSummary(AutonomousRunRequest request, OrchestrationPlanDocument plan)
+    {
+        var completed = plan.Tasks.Count(t => string.Equals(t.Status, "completed", StringComparison.OrdinalIgnoreCase));
+        var failed = plan.Tasks.Count(t => string.Equals(t.Status, "failed", StringComparison.OrdinalIgnoreCase));
+        var sb = new System.Text.StringBuilder(256);
+        sb.Append("Hoàn thành ").Append(completed).Append('/').Append(plan.Tasks.Count).Append(" công việc");
+        if (failed > 0) sb.Append(" (").Append(failed).Append(" thất bại)");
+        sb.Append(" cho mục tiêu: ").Append(request.Goal).Append('.');
+        foreach (var task in plan.Tasks)
+        {
+            sb.Append(' ').Append('[').Append(task.Agent).Append("] ").Append(task.Description);
+            if (string.Equals(task.Status, "completed", StringComparison.OrdinalIgnoreCase))
+                sb.Append(" — xong");
+            else if (string.Equals(task.Status, "failed", StringComparison.OrdinalIgnoreCase))
+                sb.Append(" — lỗi").Append(task.Error is null ? string.Empty : ": " + task.Error);
+        }
+        // ponytail: cap the summary length so a large DAG does not flood the trace; downstream can fetch full output.
+        return sb.Length > 1200 ? sb.ToString(0, 1197) + "..." : sb.ToString();
+    }
+
+    private static string BuildPlanSummary(OrchestrationPlanDocument plan)
+    {
+        var sb = new System.Text.StringBuilder(256);
+        sb.Append("Kế hoạch ").Append(plan.Tasks.Count).Append(" bước:");
+        foreach (var task in plan.Tasks)
+            sb.Append(' ').Append(task.Agent).Append(':').Append(task.Description).Append(';');
+        return sb.Length > 1200 ? sb.ToString(0, 1197) + "..." : sb.ToString();
+    }
+
+    private async Task<AgentResult> ExecuteAgentWithTransientRetryAsync(
+        IAgent agent, AgentTask agentTask, AutonomousRunRequest request, OrchestrationPlanTask task, CancellationToken ct)
+    {
+        var attempt = 0;
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                return await agent.ExecuteAsync(agentTask, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (IsTransient(ex))
+            {
+                attempt++;
+                if (attempt > _options.MaxTransientRetries)
+                    throw; // retries exhausted -> bubbles up as a failed task (replan round), no longer transient
+                var delayMs = _options.TransientBackoffBaseMs * attempt;
+                await _sink.TraceAsync(request.TenantId, request.SessionId, task.Id, task.Agent, "transient_retry",
+                    $"Transient failure ({ex.GetType().Name}: {ex.Message}). Retry {attempt}/{_options.MaxTransientRetries} after {delayMs}ms.",
+                    _clock.UtcNow, ct).ConfigureAwait(false);
+                await Task.Delay(delayMs, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    // Transient = timeout-induced cancellation (HttpClient.Timeout throws TaskCanceledException when the user ct is NOT the cause),
+    // explicit TimeoutException, or 5xx/429 HTTP. Logical failures fall through to the replan path.
+    private static bool IsTransient(Exception ex) =>
+        ex is TimeoutException
+        || ex is OperationCanceledException
+        || (ex is System.Net.Http.HttpRequestException hre && IsTransientHttpStatus(hre));
+
+    private static bool IsTransientHttpStatus(System.Net.Http.HttpRequestException ex) =>
+        ex.StatusCode is System.Net.HttpStatusCode.TooManyRequests
+        || (int?)ex.StatusCode >= 500;
+
+    // EARS[WHEN a data-defined agent declares allowed tools THE SYSTEM SHALL run it through the tool-capable
+    // ReAct worker so it can delegate to the registered adapters (the "hands") instead of downgrading to text-only;
+    // WHEN no definition exists THE SYSTEM SHALL fall back to the static runtime registry adapter]
+    private IAgent ResolveAgent(string name, AgentDefinitionCatalogEntry? definition, AutonomousRunRequest request, OrchestrationPlanTask task)
     {
         if (definition is not null)
-            return new GenericLlmAgentWorker(definition, _ragRetriever, _chatClient, _costGuard, _llmScope);
+            return new GenericLlmAgentWorker(definition, _ragRetriever, _chatClient, _costGuard, _llmScope, _toolRegistry,
+                _requireHighRiskApproval, _sink, _clock, new WorkerRunContext(request.TenantId, request.SessionId), _dryRun);
 
         try { return _registry.Resolve(name); }
         catch (KeyNotFoundException) { throw new InvalidOperationException($"No runtime adapter for agent '{name}'."); }
