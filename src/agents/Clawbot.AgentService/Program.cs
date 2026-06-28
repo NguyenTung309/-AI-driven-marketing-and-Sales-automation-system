@@ -36,7 +36,37 @@ builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IAgentDefinitionCata
 builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IA2AMailbox, Clawbot.Infrastructure.Agents.EfA2AMailbox>();
 builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IAutonomousPlanner, Clawbot.AgentService.Services.AutonomousPlanner>();
 builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IAutonomousRunSink, Clawbot.AgentService.Services.AutonomousRunSink>();
-builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.AutonomousOrchestrator>();
+// SPEC-16 P4-4: tenant high-risk approval toggle resolver (reads Tenant.RequireOrchestrationApproval).
+builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IOrchestrationApprovalResolver, Clawbot.Infrastructure.Agents.EfOrchestrationApprovalResolver>();
+// Autonomous orchestration options bound from config (MaxRounds, transient-retry caps) so they are tunable without redeploy.
+var autonomousOptions = builder.Configuration.GetSection("AutonomousOrchestration").Get<AutonomousOrchestratorOptions>()
+    ?? new AutonomousOrchestratorOptions();
+builder.Services.AddSingleton(autonomousOptions);
+// Tool registry wraps the real DI agent adapters (content/ads/lead/report/...) as callable tools for the ReAct worker.
+// Scoped because the adapters are scoped; built from IEnumerable<IAgent> so it tracks the registered hands.
+// Explicit IAgentTool registrations (content persist/approve — AgentService-layer, need AppDbContext) override
+// adapter-wrapped tools of the same name, so the content tool persists drafts instead of returning text only.
+builder.Services.AddScoped<IAgentTool, ContentGenerateTool>();
+builder.Services.AddScoped<IAgentTool, ContentApproveTool>();
+builder.Services.AddScoped<IAgentTool, ContentScheduleTool>();
+builder.Services.AddScoped<IAgentTool, ContentPublishTool>();
+builder.Services.AddScoped<ToolRegistry>(sp => ToolRegistryFactory.Build(
+    sp.GetRequiredService<IEnumerable<IAgent>>(),
+    sp.GetRequiredService<IEnumerable<IAgentTool>>()));
+builder.Services.AddScoped<AutonomousOrchestrator>(sp => new AutonomousOrchestrator(
+    sp.GetRequiredService<Clawbot.Agents.Core.Orchestrator.IAutonomousPlanner>(),
+    sp.GetRequiredService<Clawbot.Agents.Core.Orchestrator.IAgentDefinitionCatalog>(),
+    sp.GetRequiredService<AgentRegistry>(),
+    sp.GetRequiredService<Clawbot.Agents.Core.Orchestrator.IA2AMailbox>(),
+    sp.GetRequiredService<OrchestratorCostGuard>(),
+    sp.GetRequiredService<ILlmCallScope>(),
+    sp.GetRequiredService<Clawbot.Agents.Core.Orchestrator.IAutonomousRunSink>(),
+    sp.GetRequiredService<IRagRetriever>(),
+    sp.GetRequiredService<IClaudeChatClient>(),
+    sp.GetRequiredService<Clawbot.SharedKernel.Time.IClock>(),
+    sp.GetRequiredService<AutonomousOrchestratorOptions>(),
+    sp.GetRequiredService<ToolRegistry>(),
+    sp.GetRequiredService<Clawbot.Agents.Core.Orchestrator.IOrchestrationApprovalResolver>()));
 builder.Services.AddScoped<Clawbot.AgentService.Services.AgentScheduleRunner>();
 builder.Services.AddHostedService<Clawbot.AgentService.Services.AgentScheduleWorker>();
 builder.Services.AddScoped<IAgent, ChatAgentAdapter>();
@@ -47,6 +77,11 @@ builder.Services.AddScoped<IAgent, AdsAgentAdapter>();
 builder.Services.AddScoped<IAgent, SaleAssistAgentAdapter>();
 builder.Services.AddScoped<LeadAgentRunner>();
 builder.Services.AddScoped<ReportAgentRunner>();
+// Part C.2: LLM-backed lead-signal classifier (keyword fallback) + per-message auto-scorer.
+builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Lead.KeywordLeadSignalClassifier>();
+builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Lead.ILeadSignalClassifier,
+    Clawbot.Agents.Core.Skills.Lead.ClaudeLeadSignalClassifier>();
+builder.Services.AddScoped<LeadAutoScorer>();
 builder.Services.AddScoped<IAgent, LeadOrchestrationAdapter>();
 builder.Services.AddScoped<IAgent, ReportOrchestrationAdapter>();
 // M25: persist Claude cost to claude_cost_ledger (overrides in-memory tracker from the skills module).
@@ -81,5 +116,9 @@ app.MapGrpcService<AdsAgentGrpcService>();
 app.MapGrpcService<ReportAgentGrpcService>();
 app.MapGrpcService<ResearchAgentGrpcService>();
 app.MapGet("/", () => "ClawBot Agent Service — use a gRPC client to call services.");
+
+// SPEC-16 Module M-1: bootstrap the Pancake page token from env vars into the encrypted pancake_pages store,
+// so the live token never lives in appsettings.json. Best-effort (never crashes startup); no-op when env absent.
+await Clawbot.Infrastructure.Channels.Pancake.PancakeBootstrapSeeder.BootstrapAsync(app.Services, builder.Configuration).ConfigureAwait(false);
 
 app.Run();

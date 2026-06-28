@@ -13,11 +13,11 @@ using Microsoft.EntityFrameworkCore;
 namespace Clawbot.Api.Endpoints;
 
 public sealed record OrchestrationV2RunRequest(string Goal, string? Source = null);
-public sealed record OrchestrationV2AgentRequest(string Code, string DisplayName, string AgentType, string PersonaPrompt, bool IsOrchestratable = true, string? KbModuleCode = null);
+public sealed record OrchestrationV2AgentRequest(string Code, string DisplayName, string AgentType, string PersonaPrompt, bool IsOrchestratable = true, string? KbModuleCode = null, string? AllowedToolsJson = null, string? InputSchemaJson = null);
 public sealed record OrchestrationV2ScheduleRequest(string Name, string GoalTemplate, string Cadence, string TimezoneId, DateTimeOffset? NextRunAt = null, bool RequiresApproval = false);
 public sealed record OrchestrationV2ControlRequest(string Action, string? Etag = null);
 
-public sealed record OrchestrationV2AgentDto(Guid Id, string Code, string DisplayName, string AgentType, bool IsOrchestratable, int Version, string? KbModuleCode);
+public sealed record OrchestrationV2AgentDto(Guid Id, string Code, string DisplayName, string AgentType, bool IsOrchestratable, int Version, string? KbModuleCode, string AllowedToolsJson = "[]", string InputSchemaJson = "{}", string PersonaPrompt = "");
 public sealed record OrchestrationV2ScheduleDto(Guid Id, string Name, string GoalTemplate, string Cadence, string TimezoneId, DateTimeOffset NextRunAt, DateTimeOffset? LastRunAt, bool IsActive, bool RequiresApproval);
 public sealed record OrchestrationV2TraceDto(string TaskId, string AgentName, string Phase, string Message, DateTimeOffset OccurredAt);
 public sealed record OrchestrationV2MessageDto(Guid Id, string TaskId, string Intent, string Status, string PayloadJson, string? Error, DateTimeOffset CreatedAt, DateTimeOffset? ProcessedAt);
@@ -25,6 +25,8 @@ public sealed record OrchestrationV2RunDto(Guid SessionId, string Status, string
 
 public static class OrchestrationV2Endpoints
 {
+    private static readonly System.Text.Json.JsonSerializerOptions WebJsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web);
+
     public static IEndpointRouteBuilder MapOrchestrationV2(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/orchestration/v2")
@@ -43,13 +45,15 @@ public static class OrchestrationV2Endpoints
         return app;
     }
 
-    private static async Task<IResult> CreateRunAsync(OrchestrationV2RunRequest body, ITenantAccessor tenants, Orchestrator.OrchestratorClient grpc, CancellationToken ct)
+    private static async Task<IResult> CreateRunAsync(OrchestrationV2RunRequest body, ITenantAccessor tenants, Orchestrator.OrchestratorClient grpc, HttpContext http, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(body.Goal)) return Results.BadRequest(new { error = "goal_required" });
         var tenant = tenants.Require();
+        // SPEC-16 P3-3: pass the initiating user's id so the run session + terminal notifications attribute to them.
+        var userId = http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         try
         {
-            var response = await grpc.SubmitAsync(new SubmitRequest { TenantId = tenant.TenantId.ToString("D"), Goal = body.Goal.Trim() }, cancellationToken: ct).ConfigureAwait(false);
+            var response = await grpc.SubmitAsync(new SubmitRequest { TenantId = tenant.TenantId.ToString("D"), Goal = body.Goal.Trim(), UserId = userId ?? string.Empty }, cancellationToken: ct).ConfigureAwait(false);
             return Results.Ok(new { sessionId = response.SessionId, status = response.Status });
         }
         catch (RpcException ex)
@@ -58,14 +62,21 @@ public static class OrchestrationV2Endpoints
         }
     }
 
-    private static async Task<IResult> ListRunsAsync(AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
+    private static async Task<IResult> ListRunsAsync(AppDbContext db, ITenantAccessor tenants, HttpContext http, CancellationToken ct)
     {
         var tenant = tenants.Require();
-        var runs = await db.AgentSessions.IgnoreQueryFilters().AsNoTracking()
-            .Where(s => s.TenantId == tenant.TenantId)
-            .OrderByDescending(s => s.StartedAt)
+        var query = db.AgentSessions.IgnoreQueryFilters().AsNoTracking()
+            .Where(s => s.TenantId == tenant.TenantId);
+        // SPEC-16 P3-6: when the caller passes ?mine=true, filter to their own runs (URL-independent run list).
+        if (string.Equals(http.Request.Query["mine"], "true", StringComparison.OrdinalIgnoreCase))
+        {
+            var userId = http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (Guid.TryParse(userId, out var uid) && uid != Guid.Empty)
+                query = query.Where(s => s.UserId == uid);
+        }
+        var runs = await query.OrderByDescending(s => s.StartedAt)
             .Take(20)
-            .Select(s => new { sessionId = s.Id, s.Status, s.Goal, s.StartedAt, s.FinishedAt })
+            .Select(s => new { sessionId = s.Id, s.Status, s.Goal, s.StartedAt, s.FinishedAt, s.UserId })
             .ToListAsync(ct).ConfigureAwait(false);
         return Results.Ok(new { items = runs });
     }
@@ -112,7 +123,7 @@ public static class OrchestrationV2Endpoints
         var agents = await db.AgentDefinitions.IgnoreQueryFilters().AsNoTracking()
             .Where(a => a.TenantId == tenant.TenantId && a.DeletedAt == null)
             .OrderBy(a => a.Code)
-            .Select(a => new OrchestrationV2AgentDto(a.Id, a.Code, a.DisplayName, a.AgentType, a.IsOrchestratable, a.Version, a.KbModuleCode))
+            .Select(a => new OrchestrationV2AgentDto(a.Id, a.Code, a.DisplayName, a.AgentType, a.IsOrchestratable, a.Version, a.KbModuleCode, a.AllowedToolsJson, a.InputSchemaJson, a.PersonaPrompt))
             .ToListAsync(ct).ConfigureAwait(false);
         return Results.Ok(new { items = agents });
     }
@@ -123,6 +134,19 @@ public static class OrchestrationV2Endpoints
             return Results.BadRequest(new { error = "agent_required_fields" });
         if (!string.IsNullOrWhiteSpace(body.KbModuleCode) && !await HasPermissionAsync(http, permissions, "kb:read", ct).ConfigureAwait(false))
             return Forbidden(http);
+        // EARS[WHEN allowedTools or inputSchema is provided THE SYSTEM SHALL validate it parses as JSON before storing,
+        // so a malformed allow-list cannot silently widen or narrow an agent's tool capabilities]
+        var allowedTools = NormalizeAllowedTools(body.AllowedToolsJson);
+        if (allowedTools is null)
+            return Results.BadRequest(new { error = "invalid_allowed_tools_json" });
+        // EARS[WHEN an admin sets an agent's allowed tools THE SYSTEM SHALL validate each tool name is known and the
+        // admin holds that tool's required permission, so an admin cannot grant an agent a capability they lack]
+        var validationError = await ValidateAllowedToolsAsync(allowedTools, http, permissions, ct).ConfigureAwait(false);
+        if (validationError is not null)
+            return Results.BadRequest(new { error = validationError });
+        var inputSchema = NormalizeJsonObject(body.InputSchemaJson);
+        if (inputSchema is null)
+            return Results.BadRequest(new { error = "invalid_input_schema_json" });
         var tenant = tenants.Require();
         var code = body.Code.Trim();
         var existing = await db.AgentDefinitions.IgnoreQueryFilters()
@@ -130,16 +154,60 @@ public static class OrchestrationV2Endpoints
         if (existing is null)
         {
             existing = AgentDefinition.Create(tenant.TenantId, code, body.DisplayName, body.AgentType, body.PersonaPrompt, clock.UtcNow,
-                isOrchestratable: body.IsOrchestratable, kbModuleCode: body.KbModuleCode);
+                allowedToolsJson: allowedTools, inputSchemaJson: inputSchema, isOrchestratable: body.IsOrchestratable, kbModuleCode: body.KbModuleCode);
             db.AgentDefinitions.Add(existing);
         }
         else
         {
-            existing.UpdateDefinition(body.DisplayName, body.AgentType, body.PersonaPrompt, existing.AllowedToolsJson, existing.InputSchemaJson,
+            existing.UpdateDefinition(body.DisplayName, body.AgentType, body.PersonaPrompt, allowedTools, inputSchema,
                 existing.OutputSchemaJson, existing.MemoryScope, existing.LlmConfigId, body.IsOrchestratable, clock.UtcNow, body.KbModuleCode);
         }
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return Results.Ok(new OrchestrationV2AgentDto(existing.Id, existing.Code, existing.DisplayName, existing.AgentType, existing.IsOrchestratable, existing.Version, existing.KbModuleCode));
+        return Results.Ok(new OrchestrationV2AgentDto(existing.Id, existing.Code, existing.DisplayName, existing.AgentType, existing.IsOrchestratable, existing.Version, existing.KbModuleCode, existing.AllowedToolsJson, existing.InputSchemaJson, existing.PersonaPrompt));
+    }
+
+    // ponytail: validate JSON shape without a schema lib; allowedTools must be a JSON array, inputSchema a JSON object.
+    internal static string? NormalizeAllowedTools(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "[]";
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(raw);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array ? raw.Trim() : null;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    // SPEC-16 P4-3: validate each allowed tool name is known and the admin holds the tool's required permission.
+    internal static async Task<string?> ValidateAllowedToolsAsync(string allowedToolsJson, HttpContext http, IPermissionResolver permissions, CancellationToken ct)
+    {
+        string[] names;
+        try
+        {
+            names = System.Text.Json.JsonSerializer.Deserialize<string[]>(allowedToolsJson, WebJsonOptions) ?? [];
+        }
+        catch (System.Text.Json.JsonException) { return "invalid_allowed_tools_json"; }
+
+        foreach (var name in names)
+        {
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            if (!ToolRegistryFactory.KnownTools.TryGetValue(name.Trim(), out var meta))
+                return $"unknown_tool:{name}";
+            if (!string.IsNullOrEmpty(meta.Permission) && !await HasPermissionAsync(http, permissions, meta.Permission, ct).ConfigureAwait(false))
+                return $"tool_permission_denied:{name}:{meta.Permission}";
+        }
+        return null;
+    }
+
+    internal static string? NormalizeJsonObject(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "{}";
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(raw);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object ? raw.Trim() : null;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
     }
 
     private static async Task<IResult> ListSchedulesAsync(AppDbContext db, ITenantAccessor tenants, CancellationToken ct)

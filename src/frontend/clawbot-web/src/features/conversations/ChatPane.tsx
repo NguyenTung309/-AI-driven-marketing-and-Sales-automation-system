@@ -2,6 +2,7 @@ import type { MessageDto } from './types';
 interface Props {
   messages: MessageDto[];
   contactName: string | null;
+  contactAvatarUrl?: string | null;
 }
 function formatTime(iso: string): string {
   const d = new Date(iso);

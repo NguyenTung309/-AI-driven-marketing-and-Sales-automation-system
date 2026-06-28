@@ -1,8 +1,10 @@
+import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { logout } from "@/shared/api/auth";
-import { getUnreadNotificationCount } from "@/shared/api/notifications";
+import { getUnreadNotificationCount, type AppNotification } from "@/shared/api/notifications";
 import { useAuthStore } from "@/shared/auth/authStore";
+import { useNotificationsRealtime } from "@/features/notifications/useNotificationsRealtime";
 import { NAV_ITEMS, NAV_SYSTEM, type NavItem } from "./nav";
 
 export interface TopbarProps {
@@ -29,6 +31,17 @@ export function Topbar({ title }: TopbarProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const clearAuth = useAuthStore((state) => state.clear);
+  const hasAuth = useAuthStore((state) => Boolean(state.accessToken));
+  // SPEC-16 P3-5: transient toast for new notifications (auto-dismiss after 5s) so the user sees them on any page.
+  const [toast, setToast] = useState<AppNotification | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 5_000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+  // SPEC-16 P3-5: mount the notification realtime hook globally so the bell stays live on every page
+  // (previously only Dashboard/Notifications connected). It invalidates the unread-count query on push.
+  useNotificationsRealtime(hasAuth, setToast);
   const { data } = useQuery({
     queryKey: ["notifications", "unread-count"],
     queryFn: getUnreadNotificationCount,
@@ -51,6 +64,17 @@ export function Topbar({ title }: TopbarProps) {
 
   return (
     <header className="fixed right-0 top-0 z-10 flex h-[64px] w-full items-center justify-between border-b border-surface-variant bg-surface px-4 text-on-surface md:w-[calc(100%-260px)] md:px-gutter">
+      {toast ? (
+        <div className="fixed left-1/2 top-[72px] z-50 -translate-x-1/2 rounded-lg border border-outline bg-surface-container-lowest px-4 py-2 shadow-2xl">
+          <div className="flex items-center gap-2">
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-primary">notifications</span>
+            <div className="min-w-0">
+              <p className="text-label-sm font-semibold text-on-surface">{toast.title}</p>
+              {toast.body ? <p className="truncate text-label-sm text-on-surface-variant">{toast.body}</p> : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="flex min-w-0 items-center gap-3">
         <details className="relative md:hidden">
           <summary className="flex size-10 cursor-pointer list-none items-center justify-center rounded border border-outline bg-surface-container-lowest text-on-surface">

@@ -1,4 +1,4 @@
-﻿using Clawbot.Domain.Channels;
+using Clawbot.Domain.Channels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -10,10 +10,11 @@ public sealed class ProcessedMessageConfiguration : IEntityTypeConfiguration<Pro
     {
         builder.ToTable("processed_messages");
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.Platform).HasMaxLength(50).IsRequired();
-        builder.Property(x => x.ExternalMessageId).HasMaxLength(255).IsRequired();
-        builder.Property(x => x.ConversationExternalId).HasMaxLength(255).IsRequired();
-        builder.Property(x => x.ProcessedAt).IsRequired();
+        builder.Property(x => x.Id).HasColumnName("Id");
+        builder.Property(x => x.Platform).HasColumnName("Platform").HasMaxLength(50).IsRequired();
+        builder.Property(x => x.ExternalMessageId).HasColumnName("ExternalMessageId").HasMaxLength(255).IsRequired();
+        builder.Property(x => x.ConversationExternalId).HasColumnName("ConversationExternalId").HasMaxLength(255).IsRequired();
+        builder.Property(x => x.ProcessedAt).HasColumnName("ProcessedAt").IsRequired();
         builder.HasIndex(x => new { x.Platform, x.ExternalMessageId }).IsUnique();
     }
 }

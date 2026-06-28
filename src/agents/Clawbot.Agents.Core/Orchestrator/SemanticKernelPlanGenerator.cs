@@ -1,7 +1,10 @@
+using System.ClientModel;
+using System.Net;
 using System.Text.Json;
 using Clawbot.Agents.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 
 namespace Clawbot.Agents.Core.Orchestrator;
@@ -30,8 +33,17 @@ public sealed partial class SemanticKernelPlanGenerator(IChatCompletionService c
         var history = new ChatHistory(BuildSystemPrompt(catalog));
         history.AddUserMessage((goal ?? string.Empty).Trim());
 
-        var replies = await _chat.GetChatMessageContentsAsync(history, cancellationToken: ct).ConfigureAwait(false);
-        var json = replies.Count > 0 ? replies[0].Content : null;
+        string? json;
+        try
+        {
+            var replies = await _chat.GetChatMessageContentsAsync(history, cancellationToken: ct).ConfigureAwait(false);
+            json = replies.Count > 0 ? replies[0].Content : null;
+        }
+        catch (Exception ex) when (IsProviderAuthFailure(ex))
+        {
+            LogProviderAuthFailed(_logger, ex);
+            throw new PlanGenerationException("LLM của orchestrator bị từ chối (401/403). Kiểm tra API key, model, base URL, rồi bấm Test trong Cấu hình LLM trước khi bind agent.", ex);
+        }
         if (string.IsNullOrWhiteSpace(json))
         {
             // Empty model output — usually a misconfigured provider/model or a refused completion.
@@ -72,6 +84,11 @@ public sealed partial class SemanticKernelPlanGenerator(IChatCompletionService c
         return plan;
     }
 
+    private static bool IsProviderAuthFailure(Exception ex) =>
+        ex is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }
+        || ex is ClientResultException { Status: 401 or 403 }
+        || ex.InnerException is not null && IsProviderAuthFailure(ex.InnerException);
+
     // Cap raw model output in logs so a runaway response can't flood the log sink.
     private static string Truncate(string value) =>
         value.Length <= 2000 ? value : value[..2000] + "…(truncated)";
@@ -84,6 +101,9 @@ public sealed partial class SemanticKernelPlanGenerator(IChatCompletionService c
 
     [LoggerMessage(EventId = 4203, Level = LogLevel.Warning, Message = "Planner plan validation failed: {Reason}. Raw response: {RawResponse}")]
     private static partial void LogValidationFailed(ILogger logger, string? reason, string rawResponse);
+
+    [LoggerMessage(EventId = 4204, Level = LogLevel.Warning, Message = "Planner LLM provider rejected request with 401/403. Check orchestrator provider credentials, endpoint/baseUrl, model/deployment, permissions, and Agent LLM binding.")]
+    private static partial void LogProviderAuthFailed(ILogger logger, Exception ex);
 
     private static string NormalizeJson(string json)
     {

@@ -378,7 +378,7 @@ function GeneratePanel({
           <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{sentVia === "email" ? "outgoing_mail" : "picture_as_pdf"}</span>
           {generating ? "Đang xử lý..." : sentVia === "email" ? "Tạo và gửi email" : "Tạo tài liệu"}
         </Button>
-        <Button type="button" variant="outline" onClick={onGenerateKit} disabled={busy}>
+        <Button type="button" variant="outline" onClick={onGenerateKit} disabled={busy} data-testid="Generate kit">
           <span aria-hidden="true" className="material-symbols-outlined text-[18px]">inventory_2</span>
           {generatingKit ? "Đang tạo bộ tài liệu..." : "Tạo bộ tài liệu"}
         </Button>
@@ -540,7 +540,7 @@ export default function DocumentsPage() {
   const generatedQuery = useQuery({ queryKey: ["documents", "generated"], queryFn: listGeneratedDocuments });
   const templates = Array.isArray(templatesQuery.data) ? templatesQuery.data : EMPTY_TEMPLATES;
   const documents = Array.isArray(generatedQuery.data) ? generatedQuery.data : EMPTY_DOCUMENTS;
-  const templatesById = useMemo(() => new Map(templates.map((template) => [template.id, template])), [templates]);
+  const templatesById = useMemo(() => new Map<string, DocumentTemplate>(templates.map((template) => [template.id, template] as [string, DocumentTemplate])), [templates]);
   const selectedDocument = documents.find((doc) => doc.id === selectedDocId) ?? documents[0] ?? null;
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? null;
   const metrics = metricCards(templates, documents);
@@ -662,7 +662,7 @@ export default function DocumentsPage() {
               <span aria-hidden="true" className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
               Tạo PDF
             </Button>
-            <Button type="button" variant="outline" onClick={() => generateKitMutation.mutate()} disabled={generateMutation.isPending || generateKitMutation.isPending}>
+            <Button type="button" variant="outline" onClick={() => generateKitMutation.mutate()} disabled={generateMutation.isPending || generateKitMutation.isPending} data-testid="Generate kit">
               <span aria-hidden="true" className="material-symbols-outlined text-[18px]">inventory_2</span>
               Tạo bộ tài liệu
             </Button>

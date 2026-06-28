@@ -1,0 +1,6 @@
+﻿BEGIN TRANSACTION;
+
+ALTER TABLE contacts ADD avatar_url NVARCHAR(512) NULL;
+ALTER TABLE messages ADD sender_display_name NVARCHAR(256) NULL;
+
+COMMIT;

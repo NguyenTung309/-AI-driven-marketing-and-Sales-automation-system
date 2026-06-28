@@ -20,7 +20,9 @@ public sealed record OrchestrationTaskDto(
     IReadOnlyDictionary<string, string> Input,
     string Status,
     string? Output,
-    string? Error);
+    string? Error,
+    int UseCount = 0,
+    string? CurrentTaskId = null);
 
 public sealed record OrchestrationSessionDto(
     string SessionId,
@@ -70,16 +72,20 @@ public static class OrchestrationEndpoints
         OrchestrationSubmitRequest body,
         ITenantAccessor tenants,
         Orchestrator.OrchestratorClient grpc,
+        HttpContext http,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(body?.Goal))
             return Results.BadRequest(new { error = "goal_required" });
 
         var tenant = tenants.Require();
+        // SPEC-16 P3-3: attribute the run to the initiating user for session + terminal notifications.
+        var userId = http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         return await CallAsync(() => grpc.SubmitAsync(new SubmitRequest
         {
             TenantId = tenant.TenantId.ToString(),
             Goal = body.Goal,
+            UserId = userId ?? string.Empty,
         }, cancellationToken: ct));
     }
 
@@ -216,15 +222,32 @@ public static class OrchestrationEndpoints
             response.ReplanCount,
             response.Etag,
             response.PlanJson,
-            response.Tasks.Select(task => new OrchestrationTaskDto(
-                task.Id,
-                task.Agent,
-                task.Description,
-                task.DependsOn.ToArray(),
-                ParseInput(task.InputJson),
-                task.Status,
-                string.IsNullOrEmpty(task.Output) ? null : task.Output,
-                string.IsNullOrEmpty(task.Error) ? null : task.Error)).ToArray());
+            ToTaskDtos(response.Tasks).ToArray());
+
+    // SPEC-16 P3-2: derive per-agent UseCount (how many tasks in this session use that agent) and CurrentTaskId
+    // (the in-progress task for that agent, if any) so the agent graph shows usage + current activity.
+    private static IEnumerable<OrchestrationTaskDto> ToTaskDtos(IReadOnlyList<PlannedTask> tasks)
+    {
+        var useCounts = tasks
+            .GroupBy(t => t.Agent, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+        var currentByAgent = tasks
+            .Where(t => string.Equals(t.Status, "running", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(t => t.Agent, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+
+        return tasks.Select(task => new OrchestrationTaskDto(
+            task.Id,
+            task.Agent,
+            task.Description,
+            task.DependsOn.ToArray(),
+            ParseInput(task.InputJson),
+            task.Status,
+            string.IsNullOrEmpty(task.Output) ? null : task.Output,
+            string.IsNullOrEmpty(task.Error) ? null : task.Error,
+            useCounts.TryGetValue(task.Agent, out var count) ? count : 1,
+            currentByAgent.TryGetValue(task.Agent, out var curId) ? curId : null));
+    }
 
     private static Dictionary<string, string> ParseInput(string inputJson)
     {

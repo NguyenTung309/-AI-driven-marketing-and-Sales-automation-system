@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Clawbot.Application.Abstractions;
 using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
@@ -51,6 +51,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     // Conversations
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<Message> Messages => Set<Message>();
+    public DbSet<ConversationLabel> ConversationLabels => Set<ConversationLabel>();
+    public DbSet<ConversationNote> ConversationNotes => Set<ConversationNote>();
 
     // Leads
     public DbSet<Lead> Leads => Set<Lead>();
@@ -67,6 +69,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
     // Chat scenarios
     public DbSet<ChatScenario> ChatScenarios => Set<ChatScenario>();
+    public DbSet<Label> Labels => Set<Label>();
 
     // Agents
     public DbSet<AgentConfig> AgentConfigs => Set<AgentConfig>();
@@ -75,6 +78,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<AgentSchedule> AgentSchedules => Set<AgentSchedule>();
     public DbSet<AgentScheduleRun> AgentScheduleRuns => Set<AgentScheduleRun>();
     public DbSet<AgentSession> AgentSessions => Set<AgentSession>();
+    public DbSet<Inbox> Inboxes => Set<Inbox>();
+    public DbSet<InboxMember> InboxMembers => Set<InboxMember>();
+    public DbSet<ChannelToken> ChannelTokens => Set<ChannelToken>();
     public DbSet<AgentTrace> AgentTraces => Set<AgentTrace>();
     public DbSet<ClaudeCostEntry> ClaudeCostLedger => Set<ClaudeCostEntry>();
 
@@ -89,6 +95,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<ContentBrief> ContentBriefs => Set<ContentBrief>();
     public DbSet<ContentItem> ContentItems => Set<ContentItem>();
     public DbSet<ContentSchedule> ContentSchedules => Set<ContentSchedule>();
+    public DbSet<SocialCredential> SocialCredentials => Set<SocialCredential>();
 
     // Ads
     public DbSet<AdsCampaign> AdsCampaigns => Set<AdsCampaign>();
@@ -109,6 +116,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
     // Channels & LLM configs
     public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();
+    public DbSet<PancakePage> PancakePages => Set<PancakePage>();
     public DbSet<LlmConfig> LlmConfigs => Set<LlmConfig>();
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
 
@@ -134,6 +142,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
         builder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
 
         builder.AddInboxStateEntity();
+
+        builder.Entity<InboxMember>(e =>
+        {
+            e.HasIndex(m => m.InboxId).IsUnique().HasDatabaseName("uq_inbox_members_inbox");
+        });
         builder.AddOutboxMessageEntity();
         builder.AddOutboxStateEntity();
 
@@ -169,3 +182,5 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
         builder.Entity<TEntity>().HasQueryFilter(e => e.TenantId == CurrentTenantId);
     }
 }
+
+

@@ -23,6 +23,7 @@ public sealed class TestAuthHandler(
             new Claim("tenant_id", TenantId),
             new Claim("tenant_slug", "test"),
             new Claim(ClaimTypes.Role, "Admin"),
+            new Claim("role_id", "11111111-1111-1111-1111-111111111111"),
             new Claim("perm", "kb.read"),
             new Claim("perm", "kb.write"),
             new Claim("perm", "inbox.read"),

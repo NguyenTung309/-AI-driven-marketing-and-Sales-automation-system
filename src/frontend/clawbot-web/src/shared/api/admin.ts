@@ -1,4 +1,4 @@
-import { AxiosError } from "axios";
+﻿import { AxiosError } from "axios";
 import { apiClient } from "./client";
 import type { TenantBranding } from "./publicWidget";
 
@@ -16,6 +16,7 @@ export interface AdminUser {
   readonly phone: string | null;
   readonly isActive: boolean;
   readonly lastLoginAt: string | null;
+  readonly hasPancakeAccessToken: boolean;
 }
 
 export interface Role {
@@ -102,6 +103,7 @@ export async function createAdminUser(body: {
   readonly displayName: string;
   readonly password: string;
   readonly roles?: readonly string[];
+  readonly pancakeAccessToken?: string;
 }): Promise<Pick<AdminUser, "id" | "email" | "displayName">> {
   const res = await apiClient.post<Pick<AdminUser, "id" | "email" | "displayName">>("/api/admin/users", body);
   return res.data;
@@ -109,7 +111,13 @@ export async function createAdminUser(body: {
 
 export async function updateAdminUser(
   id: string,
-  body: { readonly displayName?: string; readonly isActive?: boolean; readonly roles?: readonly string[] }
+  body: {
+    readonly displayName?: string;
+    readonly isActive?: boolean;
+    readonly roles?: readonly string[];
+    readonly pancakeAccessToken?: string;
+    readonly clearPancakeAccessToken?: boolean;
+  }
 ): Promise<void> {
   await apiClient.put(`/api/admin/users/${id}`, body);
 }
@@ -228,4 +236,100 @@ export async function listAuditLogs(params?: {
 }): Promise<PagedResponse<AuditLog>> {
   const res = await apiClient.get<PagedResponse<AuditLog>>("/api/admin/audit-logs", { params });
   return res.data;
+}
+
+// --- Channel Management ---
+
+export interface SimpleUser {
+  readonly id: string;
+  readonly displayName: string;
+  readonly email: string;
+}
+
+export interface InboxItem {
+  readonly id: string;
+  readonly name: string;
+  readonly platform: string;
+  readonly externalPageId: string;
+  readonly isActive: boolean;
+  readonly createdAt: string;
+  readonly memberCount: number;
+  readonly hasToken: boolean;
+}
+
+export async function getSimpleUserList(): Promise<readonly SimpleUser[]> {
+  const res = await apiClient.get<readonly SimpleUser[]>("/api/admin/users/simple");
+  return res.data;
+}
+
+export async function listInboxes(): Promise<readonly InboxItem[]> {
+  const res = await apiClient.get<readonly InboxItem[]>("/api/admin/inboxes");
+  return res.data;
+}
+
+export async function getInboxMembers(inboxId: string): Promise<readonly string[]> {
+  const res = await apiClient.get<readonly string[]>(`/api/admin/inboxes/${inboxId}/members`);
+  return res.data;
+}
+
+export async function updateInboxMember(inboxId: string, agentId: string | null): Promise<void> {
+  await apiClient.put(`/api/admin/inboxes/${inboxId}/members`, { agentId });
+}
+
+export interface CreateInboxRequest {
+  readonly name: string;
+  readonly platform: string;
+  readonly externalPageId: string;
+  readonly pageAccessToken?: string | null;
+  readonly agentId?: string | null;
+}
+
+export async function createInbox(body: CreateInboxRequest): Promise<any> {
+  const res = await apiClient.post("/api/admin/inboxes", body);
+  return res.data;
+}
+
+// SPEC-16 Module M-5: Pancake channel connect — list pages from a user token, then mint+store page tokens.
+
+export interface PancakePageSummary {
+  readonly pageId: string;
+  readonly name: string;
+  readonly platform: string;
+}
+
+export interface ConnectedPancakePage {
+  readonly pageId: string;
+  readonly name: string;
+  readonly platform: string;
+  readonly status: string;
+  readonly mintedAt?: string | null;
+}
+
+/** Validate a Pancake user access token by listing its pages (M-3). Returns the page summaries for selection. */
+export async function connectPancake(userAccessToken: string): Promise<readonly PancakePageSummary[]> {
+  const res = await apiClient.post<{ items: readonly PancakePageSummary[] }>(
+    "/api/admin/channels/pancake/connect",
+    { userAccessToken },
+  );
+  return res.data.items;
+}
+
+/** Mint + store a page access token per selected page (M-4). */
+export async function mintPancakePages(
+  userAccessToken: string,
+  pages: readonly PancakePageSummary[],
+): Promise<readonly { pageId: string; status: string; error?: string }[]> {
+  const res = await apiClient.post<{ items: readonly { pageId: string; status: string; error?: string }[] }>(
+    "/api/admin/channels/pancake/pages",
+    { userAccessToken, pages: pages.map((p) => ({ pageId: p.pageId, name: p.name, platform: p.platform })) },
+  );
+  return res.data.items;
+}
+
+/** List currently connected Pancake pages with their status (M-5 status view). Never returns the token. */
+export async function listConnectedPancakePages(): Promise<readonly ConnectedPancakePage[]> {
+  const res = await apiClient.get<{ items: readonly ConnectedPancakePage[] }>(
+    "/api/admin/channels/pancake/pages",
+  );
+  return res.data.items;
 }

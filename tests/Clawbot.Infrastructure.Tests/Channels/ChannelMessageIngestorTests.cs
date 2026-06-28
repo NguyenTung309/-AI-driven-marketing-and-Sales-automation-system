@@ -1,4 +1,4 @@
-using Clawbot.Agents.Core.Skills.Nlp;
+﻿using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Vectors;
 using Clawbot.SharedKernel.Channels;
@@ -102,4 +102,83 @@ public sealed class ChannelMessageIngestorTests
 
         await act.Should().ThrowAsync<ArgumentException>();
     }
+
+
+    [Fact]
+    public async Task Direction_out_when_sender_id_matches_page_id()
+    {
+        using var fx = new TestAppDb();
+        var (sut, _) = Build(fx);
+        var meta = new Dictionary<string, string>
+        {
+            ["sender_id"] = "page1",
+            ["page_id"] = "page1",
+            ["sender_name"] = "Page Owner",
+        };
+
+        await sut.IngestAsync(fx.TenantId, Msg("hello from owner", thread: "page1:thread2", meta: meta));
+
+        var msg = await fx.Db.Messages.IgnoreQueryFilters().SingleAsync();
+        msg.Direction.Should().Be("out");
+        msg.SenderType.Should().Be("user");
+        msg.SenderDisplayName.Should().Be("Page Owner");
+    }
+
+    [Fact]
+    public async Task Direction_in_when_sender_id_differs_from_page_id()
+    {
+        using var fx = new TestAppDb();
+        var (sut, _) = Build(fx);
+        var meta = new Dictionary<string, string>
+        {
+            ["sender_id"] = "customer1",
+            ["page_id"] = "page1",
+            ["sender_name"] = "Nguyen Van A",
+        };
+
+        await sut.IngestAsync(fx.TenantId, Msg("hello from customer", thread: "page1:thread3", meta: meta));
+
+        var msg = await fx.Db.Messages.IgnoreQueryFilters().SingleAsync();
+        msg.Direction.Should().Be("in");
+        msg.SenderType.Should().Be("contact");
+        msg.SenderDisplayName.Should().Be("Nguyen Van A");
+    }
+
+    [Fact]
+    public async Task Contact_avatar_stored_from_metadata()
+    {
+        using var fx = new TestAppDb();
+        var (sut, _) = Build(fx);
+        var meta = new Dictionary<string, string>
+        {
+            ["display_name"] = "Test Contact",
+            ["avatar_url"] = "https://cdn.example.com/avatar.jpg",
+        };
+
+        await sut.IngestAsync(fx.TenantId, Msg("hi", user: "ext-user-1", meta: meta));
+
+        var contact = await fx.Db.Contacts.IgnoreQueryFilters().SingleAsync();
+        contact.AvatarUrl.Should().Be("https://cdn.example.com/avatar.jpg");
+    }
+
+   [Fact]
+    public async Task Contact_display_name_updated_from_pzl_to_real_name()
+    {
+        using var fx = new TestAppDb();
+        var (sut, _) = Build(fx);
+
+        // Simulate a contact initially created with pzl_ prefix (from old system)
+        await sut.IngestAsync(fx.TenantId, Msg("first msg", user: "pzl_u_abc123", meta: new Dictionary<string, string>()));
+
+        // Now ingest with real display_name
+        var meta = new Dictionary<string, string>
+        {
+            ["display_name"] = "Nguyen Van B",
+        };
+        await sut.IngestAsync(fx.TenantId, Msg("second msg", user: "pzl_u_abc123", meta: meta));
+
+        var contact = await fx.Db.Contacts.IgnoreQueryFilters().SingleAsync();
+        contact.DisplayName.Should().Be("Nguyen Van B");
+    }
+
 }

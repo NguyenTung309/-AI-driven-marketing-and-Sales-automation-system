@@ -64,7 +64,9 @@ public static partial class RbacSeeder
         ("orchestration:manage", [Admin]),
         ("rbac:manage", [Admin]),
         ("users:manage", [Admin]),
+        ("users:pancake-token:manage", [Admin, SalesLead]),
         ("system:config", [Admin]),
+        ("admin:inboxes", [Admin]),
     ];
 
     private static readonly (string Code, string DisplayName, string AgentType)[] DefaultAgents =

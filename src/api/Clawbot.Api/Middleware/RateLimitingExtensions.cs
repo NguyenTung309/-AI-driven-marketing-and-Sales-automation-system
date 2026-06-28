@@ -10,6 +10,7 @@ public static class RateLimitingExtensions
     public const string WebhookPolicy = "webhook";
     public const string ChatPolicy = "chat";
     public const string GeneralPolicy = "general";
+    public const string UploadPolicy = "upload";
 
     public static IServiceCollection AddClawbotRateLimiting(this IServiceCollection services)
     {
@@ -21,6 +22,8 @@ public static class RateLimitingExtensions
             options.AddPolicy(WebhookPolicy, ctx => PartitionForRemoteIp(ctx, permit: 120, window: TimeSpan.FromMinutes(1)));
             options.AddPolicy(ChatPolicy, ctx => PartitionForUserOrIp(ctx, permit: 60, window: TimeSpan.FromMinutes(1)));
             options.AddPolicy(GeneralPolicy, ctx => PartitionForUserOrIp(ctx, permit: 300, window: TimeSpan.FromMinutes(1)));
+            // File parsing (OpenXml/PdfPig) is CPU+memory heavy — keep it well below the general limit.
+            options.AddPolicy(UploadPolicy, ctx => PartitionForUserOrIp(ctx, permit: 20, window: TimeSpan.FromMinutes(1)));
 
             options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
                 RateLimitPartition.GetFixedWindowLimiter(

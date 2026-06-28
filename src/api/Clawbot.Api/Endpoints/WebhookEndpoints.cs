@@ -33,6 +33,13 @@ public static partial class WebhookEndpoints
             var body = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
             var headers = req.Headers.ToDictionary(h => h.Key, h => h.Value.ToString(), StringComparer.OrdinalIgnoreCase);
 
+            var tenant = await db.Tenants
+                .IgnoreQueryFilters()
+                .Where(t => t.Slug == tenantSlug)
+                .Select(t => new { t.Id })
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            if (tenant is null) return Results.NotFound(new { error = "tenant not found" });
+
             var ok = await adapter.VerifyWebhookSignatureAsync(body, headers, ct).ConfigureAwait(false);
             if (!ok)
             {
@@ -40,7 +47,7 @@ public static partial class WebhookEndpoints
                 LogHmacRejected(logger, tenantSlug, ip);
 
                 db.AuditLogs.Add(AuditLog.Create(
-                    tenantId: Guid.Empty,
+                    tenantId: tenant.Id,
                     userId: null,
                     action: "webhook.hmac.reject",
                     resourceType: "webhook",
@@ -53,13 +60,6 @@ public static partial class WebhookEndpoints
 
                 return Results.Unauthorized();
             }
-
-            var tenant = await db.Tenants
-                .IgnoreQueryFilters()
-                .Where(t => t.Slug == tenantSlug)
-                .Select(t => new { t.Id })
-                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-            if (tenant is null) return Results.NotFound(new { error = "tenant not found" });
 
             var messages = await adapter.ParseAsync(body, ct).ConfigureAwait(false);
             foreach (var msg in messages)

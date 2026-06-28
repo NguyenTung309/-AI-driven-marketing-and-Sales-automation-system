@@ -20,7 +20,10 @@ public sealed class ContentEndpointTests : IClassFixture<SqlServerFixture>, IAsy
         _client = _factory.CreateClient();
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public async Task InitializeAsync()
+    {
+        await _factory.InitializeAsync();
+    }
 
     public Task DisposeAsync()
     {

@@ -229,7 +229,7 @@ public sealed class DatabaseSmokeTests : IClassFixture<SqlServerFixture>
         {
             cmd.CommandText = """
                 INSERT INTO messages (id, conversation_id, tenant_id, direction, sender_type, content, metadata_json)
-                VALUES (@mid, @vid, @tid, 'in', 'contact', 'Xin chào, tôi muốn hỏi về khóa học', '{"external_message_id":"ext-msg-789","display_name":"Pancake Customer"}');
+                VALUES (@mid, @vid, @tid, 'in', 'contact', N'Xin chào, tôi muốn hỏi về khóa học', '{"external_message_id":"ext-msg-789","display_name":"Pancake Customer"}');
                 """;
             cmd.Parameters.AddWithValue("@mid", inboundMsgId);
             cmd.Parameters.AddWithValue("@vid", convId);
@@ -258,7 +258,7 @@ public sealed class DatabaseSmokeTests : IClassFixture<SqlServerFixture>
         {
             cmd.CommandText = """
                 INSERT INTO messages (id, conversation_id, tenant_id, direction, sender_type, content)
-                VALUES (@mid, @vid, @tid, 'out', 'agent', 'Cảm ơn bạn đã liên hệ! Chúng tôi sẽ tư vấn cho bạn.');
+                VALUES (@mid, @vid, @tid, 'out', 'agent', N'Cảm ơn bạn đã liên hệ! Chúng tôi sẽ tư vấn cho bạn.');
                 """;
             cmd.Parameters.AddWithValue("@mid", outboundMsgId);
             cmd.Parameters.AddWithValue("@vid", convId);

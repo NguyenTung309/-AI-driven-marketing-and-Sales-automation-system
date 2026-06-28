@@ -118,6 +118,24 @@ export async function createKbVersion(moduleId: string, contentMd: string): Prom
   return response.data;
 }
 
+export interface KbUploadResult {
+  readonly version: KbVersion;
+  readonly sourceFormat: string;
+  readonly charCount: number;
+  readonly contentMd: string;
+}
+
+export const KB_UPLOAD_ACCEPT = ".docx,.xlsx,.csv,.pdf,.txt,.md";
+
+export async function uploadKbVersion(moduleId: string, file: File): Promise<KbUploadResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await apiClient.post<KbUploadResult>(`/api/kb/modules/${moduleId}/upload`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return response.data;
+}
+
 export async function deployKbVersion(moduleId: string, versionId: string): Promise<void> {
   await apiClient.post(`/api/kb/modules/${moduleId}/versions/${versionId}/deploy`);
 }

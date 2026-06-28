@@ -23,6 +23,7 @@ function toMessage(evt: InboxMessageEvent): InboxMessage {
     direction: evt.direction,
     senderType: evt.senderType,
     senderUserId: null,
+    senderDisplayName: null,
     content: evt.content,
     contentType: evt.contentType,
     sentAt: evt.sentAt,

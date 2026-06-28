@@ -67,6 +67,21 @@ public sealed class ClawbotWebApplicationFactory : WebApplicationFactory<Program
     public async Task InitializeAsync()
     {
         await using var conn = await _sql.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            IF NOT EXISTS (SELECT 1 FROM tenants WHERE id = '00000000-0000-0000-0000-000000000001')
+            BEGIN
+                INSERT INTO tenants (id, slug, display_name, plan_name, is_active, settings_json, created_at, updated_at)
+                VALUES ('00000000-0000-0000-0000-000000000001', 'test', 'Test Tenant', 'free', 1, '{}', SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET());
+            END;
+
+            IF NOT EXISTS (SELECT 1 FROM users WHERE id = '00000000-0000-0000-0000-000000000002')
+            BEGIN
+                INSERT INTO users (id, tenant_id, display_name, email, password_hash, security_stamp, access_failed_count, is_active, created_at, updated_at, user_name, normalized_user_name, normalized_email, email_confirmed, phone_number_confirmed, two_factor_enabled, lockout_enabled)
+                VALUES ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'Test Admin', 'integration-test-admin@clawbot.local', 'AQAAAAIAAYagAAAAEJ...', 'stamp', 0, 1, SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET(), 'integration-test-admin@clawbot.local', 'INTEGRATION-TEST-ADMIN@CLAWBOT.LOCAL', 'INTEGRATION-TEST-ADMIN@CLAWBOT.LOCAL', 1, 0, 0, 1);
+            END;
+            """;
+        await cmd.ExecuteNonQueryAsync();
     }
 
     Task IAsyncLifetime.DisposeAsync() => Task.CompletedTask;

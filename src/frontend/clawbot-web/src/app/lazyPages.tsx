@@ -1,4 +1,4 @@
-import { lazy } from "react";
+﻿import { lazy } from "react";
 
 export const AdminConsolePage = lazy(() => import("@/features/admin/AdminConsolePage"));
 export const LoginPage = lazy(() => import("@/features/auth/LoginPage"));
@@ -21,3 +21,6 @@ export const WidgetDemoPage = lazy(() => import("@/features/public/WidgetDemoPag
 export const TokenManagementPage = lazy(() => import("@/features/tokens/TokenManagementPage"));
 export const LlmProvidersPage = lazy(() => import("@/features/llm-providers/LlmProvidersPage"));
 export const OrchestrationV2Page = lazy(() => import("@/features/orchestration/OrchestrationV2Page"));
+export const ChannelManagementPage = lazy(() => import("@/features/admin/ChannelManagementPage"));
+export const ChannelListPage = lazy(() => import("@/features/inbox/ChannelListPage"));
+export const AgentHubLayout = lazy(() => import("@/features/agent-hub/AgentHubLayout"));

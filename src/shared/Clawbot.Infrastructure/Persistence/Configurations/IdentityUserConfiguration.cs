@@ -14,5 +14,6 @@ public sealed class IdentityUserConfiguration : IEntityTypeConfiguration<AppUser
         builder.ToTable("users");
         builder.Property(x => x.DisplayName).HasMaxLength(256);
         builder.Property(x => x.AvatarUrl).HasMaxLength(512);
+        builder.Property(x => x.PancakeAccessTokenEncrypted).HasMaxLength(2048);
     }
 }

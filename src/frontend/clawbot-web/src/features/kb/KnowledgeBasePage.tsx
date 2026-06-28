@@ -20,6 +20,7 @@ import {
   rollbackKbVersion,
   runKbTest,
   updateKbModule,
+  uploadKbVersion,
   type CreateKbModulePayload,
   type KbAccuracySummary,
   type KbModule,
@@ -151,6 +152,17 @@ export default function KnowledgeBasePage() {
     },
   });
 
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => uploadKbVersion(selectedModule?.id ?? "", file),
+    onSuccess: async (result) => {
+      setSelectedVersionId(result.version.id);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["kb", selectedModule?.id, "versions"] }),
+        queryClient.invalidateQueries({ queryKey: ["kb", "modules"] }),
+      ]);
+    },
+  });
+
   const deploymentMutation = useMutation({
     mutationFn: ({ rollback }: { readonly rollback: boolean }) =>
       rollback
@@ -201,6 +213,7 @@ export default function KnowledgeBasePage() {
     moduleMutation.error,
     archiveMutation.error,
     saveVersionMutation.error,
+    uploadMutation.error,
     deploymentMutation.error,
     addTestCaseMutation.error,
     testMutation.error,
@@ -266,8 +279,10 @@ export default function KnowledgeBasePage() {
           onOpenQa={() => setQaOpen(true)}
           onRollback={() => deploymentMutation.mutate({ rollback: true })}
           onSave={(content) => saveVersionMutation.mutate(content)}
+          onUpload={(file) => uploadMutation.mutate(file)}
           saving={saveVersionMutation.isPending}
           testPending={testMutation.isPending}
+          uploading={uploadMutation.isPending}
           version={selectedVersion}
         />
       </section>

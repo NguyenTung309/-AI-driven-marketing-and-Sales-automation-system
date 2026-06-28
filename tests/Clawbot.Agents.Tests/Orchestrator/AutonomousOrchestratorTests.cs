@@ -78,6 +78,231 @@ public sealed class AutonomousOrchestratorTests
     }
 
     [Fact]
+    public async Task RunAsync_RetriesTask_OnTransientFailure_WithoutBurningReplan()
+    {
+        // EARS[WHEN a delegated task suffers a transient failure THE SYSTEM SHALL retry the same task without replanning]
+        // "flaky-agent" is intentionally NOT in the catalog so the orchestrator resolves the registry fake (not the
+        // GenericLlmAgentWorker that data-defined agents shadow to).
+        var planner = FakePlanner(SingleTaskPlan("flaky-agent"));
+        var agent = TransientThenOkAgent("flaky-agent", 1, new TimeoutException("llm timeout"));
+        var registry = Registry(agent);
+        var sut = Build(planner, registry, new AutonomousOrchestratorOptions { MaxRounds = 1, TransientBackoffBaseMs = 0 });
+
+        var result = await sut.RunAsync(Request("manual"), CancellationToken.None);
+
+        result.Status.Should().Be("completed");
+        agent.Calls.Should().Be(2);
+        await planner.DidNotReceive().ReplanAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<IReadOnlyList<AgentCatalogEntry>>(), Arg.Any<IReadOnlyList<OrchestrationPlanTask>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunAsync_TreatsTimeoutInducedCancellation_AsTransientAndRetries()
+    {
+        // HttpClient.Timeout throws TaskCanceledException when the user ct is NOT the cause -> must retry, not abort.
+        var planner = FakePlanner(SingleTaskPlan("flaky-agent"));
+        var agent = TransientThenOkAgent("flaky-agent", 1, new TaskCanceledException("HttpClient.Timeout"));
+        var registry = Registry(agent);
+        var sut = Build(planner, registry, new AutonomousOrchestratorOptions { MaxRounds = 1, TransientBackoffBaseMs = 0 });
+
+        var result = await sut.RunAsync(Request("manual"), CancellationToken.None);
+
+        result.Status.Should().Be("completed");
+        agent.Calls.Should().Be(2);
+        await planner.DidNotReceive().ReplanAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<IReadOnlyList<AgentCatalogEntry>>(), Arg.Any<IReadOnlyList<OrchestrationPlanTask>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunAsync_TransientExhausted_FailsAndReplans()
+    {
+        // EARS[WHEN transient retries are exhausted THE SYSTEM SHALL surface the task as failed and replan]
+        var planner = FakePlanner(SingleFailingPlan(), SingleFailingPlan());
+        var agent = TransientThenOkAgent("failing-agent", 99, new TimeoutException("persistent timeout"));
+        var registry = Registry(agent);
+        var sut = Build(planner, registry, new AutonomousOrchestratorOptions { MaxRounds = 2, MaxTransientRetries = 1, TransientBackoffBaseMs = 0 });
+
+        var result = await sut.RunAsync(Request("manual"), CancellationToken.None);
+
+        result.Status.Should().Be("failed");
+        result.Reason.Should().Be("max_rounds");
+        await planner.Received(1).ReplanAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<IReadOnlyList<AgentCatalogEntry>>(), Arg.Any<IReadOnlyList<OrchestrationPlanTask>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunAsync_ReActWorker_InvokesAllowedTool_ThenFinalAnswer()
+    {
+        // EARS[WHEN a data-defined agent declares allowed tools THE SYSTEM SHALL run a ReAct loop: the model emits
+        // a JSON action, the worker invokes the allowed tool (forwarding tenant_id), feeds the observation back, and
+        // returns the model's plain-text final answer]
+        var definition = new AgentDefinitionCatalogEntry(
+            Guid.NewGuid(), "dyn-content", "dyn", "Dyn", "content", "Generate then report.", "{}", true, null,
+            """["content-agent"]""");
+        var catalog = Substitute.For<IAgentDefinitionCatalog>();
+        catalog.ListAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(new[] { definition });
+        var planner = FakePlanner(SingleTaskPlan("dyn-content"));
+
+        var contentTool = new CapturingFakeAgent("content-agent", new AgentResult("t1", true, "{\"post\":\"hello\"}", null));
+        var toolRegistry = ToolRegistryFactory.Build(new[] { contentTool });
+
+        var chat = Substitute.For<IClaudeChatClient>();
+        chat.CompleteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new ClaudeReply("""{"tool":"content-agent","args":{"platform":"facebook","brief":"x"}}""", 1, 2, 0m),
+                new ClaudeReply("Final answer: posted", 3, 4, 0m));
+
+        var sut = Build(planner, Registry(), catalog: catalog, chat: chat, toolRegistry: toolRegistry);
+
+        var result = await sut.RunAsync(Request("manual"), CancellationToken.None);
+
+        result.Status.Should().Be("completed");
+        contentTool.Calls.Should().Be(1);
+        contentTool.LastInput.Should().ContainKey("platform").WhoseValue.Should().Be("facebook");
+        contentTool.LastInput.Should().ContainKey("tenant_id").WhoseValue.Should().Be(Tenant.ToString("D"));
+        await chat.Received(2).CompleteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunAsync_ReActWorker_RejectsOutOfListTool()
+    {
+        // EARS[WHEN the model emits a tool action for a tool NOT in the agent's allow-list THE SYSTEM SHALL refuse
+        // to invoke it and feed a not-available observation back so the model must use only allowed tools]
+        var definition = new AgentDefinitionCatalogEntry(
+            Guid.NewGuid(), "dyn-content", "dyn", "Dyn", "content", "Generate then report.", "{}", true, null,
+            """["content-agent"]""");
+        var catalog = Substitute.For<IAgentDefinitionCatalog>();
+        catalog.ListAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(new[] { definition });
+        var planner = FakePlanner(SingleTaskPlan("dyn-content"));
+
+        var contentTool = new CapturingFakeAgent("content-agent", new AgentResult("t1", true, "{\"post\":\"hello\"}", null));
+        var toolRegistry = ToolRegistryFactory.Build(new[] { contentTool });
+
+        var chat = Substitute.For<IClaudeChatClient>();
+        chat.CompleteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new ClaudeReply("""{"tool":"ads-agent","args":{}}""", 1, 2, 0m),
+                new ClaudeReply("Final: ads not available, content skipped", 3, 4, 0m));
+
+        var sut = Build(planner, Registry(), catalog: catalog, chat: chat, toolRegistry: toolRegistry);
+
+        var result = await sut.RunAsync(Request("manual"), CancellationToken.None);
+
+        result.Status.Should().Be("completed");
+        contentTool.Calls.Should().Be(0); // ads-agent is not in the allow-list -> never invoked
+    }
+
+    [Fact]
+    public async Task RunAsync_EmitsReadableRunSummary_OnCompletion()
+    {
+        // SPEC-16 P2-11: on completion the orchestrator posts a human-readable run_summary trace composed from the sub-agent results.
+        var planner = FakePlanner(TwoStepPlan());
+        var registry = Registry(
+            OkAgent("research-agent", "insight"),
+            OkAgent("content-agent", "draft"));
+        var sink = Substitute.For<IAutonomousRunSink>();
+        var capturedPhases = new System.Collections.Concurrent.ConcurrentBag<string>();
+        sink.When(s => s.TraceAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()))
+            .Do(ci => capturedPhases.Add(ci.ArgAt<string>(4)));
+        var sut = Build(planner, registry, sink: sink);
+
+        var result = await sut.RunAsync(Request("manual"), CancellationToken.None);
+
+        result.Status.Should().Be("completed");
+        capturedPhases.Should().Contain("plan_summary");
+        capturedPhases.Should().Contain("run_summary");
+    }
+
+    [Fact]
+    public async Task RunAsync_HighRiskTool_RefusedWhenApprovalRequired()
+    {
+        // EARS[WHEN a high-risk tool is invoked and the tenant requires approval THE SYSTEM SHALL refuse it
+        // (the model gets a needs-approval observation and never executes the high-risk action)]
+        var definition = new AgentDefinitionCatalogEntry(
+            Guid.NewGuid(), "dyn-pub", "dyn", "Dyn", "publisher", "Publish content.", "{}", true, null,
+            """["content.publish"]""");
+        var catalog = Substitute.For<IAgentDefinitionCatalog>();
+        catalog.ListAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(new[] { definition });
+        var planner = FakePlanner(SingleTaskPlan("dyn-pub"));
+
+        var highRiskTool = new HighRiskFakeTool("content.publish");
+        var toolRegistry = ToolRegistryFactory.Build(Array.Empty<IAgent>(), new[] { highRiskTool });
+
+        var approvalResolver = Substitute.For<IOrchestrationApprovalResolver>();
+        approvalResolver.IsRequiredAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(true);
+
+        var chat = Substitute.For<IClaudeChatClient>();
+        chat.CompleteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new ClaudeReply("""{"tool":"content.publish","args":{"content_id":"x"}}""", 1, 2, 0m),
+                new ClaudeReply("Final: publish needs approval", 3, 4, 0m));
+
+        var sut = Build(planner, Registry(), catalog: catalog, chat: chat, toolRegistry: toolRegistry, approvalResolver: approvalResolver);
+
+        var result = await sut.RunAsync(Request("manual"), CancellationToken.None);
+
+        result.Status.Should().Be("completed");
+        highRiskTool.Calls.Should().Be(0); // high-risk tool never executed
+    }
+
+    [Fact]
+    public async Task RunAsync_HighRiskTool_AllowedWhenApprovalNotRequired()
+    {
+        var definition = new AgentDefinitionCatalogEntry(
+            Guid.NewGuid(), "dyn-pub", "dyn", "Dyn", "publisher", "Publish content.", "{}", true, null,
+            """["content.publish"]""");
+        var catalog = Substitute.For<IAgentDefinitionCatalog>();
+        catalog.ListAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(new[] { definition });
+        var planner = FakePlanner(SingleTaskPlan("dyn-pub"));
+
+        var highRiskTool = new HighRiskFakeTool("content.publish");
+        var toolRegistry = ToolRegistryFactory.Build(Array.Empty<IAgent>(), new[] { highRiskTool });
+
+        var approvalResolver = Substitute.For<IOrchestrationApprovalResolver>();
+        approvalResolver.IsRequiredAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(false);
+
+        var chat = Substitute.For<IClaudeChatClient>();
+        chat.CompleteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new ClaudeReply("""{"tool":"content.publish","args":{"content_id":"x"}}""", 1, 2, 0m),
+                new ClaudeReply("Final: published", 3, 4, 0m));
+
+        var sut = Build(planner, Registry(), catalog: catalog, chat: chat, toolRegistry: toolRegistry, approvalResolver: approvalResolver);
+
+        var result = await sut.RunAsync(Request("manual"), CancellationToken.None);
+
+        result.Status.Should().Be("completed");
+        highRiskTool.Calls.Should().Be(1); // toggle off -> executed
+    }
+
+    [Fact]
+    public async Task RunAsync_DryRun_PreviewsToolActions_WithoutExecuting()
+    {
+        // EARS[WHEN dry-run is on THE SYSTEM SHALL return tool-action previews without side effects]
+        var definition = new AgentDefinitionCatalogEntry(
+            Guid.NewGuid(), "dyn-content", "dyn", "Dyn", "content", "Generate then report.", "{}", true, null,
+            """["content-agent"]""");
+        var catalog = Substitute.For<IAgentDefinitionCatalog>();
+        catalog.ListAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(new[] { definition });
+        var planner = FakePlanner(SingleTaskPlan("dyn-content"));
+
+        var contentTool = new CapturingFakeAgent("content-agent", new AgentResult("t1", true, "{\"post\":\"hello\"}", null));
+        var toolRegistry = ToolRegistryFactory.Build(new[] { contentTool });
+
+        var chat = Substitute.For<IClaudeChatClient>();
+        chat.CompleteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(
+                new ClaudeReply("""{"tool":"content-agent","args":{"platform":"facebook","brief":"x"}}""", 1, 2, 0m),
+                new ClaudeReply("Final: previewed", 3, 4, 0m));
+
+        var dryRunRequest = new AutonomousRunRequest(Tenant, Session, "Launch HSK4 campaign", "manual", RequiresApproval: false, DryRun: true);
+        var sut = Build(planner, Registry(), catalog: catalog, chat: chat, toolRegistry: toolRegistry);
+
+        var result = await sut.RunAsync(dryRunRequest, CancellationToken.None);
+
+        result.Status.Should().Be("completed");
+        // Adapter-wrapped tool short-circuited on dry-run -> the underlying adapter never executed.
+        contentTool.Calls.Should().Be(0);
+    }
+
+    [Fact]
     public async Task RunAsync_FailsPreflight_WhenCostCapExceeded()
     {
         var planner = FakePlanner(SingleTaskPlan("content-agent"));
@@ -112,7 +337,10 @@ public sealed class AutonomousOrchestratorTests
         IClaudeCostTracker? tracker = null,
         IAgentDefinitionCatalog? catalog = null,
         IRagRetriever? rag = null,
-        IClaudeChatClient? chat = null)
+        IClaudeChatClient? chat = null,
+        ToolRegistry? toolRegistry = null,
+        IAutonomousRunSink? sink = null,
+        IOrchestrationApprovalResolver? approvalResolver = null)
     {
         tracker ??= AllowedTracker();
         if (catalog is null)
@@ -122,7 +350,7 @@ public sealed class AutonomousOrchestratorTests
                 .Returns(new[] { Research, Content });
         }
         var mailbox = Substitute.For<IA2AMailbox>();
-        var sink = Substitute.For<IAutonomousRunSink>();
+        sink ??= Substitute.For<IAutonomousRunSink>();
         rag ??= Substitute.For<IRagRetriever>();
         if (chat is null)
         {
@@ -133,7 +361,7 @@ public sealed class AutonomousOrchestratorTests
         return new AutonomousOrchestrator(
             planner, catalog, registry, mailbox,
             new OrchestratorCostGuard(tracker),
-            new LlmCallScope(), sink, rag, chat, new FixedClock(Now), options);
+            new LlmCallScope(), sink, rag, chat, new FixedClock(Now), options, toolRegistry, approvalResolver);
     }
 
     private static AutonomousRunRequest Request(string source) => new(Tenant, Session, "Launch HSK4 campaign", source, RequiresApproval: false);
@@ -181,6 +409,75 @@ public sealed class AutonomousOrchestratorTests
         agent.ExecuteAsync(Arg.Any<AgentTask>(), Arg.Any<CancellationToken>())
             .Returns(new AgentResult("t1", false, string.Empty, "boom"));
         return agent;
+    }
+
+    private static TransientThenOkFakeAgent TransientThenOkAgent(string name, int transientCount, Exception ex) =>
+        new TransientThenOkFakeAgent(name, transientCount, ex);
+
+    // Real fake (not NSubstitute): throwing from a NSubstitute Returns-callback wraps the exception and breaks
+    // transient classification, so fault the Task directly with the original exception type intact.
+    private sealed class TransientThenOkFakeAgent : IAgent
+    {
+        private readonly int _transientCount;
+        private readonly Exception _ex;
+        private int _calls;
+
+        public TransientThenOkFakeAgent(string name, int transientCount, Exception ex)
+        {
+            Name = name;
+            _transientCount = transientCount;
+            _ex = ex;
+        }
+
+        public string Name { get; }
+        public int Calls => _calls;
+
+        public Task<AgentResult> ExecuteAsync(AgentTask task, CancellationToken cancellationToken) =>
+            ++_calls <= _transientCount
+                ? Task.FromException<AgentResult>(_ex)
+                : Task.FromResult(new AgentResult(task.Id, true, "recovered", null));
+    }
+
+    // Minimal high-risk tool fake for the P4-4 risk-gate test.
+    private sealed class HighRiskFakeTool : IAgentTool
+    {
+        private int _calls;
+        public HighRiskFakeTool(string name) { Name = name; }
+        public string Name { get; }
+        public string Description => "publish";
+        public string InputSchemaJson => "{}";
+        public string RequiredPermission => "content:write";
+        public ToolRiskLevel RiskLevel => ToolRiskLevel.High;
+        public int Calls => _calls;
+        public Task<ToolResult> InvokeAsync(IReadOnlyDictionary<string, string> args, ToolContext ctx, CancellationToken ct)
+        {
+            _calls++;
+            return Task.FromResult(ToolResult.Ok("{\"published\":true}"));
+        }
+    }
+
+    // Captures the last task input so a test can assert the tool forwarded args + tenant_id into the adapter.
+    private sealed class CapturingFakeAgent : IAgent
+    {
+        private readonly AgentResult _result;
+        private int _calls;
+
+        public CapturingFakeAgent(string name, AgentResult result)
+        {
+            Name = name;
+            _result = result;
+        }
+
+        public string Name { get; }
+        public int Calls => _calls;
+        public IReadOnlyDictionary<string, string> LastInput { get; private set; } = new Dictionary<string, string>(0);
+
+        public Task<AgentResult> ExecuteAsync(AgentTask task, CancellationToken cancellationToken)
+        {
+            ++_calls;
+            LastInput = task.Input;
+            return Task.FromResult(_result);
+        }
     }
 
     private static IClaudeCostTracker AllowedTracker()

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text;
 using Clawbot.Api.Background;
 using Clawbot.Api.Auth;
@@ -118,6 +118,7 @@ builder.Services.AddScoped<ReplicationHealthService>();
 builder.Services.AddScoped<ContactDataExportService>();
 builder.Services.AddScoped<ConversationExportService>();
 builder.Services.AddScoped<InboxSearchService>();
+builder.Services.AddScoped<IUserInboxResolver, UserInboxResolver>();
 builder.Services.AddScoped<KbTestRunnerService>();
 builder.Services.AddScoped<LeadCsvService>();
 builder.Services.AddScoped<Clawbot.Agents.Core.Skills.Content.IImagePromptGenerator, Clawbot.Agents.Core.Skills.Content.ClaudeImagePromptGenerator>();
@@ -184,7 +185,32 @@ builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Orchestrator.Orchestrato
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
-    c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First()));
+{
+    c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First());
+    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+        Scheme = "Bearer",
+        BearerFormat = "JWT",
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Description = "Enter JWT access token"
+    });
+    c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    {
+        {
+            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            {
+                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                {
+                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
 builder.Services.AddCors(c =>
     c.AddDefaultPolicy(p =>
         p.WithOrigins("http://localhost:15876")
@@ -238,6 +264,9 @@ app.MapRoles();
 app.MapApiKeys();
 app.MapKb();
 app.MapInbox();
+app.MapLabels();
+app.MapInboxNotes();
+app.MapInboxLabels();
 app.MapSaleAssist();
 app.MapContent();
 app.MapAds();
@@ -253,6 +282,8 @@ app.MapChannels();
 app.MapWebhooks();
 app.MapContacts();
 app.MapAdmin();
+app.MapAdminInboxEndpoints();
+app.MapAdminChannelsEndpoints();
 app.MapTenantBranding();
 app.MapAdminUsers();
 app.MapProfile();
@@ -281,8 +312,11 @@ if (app.Environment.IsDevelopment())
     await DevDataSeeder.SeedAdminAsync(app.Services).ConfigureAwait(false);
     await DevDataSeeder.SeedAutoReplyTemplateAsync(app.Services).ConfigureAwait(false);
     await DemoLlmConfigSeeder.SeedAsync(app.Services).ConfigureAwait(false);
+    await DevDataSeeder.SeedAgentDefinitionsAsync(app.Services).ConfigureAwait(false);
+    await DevDataSeeder.BackfillConversationInboxesAsync(app.Services).ConfigureAwait(false);
 }
 
 app.Run();
 
 public partial class Program { }
+

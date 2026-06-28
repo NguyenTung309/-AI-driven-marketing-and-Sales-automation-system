@@ -60,6 +60,8 @@ message SubmitRequest {
   string tenant_id = 1;
   string goal = 2;
   google.protobuf.Timestamp requested_at = 3;
+  // SPEC-16 P3-3: the user initiating the run, so the session (and terminal notifications) can be attributed to them.
+  string user_id = 4;
 }
 
 message SessionRef {

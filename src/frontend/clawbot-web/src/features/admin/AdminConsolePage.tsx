@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
+import { useAuthStore } from "@/shared/auth/authStore";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, Modal, StatusPill, type StatusTone } from "@/shared/ui";
 import { toUserFriendlyError } from "@/shared/utils/userText";
@@ -200,6 +201,9 @@ const tempPasswordHint = "Ít nhất 8 ký tự, gồm chữ hoa, chữ thườn
 
 export default function AdminConsolePage() {
   const queryClient = useQueryClient();
+  const authPermissions = useAuthStore((s) => s.permissions);
+  const canManageUsers = authPermissions.includes("admin.system");
+  const canManagePancakeToken = canManageUsers || authPermissions.includes("users:pancake-token:manage");
   const [tab, setTab] = useState<AdminTab>("users");
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -211,6 +215,8 @@ export default function AdminConsolePage() {
     password: "",
     isActive: true,
     roles: [] as string[],
+    pancakeAccessToken: "",
+    clearPancakeAccessToken: false,
   });
   const [roleModal, setRoleModal] = useState<RoleModalMode>(null);
   const [editingRole, setEditingRole] = useState<Role | null>(null);
@@ -230,14 +236,17 @@ export default function AdminConsolePage() {
   const rolesQuery = useQuery({
     queryKey: ["admin", "roles"],
     queryFn: listRoles,
+    enabled: canManageUsers,
   });
   const permissionsQuery = useQuery({
     queryKey: ["admin", "permissions"],
     queryFn: listPermissions,
+    enabled: canManageUsers,
   });
   const apiKeysQuery = useQuery({
     queryKey: ["admin", "api-keys"],
     queryFn: listApiKeys,
+    enabled: canManageUsers,
   });
   const brandingQuery = useQuery({
     queryKey: ["admin", "tenant-branding"],
@@ -269,7 +278,7 @@ export default function AdminConsolePage() {
   const rolePermissionsQuery = useQuery({
     queryKey: ["admin", "role-permissions", effectiveSelectedRoleId],
     queryFn: () => listRolePermissions(effectiveSelectedRoleId!),
-    enabled: tab === "roles" && Boolean(effectiveSelectedRoleId),
+    enabled: canManageUsers && tab === "roles" && Boolean(effectiveSelectedRoleId),
   });
   const rolePermissionRows = Array.isArray(rolePermissionsQuery.data) ? rolePermissionsQuery.data : EMPTY_PERMISSIONS;
   const selectedRole = roles.find((role) => role.id === effectiveSelectedRoleId) ?? null;
@@ -353,12 +362,18 @@ export default function AdminConsolePage() {
           displayName: userForm.displayName.trim(),
           password: userForm.password,
           roles: userForm.roles,
+          ...(canManagePancakeToken && userForm.pancakeAccessToken.trim()
+            ? { pancakeAccessToken: userForm.pancakeAccessToken.trim() }
+            : {}),
         });
       }
       if (!editingUser) return undefined;
       await updateAdminUser(editingUser.id, {
-        displayName: userForm.displayName.trim(),
-        isActive: userForm.isActive,
+        ...(canManageUsers ? { displayName: userForm.displayName.trim(), isActive: userForm.isActive } : {}),
+        ...(canManagePancakeToken && userForm.pancakeAccessToken.trim()
+          ? { pancakeAccessToken: userForm.pancakeAccessToken.trim() }
+          : {}),
+        ...(canManagePancakeToken && userForm.clearPancakeAccessToken ? { clearPancakeAccessToken: true } : {}),
       });
       return undefined;
     },
@@ -486,13 +501,29 @@ export default function AdminConsolePage() {
 
   function openCreateUser() {
     setEditingUser(null);
-    setUserForm({ displayName: "", email: "", password: "", isActive: true, roles: [] });
+    setUserForm({
+      displayName: "",
+      email: "",
+      password: "",
+      isActive: true,
+      roles: [],
+      pancakeAccessToken: "",
+      clearPancakeAccessToken: false,
+    });
     setUserModal("create");
   }
 
   function openEditUser(user: AdminUser) {
     setEditingUser(user);
-    setUserForm({ displayName: user.displayName, email: user.email, password: "", isActive: user.isActive, roles: [] });
+    setUserForm({
+      displayName: user.displayName,
+      email: user.email,
+      password: "",
+      isActive: user.isActive,
+      roles: [],
+      pancakeAccessToken: "",
+      clearPancakeAccessToken: false,
+    });
     setUserModal("edit");
   }
 
@@ -585,10 +616,14 @@ export default function AdminConsolePage() {
 
       <div className="mb-gutter flex flex-wrap border-b border-outline">
         <TabButton active={tab === "users"} icon="group" label="Người dùng" onClick={() => setTab("users")} />
-        <TabButton active={tab === "roles"} icon="admin_panel_settings" label="Phân quyền" onClick={() => setTab("roles")} />
-        <TabButton active={tab === "keys"} icon="vpn_key" label="Khóa tích hợp" onClick={() => setTab("keys")} />
-        <TabButton active={tab === "integrations"} icon="hub" label="Tích hợp" onClick={() => setTab("integrations")} />
-        <TabButton active={tab === "audit"} icon="receipt_long" label="Nhật ký quản trị" onClick={() => setTab("audit")} />
+        {canManageUsers ? (
+          <>
+            <TabButton active={tab === "roles"} icon="admin_panel_settings" label="Phân quyền" onClick={() => setTab("roles")} />
+            <TabButton active={tab === "keys"} icon="vpn_key" label="Khóa tích hợp" onClick={() => setTab("keys")} />
+            <TabButton active={tab === "integrations"} icon="hub" label="Tích hợp" onClick={() => setTab("integrations")} />
+            <TabButton active={tab === "audit"} icon="receipt_long" label="Nhật ký quản trị" onClick={() => setTab("audit")} />
+          </>
+        ) : null}
       </div>
 
       {tab === "users" ? (
@@ -601,10 +636,12 @@ export default function AdminConsolePage() {
               </div>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input className={inputClass} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tìm email hoặc tên..." />
-                <Button type="button" className="shrink-0 whitespace-nowrap" onClick={openCreateUser}>
-                  <span aria-hidden="true" className="material-symbols-outlined text-[18px]">person_add</span>
-                  Thêm người dùng
-                </Button>
+                {canManageUsers ? (
+                  <Button type="button" className="shrink-0 whitespace-nowrap" onClick={openCreateUser}>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[18px]">person_add</span>
+                    Thêm người dùng
+                  </Button>
+                ) : null}
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -614,6 +651,7 @@ export default function AdminConsolePage() {
                     <th className="px-4 py-3 font-bold">Người dùng</th>
                     <th className="px-4 py-3 font-bold">Email</th>
                     <th className="px-4 py-3 font-bold">Đăng nhập cuối</th>
+                    <th className="px-4 py-3 font-bold">Token Pancake</th>
                     <th className="px-4 py-3 font-bold">Trạng thái</th>
                     <th className="px-4 py-3 text-right font-bold">Hành động</th>
                   </tr>
@@ -635,6 +673,11 @@ export default function AdminConsolePage() {
                       <td className="px-4 py-4 text-body-md text-secondary">{user.email}</td>
                       <td className="px-4 py-4 text-body-md text-on-surface-variant">{formatDateTime(user.lastLoginAt)}</td>
                       <td className="px-4 py-4">
+                        <StatusPill tone={user.hasPancakeAccessToken ? "success" : "warning"}>
+                          {user.hasPancakeAccessToken ? "Đã cấu hình" : "Chưa có"}
+                        </StatusPill>
+                      </td>
+                      <td className="px-4 py-4">
                         <StatusPill tone={user.isActive ? "success" : "error"}>{user.isActive ? "Hoạt động" : "Đã khóa"}</StatusPill>
                       </td>
                       <td className="px-4 py-4">
@@ -642,26 +685,30 @@ export default function AdminConsolePage() {
                           <Button type="button" size="sm" variant="ghost" onClick={() => openEditUser(user)} aria-label={`Sửa ${user.displayName}`}>
                             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">edit</span>
                           </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => activeMutation.mutate({ id: user.id, active: !user.isActive })}
-                            disabled={activeMutation.isPending}
-                            aria-label={user.isActive ? `Khóa ${user.displayName}` : `Mở khóa ${user.displayName}`}
-                          >
-                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{user.isActive ? "lock" : "lock_open"}</span>
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => resetPasswordMutation.mutate(user.id)}
-                            disabled={resetPasswordMutation.isPending}
-                            aria-label={`Reset mật khẩu ${user.displayName}`}
-                          >
-                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">restart_alt</span>
-                          </Button>
+                          {canManageUsers ? (
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => activeMutation.mutate({ id: user.id, active: !user.isActive })}
+                                disabled={activeMutation.isPending}
+                                aria-label={user.isActive ? `Khóa ${user.displayName}` : `Mở khóa ${user.displayName}`}
+                              >
+                                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{user.isActive ? "lock" : "lock_open"}</span>
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => resetPasswordMutation.mutate(user.id)}
+                                disabled={resetPasswordMutation.isPending}
+                                aria-label={`Reset mật khẩu ${user.displayName}`}
+                              >
+                                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">restart_alt</span>
+                              </Button>
+                            </>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -1096,7 +1143,13 @@ export default function AdminConsolePage() {
           }}
         >
           <Field label="Tên hiển thị">
-            <input className={inputClass} required value={userForm.displayName} onChange={(event) => setUserForm({ ...userForm, displayName: event.target.value })} />
+            <input
+              className={inputClass}
+              required={canManageUsers}
+              disabled={!canManageUsers}
+              value={userForm.displayName}
+              onChange={(event) => setUserForm({ ...userForm, displayName: event.target.value })}
+            />
           </Field>
           {userModal === "create" ? (
             <>
@@ -1128,12 +1181,43 @@ export default function AdminConsolePage() {
                 </div>
               </div>
             </>
-          ) : (
+          ) : canManageUsers ? (
             <label className="inline-flex items-center gap-2 text-body-md font-semibold text-secondary">
               <input type="checkbox" className="size-4 accent-primary" checked={userForm.isActive} onChange={(event) => setUserForm({ ...userForm, isActive: event.target.checked })} />
               Người dùng đang hoạt động
             </label>
-          )}
+          ) : null}
+          {canManagePancakeToken ? (
+            <div className="space-y-3 rounded-lg border border-outline bg-surface p-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-label-sm font-semibold text-secondary">Access token Pancake của nhân viên sale</p>
+                {editingUser ? (
+                  <StatusPill tone={editingUser.hasPancakeAccessToken ? "success" : "warning"}>
+                    {editingUser.hasPancakeAccessToken ? "Đã cấu hình" : "Chưa có"}
+                  </StatusPill>
+                ) : null}
+              </div>
+              <input
+                className={inputClass}
+                type="password"
+                value={userForm.pancakeAccessToken}
+                onChange={(event) => setUserForm({ ...userForm, pancakeAccessToken: event.target.value, clearPancakeAccessToken: false })}
+                placeholder={editingUser?.hasPancakeAccessToken ? "Đã lưu token, nhập để thay thế" : "Nhập access token Pancake"}
+              />
+              {editingUser?.hasPancakeAccessToken ? (
+                <label className="inline-flex items-center gap-2 text-body-md text-secondary">
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-primary"
+                    checked={userForm.clearPancakeAccessToken}
+                    onChange={(event) => setUserForm({ ...userForm, clearPancakeAccessToken: event.target.checked, pancakeAccessToken: "" })}
+                  />
+                  Xóa token hiện tại
+                </label>
+              ) : null}
+              <p className="text-label-sm text-on-surface-variant">Token được mã hóa khi lưu; giao diện không hiển thị lại token đã lưu.</p>
+            </div>
+          ) : null}
         </form>
       </Modal>
 

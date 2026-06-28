@@ -5,7 +5,7 @@ namespace Clawbot.Infrastructure.Tests.Frontend;
 public sealed class PixelAgentsOfficeFrontendTests
 {
     [Fact]
-    public void Frontend_exposes_pixel_agents_office_route_and_nav_entry()
+    public void Frontend_exposes_pixel_agents_office_route_without_sidebar_entry()
     {
         var root = FindRepositoryRoot();
         var routes = File.ReadAllText(Path.Combine(root, "src", "frontend", "clawbot-web", "src", "app", "routes.tsx"));
@@ -16,8 +16,8 @@ public sealed class PixelAgentsOfficeFrontendTests
 
         routes.Should().Contain("PixelAgentsOfficePage");
         routes.Should().Contain("path: \"/agents-office\"");
-        nav.Should().Contain("Không gian agents");
-        nav.Should().Contain("to: \"/agents-office\"");
+        nav.Should().NotContain("Không gian agents");
+        nav.Should().NotContain("to: \"/agents-office\"");
 
         var page = File.ReadAllText(pagePath);
         page.Should().Contain("Không gian agents");

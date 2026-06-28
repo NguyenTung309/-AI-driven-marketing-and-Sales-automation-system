@@ -38,9 +38,39 @@ public static class LeadsEndpoints
             .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
         rules.MapGet("/", ListRulesAsync);
         rules.MapPost("/", CreateRuleAsync);
+        rules.MapPost("/seed-defaults", SeedDefaultRulesAsync);
         rules.MapDelete("/{id:guid}", DeactivateRuleAsync);
 
         return app;
+    }
+
+    // One-click seed of the default education lead-scoring rules. Skips codes already present
+    // so it is safe to re-run; returns how many rules were created.
+    private static async Task<IResult> SeedDefaultRulesAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var existing = await db.LeadScoringRules
+            .Where(r => r.TenantId == tenantId)
+            .Select(r => r.EventCode)
+            .ToListAsync(ct).ConfigureAwait(false);
+        var have = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
+
+        var created = 0;
+        foreach (var spec in LeadScoringDefaults.Rules)
+        {
+            if (have.Contains(spec.EventCode)) continue;
+            var rule = LeadScoringRule.Create(tenantId, spec.EventCode, spec.Weight, platform: null, clock.UtcNow);
+            db.Entry(rule).Property("Description").CurrentValue = spec.Description;
+            db.LeadScoringRules.Add(rule);
+            created++;
+        }
+
+        if (created > 0) await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.Ok(new { created, total = LeadScoringDefaults.Rules.Count });
     }
 
     private static async Task<IResult> ListAsync(

@@ -55,6 +55,8 @@ public sealed class AgentsEndpointPermissionTests
     [InlineData("anthropic", "gpt-4o", false)]
     [InlineData("openai", "gpt-4o", true)]
     [InlineData("openai", "claude-opus-4", false)]
+    [InlineData("openai-compatible", "deepseek-chat", true)]
+    [InlineData("openai-compatible", "claude-opus-4", false)]
     public void Model_provider_guard_still_blocks_cross_provider_binding(string provider, string model, bool expected)
     {
         AgentsEndpoints.IsModelCompatibleWithProvider(provider, model).Should().Be(expected);

@@ -13,12 +13,18 @@ public sealed class Contact : AggregateRoot<Guid>, ITenantOwned
     public string Locale { get; private set; } = "vi-VN";
     public int LifetimeScore { get; private set; }
     public string LifecycleStage { get; private set; } = "visitor";
+    public string? AvatarUrl { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? DeletedAt { get; private set; }
 
     public IReadOnlyCollection<ContactExternalId> ExternalIds => _externalIds.AsReadOnly();
 
     private Contact() { }
+
+    public void UpdateAvatar(string? avatarUrl, DateTimeOffset at)
+    {
+        AvatarUrl = avatarUrl;
+    }
 
     public static Contact Create(Guid tenantId, string displayName, DateTimeOffset createdAt) =>
         new()
@@ -33,5 +39,13 @@ public sealed class Contact : AggregateRoot<Guid>, ITenantOwned
     {
         if (_externalIds.Any(x => x.Platform == platform && x.ExternalId == externalId)) return;
         _externalIds.Add(ContactExternalId.Create(Id, platform, externalId, seenAt));
+    }
+
+    public void UpdateDisplayName(string displayName)
+    {
+        if (!string.IsNullOrWhiteSpace(displayName))
+        {
+            DisplayName = displayName;
+        }
     }
 }

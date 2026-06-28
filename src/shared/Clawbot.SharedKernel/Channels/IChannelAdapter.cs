@@ -6,4 +6,6 @@ public interface IChannelAdapter
     Task<bool> VerifyWebhookSignatureAsync(string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default);
     Task<IReadOnlyList<ChannelMessage>> ParseAsync(string rawBody, CancellationToken ct = default);
     Task SendAsync(string externalThreadId, string text, CancellationToken ct = default);
+    Task SendAsync(string externalThreadId, string text, string? accessToken, CancellationToken ct = default) =>
+        SendAsync(externalThreadId, text, ct);
 }
