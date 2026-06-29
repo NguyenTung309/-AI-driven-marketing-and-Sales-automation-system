@@ -16,6 +16,7 @@ public sealed class AgentSession : AggregateRoot<Guid>, ITenantOwned
     public string PlanJson { get; private set; } = "{}";
     public bool RequiresApproval { get; private set; }
     public int ReplanCount { get; private set; }
+    public DateTimeOffset? ArchivedAt { get; private set; }
     public byte[]? RowVersion { get; private set; }
     public DateTimeOffset StartedAt { get; private set; }
     public DateTimeOffset? FinishedAt { get; private set; }
@@ -136,4 +137,13 @@ public sealed class AgentSession : AggregateRoot<Guid>, ITenantOwned
         Status = AgentSessionStatuses.Failed;
         FinishedAt = at;
     }
+
+    public void Archive(DateTimeOffset at)
+    {
+        if (Status is not (AgentSessionStatuses.Completed or AgentSessionStatuses.Failed or AgentSessionStatuses.Cancelled))
+            throw new InvalidOperationException("Only completed, failed, or cancelled orchestration sessions can be archived. Cancel running sessions first.");
+
+        ArchivedAt = at;
+    }
 }
+

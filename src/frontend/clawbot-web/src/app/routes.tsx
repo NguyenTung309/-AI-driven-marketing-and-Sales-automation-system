@@ -5,6 +5,7 @@ import {
   AnalyticsReportsPage,
   ContentWorkspacePage,
   ConversationsPage,
+  AgentRunDetailPage,
   DashboardPage,
   DocumentsPage,
   ForgotPasswordPage,
@@ -102,6 +103,14 @@ export const router = createBrowserRouter([
     element: (
       <RequireAuth>
         <AgentDashboardPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/agents/runs/:sessionId",
+    element: (
+      <RequireAuth>
+        <AgentRunDetailPage />
       </RequireAuth>
     ),
   },

@@ -66,11 +66,28 @@ export interface OrchestrationRunListItem {
   readonly userId?: string | null;
 }
 
-export async function listOrchestrationRuns(mine = false): Promise<readonly OrchestrationRunListItem[]> {
-  const res = await apiClient.get<{ items: readonly OrchestrationRunListItem[] }>(
-    `/api/orchestration/v2/runs${mine ? "?mine=true" : ""}`,
-  );
+export async function listOrchestrationRuns(mine = false, archived = false): Promise<readonly OrchestrationRunListItem[]> {
+  const params = new URLSearchParams();
+  if (mine) params.set("mine", "true");
+  if (archived) params.set("archived", "true");
+  const suffix = params.toString() ? `?${params}` : "";
+  const res = await apiClient.get<{ items: readonly OrchestrationRunListItem[] }>(`/api/orchestration/v2/runs${suffix}`);
   return res.data.items;
+}
+
+export async function archiveOrchestrationRun(sessionId: string): Promise<{ readonly sessionId: string; readonly status: string; readonly archivedAt: string | null }> {
+  const res = await apiClient.post<{ readonly sessionId: string; readonly status: string; readonly archivedAt: string | null }>(
+    `/api/orchestration/v2/runs/${encodeURIComponent(sessionId)}/archive`,
+  );
+  return res.data;
+}
+
+export async function controlOrchestrationRun(sessionId: string, action: OrchestrationControlAction): Promise<{ readonly sessionId: string; readonly status: string }> {
+  const res = await apiClient.post<{ readonly sessionId: string; readonly status: string }>(
+    `/api/orchestration/v2/runs/${encodeURIComponent(sessionId)}/control`,
+    { action },
+  );
+  return res.data;
 }
 
 export async function getOrchestrationPlan(sessionId: string): Promise<OrchestrationSessionDto> {

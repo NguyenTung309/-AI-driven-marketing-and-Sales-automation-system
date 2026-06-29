@@ -153,7 +153,7 @@ public sealed class QuestPdfDocumentRenderer : IDocumentRenderer
 /// <summary>Persists a rendered document and returns a retrievable URL.</summary>
 public interface IDocumentStorage
 {
-    Task<string> SaveAsync(byte[] content, string fileName, CancellationToken ct = default);
+    Task<string> SaveAsync(byte[] content, string fileName, string? contentType = null, CancellationToken ct = default);
 }
 
 /// <summary>Options for <see cref="LocalDocumentStorage"/>. Bound from config section <c>Docs:Storage</c>.</summary>
@@ -176,12 +176,13 @@ public sealed class LocalDocumentStorage : IDocumentStorage
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
-    public async Task<string> SaveAsync(byte[] content, string fileName, CancellationToken ct = default)
+    public async Task<string> SaveAsync(byte[] content, string fileName, string? contentType = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(content);
         if (string.IsNullOrWhiteSpace(fileName))
             throw new ArgumentException("fileName required", nameof(fileName));
 
+        _ = contentType;
         Directory.CreateDirectory(_options.BaseDirectory);
         var safeName = Path.GetFileName(fileName);
         var fullPath = Path.Combine(_options.BaseDirectory, safeName);

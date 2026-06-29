@@ -20,6 +20,7 @@ import {
   scheduleContentItem,
   updateContentBrief,
   updateContentItem,
+  uploadContentAsset,
   type ContentBrief,
   type ContentCalendarItem,
   type ContentItem,
@@ -33,6 +34,13 @@ type NoticeTone = "info" | "success" | "warning" | "error";
 interface NoticeState {
   readonly tone: NoticeTone;
   readonly message: string;
+}
+
+interface ContentAsset {
+  readonly type?: string;
+  readonly url?: string;
+  readonly fileName?: string;
+  readonly contentType?: string;
 }
 
 interface EditorDraft {
@@ -153,16 +161,24 @@ function errorMessage(error: unknown): string {
   return toUserFriendlyError(error, "Không xử lý được thao tác nội dung. Vui lòng thử lại.");
 }
 
-function assetsSummary(value: string): string {
-  if (!value || value === "[]") return "Chưa có tệp đính kèm";
+function parseAssets(value: string): readonly ContentAsset[] {
+  if (!value || value === "[]") return [];
   try {
     const parsed = JSON.parse(value) as unknown;
-    if (Array.isArray(parsed)) return `${parsed.length} tệp đính kèm`;
-    if (typeof parsed === "object" && parsed !== null) return "1 tệp đính kèm";
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is ContentAsset => typeof item === "object" && item !== null && "url" in item);
   } catch {
-    return "Thông tin tệp đính kèm";
+    return [];
   }
-  return "Thông tin tệp đính kèm";
+}
+
+function assetsSummary(value: string): string {
+  const count = parseAssets(value).length;
+  return count ? `${count} tệp đính kèm` : "Chưa có tệp đính kèm";
+}
+
+function firstImageAsset(value: string): ContentAsset | null {
+  return parseAssets(value).find((asset) => asset.url && (!asset.type || asset.type === "image")) ?? null;
 }
 
 function groupCalendar(items: readonly ContentCalendarItem[]) {
@@ -251,7 +267,7 @@ function BriefEditor({
           <h2 className="text-headline-sm text-secondary">Yêu cầu nội dung</h2>
           <p className="mt-1 text-body-md text-on-surface-variant">Tạo yêu cầu cho agent marketing và sinh bản nháp.</p>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={onNew}>
+        <Button type="button" variant="outline" className="text-nowrap" size="sm" onClick={onNew}>
           <span aria-hidden="true" className="material-symbols-outlined text-[16px]">add</span>
           Yêu cầu mới
         </Button>
@@ -458,8 +474,9 @@ function QueueList({
   );
 }
 
-function SocialPreview({ item, body }: { readonly item: ContentItem; readonly body: string }) {
+function SocialPreview({ item, body, assetsJson }: { readonly item: ContentItem; readonly body: string; readonly assetsJson: string }) {
   const config = platformConfig(item.platform);
+  const image = firstImageAsset(assetsJson);
   return (
     <div className="rounded-lg border border-outline bg-white">
       <div className="flex items-center justify-between border-b border-outline p-4">
@@ -474,12 +491,16 @@ function SocialPreview({ item, body }: { readonly item: ContentItem; readonly bo
       </div>
       <div className="space-y-3 p-4">
         <p className="whitespace-pre-wrap text-body-md text-on-surface">{body || "Nội dung bản nháp sẽ hiển thị ở đây."}</p>
-        <div className="flex min-h-[180px] items-center justify-center rounded-lg border border-dashed border-outline bg-surface">
-          <div className="text-center">
-            <span aria-hidden="true" className="material-symbols-outlined text-[36px] text-primary">image</span>
-            <p className="mt-2 text-label-sm text-on-surface-variant">{assetsSummary(item.assetsJson)}</p>
+        {image?.url ? (
+          <img className="max-h-[320px] w-full rounded-lg object-cover" src={image.url} alt={image.fileName || "Ảnh bài viết"} />
+        ) : (
+          <div className="flex min-h-[180px] items-center justify-center rounded-lg border border-dashed border-outline bg-surface">
+            <div className="text-center">
+              <span aria-hidden="true" className="material-symbols-outlined text-[36px] text-primary">image</span>
+              <p className="mt-2 text-label-sm text-on-surface-variant">{assetsSummary(assetsJson)}</p>
+            </div>
           </div>
-        </div>
+        )}
       </div>
       <div className="grid grid-cols-3 border-t border-outline text-label-sm text-on-surface-variant">
         <button className="flex items-center justify-center gap-2 py-3 hover:bg-surface" type="button">
@@ -504,9 +525,10 @@ function QueueEditor({
   body,
   assetsJson,
   saving,
+  uploading,
   acting,
   onBody,
-  onAssets,
+  onUploadAsset,
   onSave,
   onApprove,
   onReject,
@@ -518,9 +540,10 @@ function QueueEditor({
   readonly body: string;
   readonly assetsJson: string;
   readonly saving: boolean;
+  readonly uploading: boolean;
   readonly acting: boolean;
   readonly onBody: (value: string) => void;
-  readonly onAssets: (value: string) => void;
+  readonly onUploadAsset: (file: File) => void;
   readonly onSave: () => void;
   readonly onApprove: () => void;
   readonly onReject: () => void;
@@ -531,6 +554,7 @@ function QueueEditor({
   const [repurposeTargets, setRepurposeTargets] = useState<readonly string[]>(() =>
     platformOptions(item?.platform).slice(0, 2).map((option) => option.value)
   );
+  const assets = parseAssets(assetsJson);
 
   if (!item) {
     return (
@@ -566,14 +590,43 @@ function QueueEditor({
             onChange={(event) => onBody(event.target.value)}
           />
         </label>
-        <label className="block">
-          <span className="mb-1 block text-label-caps uppercase text-secondary">Dữ liệu hình ảnh</span>
-          <textarea
-            className="min-h-[84px] w-full resize-y rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary"
-            value={assetsJson}
-            onChange={(event) => onAssets(event.target.value)}
-          />
-        </label>
+        <div className="rounded-lg border border-outline bg-surface p-3">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-label-caps uppercase text-secondary">Hình ảnh bài đăng</p>
+              <p className="text-label-sm text-on-surface-variant">Tải ảnh PNG, JPG, WebP hoặc GIF.</p>
+            </div>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded border border-primary bg-white px-3 py-2 text-label-sm font-semibold text-primary hover:bg-primary/5">
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">upload</span>
+              {uploading ? "Đang tải..." : "Tải ảnh"}
+              <input
+                className="sr-only"
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                disabled={uploading}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.currentTarget.value = "";
+                  if (file) onUploadAsset(file);
+                }}
+              />
+            </label>
+          </div>
+          {assets.length ? (
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+              {assets.map((asset) => (
+                <a key={asset.url} className="group block overflow-hidden rounded border border-outline bg-white" href={asset.url} target="_blank" rel="noreferrer">
+                  <img className="h-28 w-full object-cover transition-transform group-hover:scale-[1.03]" src={asset.url} alt={asset.fileName || "Ảnh bài viết"} />
+                  <span className="block truncate px-2 py-1 text-label-sm text-on-surface-variant">{asset.fileName || asset.url}</span>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded border border-dashed border-outline bg-white p-4 text-body-md text-on-surface-variant">
+              Chưa có ảnh. Bấm Tải ảnh để gắn media vào bài.
+            </div>
+          )}
+        </div>
 
         <div className="flex flex-wrap gap-2">
           <Button type="button" onClick={onSave} disabled={saving || !body.trim()}>
@@ -622,7 +675,7 @@ function QueueEditor({
           </Button>
         </div>
       </div>
-      <SocialPreview item={item} body={body} />
+      <SocialPreview item={item} body={body} assetsJson={assetsJson} />
     </div>
   );
 }
@@ -904,6 +957,15 @@ export default function ContentWorkspacePage() {
     },
   });
 
+  const uploadAssetMutation = useMutation({
+    mutationFn: ({ item, file }: { readonly item: ContentItem; readonly file: File }) => uploadContentAsset(item.id, file),
+    onSuccess: async (response) => {
+      if (selectedItem) setEditorDraft({ itemId: selectedItem.id, body: editorBody, assetsJson: response.assetsJson });
+      setNotice({ tone: "success", message: "Đã tải ảnh lên bài viết." });
+      await queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
+    },
+  });
+
   const approveMutation = useMutation({
     mutationFn: (id: string) => approveContentItem(id),
     onSuccess: async () => {
@@ -981,11 +1043,6 @@ export default function ContentWorkspacePage() {
   function updateEditorBody(value: string) {
     if (!selectedItem) return;
     setEditorDraft({ itemId: selectedItem.id, body: value, assetsJson: editorAssets });
-  }
-
-  function updateEditorAssets(value: string) {
-    if (!selectedItem) return;
-    setEditorDraft({ itemId: selectedItem.id, body: editorBody, assetsJson: value });
   }
 
   function newBrief() {
@@ -1103,6 +1160,7 @@ export default function ContentWorkspacePage() {
             </div>
 
             {(updateItemMutation.error ||
+              uploadAssetMutation.error ||
               approveMutation.error ||
               rejectMutation.error ||
               deleteItemMutation.error ||
@@ -1112,6 +1170,7 @@ export default function ContentWorkspacePage() {
                 <Alert tone="error">
                   {errorMessage(
                     updateItemMutation.error ??
+                      uploadAssetMutation.error ??
                       approveMutation.error ??
                       rejectMutation.error ??
                       deleteItemMutation.error ??
@@ -1132,6 +1191,7 @@ export default function ContentWorkspacePage() {
                 body={editorBody}
                 assetsJson={editorAssets}
                 saving={updateItemMutation.isPending}
+                uploading={uploadAssetMutation.isPending}
                 acting={
                   approveMutation.isPending ||
                   rejectMutation.isPending ||
@@ -1139,7 +1199,9 @@ export default function ContentWorkspacePage() {
                   repurposeMutation.isPending
                 }
                 onBody={updateEditorBody}
-                onAssets={updateEditorAssets}
+                onUploadAsset={(file) => {
+                  if (selectedItem) uploadAssetMutation.mutate({ item: selectedItem, file });
+                }}
                 onSave={() => {
                   if (selectedItem) updateItemMutation.mutate(selectedItem);
                 }}

@@ -228,6 +228,18 @@ export async function updateTenantBranding(body: TenantBrandingUpdate): Promise<
   return res.data;
 }
 
+// Tenant orchestration autonomy: when requireApproval is true, high-risk agent tools (publish, ad spend,
+// customer messages) pause for a human instead of auto-executing. Default false = full auto-publish.
+export async function getTenantOrchestration(): Promise<{ readonly requireApproval: boolean }> {
+  const res = await apiClient.get<{ requireApproval: boolean }>("/api/admin/tenant/orchestration");
+  return res.data;
+}
+
+export async function setTenantOrchestration(requireApproval: boolean): Promise<{ readonly requireOrchestrationApproval: boolean }> {
+  const res = await apiClient.put<{ requireOrchestrationApproval: boolean }>("/api/admin/tenant/orchestration", { requireApproval });
+  return res.data;
+}
+
 export async function listAuditLogs(params?: {
   readonly action?: string;
   readonly resourceType?: string;

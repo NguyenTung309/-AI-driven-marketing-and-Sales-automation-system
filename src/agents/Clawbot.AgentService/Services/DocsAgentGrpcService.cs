@@ -91,7 +91,7 @@ public sealed partial class DocsAgentGrpcService(
 
         var now = _clock.UtcNow;
         var fileName = $"{template.Code}-{now:yyyyMMddHHmmss}-{Guid.NewGuid():N}.pdf".ToLowerInvariant();
-        var fileUrl = await _storage.SaveAsync(result.Pdf, fileName, ct).ConfigureAwait(false);
+        var fileUrl = await _storage.SaveAsync(result.Pdf, fileName, ct: ct).ConfigureAwait(false);
 
         var doc = GeneratedDocument.Create(
             tenantId, template.Id, fileUrl, now,

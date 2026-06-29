@@ -346,10 +346,12 @@ public sealed class AgentSessionConfiguration : IEntityTypeConfiguration<AgentSe
         builder.Property(x => x.RequiresApproval).HasDefaultValue(false);
         builder.Property(x => x.ReplanCount).HasDefaultValue(0);
         builder.Property(x => x.UserId).HasColumnName("user_id");
+        builder.Property(x => x.ArchivedAt).HasColumnName("archived_at");
         builder.Property(x => x.RowVersion).IsRowVersion();
         builder.HasMany(x => x.Traces).WithOne().HasForeignKey(t => t.SessionId).OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(x => new { x.TenantId, x.StartedAt });
         builder.HasIndex(x => new { x.TenantId, x.Status, x.StartedAt });
+        builder.HasIndex(x => new { x.TenantId, x.ArchivedAt, x.StartedAt });
         // SPEC-16 P3-3: index for fetching a user's runs (notification targeting + run list by user).
         builder.HasIndex(x => new { x.TenantId, x.UserId, x.StartedAt });
     }

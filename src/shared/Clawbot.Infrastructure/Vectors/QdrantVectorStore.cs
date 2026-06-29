@@ -1,14 +1,16 @@
 using Clawbot.SharedKernel.Vectors;
 using Google.Protobuf.Collections;
 using Grpc.Core;
+using Microsoft.Extensions.Logging;
 using Qdrant.Client;
 using Qdrant.Client.Grpc;
 
 namespace Clawbot.Infrastructure.Vectors;
 
-public sealed class QdrantVectorStore(QdrantClient client) : IVectorStore
+public sealed partial class QdrantVectorStore(QdrantClient client, ILogger<QdrantVectorStore> logger) : IVectorStore
 {
     private readonly QdrantClient _client = client;
+    private readonly ILogger<QdrantVectorStore> _logger = logger;
 
     public async Task UpsertAsync(string collection, IEnumerable<VectorRecord> records, CancellationToken ct = default)
     {
@@ -27,13 +29,16 @@ public sealed class QdrantVectorStore(QdrantClient client) : IVectorStore
         CancellationToken ct = default)
     {
         await EnsureCollectionAsync(collection, (uint)query.Length, ct).ConfigureAwait(false);
+        var qdrantFilter = BuildFilter(filters);
+        LogSearch(_logger, collection, query.Length, qdrantFilter?.ToString() ?? "<none>");
         var hits = await _client.SearchAsync(
             collection,
             query.ToArray(),
-            filter: BuildFilter(filters),
+            filter: qdrantFilter,
             limit: (ulong)Math.Max(1, topK),
             payloadSelector: true,
             cancellationToken: ct).ConfigureAwait(false);
+        LogSearchResult(_logger, collection, hits.Count);
 
         return hits.Select(h => new VectorMatch(
             Id: h.Id.Uuid,
@@ -73,16 +78,24 @@ public sealed class QdrantVectorStore(QdrantClient client) : IVectorStore
     {
         if (filters is null || filters.Count == 0) return null;
 
-        Filter? qdrantFilter = null;
+        // Build the filter explicitly with every condition in Must (AND). The previous
+        // `condition ?: left & condition` chaining relied on implicit Condition→Filter conversion
+        // and the `&` operator, which mis-composed the filter (matched nothing) for >1 condition.
+        var qdrantFilter = new Filter();
         foreach (var filter in filters.Where(f => !string.IsNullOrWhiteSpace(f.Field) && f.Values.Count > 0))
         {
-            var condition = filter.Values.Count == 1
+            qdrantFilter.Must.Add(filter.Values.Count == 1
                 ? Conditions.MatchKeyword(filter.Field, filter.Values[0])
-                : Conditions.Match(filter.Field, filter.Values);
-            qdrantFilter = qdrantFilter is null ? condition : qdrantFilter & condition;
+                : Conditions.Match(filter.Field, filter.Values));
         }
-        return qdrantFilter;
+        return qdrantFilter.Must.Count > 0 ? qdrantFilter : null;
     }
+
+    [LoggerMessage(EventId = 8201, Level = LogLevel.Information, Message = "Qdrant search: collection={Collection} dim={Dim} filter={Filter}")]
+    private static partial void LogSearch(ILogger logger, string collection, int dim, string filter);
+
+    [LoggerMessage(EventId = 8202, Level = LogLevel.Information, Message = "Qdrant search result: collection={Collection} hits={Hits}")]
+    private static partial void LogSearchResult(ILogger logger, string collection, int hits);
 
     private static PointStruct ToPoint(VectorRecord r)
     {

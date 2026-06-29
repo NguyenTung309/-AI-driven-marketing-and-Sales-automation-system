@@ -31,7 +31,7 @@ public sealed class MinioDocumentStorage : IDocumentStorage
             .Build();
     }
 
-    public async Task<string> SaveAsync(byte[] content, string fileName, CancellationToken ct = default)
+    public async Task<string> SaveAsync(byte[] content, string fileName, string? contentType = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(content);
         if (string.IsNullOrWhiteSpace(fileName))
@@ -52,7 +52,7 @@ public sealed class MinioDocumentStorage : IDocumentStorage
             .WithObject(fileName)
             .WithStreamData(ms)
             .WithObjectSize(ms.Length)
-            .WithContentType("application/pdf"), ct).ConfigureAwait(false);
+            .WithContentType(string.IsNullOrWhiteSpace(contentType) ? "application/pdf" : contentType), ct).ConfigureAwait(false);
 
         return await _client.PresignedGetObjectAsync(new PresignedGetObjectArgs()
             .WithBucket(_bucket)

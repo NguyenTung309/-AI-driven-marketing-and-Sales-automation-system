@@ -367,11 +367,11 @@ export function EditorWorkspace({
             </button>
             <button
               className="rounded bg-primary px-4 py-2 text-label-sm font-bold text-white hover:bg-primary-hover disabled:opacity-40"
-              disabled={!version || isDeployed || deploying || testPending}
+              disabled={!version || deploying || testPending}
               onClick={onDeploy}
               type="button"
             >
-              {deploying ? "Đang phát hành" : isDeployed ? "Đã phát hành" : "Phát hành bản này"}
+              {deploying ? "Đang phát hành" : isDeployed ? "Phát hành lại (re-embed)" : "Phát hành bản này"}
             </button>
           </div>
         </div>

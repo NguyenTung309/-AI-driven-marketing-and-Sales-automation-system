@@ -40,6 +40,20 @@ public sealed class ContentCalendarTests
     }
 
     [Fact]
+    public void AddImageAsset_appends_uploaded_image_metadata()
+    {
+        var assetsJson = ContentEndpoints.AddImageAsset(
+            "[]",
+            "https://cdn.example/content.png",
+            "content.png",
+            "image/png");
+
+        assetsJson.Should().Contain("https://cdn.example/content.png");
+        assetsJson.Should().Contain("content.png");
+        assetsJson.Should().Contain("image/png");
+    }
+
+    [Fact]
     public void BuildCalendarRows_maps_all_status_variants()
     {
         var tenantId = Guid.NewGuid();

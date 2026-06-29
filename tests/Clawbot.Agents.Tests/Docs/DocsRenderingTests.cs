@@ -138,7 +138,7 @@ public sealed class LocalDocumentStorageTests
 
         try
         {
-            var url = await storage.SaveAsync(bytes, "quote-v1.pdf", CancellationToken.None);
+            var url = await storage.SaveAsync(bytes, "quote-v1.pdf", ct: CancellationToken.None);
 
             url.Should().Be("https://cdn.example.com/docs/quote-v1.pdf");
             File.Exists(Path.Combine(dir, "quote-v1.pdf")).Should().BeTrue();
@@ -156,7 +156,7 @@ public sealed class LocalDocumentStorageTests
     {
         var storage = new LocalDocumentStorage(new DocsStorageOptions());
 
-        var act = async () => await storage.SaveAsync([1, 2, 3], "  ", CancellationToken.None);
+        var act = async () => await storage.SaveAsync([1, 2, 3], "  ", ct: CancellationToken.None);
 
         await act.Should().ThrowAsync<ArgumentException>();
     }

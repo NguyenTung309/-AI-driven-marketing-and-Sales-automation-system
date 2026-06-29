@@ -66,12 +66,22 @@ public sealed partial class GraphSocialPublisher(
         if (fb is null || !fb.Enabled || string.IsNullOrWhiteSpace(fb.Endpoint) || string.IsNullOrWhiteSpace(fb.PageAccessToken) || string.IsNullOrWhiteSpace(fb.PageId))
             return new PublishResult(false, null, "facebook_not_configured");
 
-        var url = $"{fb.Endpoint.TrimEnd('/')}/{Uri.EscapeDataString(fb.PageId)}/feed";
-        using var form = new FormUrlEncodedContent(new Dictionary<string, string>
-        {
-            ["message"] = request.Body,
-            ["access_token"] = fb.PageAccessToken,
-        });
+        var imageUrl = FirstImageUrl(request.AssetsJson);
+        var path = imageUrl is null ? "feed" : "photos";
+        var url = $"{fb.Endpoint.TrimEnd('/')}/{Uri.EscapeDataString(fb.PageId)}/{path}";
+        var fields = imageUrl is null
+            ? new Dictionary<string, string>
+            {
+                ["message"] = request.Body,
+                ["access_token"] = fb.PageAccessToken,
+            }
+            : new Dictionary<string, string>
+            {
+                ["caption"] = request.Body,
+                ["url"] = imageUrl,
+                ["access_token"] = fb.PageAccessToken,
+            };
+        using var form = new FormUrlEncodedContent(fields);
 
         try
         {
@@ -149,6 +159,27 @@ public sealed partial class GraphSocialPublisher(
             if (dbCreds is not null) return dbCreds;
         }
         return provider == "facebook" ? _options.Facebook : (provider == "zalo" ? _options.Zalo : null);
+    }
+
+    private static string? FirstImageUrl(string assetsJson)
+    {
+        if (string.IsNullOrWhiteSpace(assetsJson)) return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(assetsJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return null;
+            foreach (var asset in doc.RootElement.EnumerateArray())
+            {
+                var type = asset.TryGetProperty("type", out var typeEl) ? typeEl.GetString() : "image";
+                if (!string.Equals(type, "image", StringComparison.OrdinalIgnoreCase)) continue;
+                if (asset.TryGetProperty("url", out var urlEl) && urlEl.ValueKind == JsonValueKind.String)
+                    return urlEl.GetString();
+            }
+        }
+        catch (JsonException) { return null; }
+
+        return null;
     }
 
     private static string NormalizePlatform(string platform) =>

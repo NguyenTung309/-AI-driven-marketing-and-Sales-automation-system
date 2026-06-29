@@ -19,7 +19,10 @@ public sealed class ActiveKbVersionResolver(AppDbContext db) : IActiveKbVersionR
         if (!string.IsNullOrWhiteSpace(moduleCode))
             query = query.Where(row => row.Code == moduleCode);
 
-        var ids = await query.Select(row => row.Id.ToString()).ToListAsync(ct).ConfigureAwait(false);
-        return ids.ToHashSet(StringComparer.Ordinal);
+        // Materialize the Guids, then ToString() in C# (lowercase). Doing .Id.ToString() inside the
+        // query makes EF emit SQL Server CONVERT, which returns UPPERCASE GUIDs — those then fail the
+        // case-sensitive Qdrant keyword match against the lowercase kb_version_id stored at deploy time.
+        var ids = await query.Select(row => row.Id).ToListAsync(ct).ConfigureAwait(false);
+        return ids.Select(id => id.ToString()).ToHashSet(StringComparer.Ordinal);
     }
 }

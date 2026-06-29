@@ -4,6 +4,7 @@ export const AdminConsolePage = lazy(() => import("@/features/admin/AdminConsole
 export const LoginPage = lazy(() => import("@/features/auth/LoginPage"));
 export const ForgotPasswordPage = lazy(() => import("@/features/auth/ForgotPasswordPage"));
 export const AgentDashboardPage = lazy(() => import("@/features/agents/AgentDashboardPage"));
+export const AgentRunDetailPage = lazy(() => import("@/features/agents/AgentRunDetailPage"));
 export const PixelAgentsOfficePage = lazy(() => import("@/features/agents/PixelAgentsOfficePage"));
 export const DashboardPage = lazy(() => import("@/features/dashboard/DashboardPage"));
 export const ConversationsPage = lazy(() => import("@/features/conversations/ConversationsPage"));

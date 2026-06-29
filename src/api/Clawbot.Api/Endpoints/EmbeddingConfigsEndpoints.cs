@@ -17,7 +17,7 @@ using OpenAI.Embeddings;
 
 namespace Clawbot.Api.Endpoints;
 
-public static class EmbeddingConfigsEndpoints
+public static partial class EmbeddingConfigsEndpoints
 {
     private static readonly HashSet<string> AllowedProviders =
         new(StringComparer.OrdinalIgnoreCase) { "openai", "openai-compatible", "hash" };
@@ -184,8 +184,10 @@ public static class EmbeddingConfigsEndpoints
         IEncryptor encryptor,
         IConfiguration config,
         IHostEnvironment env,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
+        var logger = loggerFactory.CreateLogger("EmbeddingConfigTest");
         var row = await FindAsync(db, tenants, id, ct).ConfigureAwait(false);
         if (row is null) return Results.NotFound();
         if (row.Provider.Equals("hash", StringComparison.OrdinalIgnoreCase))
@@ -204,17 +206,58 @@ public static class EmbeddingConfigsEndpoints
                 opts.Transport = new HttpClientPipelineTransport(
                     LlmBaseUrlGuard.CreateGuardedHttpClient(endpoint, AllowPrivateBaseUrls(config, env)));
             }
-            var client = new EmbeddingClient(row.ModelId, new ApiKeyCredential(encryptor.Decrypt(row.ApiKeyEncrypted)), opts);
-            await client.GenerateEmbeddingAsync("ping", new EmbeddingGenerationOptions { Dimensions = row.Dimension }, ct)
-                .ConfigureAwait(false);
+            var apiKey = encryptor.Decrypt(row.ApiKeyEncrypted);
+            LogEmbeddingTestKey(logger, row.Id, MaskSecret(apiKey), apiKey.Length, row.ModelId, row.BaseUrl);
+            var client = new EmbeddingClient(row.ModelId, new ApiKeyCredential(apiKey), opts);
+            try
+            {
+                await client.GenerateEmbeddingAsync("ping", new EmbeddingGenerationOptions { Dimensions = row.Dimension }, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception inner) when (ConfiguredEmbeddingProvider.ShouldTryMultimodal(inner))
+            {
+                // Auto-detect multimodal model: retry the test with the content-array input shape.
+                var rawBase = string.IsNullOrWhiteSpace(row.BaseUrl) ? "https://api.openai.com/v1" : row.BaseUrl;
+                var http = LlmBaseUrlGuard.CreateGuardedHttpClient(new Uri(rawBase, UriKind.Absolute), AllowPrivateBaseUrls(config, env));
+                await ConfiguredEmbeddingProvider.EmbedMultimodalHttpAsync(
+                    http, rawBase.TrimEnd('/') + "/embeddings", apiKey, row.ModelId, "ping", ct).ConfigureAwait(false);
+            }
             sw.Stop();
             return Results.Ok(new TestLlmConfigResponse(true, sw.ElapsedMilliseconds));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             sw.Stop();
-            return Results.Ok(new TestLlmConfigResponse(false, sw.ElapsedMilliseconds, "embedding_connection_test_failed"));
+            var status = ex is ClientResultException cre ? cre.Status : 0;
+            LogEmbeddingTestFailed(logger, ex, row.Id, row.Provider, row.ModelId, row.BaseUrl, status);
+            // Auth passed but the SDK couldn't parse the response (null Value) → the model returned a
+            // non-standard embeddings body (e.g. a multimodal model). Can't auto-handle the format; tell
+            // the operator to pick an OpenAI-compatible text-embedding model.
+            if (ex.Message.Contains("ClientResult", StringComparison.Ordinal))
+                return Results.Ok(new TestLlmConfigResponse(false, sw.ElapsedMilliseconds,
+                    $"model_not_embeddings_compatible: '{row.ModelId}' did not return a standard embeddings response. Use an OpenAI-compatible text-embedding model (e.g. text-embedding-3-small)."));
+            // Permission-gated admin endpoint: surface the upstream message so the operator can see the real cause.
+            var detail = status > 0 ? $"HTTP {status}: {ex.Message}" : ex.Message;
+            return Results.Ok(new TestLlmConfigResponse(false, sw.ElapsedMilliseconds, $"embedding_connection_test_failed: {detail}"));
         }
+    }
+
+    [LoggerMessage(EventId = 7101, Level = LogLevel.Error,
+        Message = "Embedding test failed for config {ConfigId} (provider={Provider} model={Model} baseUrl={BaseUrl} status={Status})")]
+    private static partial void LogEmbeddingTestFailed(
+        ILogger logger, Exception ex, Guid configId, string provider, string model, string? baseUrl, int status);
+
+    [LoggerMessage(EventId = 7102, Level = LogLevel.Warning,
+        Message = "Embedding test sending key for config {ConfigId}: apiKey={MaskedKey} (len={KeyLength}) model={Model} baseUrl={BaseUrl}")]
+    private static partial void LogEmbeddingTestKey(
+        ILogger logger, Guid configId, string maskedKey, int keyLength, string model, string? baseUrl);
+
+    // Masked fingerprint so logs prove the key is present + which key, without leaking the secret.
+    private static string MaskSecret(string secret)
+    {
+        if (string.IsNullOrEmpty(secret)) return "<empty>";
+        if (secret.Length <= 8) return $"{secret[0]}***{secret[^1]}";
+        return $"{secret[..4]}***{secret[^4..]}";
     }
 
     private static async Task<IResult> DeleteAsync(Guid id, AppDbContext db, ITenantAccessor tenants, CancellationToken ct)

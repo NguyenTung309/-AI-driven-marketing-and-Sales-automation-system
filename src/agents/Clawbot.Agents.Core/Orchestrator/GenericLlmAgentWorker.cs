@@ -75,6 +75,10 @@ internal sealed class GenericLlmAgentWorker(
         var history = new List<ChatTurn>();
         var userMessage = BuildUserMessage(task);
         var ctx = new ToolContext(TenantId(task), task.Id, definition.Id, definition.Code, requireHighRiskApproval, dryRun);
+        // Successful tool result payloads (JSON). Folded into the final Output so structured IDs (content_id,
+        // schedule_id, post_url) thread to dependent agents via the orchestrator's upstream_results — the ReAct
+        // final answer is free LLM text and can't be relied on to echo them, which broke the content pipeline.
+        var toolOutputs = new List<string>();
 
         for (var iteration = 1; iteration <= MaxReActIterations; iteration++)
         {
@@ -83,7 +87,7 @@ internal sealed class GenericLlmAgentWorker(
             await RecordCostAsync(reply).ConfigureAwait(false);
 
             if (!ReActAction.TryParse(reply.Text, out var action))
-                return new AgentResult(task.Id, true, reply.Text, null);
+                return new AgentResult(task.Id, true, ComposeOutput(reply.Text, toolOutputs), null);
 
             var tool = allowedTools.FirstOrDefault(t => string.Equals(t.Name, action.Tool, StringComparison.OrdinalIgnoreCase));
             string observation;
@@ -106,6 +110,8 @@ internal sealed class GenericLlmAgentWorker(
                     observation = result.Success
                         ? result.Output
                         : $"Tool '{tool.Name}' failed: {result.Error}";
+                    if (result.Success)
+                        toolOutputs.Add(result.Output);
                     // SPEC-16 P1-6: persist each tool action + its observation as a structured trace.
                     await EmitToolTraceAsync(task, result.Success ? "tool_executed" : "tool_failed", observation, ct).ConfigureAwait(false);
                 }
@@ -118,8 +124,47 @@ internal sealed class GenericLlmAgentWorker(
             history.Add(new ChatTurn("user", "Observation: " + observation));
         }
 
-        // Iteration cap reached without a final answer. Surface as a logical failure so the orchestrator can replan.
-        return new AgentResult(task.Id, false, string.Empty, $"re_act_loop_exhausted (cap={MaxReActIterations})");
+        // Iteration cap reached without a plain-text final answer. If tools already ran (e.g. a draft was persisted),
+        // return their results as a completed task so the side effect isn't orphaned and IDs still thread downstream;
+        // only surface a failure (for replan) when nothing was accomplished.
+        return toolOutputs.Count > 0
+            ? new AgentResult(task.Id, true, ComposeOutput($"(reached tool step cap {MaxReActIterations})", toolOutputs), null)
+            : new AgentResult(task.Id, false, string.Empty, $"re_act_loop_exhausted (cap={MaxReActIterations})");
+    }
+
+    // Folds successful tool-result JSON into the agent's textual answer under a [tool_results] marker so the
+    // orchestrator's upstream_results carries the structured IDs a dependent agent needs. Non-JSON tool outputs
+    // (e.g. a research text scan) are left in the trace but excluded from the merged block.
+    private static string ComposeOutput(string finalText, IReadOnlyList<string> toolOutputs)
+    {
+        var merged = MergeToolJson(toolOutputs);
+        if (merged is null)
+            return finalText;
+        return string.IsNullOrWhiteSpace(finalText)
+            ? $"[tool_results]\n{merged}"
+            : $"{finalText}\n\n[tool_results]\n{merged}";
+    }
+
+    private static string? MergeToolJson(IReadOnlyList<string> outputs)
+    {
+        if (outputs.Count == 0)
+            return null;
+        var merged = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+        foreach (var output in outputs)
+        {
+            if (string.IsNullOrWhiteSpace(output))
+                continue;
+            try
+            {
+                using var doc = JsonDocument.Parse(output);
+                if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                    continue;
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                    merged[prop.Name] = prop.Value.Clone(); // last successful tool wins on key collision
+            }
+            catch (JsonException) { /* non-JSON tool output — keep it in the trace, skip the merge */ }
+        }
+        return merged.Count == 0 ? null : JsonSerializer.Serialize(merged, JsonOptions);
     }
 
     // SPEC-16 P1-6: emit a structured tool trace (action/observation) to the run sink so per-tool activity is
@@ -210,6 +255,15 @@ internal sealed class GenericLlmAgentWorker(
         sb.AppendLine("To call a tool, reply with ONLY a JSON action on one line: {\"tool\":\"<name>\",\"args\":{<keys>}}.");
         sb.AppendLine("After each action you receive an Observation. When the task is complete, reply with the final answer as plain text (no JSON).");
         sb.AppendLine("If a tool returns an error, adjust your args or pick a different tool; do not repeat a failed action unchanged.");
+        sb.AppendLine();
+        // The pipeline only works if actionable steps actually run their tool: the tool's returned ids
+        // (content_id, schedule_id, post_url) are what downstream agents (reviewer→publisher→report) consume.
+        // A prose-only answer leaves no id and breaks the chain — so require a tool call before finishing.
+        sb.AppendLine("IMPORTANT — act, do not just describe:");
+        sb.AppendLine("- When the task creates, approves, schedules, or publishes something and a matching tool exists, you MUST call that tool. Producing only a plan/calendar/description as text is a failure: the next agent needs the id the tool returns (e.g. content_id).");
+        sb.AppendLine("- Prefer one concrete tool call over a long text plan. If the task is bulk (e.g. a content calendar), still persist at least one concrete item via the tool so a real id exists, then summarise the rest as text.");
+        sb.AppendLine("- If an upstream Observation or the Input JSON contains an id you need (e.g. content_id under upstream_results), reuse it in your tool args instead of inventing one.");
+        sb.AppendLine("- Only give a plain-text final answer after the needed tool(s) have run, or when no available tool fits the task.");
         sb.AppendLine();
         sb.AppendLine("## Available tools");
         foreach (var tool in tools)

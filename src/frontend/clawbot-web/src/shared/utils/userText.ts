@@ -60,10 +60,41 @@ export function operationalPhaseLabel(value: string | null | undefined): string 
   if (normalized.includes("warn")) return "Cảnh báo";
   if (normalized === "input") return "Đầu vào";
   if (normalized === "reply") return "Phản hồi";
+  if (normalized === "tool_blocked") return "Công cụ bị chặn";
+  if (normalized.includes("tool")) return "Công cụ";
   if (normalized.includes("plan")) return "Lập kế hoạch";
   if (normalized.includes("block") || normalized.includes("missing")) return "Bị chặn";
   if (normalized.includes("prompt")) return "Prompt";
   if (normalized.includes("complete") || normalized.includes("success")) return "Hoàn tất";
   if (normalized.includes("start") || normalized.includes("running") || normalized.includes("process")) return "Đang xử lý";
   return value?.trim() || "Thông tin";
+}
+
+const TOOL_RESULTS_MARKER = "[tool_results]";
+
+// Splits an agent task output into its human text and the structured tool-result block the worker appends
+// (`[tool_results]\n{json}`). Tool results are operational identifiers (content_id, schedule_id, post_url) the
+// user explicitly wants to see, so they are returned verbatim — they are not redacted like free-text traces.
+export function splitToolResults(output: string | null | undefined): {
+  readonly text: string;
+  readonly toolResults: Readonly<Record<string, string>> | null;
+} {
+  const raw = (output ?? "").trim();
+  if (!raw) return { text: "", toolResults: null };
+  const idx = raw.indexOf(TOOL_RESULTS_MARKER);
+  if (idx < 0) return { text: raw, toolResults: null };
+  const text = raw.slice(0, idx).trim();
+  const jsonPart = raw.slice(idx + TOOL_RESULTS_MARKER.length).trim();
+  try {
+    const parsed: unknown = JSON.parse(jsonPart);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const flat: Record<string, string> = {};
+      for (const [key, val] of Object.entries(parsed as Record<string, unknown>))
+        flat[key] = typeof val === "string" ? val : JSON.stringify(val);
+      return { text, toolResults: flat };
+    }
+  } catch {
+    /* not parseable JSON — fall through and treat the whole thing as text */
+  }
+  return { text: raw, toolResults: null };
 }

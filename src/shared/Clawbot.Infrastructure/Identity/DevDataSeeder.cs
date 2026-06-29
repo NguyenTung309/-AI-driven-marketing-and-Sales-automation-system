@@ -285,29 +285,39 @@ public static partial class DevDataSeeder
         if (tenant is null)
             return;
 
+        // Tracked (no AsNoTracking) so we can repair stale tool grants on existing rows, not just insert missing ones.
         var existing = await db.AgentDefinitions
             .IgnoreQueryFilters()
             .Where(a => a.TenantId == tenant.Id)
-            .Select(a => a.Code)
             .ToListAsync(ct);
-        var have = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
+        var byCode = existing.ToDictionary(a => a.Code, StringComparer.OrdinalIgnoreCase);
 
-        var added = 0;
+        var changed = 0;
         var now = DateTimeOffset.UtcNow;
         foreach (var (code, displayName, agentType, persona, allowedToolsJson) in OrchestratorAgents)
         {
-            if (have.Contains(code)) continue;
+            if (byCode.TryGetValue(code, out var def))
+            {
+                // Repair: a code seeded before tools were assigned (or before a grant changed) never received the
+                // tools otherwise — the loop used to skip existing rows entirely, leaving them text-only.
+                if (!string.Equals(def.AllowedToolsJson, allowedToolsJson, StringComparison.Ordinal))
+                {
+                    def.SetAllowedTools(allowedToolsJson, now);
+                    changed++;
+                }
+                continue;
+            }
             db.AgentDefinitions.Add(AgentDefinition.Create(
                 tenant.Id, code, displayName, agentType, persona, now,
                 allowedToolsJson: allowedToolsJson, memoryScope: "session", isOrchestratable: true));
-            added++;
+            changed++;
         }
 
-        if (added == 0) return;
+        if (changed == 0) return;
         try
         {
             await db.SaveChangesAsync(ct);
-            LogAgentDefinitionsSeeded(logger, added);
+            LogAgentDefinitionsSeeded(logger, changed);
         }
         catch (DbUpdateException)
         {
