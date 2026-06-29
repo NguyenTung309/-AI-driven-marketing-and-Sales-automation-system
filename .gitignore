@@ -15,6 +15,7 @@ deploy/.env
 .run-logs/
 TestResults/
 coverage/
+artifacts/
 appsettings*.Local.json
 *.log
 .DS_Store
