@@ -36,7 +36,7 @@ public static class ChatModule
         var baseUrlOptions = cfg.GetSection(LlmBaseUrlOptions.SectionName).Get<LlmBaseUrlOptions>() ?? new LlmBaseUrlOptions();
         var allowPrivateBaseUrls = env.IsDevelopment() && baseUrlOptions.AllowPrivate;
         services.AddSingleton<ILlmCallScope, LlmCallScope>();
-        services.AddSingleton<ILlmChatClientFactory>(sp => new LlmChatClientFactory(sp.GetRequiredService<IHttpClientFactory>(), allowPrivateBaseUrls));
+        services.AddSingleton<ILlmChatClientFactory>(sp => new LlmChatClientFactory(sp.GetRequiredService<IHttpClientFactory>(), allowPrivateBaseUrls, httpOptions.HttpTimeoutSeconds));
         services.AddSingleton<IClaudeChatClient, ScopedLlmChatClient>();
 
         services.AddScoped<ChatAgent>();

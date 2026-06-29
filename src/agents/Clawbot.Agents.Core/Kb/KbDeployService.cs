@@ -1,8 +1,10 @@
 using Clawbot.Agents.Core.Rag;
 using Clawbot.Domain.KnowledgeBase;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Clawbot.SharedKernel.Vectors;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace Clawbot.Agents.Core.Kb;
 
@@ -16,18 +18,19 @@ public sealed partial class KbDeployService(
         var chunks = ChunkContent(version.ContentMd);
         if (chunks.Count == 0) return 0;
 
-        var collection = $"kb_v{embedder.Dimension}";
         var records = new List<VectorRecord>(chunks.Count);
 
-        var versionEmbedding = await embedder.EmbedAsync(version.ContentMd, ct).ConfigureAwait(false);
+        var embeddingConfig = await ResolveConfigAsync(tenantId, ct).ConfigureAwait(false);
+        var versionEmbedding = await EmbedAsync(embeddingConfig, tenantId, version.ContentMd, ct).ConfigureAwait(false);
+        var collection = ConfiguredEmbeddingProvider.CollectionName(embeddingConfig);
         version.SetEmbeddingJson(JsonSerializer.Serialize(versionEmbedding.ToArray()));
 
         foreach (var (idx, chunk) in chunks.Select((c, i) => (i, c)))
         {
             ct.ThrowIfCancellationRequested();
-            var embedding = await embedder.EmbedAsync(chunk, ct).ConfigureAwait(false);
+            var embedding = await EmbedAsync(embeddingConfig, tenantId, chunk, ct).ConfigureAwait(false);
             records.Add(new VectorRecord(
-                Id: version.Id.ToString(),
+                Id: ChunkPointId(version.Id, idx),
                 Embedding: embedding,
                 Metadata: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
@@ -66,6 +69,22 @@ public sealed partial class KbDeployService(
 
         return chunks;
     }
+
+    internal static string ChunkPointId(Guid versionId, int chunkIndex)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes($"{versionId:N}:{chunkIndex}"));
+        return new Guid(bytes.AsSpan(0, 16)).ToString();
+    }
+
+    private async Task<ResolvedEmbeddingConfig> ResolveConfigAsync(Guid tenantId, CancellationToken ct) =>
+        embedder is ConfiguredEmbeddingProvider configured
+            ? await configured.ResolveConfigAsync(tenantId, ct).ConfigureAwait(false)
+            : new ResolvedEmbeddingConfig("runtime", $"dim-{embedder.Dimension}", null, null, embedder.Dimension, "runtime");
+
+    private Task<ReadOnlyMemory<float>> EmbedAsync(ResolvedEmbeddingConfig config, Guid tenantId, string text, CancellationToken ct) =>
+        embedder is ConfiguredEmbeddingProvider configured
+            ? configured.EmbedAsync(config, text, ct)
+            : embedder.EmbedAsync(text, ct);
 
     private static string Truncate(string text, int maxLen) =>
         text.Length <= maxLen ? text : text[..maxLen] + "...";

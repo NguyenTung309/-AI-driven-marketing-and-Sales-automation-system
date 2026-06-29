@@ -124,7 +124,7 @@ public sealed class AutonomousOrchestratorTests
 
         result.Status.Should().Be("failed");
         result.Reason.Should().Be("max_rounds");
-        await planner.Received(1).ReplanAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<IReadOnlyList<AgentCatalogEntry>>(), Arg.Any<IReadOnlyList<OrchestrationPlanTask>>(), Arg.Any<CancellationToken>());
+        await planner.Received(2).ReplanAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<IReadOnlyList<AgentCatalogEntry>>(), Arg.Any<IReadOnlyList<OrchestrationPlanTask>>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

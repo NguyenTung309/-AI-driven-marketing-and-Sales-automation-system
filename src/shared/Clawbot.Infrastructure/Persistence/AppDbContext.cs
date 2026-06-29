@@ -118,6 +118,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();
     public DbSet<PancakePage> PancakePages => Set<PancakePage>();
     public DbSet<LlmConfig> LlmConfigs => Set<LlmConfig>();
+    public DbSet<EmbeddingConfig> EmbeddingConfigs => Set<EmbeddingConfig>();
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
 
     // Competitors

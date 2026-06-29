@@ -18,19 +18,19 @@ public static class LlmBaseUrlGuard
         return allowPrivateHosts && uri.Scheme == Uri.UriSchemeHttp && IsKnownPrivateHost(uri);
     }
 
-    public static HttpClient CreateGuardedHttpClient(Uri baseUri, bool allowPrivateHosts = false)
+    public static HttpClient CreateGuardedHttpClient(Uri baseUri, bool allowPrivateHosts = false, int timeoutSeconds = 120)
     {
         var origin = baseUri.GetLeftPart(UriPartial.Authority);
         var allowDirectPrivate = allowPrivateHosts && IsKnownPrivateHost(baseUri);
-        var cacheKey = $"{allowDirectPrivate}:{origin}";
-        return GuardedClients.GetOrAdd(cacheKey, _ => new Lazy<HttpClient>(() => CreateClient(new Uri(origin, UriKind.Absolute), allowDirectPrivate))).Value;
+        var cacheKey = $"{allowDirectPrivate}:{timeoutSeconds}:{origin}";
+        return GuardedClients.GetOrAdd(cacheKey, _ => new Lazy<HttpClient>(() => CreateClient(new Uri(origin, UriKind.Absolute), allowDirectPrivate, timeoutSeconds))).Value;
     }
 
-    private static HttpClient CreateClient(Uri baseUri, bool allowDirectPrivate) =>
+    private static HttpClient CreateClient(Uri baseUri, bool allowDirectPrivate, int timeoutSeconds) =>
         new(CreateHandler(allowDirectPrivate))
         {
             BaseAddress = baseUri,
-            Timeout = TimeSpan.FromSeconds(30),
+            Timeout = TimeSpan.FromSeconds(timeoutSeconds),
         };
 
     private static SocketsHttpHandler CreateHandler(bool allowDirectPrivate)

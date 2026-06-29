@@ -1,3 +1,4 @@
+using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Kb;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,16 +10,9 @@ public static class RagModule
     public static IServiceCollection AddClawbotRag(this IServiceCollection services, IConfiguration cfg)
     {
         services.Configure<EmbeddingOptions>(cfg.GetSection(EmbeddingOptions.SectionName));
+        services.Configure<LlmBaseUrlOptions>(cfg.GetSection(LlmBaseUrlOptions.SectionName));
 
-        var embeddingCfg = cfg.GetSection(EmbeddingOptions.SectionName);
-        if (!string.IsNullOrWhiteSpace(embeddingCfg["ApiKey"]))
-        {
-            services.AddSingleton<IEmbeddingProvider, OpenAiEmbeddingProvider>();
-        }
-        else
-        {
-            services.AddSingleton<IEmbeddingProvider, HashEmbeddingProvider>();
-        }
+        services.AddScoped<IEmbeddingProvider, ConfiguredEmbeddingProvider>();
 
         services.AddScoped<QdrantRagRetriever>();
         services.AddScoped<IRagRetriever>(sp =>
@@ -26,7 +20,12 @@ public static class RagModule
             IRagRetriever inner = sp.GetRequiredService<QdrantRagRetriever>();
             var redis = sp.GetService<StackExchange.Redis.IConnectionMultiplexer>();
             if (redis is not null)
-                inner = new CachedRagRetriever(inner, redis, sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CachedRagRetriever>>());
+                inner = new CachedRagRetriever(
+                    inner,
+                    sp.GetRequiredService<IEmbeddingProvider>(),
+                    redis,
+                    sp.GetServices<IActiveKbVersionResolver>(),
+                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CachedRagRetriever>>());
             return inner;
         });
 

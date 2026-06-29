@@ -674,6 +674,24 @@ public sealed class LlmConfigConfiguration : IEntityTypeConfiguration<LlmConfig>
         // Numeric-suffixed names snake-case ambiguously; pin them so DDL + EF agree.
         builder.Property(x => x.InputUsdPer1M).HasColumnName("input_usd_per_1m").HasColumnType("decimal(10,4)");
         builder.Property(x => x.OutputUsdPer1M).HasColumnName("output_usd_per_1m").HasColumnType("decimal(10,4)");
+        builder.Property(x => x.TimeoutSeconds).HasColumnName("timeout_seconds");
+        builder.Property(x => x.MaxOutputTokens).HasColumnName("max_output_tokens");
+        builder.HasIndex(x => new { x.TenantId, x.IsActive });
+    }
+}
+
+public sealed class EmbeddingConfigConfiguration : IEntityTypeConfiguration<EmbeddingConfig>
+{
+    public void Configure(EntityTypeBuilder<EmbeddingConfig> builder)
+    {
+        builder.ToTable("embedding_configs");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Provider).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.ModelId).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.DisplayName).HasColumnName("display_name").HasMaxLength(128);
+        builder.Property(x => x.ApiKeyEncrypted).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.BaseUrl).HasMaxLength(512);
+        builder.Property(x => x.Dimension).HasDefaultValue(1536);
         builder.HasIndex(x => new { x.TenantId, x.IsActive });
     }
 }

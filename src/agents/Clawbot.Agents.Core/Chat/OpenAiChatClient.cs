@@ -89,7 +89,12 @@ public sealed class OpenAiChatClient : IClaudeChatClient
         yield return new ClaudeStreamChunk(string.Empty, Final: true, inTok, outTok, Cost(inTok, outTok), _config.Model);
     }
 
-    private static ChatCompletionOptions BuildOptions() => new();
+    // Only emit a token cap when the config sets one explicitly. The OpenAI SDK serializes
+    // MaxOutputTokenCount as `max_completion_tokens`; DeepSeek and many OpenAI-compatible gateways
+    // only accept `max_tokens` and reject the unknown field (observed as 403). So we don't apply the
+    // 3000 default here — the server's own default stands unless the admin opts in.
+    private ChatCompletionOptions BuildOptions() =>
+        _config.MaxOutputTokens is int max ? new() { MaxOutputTokenCount = max } : new();
 
     private static List<ChatMessage> BuildMessages(string systemPrompt, IReadOnlyList<ChatTurn> history, string userMessage)
     {

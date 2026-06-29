@@ -130,7 +130,7 @@ function agentTypeLabel(type: string): string {
   if (value === "report") return "Báo cáo";
   if (value === "research") return "Nghiên cứu";
   if (value === "chat") return "Trò chuyện";
-  if (value === "orchestrator") return "Điều phối";
+  if (value === "orchestrator") return "Điều phối viên";
   return type || "Agent";
 }
 
@@ -527,7 +527,7 @@ export default function AgentDashboardPage() {
             type="button"
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">warning</span>
-            Dừng orchestrator đang chạy
+            Dừng điều phối viên đang chạy
           </Button>
         </div>
       </div>
@@ -544,13 +544,13 @@ export default function AgentDashboardPage() {
 
       <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          label="Orchestrator"
+          label="Điều phối viên"
           value={visibleOrchestrator ? statusLabel(visibleOrchestrator.status) : "Chưa có"}
           delta=""
           icon="memory"
           tone={visibleOrchestrator ? statusTone(visibleOrchestrator.status) : "neutral"}
         />
-        <MetricCard label="Orchestrator lỗi" value={String(errorCount)} delta="Cần kiểm tra" icon="bug_report" tone={errorCount ? "error" : "success"} />
+        <MetricCard label="Điều phối viên lỗi" value={String(errorCount)} delta="Cần kiểm tra" icon="bug_report" tone={errorCount ? "error" : "success"} />
         <MetricCard label="Chi phí AI" value={formatCurrency(totalUsd)} delta="30 ngày gần nhất" icon="toll" tone="warning" />
         <MetricCard label="Lượt gọi AI" value={totalCalls.toLocaleString("vi-VN")} delta="Theo sổ chi phí" icon="analytics" tone="neutral" />
       </section>

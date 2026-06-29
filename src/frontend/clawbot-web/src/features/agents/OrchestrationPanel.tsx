@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { Alert } from "@/shared/ui/Alert";
 import { Button } from "@/shared/ui/Button";
 import { Card } from "@/shared/ui/Card";
+import { Modal } from "@/shared/ui/Modal";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import { useAuthStore } from "@/shared/auth/authStore";
 import { toSafeOperationalText, operationalPhaseLabel } from "@/shared/utils/userText";
@@ -19,6 +20,7 @@ import {
   type OrchestrationRunListItem,
   type OrchestrationSessionDto,
   type OrchestrationStatus,
+  type OrchestrationTaskDto,
 } from "@/shared/api/orchestration";
 
 const ACTIVE_STATUSES = new Set<OrchestrationStatus>(["draft", "pending_approval", "running", "paused"]);
@@ -116,6 +118,7 @@ export function OrchestrationPanel() {
   const [draft, setDraft] = useState<{ source: string; text: string } | null>(null);
   // SPEC-16 P3-1: raw-JSON plan edit is behind an "advanced" toggle so the structured DAG is the primary view.
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showRecentRuns, setShowRecentRuns] = useState(false);
 
   const setSessionId = (next: string | null): void => {
     setSearchParams(
@@ -242,31 +245,16 @@ export function OrchestrationPanel() {
         )}
       </div>
 
-      {/* SPEC-16 P3-6: recent/in-flight runs — click to load a run by id without typing the URL. */}
+      {/* SPEC-16 P3-6: recent/in-flight runs — open as a modal so the main orchestration surface stays focused. */}
       {runsQuery.data && runsQuery.data.length > 0 && (
-        <div className="rounded-lg border border-outline p-3">
-          <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between rounded-lg border border-outline p-3">
+          <div>
             <h3 className="text-label-md text-on-surface">Phiên gần đây</h3>
-            {runsQuery.isFetching && <span className="text-label-sm text-on-surface-variant">đang cập nhật...</span>}
+            <p className="text-label-sm text-on-surface-variant">{runsQuery.data.length} phiên có thể mở lại.</p>
           </div>
-          <ul className="mt-2 flex flex-col gap-1">
-            {runsQuery.data.map((run) => (
-              <li key={run.sessionId}>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-body-sm hover:bg-surface-container-low"
-                  onClick={() => setSessionId(run.sessionId)}
-                  disabled={busy}
-                >
-                  <StatusPill tone={statusTone(run.status)}>{statusLabel(run.status)}</StatusPill>
-                  <span className="truncate text-on-surface">{run.goal || "(không có mục tiêu)"}</span>
-                  <span className="ml-auto shrink-0 text-label-sm text-on-surface-variant">
-                    {new Date(run.startedAt).toLocaleString()}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <Button variant="outline" onClick={() => setShowRecentRuns(true)} disabled={busy}>
+            Xem phiên
+          </Button>
         </div>
       )}
 
@@ -292,6 +280,35 @@ export function OrchestrationPanel() {
           Vượt ngưỡng chi phí ({session.costReason ?? "cost_cap"}). Kế hoạch chuyển sang chờ phê duyệt.
         </Alert>
       )}
+
+      <Modal open={showRecentRuns} onClose={() => setShowRecentRuns(false)} title="Phiên gần đây">
+        {runsQuery.isFetching && <p className="text-label-sm text-on-surface-variant">Đang cập nhật...</p>}
+        {runsQuery.data && runsQuery.data.length > 0 ? (
+          <ul className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto pr-1">
+            {runsQuery.data.map((run: OrchestrationRunListItem) => (
+              <li key={run.sessionId}>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 rounded-lg border border-outline px-3 py-2 text-left hover:bg-surface-container-low"
+                  onClick={() => {
+                    setSessionId(run.sessionId);
+                    setShowRecentRuns(false);
+                  }}
+                  disabled={busy}
+                >
+                  <StatusPill tone={statusTone(run.status)}>{statusLabel(run.status)}</StatusPill>
+                  <span className="min-w-0 flex-1 truncate text-body-sm text-on-surface">{run.goal || "(không có mục tiêu)"}</span>
+                  <span className="shrink-0 text-label-sm text-on-surface-variant">
+                    {new Date(run.startedAt).toLocaleString()}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-label-sm text-on-surface-variant">Chưa có phiên nào.</p>
+        )}
+      </Modal>
 
       {session && (
         <div className="flex flex-col gap-3">

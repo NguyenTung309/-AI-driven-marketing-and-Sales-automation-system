@@ -1,6 +1,7 @@
 import { useDeferredValue, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
+import { getEmbeddingStatus } from "@/shared/api/embeddingConfigs";
 import { Alert } from "@/shared/ui/Alert";
 import { Modal } from "@/shared/ui/Modal";
 import { StatusPill } from "@/shared/ui/StatusPill";
@@ -11,6 +12,7 @@ import {
   createKbModule,
   createKbVersion,
   deployKbVersion,
+  generateKbTestCases,
   getKbAccuracy,
   getKbVersion,
   getKbVersionDiff,
@@ -67,6 +69,7 @@ export default function KnowledgeBasePage() {
 
   const modulesQuery = useQuery({ queryKey: ["kb", "modules"], queryFn: listKbModules });
   const accuracyQuery = useQuery({ queryKey: ["kb", "accuracy"], queryFn: getKbAccuracy });
+  const embeddingStatusQuery = useQuery({ queryKey: ["embedding-configs", "status"], queryFn: getEmbeddingStatus });
   const modules = modulesQuery.data ?? EMPTY_MODULES;
   const accuracy = accuracyQuery.data ?? EMPTY_ACCURACY;
   const visibleModules = useMemo(() => modules.filter((module) => moduleMatches(module, deferredSearch)), [modules, deferredSearch]);
@@ -185,6 +188,13 @@ export default function KnowledgeBasePage() {
     },
   });
 
+  const generateMutation = useMutation({
+    mutationFn: () => generateKbTestCases(selectedModule?.id ?? ""),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["kb", selectedModule?.id, "test-cases"] });
+    },
+  });
+
   const testMutation = useMutation({
     mutationFn: () => runKbTest(selectedModule?.id ?? ""),
     onSuccess: async () => {
@@ -216,6 +226,7 @@ export default function KnowledgeBasePage() {
     uploadMutation.error,
     deploymentMutation.error,
     addTestCaseMutation.error,
+    generateMutation.error,
     testMutation.error,
     diffMutation.error,
   ].filter(Boolean);
@@ -245,6 +256,14 @@ export default function KnowledgeBasePage() {
       {errors.length ? (
         <div className="mb-gutter">
           <Alert tone="error">{errorText(errors[0])}</Alert>
+        </div>
+      ) : null}
+
+      {embeddingStatusQuery.data?.isFallback ? (
+        <div className="mb-gutter">
+          <Alert tone="warning">
+            Kho tri thức đang dùng embedding hash fallback ({embeddingStatusQuery.data.dimension} chiều), chỉ phù hợp demo. Cấu hình embedding thật rồi phát hành lại KB để tăng độ chính xác RAG.
+          </Alert>
         </div>
       ) : null}
 
@@ -300,10 +319,12 @@ export default function KnowledgeBasePage() {
       <QaModal
         adding={addTestCaseMutation.isPending}
         cases={testCases}
+        generating={generateMutation.isPending}
         loading={testCasesQuery.isLoading}
         module={selectedModule}
         onAdd={(question, answer) => addTestCaseMutation.mutate({ question, answer })}
         onClose={() => setQaOpen(false)}
+        onGenerate={() => generateMutation.mutate()}
         onRun={() => testMutation.mutate()}
         open={qaOpen}
         testResult={testMutation.data ?? null}

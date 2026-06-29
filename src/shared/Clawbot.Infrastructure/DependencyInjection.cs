@@ -1,5 +1,6 @@
 ﻿using Clawbot.Agents.Core.Ads;
 using Clawbot.Agents.Core.Lead;
+using Clawbot.Agents.Core.Rag;
 using Clawbot.Agents.Core.Skills;
 using Clawbot.Agents.Core.Skills.Content;
 using Clawbot.Agents.Core.Skills.Nlp;
@@ -116,6 +117,8 @@ public static class DependencyInjection
         services.AddSingleton<IEncryptor, AesEncryptor>();
         // Per-(tenant, agent) LLM provider resolution (decrypts the bound LlmConfig at call time).
         services.AddSingleton<Clawbot.Agents.Core.Chat.ILlmConfigResolver, Agents.LlmConfigResolver>();
+        services.AddScoped<IEmbeddingConfigResolver, Agents.EmbeddingConfigResolver>();
+        services.AddScoped<IActiveKbVersionResolver, Agents.ActiveKbVersionResolver>();
         services.Configure<PublisherOptions>(cfg.GetSection(PublisherOptions.SectionName));
         services.AddSingleton<IGoldenHourResolver, DefaultGoldenHourResolver>();
         services.AddClawbotLead(); // Lead-2: least-busy assignment for API endpoints + hot-lead consumer

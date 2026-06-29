@@ -1,5 +1,6 @@
 using Clawbot.SharedKernel.Vectors;
 using Google.Protobuf.Collections;
+using Grpc.Core;
 using Qdrant.Client;
 using Qdrant.Client.Grpc;
 
@@ -22,12 +23,14 @@ public sealed class QdrantVectorStore(QdrantClient client) : IVectorStore
         string collection,
         ReadOnlyMemory<float> query,
         int topK,
+        IReadOnlyList<VectorMetadataFilter>? filters = null,
         CancellationToken ct = default)
     {
         await EnsureCollectionAsync(collection, (uint)query.Length, ct).ConfigureAwait(false);
         var hits = await _client.SearchAsync(
             collection,
             query.ToArray(),
+            filter: BuildFilter(filters),
             limit: (ulong)Math.Max(1, topK),
             payloadSelector: true,
             cancellationToken: ct).ConfigureAwait(false);
@@ -51,13 +54,34 @@ public sealed class QdrantVectorStore(QdrantClient client) : IVectorStore
 
     private async Task EnsureCollectionAsync(string collection, uint vectorSize, CancellationToken ct)
     {
-        var existing = await _client.ListCollectionsAsync(ct).ConfigureAwait(false);
-        if (existing.Any(c => string.Equals(c, collection, StringComparison.Ordinal))) return;
+        if (await _client.CollectionExistsAsync(collection, ct).ConfigureAwait(false)) return;
 
-        await _client.CreateCollectionAsync(
-            collection,
-            new VectorParams { Size = vectorSize, Distance = Distance.Cosine },
-            cancellationToken: ct).ConfigureAwait(false);
+        try
+        {
+            await _client.CreateCollectionAsync(
+                collection,
+                new VectorParams { Size = vectorSize, Distance = Distance.Cosine },
+                cancellationToken: ct).ConfigureAwait(false);
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.AlreadyExists)
+        {
+            // Another request created the collection after our exists check.
+        }
+    }
+
+    private static Filter? BuildFilter(IReadOnlyList<VectorMetadataFilter>? filters)
+    {
+        if (filters is null || filters.Count == 0) return null;
+
+        Filter? qdrantFilter = null;
+        foreach (var filter in filters.Where(f => !string.IsNullOrWhiteSpace(f.Field) && f.Values.Count > 0))
+        {
+            var condition = filter.Values.Count == 1
+                ? Conditions.MatchKeyword(filter.Field, filter.Values[0])
+                : Conditions.Match(filter.Field, filter.Values);
+            qdrantFilter = qdrantFilter is null ? condition : qdrantFilter & condition;
+        }
+        return qdrantFilter;
     }
 
     private static PointStruct ToPoint(VectorRecord r)

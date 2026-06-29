@@ -42,7 +42,7 @@ public sealed class AnthropicChatClientTests
 
         using var body = JsonDocument.Parse(handler.Body!);
         body.RootElement.GetProperty("model").GetString().Should().Be("claude-test");
-        body.RootElement.GetProperty("max_tokens").GetInt32().Should().Be(1024);
+        body.RootElement.GetProperty("max_tokens").GetInt32().Should().Be(3000);
         body.RootElement.TryGetProperty("temperature", out _).Should().BeFalse();
         body.RootElement.GetProperty("system").GetString().Should().Be("system prompt");
 

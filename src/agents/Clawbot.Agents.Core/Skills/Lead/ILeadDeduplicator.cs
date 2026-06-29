@@ -43,7 +43,12 @@ internal sealed class QdrantLeadDeduplicator : ILeadDeduplicator
             return Array.Empty<DedupCandidate>();
 
         var embedding = await _embedding.EmbedAsync(key, ct).ConfigureAwait(false);
-        var matches = await _store.SearchAsync(_collection, embedding, topK * 4, ct).ConfigureAwait(false);
+        var matches = await _store.SearchAsync(
+            _collection,
+            embedding,
+            topK * 4,
+            [new VectorMetadataFilter("tenant_id", [tenantId.ToString("D", CultureInfo.InvariantCulture)])],
+            ct).ConfigureAwait(false);
 
         var candidates = new List<DedupCandidate>();
         foreach (var m in matches)

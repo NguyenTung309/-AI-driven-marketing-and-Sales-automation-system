@@ -126,59 +126,57 @@ public sealed class AutonomousOrchestrator
         // SPEC-16 P4-2: capture the run's dry-run flag so the worker previews tool actions without side effects.
         _dryRun = request.DryRun;
 
-        for (var round = 1; round <= _options.MaxRounds; round++)
+        // Execution proceeds in waves: each wave runs every currently-ready task. A wave that produces no
+        // failures simply advances the DAG and is NOT charged against the replan budget — so a deep but healthy
+        // chain (research→content→reviewer→publisher→reporter) completes regardless of its depth. _options.MaxRounds
+        // bounds only REPLANS (recovery after a failed task). Previously the wave loop itself was capped at MaxRounds,
+        // so any chain deeper than MaxRounds tripped a false max_rounds even with zero failures — the real root cause.
+        var replans = 0;
+        while (true)
         {
             ct.ThrowIfCancellationRequested();
 
-            var ready = ReadyTasks(plan);
+            var hasFailed = plan.Tasks.Any(t => IsFailed(t.Status));
             var pending = plan.Tasks.Where(t => IsPending(t.Status)).ToArray();
-            if (pending.Length == 0)
+            if (pending.Length == 0 && !hasFailed)
             {
-                var anyFailed = plan.Tasks.Any(t => string.Equals(t.Status, "failed", StringComparison.OrdinalIgnoreCase));
-                if (anyFailed)
-                    break; // fall through to replan/failed handling below
                 await EmitRunSummaryAsync(request, plan, ct).ConfigureAwait(false);
                 await _sink.CompleteAsync(request.TenantId, request.SessionId, _clock.UtcNow, ct).ConfigureAwait(false);
-                return AutonomousRunResult.Completed(round);
+                return AutonomousRunResult.Completed(replans);
             }
 
-            if (ready.Count == 0)
+            var ready = ReadyTasks(plan);
+            if (ready.Count > 0)
             {
-                await _sink.FailAsync(request.TenantId, request.SessionId, "dependency_blocked", _clock.UtcNow, ct).ConfigureAwait(false);
-                return AutonomousRunResult.Failed("dependency_blocked", round);
+                foreach (var task in ready)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    plan = await ExecuteTaskAsync(request, plan, task, byCode, ct).ConfigureAwait(false);
+                    await _sink.PersistPlanAsync(request.TenantId, request.SessionId, plan, ct: ct).ConfigureAwait(false);
+                    if (await _sink.IsStoppedAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false))
+                        return AutonomousRunResult.Failed("stopped", replans);
+                }
+
+                // Healthy wave → advance to the next wave without consuming the replan budget.
+                if (!plan.Tasks.Any(t => IsFailed(t.Status)))
+                    continue;
             }
 
-            foreach (var task in ready)
-            {
-                ct.ThrowIfCancellationRequested();
-                plan = await ExecuteTaskAsync(request, plan, task, byCode, ct).ConfigureAwait(false);
-                await _sink.PersistPlanAsync(request.TenantId, request.SessionId, plan, ct: ct).ConfigureAwait(false);
-                if (await _sink.IsStoppedAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false))
-                    return AutonomousRunResult.Failed("stopped", round);
-            }
-
-            var failed = plan.Tasks.Where(t => string.Equals(t.Status, "failed", StringComparison.OrdinalIgnoreCase)).ToArray();
+            var failed = plan.Tasks.Where(t => IsFailed(t.Status)).ToArray();
             if (failed.Length == 0)
             {
-                // Detect completion HERE so a successful DAG does not need an extra round. Previously completion was
-                // only checked at the top of the next round, so MaxRounds <= task count surfaced a false max_rounds on
-                // fully successful runs (the real root cause behind the reported max_rounds error).
-                var stillPending = plan.Tasks.Where(t => IsPending(t.Status)).ToArray();
-                if (stillPending.Length == 0)
-                {
-                    await EmitRunSummaryAsync(request, plan, ct).ConfigureAwait(false);
-                    await _sink.CompleteAsync(request.TenantId, request.SessionId, _clock.UtcNow, ct).ConfigureAwait(false);
-                    return AutonomousRunResult.Completed(round);
-                }
-                continue; // more tasks become ready next round; no replan round burned
+                // Nothing ready, nothing failed, yet work remains → unsatisfiable dependencies.
+                await _sink.FailAsync(request.TenantId, request.SessionId, "dependency_blocked", _clock.UtcNow, ct).ConfigureAwait(false);
+                return AutonomousRunResult.Failed("dependency_blocked", replans);
             }
 
-            if (round >= _options.MaxRounds)
+            if (replans >= _options.MaxRounds)
             {
                 await _sink.FailAsync(request.TenantId, request.SessionId, "max_rounds", _clock.UtcNow, ct).ConfigureAwait(false);
-                return AutonomousRunResult.Failed("max_rounds", round);
+                return AutonomousRunResult.Failed("max_rounds", replans);
             }
 
+            replans++;
             await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "re-planned", $"Re-planning after {failed.Length} failed task(s).", _clock.UtcNow, ct).ConfigureAwait(false);
             using (_llmScope.Begin(request.TenantId, OrchestratorAgentCode))
             {
@@ -186,9 +184,6 @@ public sealed class AutonomousOrchestrator
             }
             await _sink.PersistPlanAsync(request.TenantId, request.SessionId, plan, ct: ct).ConfigureAwait(false);
         }
-
-        await _sink.FailAsync(request.TenantId, request.SessionId, "max_rounds", _clock.UtcNow, ct).ConfigureAwait(false);
-        return AutonomousRunResult.Failed("max_rounds", _options.MaxRounds);
     }
 
     private async Task<OrchestrationPlanDocument> ExecuteTaskAsync(
@@ -220,7 +215,7 @@ public sealed class AutonomousOrchestrator
             // with backoff (up to MaxTransientRetries) without burning a replan round, so a slow completion no longer
             // cascades into max_rounds]
             result = await ExecuteAgentWithTransientRetryAsync(
-                agent, ToAgentTask(task, request.TenantId), request, task, ct).ConfigureAwait(false);
+                agent, ToAgentTask(task, plan, request.TenantId), request, task, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -366,12 +361,34 @@ public sealed class AutonomousOrchestrator
     private static bool IsPending(string? status) =>
         string.IsNullOrWhiteSpace(status) || string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase);
 
-    private static AgentTask ToAgentTask(OrchestrationPlanTask task, Guid tenantId)
+    private static bool IsFailed(string? status) =>
+        string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase);
+
+    private static AgentTask ToAgentTask(OrchestrationPlanTask task, OrchestrationPlanDocument plan, Guid tenantId)
     {
         var input = task.Input is null
             ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, string>(task.Input, StringComparer.OrdinalIgnoreCase);
         input["tenant_id"] = tenantId.ToString("D");
+
+        // Thread completed predecessor outputs into the input so a dependent agent (reviewer, publisher, …) actually
+        // receives upstream results, not just its static planned input. Without this, DependsOn only orders execution
+        // and passes no data — the downstream agent soft-fails ("thiếu nội dung"/"thiếu content_id") and the
+        // orchestrator re-plans until it exhausts MaxRounds (max_rounds).
+        if (task.DependsOn.Count > 0)
+        {
+            var upstream = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var dep in task.DependsOn)
+            {
+                var src = plan.Tasks.FirstOrDefault(t => string.Equals(t.Id, dep, StringComparison.OrdinalIgnoreCase));
+                if (src is null || string.IsNullOrEmpty(src.Output)) continue;
+                var key = upstream.ContainsKey(src.Agent) ? $"{src.Agent}:{src.Id}" : src.Agent;
+                upstream[key] = src.Output;
+            }
+            if (upstream.Count > 0)
+                input["upstream_results"] = System.Text.Json.JsonSerializer.Serialize(upstream);
+        }
+
         return new AgentTask(task.Id, task.Agent, task.Description, input);
     }
 

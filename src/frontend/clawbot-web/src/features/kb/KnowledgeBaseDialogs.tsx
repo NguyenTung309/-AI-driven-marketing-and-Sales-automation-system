@@ -98,10 +98,12 @@ export function QaModal({
   cases,
   loading,
   adding,
+  generating,
   testing,
   testResult,
   onClose,
   onAdd,
+  onGenerate,
   onRun,
 }: {
   readonly open: boolean;
@@ -109,10 +111,12 @@ export function QaModal({
   readonly cases: readonly KbTestCase[];
   readonly loading: boolean;
   readonly adding: boolean;
+  readonly generating: boolean;
   readonly testing: boolean;
   readonly testResult: KbTestRunResult | null;
   readonly onClose: () => void;
   readonly onAdd: (question: string, answer: string) => void;
+  readonly onGenerate: () => void;
   readonly onRun: () => void;
 }) {
   const [question, setQuestion] = useState("");
@@ -180,7 +184,18 @@ export function QaModal({
         </div>
 
         <div>
-          <p className="mb-2 text-label-caps uppercase text-on-surface-variant">Bộ kiểm thử ({cases.length})</p>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-label-caps uppercase text-on-surface-variant">Bộ kiểm thử ({cases.length})</p>
+            <button
+              className="inline-flex items-center gap-1 rounded border border-primary px-3 py-1.5 text-label-sm font-bold text-primary hover:bg-red-50 disabled:opacity-50"
+              disabled={generating}
+              onClick={onGenerate}
+              type="button"
+            >
+              <span aria-hidden="true" className="material-symbols-outlined text-[16px]">auto_awesome</span>
+              {generating ? "Đang tạo câu hỏi" : "Tự động tạo từ tài liệu"}
+            </button>
+          </div>
           {loading ? (
             <p className="text-body-md text-on-surface-variant">Đang tải câu kiểm thử...</p>
           ) : cases.length ? (

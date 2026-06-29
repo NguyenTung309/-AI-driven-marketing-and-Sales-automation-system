@@ -41,6 +41,8 @@ interface LlmConfigDraft {
   readonly baseUrl: string;
   readonly inputUsdPer1M: string;
   readonly outputUsdPer1M: string;
+  readonly timeoutSeconds: string;
+  readonly maxOutputTokens: string;
 }
 
 const EMPTY_LLM_CONFIG_DRAFT: LlmConfigDraft = {
@@ -51,6 +53,8 @@ const EMPTY_LLM_CONFIG_DRAFT: LlmConfigDraft = {
   baseUrl: "",
   inputUsdPer1M: "",
   outputUsdPer1M: "",
+  timeoutSeconds: "",
+  maxOutputTokens: "",
 };
 
 function listToText(values: readonly string[]): string {
@@ -80,6 +84,8 @@ function toCreateLlmPayload(draft: LlmConfigDraft): CreateLlmConfigPayload {
     baseUrl: draft.baseUrl.trim() || null,
     inputUsdPer1M: toNullableNumber(draft.inputUsdPer1M),
     outputUsdPer1M: toNullableNumber(draft.outputUsdPer1M),
+    timeoutSeconds: toNullableNumber(draft.timeoutSeconds),
+    maxOutputTokens: toNullableNumber(draft.maxOutputTokens),
   };
 }
 
@@ -202,6 +208,8 @@ export function AgentConfigDrawer({
         baseUrl: editDraft.baseUrl.trim() || null,
         inputUsdPer1M: toNullableNumber(editDraft.inputUsdPer1M),
         outputUsdPer1M: toNullableNumber(editDraft.outputUsdPer1M),
+        timeoutSeconds: toNullableNumber(editDraft.timeoutSeconds),
+        maxOutputTokens: toNullableNumber(editDraft.maxOutputTokens),
       });
       if (editDraft.apiKey.trim()) await rotateLlmKey(editingId!, editDraft.apiKey);
     },
@@ -243,6 +251,8 @@ export function AgentConfigDrawer({
       baseUrl: config.baseUrl ?? "",
       inputUsdPer1M: config.inputUsdPer1M?.toString() ?? "",
       outputUsdPer1M: config.outputUsdPer1M?.toString() ?? "",
+      timeoutSeconds: config.timeoutSeconds?.toString() ?? "",
+      maxOutputTokens: config.maxOutputTokens?.toString() ?? "",
     });
   };
 
@@ -466,6 +476,14 @@ export function AgentConfigDrawer({
                     <span className="text-label-caps uppercase text-tertiary">Base URL</span>
                     <input className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" onChange={(event) => setLlmDraft((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="http://localhost:20128/v1" value={llmDraft.baseUrl} />
                   </label>
+                  <label className="space-y-1">
+                    <span className="text-label-caps uppercase text-tertiary">Timeout (giây)</span>
+                    <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" type="number" min={1} max={600} step={1} onChange={(event) => setLlmDraft((current) => ({ ...current, timeoutSeconds: event.target.value }))} placeholder="mặc định 120" value={llmDraft.timeoutSeconds} />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-label-caps uppercase text-tertiary">Max output tokens</span>
+                    <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" type="number" min={1} max={200000} step={1} onChange={(event) => setLlmDraft((current) => ({ ...current, maxOutputTokens: event.target.value }))} placeholder="mặc định 3000" value={llmDraft.maxOutputTokens} />
+                  </label>
                 </div>
               </div>
               {llmConfigs.map((config) => {
@@ -518,6 +536,14 @@ export function AgentConfigDrawer({
                         <label className="space-y-1 md:col-span-2">
                           <span className="text-label-caps uppercase text-tertiary">Base URL</span>
                           <input className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" onChange={(event) => setEditDraft((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="http://localhost:20128/v1" value={editDraft.baseUrl} />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="text-label-caps uppercase text-tertiary">Timeout (giây)</span>
+                          <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" type="number" min={1} max={600} step={1} onChange={(event) => setEditDraft((current) => ({ ...current, timeoutSeconds: event.target.value }))} placeholder="mặc định 120" value={editDraft.timeoutSeconds} />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="text-label-caps uppercase text-tertiary">Max output tokens</span>
+                          <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" type="number" min={1} max={200000} step={1} onChange={(event) => setEditDraft((current) => ({ ...current, maxOutputTokens: event.target.value }))} placeholder="mặc định 3000" value={editDraft.maxOutputTokens} />
                         </label>
                         <div className="flex justify-end gap-2 md:col-span-2">
                           <button className="rounded border border-outline px-3 py-1.5 text-body-md font-bold text-on-surface-variant hover:bg-surface-variant" onClick={() => setEditingId(null)} type="button">

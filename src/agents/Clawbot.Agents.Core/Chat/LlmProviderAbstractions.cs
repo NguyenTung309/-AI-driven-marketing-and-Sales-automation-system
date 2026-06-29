@@ -8,7 +8,9 @@ public sealed record ResolvedLlmConfig(
     string ApiKey,
     string? BaseUrl,
     decimal? InputUsdPer1M,
-    decimal? OutputUsdPer1M);
+    decimal? OutputUsdPer1M,
+    int? TimeoutSeconds = null,
+    int? MaxOutputTokens = null);
 
 // Resolves the LLM config bound to an agent (by code) for a tenant.
 // Throws LlmConfigNotConfiguredException when unbound or inactive (D1 — no fallback).

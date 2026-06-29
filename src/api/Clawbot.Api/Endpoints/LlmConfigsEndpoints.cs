@@ -58,7 +58,7 @@ public static class LlmConfigsEndpoints
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(req.ApiKey)) return Results.BadRequest(new { error = "api_key_required" });
-        if (Validate(req.Provider, req.ModelId, req.BaseUrl, req.InputUsdPer1M, req.OutputUsdPer1M, AllowPrivateBaseUrls(config, env)) is { } err)
+        if (Validate(req.Provider, req.ModelId, req.BaseUrl, req.InputUsdPer1M, req.OutputUsdPer1M, req.TimeoutSeconds, req.MaxOutputTokens, AllowPrivateBaseUrls(config, env)) is { } err)
             return Results.BadRequest(new { error = err });
 
         var tenantId = tenants.Require().TenantId;
@@ -73,7 +73,9 @@ public static class LlmConfigsEndpoints
             baseUrl: NormalizeBaseUrl(provider, req.BaseUrl),
             displayName: Trimmed(req.DisplayName),
             inputUsdPer1M: req.InputUsdPer1M,
-            outputUsdPer1M: req.OutputUsdPer1M);
+            outputUsdPer1M: req.OutputUsdPer1M,
+            timeoutSeconds: req.TimeoutSeconds,
+            maxOutputTokens: req.MaxOutputTokens);
 
         db.LlmConfigs.Add(row);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -90,7 +92,7 @@ public static class LlmConfigsEndpoints
         IHostEnvironment env,
         CancellationToken ct)
     {
-        if (Validate(req.Provider, req.ModelId, req.BaseUrl, req.InputUsdPer1M, req.OutputUsdPer1M, AllowPrivateBaseUrls(config, env)) is { } err)
+        if (Validate(req.Provider, req.ModelId, req.BaseUrl, req.InputUsdPer1M, req.OutputUsdPer1M, req.TimeoutSeconds, req.MaxOutputTokens, AllowPrivateBaseUrls(config, env)) is { } err)
             return Results.BadRequest(new { error = err });
 
         var row = await FindAsync(db, tenants, id, ct).ConfigureAwait(false);
@@ -109,7 +111,7 @@ public static class LlmConfigsEndpoints
         var baseUrl = NormalizeBaseUrl(provider, req.BaseUrl);
         var credentialEndpointChanged = !string.Equals(row.Provider, provider, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(row.BaseUrl, baseUrl, StringComparison.OrdinalIgnoreCase);
-        row.UpdateConnection(provider, modelId, baseUrl, Trimmed(req.DisplayName), now);
+        row.UpdateConnection(provider, modelId, baseUrl, Trimmed(req.DisplayName), now, req.TimeoutSeconds, req.MaxOutputTokens);
         row.UpdateRates(req.InputUsdPer1M, req.OutputUsdPer1M, now);
         if (credentialEndpointChanged)
             row.RequireKeyRotation(now);
@@ -177,7 +179,7 @@ public static class LlmConfigsEndpoints
         {
             var resolved = new ResolvedLlmConfig(
                 row.Provider, row.ModelId, encryptor.Decrypt(row.ApiKeyEncrypted), row.BaseUrl,
-                row.InputUsdPer1M, row.OutputUsdPer1M);
+                row.InputUsdPer1M, row.OutputUsdPer1M, row.TimeoutSeconds, row.MaxOutputTokens);
             var client = factory.Create(resolved);
             await client.CompleteAsync("You are a connection test. Reply with 'ok'.", Array.Empty<ChatTurn>(), "ping", ct)
                 .ConfigureAwait(false);
@@ -216,7 +218,7 @@ public static class LlmConfigsEndpoints
         c.Id, c.Provider, c.ModelId, c.DisplayName,
         HasApiKey: !string.IsNullOrEmpty(c.ApiKeyEncrypted),
         c.BaseUrl, c.IsActive,
-        c.InputUsdPer1M, c.OutputUsdPer1M, c.CreatedAt, c.UpdatedAt);
+        c.InputUsdPer1M, c.OutputUsdPer1M, c.CreatedAt, c.UpdatedAt, c.TimeoutSeconds, c.MaxOutputTokens);
 
     private static string? Trimmed(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -239,10 +241,15 @@ public static class LlmConfigsEndpoints
         };
     }
 
-    // Boundary validation: provider enum, https-only baseUrl (SSRF guard), non-negative cost rates.
+    // Request timeout bounds: 1s floor, 600s (10 min) ceiling. null → global default.
+    private const int MaxTimeoutSeconds = 600;
+    // Output-token cap bounds: 1 floor, 200k ceiling. null → provider default (3000).
+    private const int MaxOutputTokensCeiling = 200_000;
+
+    // Boundary validation: provider enum, https-only baseUrl (SSRF guard), non-negative cost rates, timeout/token ranges.
     private static string? Validate(
         string? provider, string? modelId, string? baseUrl,
-        decimal? inputRate, decimal? outputRate,
+        decimal? inputRate, decimal? outputRate, int? timeoutSeconds, int? maxOutputTokens,
         bool allowPrivateBaseUrls = false)
     {
         if (string.IsNullOrWhiteSpace(provider) || !AllowedProviders.Contains(provider.Trim()))
@@ -253,6 +260,10 @@ public static class LlmConfigsEndpoints
             return "invalid_base_url";
         if (inputRate is < 0m || outputRate is < 0m)
             return "invalid_rate";
+        if (timeoutSeconds is < 1 or > MaxTimeoutSeconds)
+            return "invalid_timeout";
+        if (maxOutputTokens is < 1 or > MaxOutputTokensCeiling)
+            return "invalid_max_output_tokens";
         return null;
     }
 

@@ -129,10 +129,8 @@ export const KB_UPLOAD_ACCEPT = ".docx,.xlsx,.csv,.pdf,.txt,.md";
 
 export async function uploadKbVersion(moduleId: string, file: File): Promise<KbUploadResult> {
   const form = new FormData();
-  form.append("file", file);
-  const response = await apiClient.post<KbUploadResult>(`/api/kb/modules/${moduleId}/upload`, form, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
+  form.append("file", file, file.name);
+  const response = await apiClient.post<KbUploadResult>(`/api/kb/modules/${moduleId}/upload`, form);
   return response.data;
 }
 
@@ -160,6 +158,13 @@ export async function addKbTestCase(moduleId: string, question: string, expected
   const response = await apiClient.post<KbTestCase>(`/api/kb/modules/${moduleId}/test-cases`, {
     question,
     expectedAnswer,
+  });
+  return response.data;
+}
+
+export async function generateKbTestCases(moduleId: string, count = 5): Promise<readonly KbTestCase[]> {
+  const response = await apiClient.post<readonly KbTestCase[]>(`/api/kb/modules/${moduleId}/test-cases/generate`, {
+    count,
   });
   return response.data;
 }
