@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { Alert } from "@/shared/ui/Alert";
@@ -8,9 +8,12 @@ import { Modal } from "@/shared/ui/Modal";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import { useAuthStore } from "@/shared/auth/authStore";
 import { toSafeOperationalText, operationalPhaseLabel } from "@/shared/utils/userText";
+import { TaskResultDetails } from "./TaskResultDetails";
 import {
   approveOrchestration,
+  archiveOrchestrationRun,
   controlOrchestration,
+  controlOrchestrationRun,
   getOrchestrationPlan,
   getOrchestrationTrace,
   listOrchestrationRuns,
@@ -21,6 +24,7 @@ import {
   type OrchestrationSessionDto,
   type OrchestrationStatus,
   type OrchestrationTaskDto,
+  type OrchestrationTraceDto,
 } from "@/shared/api/orchestration";
 
 const ACTIVE_STATUSES = new Set<OrchestrationStatus>(["draft", "pending_approval", "running", "paused"]);
@@ -156,6 +160,19 @@ export function OrchestrationPanel() {
   });
   const traceItems = traceQuery.data ?? [];
 
+  // Group tool-action traces (tool_executed/tool_failed/tool_blocked/…) by the task that produced them, so each
+  // agent step can show exactly what it did on the system.
+  const toolTracesByTask = useMemo(() => {
+    const map = new Map<string, OrchestrationTraceDto[]>();
+    for (const trace of traceItems) {
+      if (!trace.phase?.toLowerCase().startsWith("tool")) continue;
+      const list = map.get(trace.taskId) ?? [];
+      list.push(trace);
+      map.set(trace.taskId, list);
+    }
+    return map;
+  }, [traceItems]);
+
   // Re-seed the editable draft when the fetched plan changes (keyed by sessionId + planJson).
   const planSource = session ? `${session.sessionId}:${session.planJson}` : null;
   if (planSource && draft?.source !== planSource) {
@@ -188,9 +205,22 @@ export function OrchestrationPanel() {
       updateOrchestrationPlan(vars.sessionId, vars.planJson, vars.etag),
     onSuccess: onSession,
   });
+  const archiveRun = useMutation({
+    mutationFn: archiveOrchestrationRun,
+    onSuccess: async (_data, archivedSessionId) => {
+      if (sessionId === archivedSessionId) setSessionId(null);
+      await queryClient.invalidateQueries({ queryKey: ["orchestration", "runs"] });
+    },
+  });
+  const cancelRun = useMutation({
+    mutationFn: (runSessionId: string) => controlOrchestrationRun(runSessionId, "cancel"),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["orchestration", "runs"] });
+    },
+  });
 
-  const busy = submit.isPending || approve.isPending || control.isPending || updatePlan.isPending;
-  const activeError = submit.error ?? approve.error ?? control.error ?? updatePlan.error ?? sessionQuery.error;
+  const busy = submit.isPending || approve.isPending || control.isPending || updatePlan.isPending || archiveRun.isPending || cancelRun.isPending;
+  const activeError = submit.error ?? approve.error ?? control.error ?? updatePlan.error ?? archiveRun.error ?? cancelRun.error ?? sessionQuery.error;
   const canRun = can("orchestration:run");
   const canApprove = can("orchestration:approve");
   const canManage = can("orchestration:manage");
@@ -285,25 +315,47 @@ export function OrchestrationPanel() {
         {runsQuery.isFetching && <p className="text-label-sm text-on-surface-variant">Đang cập nhật...</p>}
         {runsQuery.data && runsQuery.data.length > 0 ? (
           <ul className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto pr-1">
-            {runsQuery.data.map((run: OrchestrationRunListItem) => (
-              <li key={run.sessionId}>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-3 rounded-lg border border-outline px-3 py-2 text-left hover:bg-surface-container-low"
-                  onClick={() => {
-                    setSessionId(run.sessionId);
-                    setShowRecentRuns(false);
-                  }}
-                  disabled={busy}
-                >
-                  <StatusPill tone={statusTone(run.status)}>{statusLabel(run.status)}</StatusPill>
-                  <span className="min-w-0 flex-1 truncate text-body-sm text-on-surface">{run.goal || "(không có mục tiêu)"}</span>
-                  <span className="shrink-0 text-label-sm text-on-surface-variant">
-                    {new Date(run.startedAt).toLocaleString()}
-                  </span>
-                </button>
-              </li>
-            ))}
+            {runsQuery.data.map((run: OrchestrationRunListItem) => {
+              const canCancelRun = run.status === "running" || run.status === "paused";
+              const canArchiveRun = run.status === "completed" || run.status === "failed" || run.status === "cancelled";
+              return (
+                <li className="flex items-center gap-2 rounded-lg border border-outline px-3 py-2" key={run.sessionId}>
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left hover:text-primary"
+                    onClick={() => {
+                      setSessionId(run.sessionId);
+                      setShowRecentRuns(false);
+                    }}
+                    disabled={busy}
+                  >
+                    <StatusPill tone={statusTone(run.status)}>{statusLabel(run.status)}</StatusPill>
+                    <span className="min-w-0 flex-1 truncate text-body-sm text-on-surface">{run.goal || "(không có mục tiêu)"}</span>
+                    <span className="shrink-0 text-label-sm text-on-surface-variant">
+                      {new Date(run.startedAt).toLocaleString()}
+                    </span>
+                  </button>
+                  {canCancelRun ? (
+                    <Button
+                      variant="ghost"
+                      onClick={() => cancelRun.mutate(run.sessionId)}
+                      disabled={!canManage || busy}
+                    >
+                      Hủy
+                    </Button>
+                  ) : null}
+                  {canArchiveRun ? (
+                    <Button
+                      variant="ghost"
+                      onClick={() => archiveRun.mutate(run.sessionId)}
+                      disabled={!canManage || busy}
+                    >
+                      Ẩn
+                    </Button>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className="text-label-sm text-on-surface-variant">Chưa có phiên nào.</p>
@@ -319,41 +371,59 @@ export function OrchestrationPanel() {
           </div>
 
           {session.tasks.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <button
-                type="button"
-                className="self-start text-label-sm text-primary hover:underline"
-                onClick={() => setShowAdvanced((v) => !v)}
-                aria-expanded={showAdvanced}
-              >
-                {showAdvanced ? "▾ Ẩn chỉnh sửa JSON nâng cao" : "▸ Chỉnh sửa JSON nâng cao"}
-              </button>
-              {showAdvanced && (
-                <>
-                  <label className="text-label-sm text-on-surface-variant" htmlFor="orchestration-plan-json">
-                    Kế hoạch JSON có thể chỉnh sửa
-                  </label>
-                  <textarea
-                    id="orchestration-plan-json"
-                    value={planDraft}
-                    onChange={(e) => setPlanDraft(e.target.value)}
-                    rows={6}
-                    className="w-full rounded-lg border border-outline bg-surface-container-lowest p-3 font-mono text-mono-status text-on-surface focus:border-primary focus:outline-none"
-                    disabled={!canEditPlan || busy}
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => session && updatePlan.mutate({ sessionId: session.sessionId, planJson: planDraft, etag: session.etag })}
-                      disabled={!canEditPlan || busy || planDraft.trim().length === 0}
-                    >
-                      Lưu kế hoạch
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
+            <button
+              type="button"
+              className="self-start text-label-sm text-primary hover:underline"
+              onClick={() => setShowAdvanced(true)}
+            >
+              ▸ Chỉnh sửa JSON nâng cao
+            </button>
           )}
+
+          {/* Advanced raw-JSON plan editor — in a wide modal so the full plan is readable/editable. */}
+          <Modal
+            open={showAdvanced}
+            onClose={() => setShowAdvanced(false)}
+            title="Chỉnh sửa kế hoạch JSON"
+            maxWidthClass="max-w-3xl"
+            footer={
+              <>
+                <Button variant="ghost" onClick={() => setShowAdvanced(false)} disabled={busy}>
+                  Đóng
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (!session) return;
+                    updatePlan.mutate(
+                      { sessionId: session.sessionId, planJson: planDraft, etag: session.etag },
+                      { onSuccess: () => setShowAdvanced(false) },
+                    );
+                  }}
+                  disabled={!canEditPlan || busy || planDraft.trim().length === 0}
+                >
+                  Lưu kế hoạch
+                </Button>
+              </>
+            }
+          >
+            {!canEditPlan && (
+              <p className="text-label-sm text-on-surface-variant">
+                Chỉ chỉnh sửa được khi phiên ở trạng thái Nháp hoặc Chờ phê duyệt.
+              </p>
+            )}
+            <label className="text-label-sm text-on-surface-variant" htmlFor="orchestration-plan-json">
+              Kế hoạch JSON có thể chỉnh sửa
+            </label>
+            <textarea
+              id="orchestration-plan-json"
+              value={planDraft}
+              onChange={(e) => setPlanDraft(e.target.value)}
+              rows={20}
+              className="mt-2 max-h-[60vh] w-full resize-y rounded-lg border border-outline bg-surface-container-lowest p-3 font-mono text-mono-status text-on-surface focus:border-primary focus:outline-none"
+              disabled={!canEditPlan || busy}
+              spellCheck={false}
+            />
+          </Modal>
 
           <ul className="flex flex-col gap-2">
             {tasksByDepth(session.tasks).map(({ task, depth }) => (
@@ -376,18 +446,22 @@ export function OrchestrationPanel() {
                       <span className="rounded-full bg-primary/10 px-2 text-label-sm text-primary">đang chạy</span>
                     ) : null}
                   </div>
-                  <p className="truncate text-body-md text-on-surface">{task.description}</p>
-                  {task.dependsOn.length > 0 && (
-                    <p className="text-label-sm text-on-surface-variant">phụ thuộc: {task.dependsOn.join(", ")}</p>
-                  )}
-                  {Object.keys(task.input).length > 0 && (
-                    <p className="text-label-sm text-on-surface-variant">input: {JSON.stringify(task.input)}</p>
-                  )}
+                  <p className="text-body-md text-on-surface">{task.description}</p>
                   {task.error && <p className="text-label-sm text-error">{task.error}</p>}
+                  <TaskResultDetails task={task} toolTraces={toolTracesByTask.get(task.id) ?? []} />
                 </div>
               </li>
             ))}
           </ul>
+
+          {sessionId && (
+            <a
+              className="self-start text-label-sm text-primary hover:underline"
+              href={`/agents/runs/${encodeURIComponent(sessionId)}`}
+            >
+              Mở chi tiết phiên ↗
+            </a>
+          )}
 
           <div className="rounded-lg border border-outline p-3">
             <div className="flex items-center justify-between">

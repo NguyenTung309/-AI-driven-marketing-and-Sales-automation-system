@@ -109,6 +109,8 @@ var docsStorage = builder.Configuration.GetSection(Clawbot.Agents.Core.Docs.Docs
 builder.Services.AddSingleton(docsStorage);
 if (!string.IsNullOrWhiteSpace(builder.Configuration["Docs:Storage:Minio:Endpoint"]))
     builder.Services.AddSingleton<Clawbot.Agents.Core.Docs.IDocumentStorage, Clawbot.Infrastructure.Documents.MinioDocumentStorage>();
+else
+    builder.Services.AddSingleton<Clawbot.Agents.Core.Docs.IDocumentStorage, Clawbot.Agents.Core.Docs.LocalDocumentStorage>();
 builder.Services.AddScoped<AnalyticsAggregationService>();
 builder.Services.AddScoped<AnalyticsExportService>();
 builder.Services.AddScoped<ChannelHealthService>();

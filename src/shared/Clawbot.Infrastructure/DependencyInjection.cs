@@ -192,7 +192,9 @@ public static class DependencyInjection
             return new QdrantClient(o.Host, o.Port, o.UseTls, o.ApiKey);
         });
         services.AddSingleton<IVectorStore, QdrantVectorStore>();
-        services.AddSingleton<IContactEmbeddingSync, ContactEmbeddingSync>();
+        // Scoped: depends on IEmbeddingProvider which captures the scoped (DbContext-backed)
+        // IEmbeddingConfigResolver. A singleton here is a captive-dependency error.
+        services.AddScoped<IContactEmbeddingSync, ContactEmbeddingSync>();
 
         // External-service config modules (Options pattern, no raw cfg[] reads).
         services.Configure<SmtpOptions>(cfg.GetSection(SmtpOptions.SectionName));

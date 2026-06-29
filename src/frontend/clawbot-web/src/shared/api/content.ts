@@ -94,6 +94,11 @@ export interface GenerateImagePromptResponse {
   readonly hints: Readonly<Record<string, string>>;
 }
 
+export interface ContentAssetUploadResponse {
+  readonly url: string;
+  readonly assetsJson: string;
+}
+
 export interface UpdateContentItemPayload {
   readonly body: string;
   readonly assetsJson?: string | null;
@@ -167,6 +172,13 @@ export async function getContentQueue(params: ContentQueueParams = {}): Promise<
 
 export async function updateContentItem(id: string, payload: UpdateContentItemPayload): Promise<ContentItem> {
   const res = await apiClient.put<ContentItem>(`/api/content/items/${id}`, payload);
+  return res.data;
+}
+
+export async function uploadContentAsset(id: string, file: File): Promise<ContentAssetUploadResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  const res = await apiClient.post<ContentAssetUploadResponse>(`/api/content/items/${id}/assets`, body);
   return res.data;
 }
 

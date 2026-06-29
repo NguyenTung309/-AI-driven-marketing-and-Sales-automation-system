@@ -13,6 +13,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { icon: "monitoring", label: "Báo cáo thống kê", to: "/analytics" },
   { icon: "notifications", label: "Trung tâm thông báo", to: "/notifications" },
   { icon: "smart_toy", label: "Agents", to: "/agents" },
+  { icon: "tune", label: "Cấu hình LLM", to: "/llm-providers" },
   { icon: "inventory_2", label: "Kho tri thức", to: "/kb" },
 ];
 

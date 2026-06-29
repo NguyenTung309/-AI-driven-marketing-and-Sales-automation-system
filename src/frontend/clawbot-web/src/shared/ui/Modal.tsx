@@ -6,10 +6,12 @@ export interface ModalProps {
   readonly title: string;
   readonly children: ReactNode;
   readonly footer?: ReactNode;
+  /** Tailwind max-width class for the dialog (default narrow). Use e.g. "max-w-3xl" for editors. */
+  readonly maxWidthClass?: string;
 }
 
 // Level 2 surface: centered dialog over a dimmed, blurred backdrop. Closes on Esc / backdrop click.
-export function Modal({ open, onClose, title, children, footer }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, maxWidthClass = "max-w-md" }: ModalProps) {
   const didPointerStartOnBackdrop = useRef(false);
 
   function handleBackdropPointerDown(e: PointerEvent<HTMLDivElement>) {
@@ -40,7 +42,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
       role="presentation"
     >
       <div
-        className="bg-surface-container-lowest w-full max-w-md rounded-xl shadow-2xl overflow-hidden"
+        className={`bg-surface-container-lowest w-full ${maxWidthClass} rounded-xl shadow-2xl overflow-hidden`}
         role="dialog"
         aria-modal="true"
         aria-label={title}

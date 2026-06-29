@@ -48,6 +48,8 @@ public sealed record GenerateImagePromptResponse(
 
 public sealed record UpdateContentItemRequest(string Body, string? AssetsJson);
 
+public sealed record ContentAssetUploadResponse(string Url, string AssetsJson);
+
 public sealed record RejectContentItemRequest(string? Reason);
 
 public sealed record RepurposeContentItemRequest(IReadOnlyList<string> TargetPlatforms);

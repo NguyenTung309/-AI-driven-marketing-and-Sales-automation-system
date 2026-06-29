@@ -1,7 +1,10 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Clawbot.Agents.Contracts.Content;
 using Clawbot.Agents.Contracts.Research;
+using Clawbot.Agents.Core.Docs;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Content;
 using Clawbot.Api.Middleware;
@@ -18,6 +21,15 @@ namespace Clawbot.Api.Endpoints;
 
 public static class ContentEndpoints
 {
+    private const long MaxAssetUploadBytes = 5 * 1024 * 1024;
+    private static readonly HashSet<string> AllowedAssetContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+    };
+
     public static IEndpointRouteBuilder MapContent(this IEndpointRouteBuilder app)
     {
         var grp = app.MapGroup("/api/content").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
@@ -36,6 +48,10 @@ public static class ContentEndpoints
         grp.MapGet("/queue", QueueAsync).RequirePermission("content:read");
         grp.MapGet("/items", QueueAsync).RequirePermission("content:read");
         grp.MapPut("/items/{id:guid}", UpdateItemAsync).RequirePermission("content:write");
+        grp.MapPost("/items/{id:guid}/assets", UploadItemAssetAsync)
+            .RequirePermission("content:write")
+            .RequireRateLimiting(RateLimitingExtensions.UploadPolicy)
+            .DisableAntiforgery();
         grp.MapDelete("/items/{id:guid}", DeleteItemAsync).RequirePermission("content:write");
         grp.MapPost("/items/{id:guid}/approve", ApproveItemAsync).RequirePermission("content:write");
         grp.MapPost("/items/{id:guid}/reject", RejectItemAsync).RequirePermission("content:write");
@@ -248,6 +264,40 @@ public static class ContentEndpoints
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.Ok(ToDto(item));
+    }
+
+    private static async Task<IResult> UploadItemAssetAsync(
+        Guid id,
+        IFormFile file,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        [FromServices] IDocumentStorage storage,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        if (file is null || file.Length == 0)
+            return Error(http, StatusCodes.Status400BadRequest, "content.asset_missing", "Thiếu file ảnh.");
+        if (file.Length > MaxAssetUploadBytes)
+            return Error(http, StatusCodes.Status400BadRequest, "content.asset_too_large", "Ảnh tối đa 5MB.");
+        if (!AllowedAssetContentTypes.Contains(file.ContentType ?? string.Empty))
+            return Error(http, StatusCodes.Status400BadRequest, "content.asset_invalid_type", "Chỉ chấp nhận PNG, JPG, WebP hoặc GIF.");
+
+        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (item is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms, ct).ConfigureAwait(false);
+        var fileName = $"content-{item.Id}-{Guid.NewGuid():N}{ResolveAssetExtension(file)}";
+        var url = await storage.SaveAsync(ms.ToArray(), fileName, file.ContentType, ct).ConfigureAwait(false);
+        var assetsJson = AddImageAsset(item.AssetsJson, url, file.FileName, file.ContentType);
+        item.SetAssets(assetsJson, clock.UtcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return Results.Ok(new ContentAssetUploadResponse(url, assetsJson));
     }
 
     private static async Task<IResult> DeleteItemAsync(
@@ -617,6 +667,50 @@ public static class ContentEndpoints
                 "content.schedule_in_past",
                 "scheduledAt must be in the future.")
             : new ScheduleResolution(scheduledAt, null, null);
+    }
+
+    internal static string AddImageAsset(string assetsJson, string url, string? fileName, string? contentType)
+    {
+        var assets = ParseAssetsArray(assetsJson);
+        assets.Add(new JsonObject
+        {
+            ["type"] = "image",
+            ["url"] = url,
+            ["fileName"] = string.IsNullOrWhiteSpace(fileName) ? null : Path.GetFileName(fileName),
+            ["contentType"] = contentType ?? string.Empty,
+        });
+        return assets.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    }
+
+    private static JsonArray ParseAssetsArray(string assetsJson)
+    {
+        if (string.IsNullOrWhiteSpace(assetsJson))
+            return [];
+
+        try
+        {
+            return JsonNode.Parse(assetsJson) as JsonArray ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static string ResolveAssetExtension(IFormFile file)
+    {
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext is ".gif" or ".jpg" or ".jpeg" or ".png" or ".webp")
+            return ext;
+
+        return file.ContentType?.ToLowerInvariant() switch
+        {
+            "image/gif" => ".gif",
+            "image/jpeg" => ".jpg",
+            "image/png" => ".png",
+            "image/webp" => ".webp",
+            _ => ".png",
+        };
     }
 
     private static TrendDto ToTrendDto(TrendItem trend) =>

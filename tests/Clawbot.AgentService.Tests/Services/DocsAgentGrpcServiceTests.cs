@@ -113,8 +113,9 @@ public sealed class DocsAgentGrpcServiceTests
 
     private sealed class CapturingStorage : IDocumentStorage
     {
-        public Task<string> SaveAsync(byte[] content, string fileName, CancellationToken ct = default)
+        public Task<string> SaveAsync(byte[] content, string fileName, string? contentType = null, CancellationToken ct = default)
         {
+            _ = contentType;
             var hash = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
             return Task.FromResult($"https://docs.example/{fileName}?hash={hash}");
         }

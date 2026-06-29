@@ -37,6 +37,7 @@ public static class OrchestrationV2Endpoints
         group.MapGet("/runs", ListRunsAsync).RequirePermission("orchestration:view");
         group.MapGet("/runs/{id:guid}", GetRunAsync).RequirePermission("orchestration:view");
         group.MapPost("/runs/{id:guid}/control", ControlRunAsync).RequirePermission("orchestration:manage");
+        group.MapPost("/runs/{id:guid}/archive", ArchiveRunAsync).RequirePermission("orchestration:manage");
         group.MapGet("/agents", ListAgentsAsync).RequirePermission("orchestration:view");
         group.MapPost("/agents", UpsertAgentAsync).RequirePermission("orchestration:manage");
         group.MapGet("/schedules", ListSchedulesAsync).RequirePermission("orchestration:view");
@@ -65,8 +66,10 @@ public static class OrchestrationV2Endpoints
     private static async Task<IResult> ListRunsAsync(AppDbContext db, ITenantAccessor tenants, HttpContext http, CancellationToken ct)
     {
         var tenant = tenants.Require();
+        var showArchived = string.Equals(http.Request.Query["archived"], "true", StringComparison.OrdinalIgnoreCase);
         var query = db.AgentSessions.IgnoreQueryFilters().AsNoTracking()
-            .Where(s => s.TenantId == tenant.TenantId);
+            .Where(s => s.TenantId == tenant.TenantId)
+            .Where(s => showArchived ? s.ArchivedAt != null : s.ArchivedAt == null);
         // SPEC-16 P3-6: when the caller passes ?mine=true, filter to their own runs (URL-independent run list).
         if (string.Equals(http.Request.Query["mine"], "true", StringComparison.OrdinalIgnoreCase))
         {
@@ -117,6 +120,27 @@ public static class OrchestrationV2Endpoints
         catch (RpcException ex)
         {
             return ToGrpcResult(ex);
+        }
+    }
+
+    private static async Task<IResult> ArchiveRunAsync(Guid id, AppDbContext db, ITenantAccessor tenants, IClock clock, CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var session = await db.AgentSessions
+            .FirstOrDefaultAsync(s => s.Id == id && s.TenantId == tenant.TenantId, ct)
+            .ConfigureAwait(false);
+        if (session is null) return Results.NotFound(new { error = "session_not_found" });
+        if (session.ArchivedAt is not null) return Results.Ok(new { sessionId = session.Id, session.Status, session.ArchivedAt });
+
+        try
+        {
+            session.Archive(clock.UtcNow);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return Results.Ok(new { sessionId = session.Id, session.Status, session.ArchivedAt });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { error = "session_not_archivable", message = ex.Message });
         }
     }
 

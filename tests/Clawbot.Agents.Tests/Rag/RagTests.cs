@@ -151,7 +151,7 @@ public sealed class QdrantRagRetrieverTests
         var embedder = Substitute.For<IEmbeddingProvider>();
         embedder.EmbedAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(new ReadOnlyMemory<float>(new float[8]));
-        return new QdrantRagRetriever(store, embedder, []);
+        return new QdrantRagRetriever(store, embedder, [], Microsoft.Extensions.Logging.Abstractions.NullLogger<QdrantRagRetriever>.Instance);
     }
 
     [Fact]
@@ -214,7 +214,7 @@ public sealed class QdrantRagRetrieverTests
         var activeResolver = Substitute.For<IActiveKbVersionResolver>();
         activeResolver.ResolveActiveVersionIdsAsync(tenant, "KB-002", Arg.Any<CancellationToken>())
             .Returns(new HashSet<string>(["v1"], StringComparer.Ordinal));
-        var sut = new QdrantRagRetriever(store, embedder, [activeResolver]);
+        var sut = new QdrantRagRetriever(store, embedder, [activeResolver], Microsoft.Extensions.Logging.Abstractions.NullLogger<QdrantRagRetriever>.Instance);
 
         await sut.RetrieveAsync(new RagRequest(tenant, "KB-002", "q", TopK: 3), CancellationToken.None);
 

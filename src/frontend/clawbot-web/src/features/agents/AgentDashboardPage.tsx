@@ -11,6 +11,7 @@ import { operationalPhaseLabel, toSafeOperationalText } from "@/shared/utils/use
 import { AgentConfigDrawer } from "./AgentConfigDrawer";
 import { OrchestrationPanel } from "./OrchestrationPanel";
 import { listLlmConfigs, type LlmConfig } from "@/shared/api/llmConfigs";
+import { getTenantOrchestration, setTenantOrchestration } from "@/shared/api/admin";
 import {
   disableAgent,
   enableAgent,
@@ -44,6 +45,7 @@ interface AgentSettingsForm {
   readonly maxTokens: number;
   readonly skillFiles: readonly string[];
   readonly kbModules: readonly string[];
+  readonly allowedTools: readonly string[];
   readonly llmConfigId: string;
 }
 
@@ -159,6 +161,7 @@ function buildSettingsPayload(form: AgentSettingsForm): UpdateAgentSettingsPaylo
     maxTokens: form.maxTokens,
     skillFiles: form.skillFiles,
     kbModules: form.kbModules,
+    allowedTools: form.allowedTools,
     llmConfigId: form.llmConfigId === "" ? UNBIND_LLM_CONFIG : form.llmConfigId,
   };
 }
@@ -295,7 +298,7 @@ function TerminalLog({
   ];
 
   return (
-    <section className="flex min-h-[520px] flex-col overflow-hidden rounded-xl border border-slate-700 bg-[#0f172a] shadow-lg">
+    <section className="flex h-[70vh] min-h-[520px] flex-col overflow-hidden rounded-xl border border-slate-700 bg-[#0f172a] shadow-lg">
       <div className="flex flex-col gap-3 border-b border-slate-700 bg-[#1e293b] px-4 pt-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="flex flex-wrap gap-1">
           {tabs.map((item) => (
@@ -374,6 +377,15 @@ export default function AgentDashboardPage() {
   const costQuery = useQuery({ queryKey: ["analytics", "agent-cost"], queryFn: getAgentCost, staleTime: 60_000 });
   const agents = agentsQuery.data?.items ?? EMPTY_AGENTS;
   const costs = costQuery.data?.items ?? EMPTY_COSTS;
+  const approvalQuery = useQuery({ queryKey: ["tenant", "orchestration"], queryFn: getTenantOrchestration, staleTime: 60_000 });
+  const requireApproval = approvalQuery.data?.requireApproval ?? false;
+  const approvalMutation = useMutation({
+    mutationFn: (next: boolean) => setTenantOrchestration(next),
+    onSuccess: async (res) => {
+      setNotice(res.requireOrchestrationApproval ? "Đã bật: cần duyệt trước khi đăng." : "Đã bật tự động đăng.");
+      await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
+    },
+  });
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [configAgentCode, setConfigAgentCode] = useState<string | null>(null);
@@ -411,6 +423,7 @@ export default function AgentDashboardPage() {
       maxTokens: settingsDraft.maxTokens ?? settings?.maxTokens ?? 2048,
       skillFiles: settingsDraft.skillFiles ?? settings?.skillFiles ?? [],
       kbModules: settingsDraft.kbModules ?? settings?.kbModules ?? [],
+      allowedTools: settingsDraft.allowedTools ?? settings?.allowedTools ?? [],
       llmConfigId: settingsDraft.llmConfigId ?? settings?.llmConfigId ?? "",
     }),
     [configAgent, selectedLlmConfig, settings, settingsDraft],
@@ -420,6 +433,8 @@ export default function AgentDashboardPage() {
     queryKey: ["agents", selectedAgent?.code, "traces"],
     queryFn: () => getAgentTraces(selectedAgent?.code ?? "", 1, 50),
     enabled: Boolean(selectedAgent?.code),
+    // Live-tail the operation log while the selected agent is running.
+    refetchInterval: () => (selectedAgent && normalize(selectedAgent.status) === "running" ? 3_000 : false),
   });
   const traces = tracesQuery.data?.items ?? EMPTY_TRACES;
 
@@ -502,6 +517,7 @@ export default function AgentDashboardPage() {
   }
 
   const visibleOrchestrator = agents.find(isOrchestrator) ?? null;
+  const subAgents = agents.filter((agent) => !isOrchestrator(agent));
   const runningAgents = visibleOrchestrator && normalize(visibleOrchestrator.status) === "running" ? [visibleOrchestrator] : [];
   const errorCount = visibleOrchestrator && normalize(visibleOrchestrator.status) === "error" ? 1 : 0;
   const totalUsd = costs.reduce((sum, item) => sum + item.usd, 0);
@@ -520,6 +536,20 @@ export default function AgentDashboardPage() {
           <StatusPill tone={agentsQuery.isError ? "error" : "success"}>
             {agentsQuery.isError ? "Mất kết nối dữ liệu" : "Agent đang trực tuyến"}
           </StatusPill>
+          <button
+            aria-pressed={requireApproval}
+            className={[
+              "flex items-center gap-2 rounded-lg border px-3 py-2 text-body-md font-semibold transition-colors disabled:opacity-60",
+              requireApproval ? "border-warning bg-warning/10 text-warning" : "border-success bg-success/10 text-success",
+            ].join(" ")}
+            disabled={approvalMutation.isPending || approvalQuery.isLoading}
+            onClick={() => approvalMutation.mutate(!requireApproval)}
+            title="Chuyển giữa tự động đăng và cần người duyệt trước khi đăng (chặn công cụ rủi ro cao)."
+            type="button"
+          >
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{requireApproval ? "approval" : "bolt"}</span>
+            {requireApproval ? "Cần duyệt trước khi đăng" : "Tự động đăng"}
+          </button>
           <Button
             className="bg-error hover:bg-red-700"
             disabled={!runningAgents.length || stopAllMutation.isPending}
@@ -581,21 +611,46 @@ export default function AgentDashboardPage() {
                   backgroundSize: "18px 18px",
                 }}
               >
-                {visibleOrchestrator ? (
-                  <div className="flex flex-col items-center">
-                    <AgentNode
-                      agent={visibleOrchestrator}
-                      cost={costForAgent(costs, visibleOrchestrator.code)}
-                      onConfigure={(tab) => openAgentConfig(visibleOrchestrator, tab)}
-                      onSelect={() => setSelectedCode(visibleOrchestrator.code)}
-                      onToggle={() => setStatusMutation.mutate(visibleOrchestrator)}
-                      pending={setStatusMutation.isPending}
-                      selected={selectedAgent?.code === visibleOrchestrator.code}
-                    />
-                    <div className="h-8 w-px bg-outline" />
-                    <div className="h-px w-full max-w-3xl bg-outline" />
-                  </div>
-                ) : null}
+                <div className="flex flex-col items-center">
+                  {visibleOrchestrator ? (
+                    <>
+                      <AgentNode
+                        agent={visibleOrchestrator}
+                        cost={costForAgent(costs, visibleOrchestrator.code)}
+                        onConfigure={(tab) => openAgentConfig(visibleOrchestrator, tab)}
+                        onSelect={() => setSelectedCode(visibleOrchestrator.code)}
+                        onToggle={() => setStatusMutation.mutate(visibleOrchestrator)}
+                        pending={setStatusMutation.isPending}
+                        selected={selectedAgent?.code === visibleOrchestrator.code}
+                      />
+                      {subAgents.length > 0 && (
+                        <>
+                          <div className="h-8 w-px bg-outline" />
+                          <div className="h-px w-full max-w-3xl bg-outline" />
+                        </>
+                      )}
+                    </>
+                  ) : null}
+
+                  {subAgents.length > 0 && (
+                    <div className="mt-6 flex flex-wrap justify-center gap-x-6 gap-y-8">
+                      {subAgents.map((agent) => (
+                        <div className="flex flex-col items-center" key={agent.code}>
+                          <div className="mb-2 h-6 w-px bg-outline" />
+                          <AgentNode
+                            agent={agent}
+                            cost={costForAgent(costs, agent.code)}
+                            onConfigure={(tab) => openAgentConfig(agent, tab)}
+                            onSelect={() => setSelectedCode(agent.code)}
+                            onToggle={() => setStatusMutation.mutate(agent)}
+                            pending={setStatusMutation.isPending}
+                            selected={selectedAgent?.code === agent.code}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="rounded-lg border border-outline bg-surface p-6 text-body-md text-on-surface-variant">

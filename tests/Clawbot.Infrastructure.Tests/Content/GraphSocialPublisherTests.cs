@@ -62,6 +62,34 @@ public sealed class GraphSocialPublisherTests
     }
 
     [Fact]
+    public async Task PublishAsync_Facebook_PostsPhotoWhenImageAssetExists()
+    {
+        var handler = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"id":"123456_790"}"""),
+        });
+        var publisher = new GraphSocialPublisher(
+            new HttpClient(handler),
+            Options.Create(FacebookOptions()),
+            credentialResolver: null, NullLogger<GraphSocialPublisher>.Instance);
+
+        var result = await publisher.PublishAsync(
+            new PublishRequest(
+                TenantId,
+                ContentItemId,
+                "facebook",
+                "Learn HSK today",
+                """[{"type":"image","url":"https://cdn.example/hsk.png"}]""",
+                ScheduledAt),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        handler.RequestUri!.ToString().Should().EndWith("/123456/photos");
+        handler.Body.Should().Contain("caption=Learn+HSK+today");
+        handler.Body.Should().Contain("url=https%3A%2F%2Fcdn.example%2Fhsk.png");
+    }
+
+    [Fact]
     public async Task PublishAsync_Facebook_FailsWhenResponseMissingId()
     {
         var handler = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)

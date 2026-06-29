@@ -64,6 +64,8 @@ export interface AgentSettings {
   readonly maxTokens: number;
   readonly skillFiles: readonly string[];
   readonly kbModules: readonly string[];
+  /** Tools the orchestrator may invoke for this agent. Empty = text-only (no system actions). */
+  readonly allowedTools: readonly string[];
   /** Bound LLM provider config id (null = unconfigured → agent hard-errors at runtime). */
   readonly llmConfigId: string | null;
   readonly updatedAt: string;
@@ -78,8 +80,18 @@ export interface UpdateAgentSettingsPayload {
   readonly maxTokens?: number;
   readonly skillFiles?: readonly string[];
   readonly kbModules?: readonly string[];
+  /** Replace the agent's tool grants. Omit = unchanged. */
+  readonly allowedTools?: readonly string[];
   /** Tri-state: omit = unchanged, empty-guid = unbind, otherwise bind to that config id. */
   readonly llmConfigId?: string | null;
+}
+
+export interface AgentToolInfo {
+  readonly name: string;
+  readonly description: string;
+  /** "Low" | "High" — High = irreversible/outward-facing (publish, ad spend, customer messages). */
+  readonly risk: string;
+  readonly permission: string;
 }
 
 export interface AgentSandboxResponse {
@@ -128,4 +140,9 @@ export async function runAgentSandbox(code: string, message: string): Promise<Ag
 export async function getAgentCost(): Promise<AgentCostResponse> {
   const res = await apiClient.get<AgentCostResponse>("/api/analytics/agent-cost");
   return res.data;
+}
+
+export async function listAgentTools(): Promise<readonly AgentToolInfo[]> {
+  const res = await apiClient.get<{ items: readonly AgentToolInfo[] }>("/api/agents/tools");
+  return res.data.items;
 }

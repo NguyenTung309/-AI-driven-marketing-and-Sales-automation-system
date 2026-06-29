@@ -38,7 +38,9 @@ public sealed partial class KbDeployService(
                     ["module_code"] = moduleCode,
                     ["kb_version_id"] = version.Id.ToString(),
                     ["chunk_index"] = idx.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["snippet"] = Truncate(chunk, 500),
+                    // Store the full chunk as the RAG context snippet. Truncating below the chunk size
+                    // dropped later-in-chunk facts (payment schedule, bank details) from the answer context.
+                    ["snippet"] = chunk,
                 }));
         }
 
@@ -85,9 +87,6 @@ public sealed partial class KbDeployService(
         embedder is ConfiguredEmbeddingProvider configured
             ? configured.EmbedAsync(config, text, ct)
             : embedder.EmbedAsync(text, ct);
-
-    private static string Truncate(string text, int maxLen) =>
-        text.Length <= maxLen ? text : text[..maxLen] + "...";
 
     [LoggerMessage(EventId = 8001, Level = LogLevel.Information,
         Message = "KB deploy: {ModuleCode} v{Version} → {ChunkCount} chunks into {Collection}")]

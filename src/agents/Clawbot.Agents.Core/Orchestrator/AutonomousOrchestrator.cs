@@ -386,10 +386,48 @@ public sealed class AutonomousOrchestrator
                 upstream[key] = src.Output;
             }
             if (upstream.Count > 0)
+            {
                 input["upstream_results"] = System.Text.Json.JsonSerializer.Serialize(upstream);
+                // Promote structured ids emitted by an upstream tool (content_id, schedule_id, post_url) to
+                // top-level input keys so a dependent agent's tool (reviewer→content.approve,
+                // publisher→content.schedule/publish) receives the id deterministically — not relying on the LLM
+                // to dig it out of the nested upstream_results JSON, which was the "thiếu content_id" failure.
+                PromoteUpstreamIds(input, upstream.Values);
+            }
         }
 
         return new AgentTask(task.Id, task.Agent, task.Description, input);
+    }
+
+    private static readonly string[] PromotableIdKeys = ["content_id", "schedule_id", "post_url"];
+
+    // Scans each upstream output for a tool-result JSON object (either the worker's "[tool_results]\n{json}"
+    // block or a bare JSON object) and copies known id fields up to the task input if not already set.
+    private static void PromoteUpstreamIds(Dictionary<string, string> input, IEnumerable<string> upstreamOutputs)
+    {
+        const string marker = "[tool_results]";
+        foreach (var output in upstreamOutputs)
+        {
+            if (string.IsNullOrWhiteSpace(output)) continue;
+            var idx = output.IndexOf(marker, StringComparison.Ordinal);
+            var json = idx >= 0 ? output[(idx + marker.Length)..].Trim() : output.Trim();
+            if (json.Length == 0 || json[0] != '{') continue;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                foreach (var key in PromotableIdKeys)
+                {
+                    if (input.ContainsKey(key)) continue;
+                    if (doc.RootElement.TryGetProperty(key, out var el) && el.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        var value = el.GetString();
+                        if (!string.IsNullOrWhiteSpace(value)) input[key] = value;
+                    }
+                }
+            }
+            catch (System.Text.Json.JsonException) { /* upstream output isn't JSON (e.g. research text) — skip */ }
+        }
     }
 
     private static string SerializeTaskInput(OrchestrationPlanTask task) =>

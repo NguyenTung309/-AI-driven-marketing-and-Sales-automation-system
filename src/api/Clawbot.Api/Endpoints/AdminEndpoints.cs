@@ -17,9 +17,23 @@ public static class AdminEndpoints
         var grp = app.MapGroup("/api/admin").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/audit-logs", ListAuditLogsAsync);
+        grp.MapGet("/tenant/orchestration", GetTenantOrchestrationAsync).RequirePermission("agent.read");
         grp.MapPut("/tenant/orchestration", UpdateTenantOrchestrationAsync).RequirePermission("system:config");
 
         return grp;
+    }
+
+    private static async Task<IResult> GetTenantOrchestrationAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        CancellationToken ct = default)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var requireApproval = await db.Tenants
+            .Where(t => t.Id == tenantId)
+            .Select(t => t.RequireOrchestrationApproval)
+            .FirstOrDefaultAsync(ct);
+        return Results.Ok(new { requireApproval });
     }
 
     private static async Task<IResult> UpdateTenantOrchestrationAsync(

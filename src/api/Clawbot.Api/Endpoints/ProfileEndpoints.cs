@@ -81,7 +81,7 @@ public static class ProfileEndpoints
 
         using var ms = new MemoryStream();
         await file.CopyToAsync(ms, ct);
-        var url = await storage.SaveAsync(ms.ToArray(), $"avatar-{user.Id}{ext}", ct);
+        var url = await storage.SaveAsync(ms.ToArray(), $"avatar-{user.Id}{ext}", file.ContentType, ct);
 
         user.AvatarUrl = url;
         await users.UpdateAsync(user);

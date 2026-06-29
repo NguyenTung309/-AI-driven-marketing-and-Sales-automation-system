@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Clawbot.Agents.Core.Chat;
+using Clawbot.Agents.Core.Orchestrator;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Agents.Core.Skills.Nlp;
@@ -26,6 +27,9 @@ public sealed record AgentSettingsResponse(
     int MaxTokens,
     IReadOnlyList<string> SkillFiles,
     IReadOnlyList<string> KbModules,
+    // Tool grants the orchestrator's ReAct worker honours. Stored on the matching agent_definitions row,
+    // not the agents table — empty means the agent runs text-only (no system actions).
+    IReadOnlyList<string> AllowedTools,
     Guid? LlmConfigId,
     DateTimeOffset UpdatedAt);
 
@@ -38,8 +42,12 @@ public sealed record AgentSettingsRequest(
     int? MaxTokens,
     IReadOnlyList<string>? SkillFiles,
     IReadOnlyList<string>? KbModules,
+    // null = leave unchanged; otherwise replace the agent_definitions tool grants with this list.
+    IReadOnlyList<string>? AllowedTools = null,
     // Tri-state: null = leave unchanged, Guid.Empty = unbind, otherwise bind to that config.
     Guid? LlmConfigId = null);
+
+public sealed record AgentToolInfo(string Name, string Description, string Risk, string Permission);
 
 public sealed record AgentSandboxRequest(string Message);
 public sealed record AgentSandboxResponse(Guid SessionId, string Reply, DateTimeOffset SentAt);
@@ -53,6 +61,7 @@ public static class AgentsEndpoints
         var grp = app.MapGroup("/api/agents").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("/", ListAsync).RequirePermission("agent.read");
+        grp.MapGet("/tools", ToolsCatalogAsync).RequirePermission("agent.read");
         grp.MapPost("/{code}/enable", EnableAsync).RequirePermission("agent.manage");
         grp.MapPost("/{code}/disable", DisableAsync).RequirePermission("agent.manage");
         grp.MapGet("/{code}/settings", SettingsAsync).RequirePermission("agent.read");
@@ -98,11 +107,23 @@ public static class AgentsEndpoints
         return Results.Ok(new { agent.Code, agent.Status });
     }
 
+    // Static tool catalog (name/description/risk/permission) so the UI can offer a checklist of grantable tools.
+    private static IResult ToolsCatalogAsync() =>
+        Results.Ok(new
+        {
+            items = ToolRegistryFactory.KnownTools
+                .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(kv => new AgentToolInfo(kv.Key, kv.Value.Description, kv.Value.Risk.ToString(), kv.Value.Permission))
+                .ToArray(),
+        });
+
     private static async Task<IResult> SettingsAsync(string code, AppDbContext db, ITenantAccessor tenants, CancellationToken ct = default)
     {
         _ = tenants.Require();
         var agent = await db.AgentConfigs.FirstOrDefaultAsync(a => a.Code == code, ct);
-        return agent is null ? Results.NotFound() : Results.Ok(ToSettings(agent));
+        if (agent is null) return Results.NotFound();
+        var allowedTools = await LoadAllowedToolsAsync(db, code, ct);
+        return Results.Ok(ToSettings(agent, allowedTools));
     }
 
     private static async Task<IResult> UpdateSettingsAsync(
@@ -121,6 +142,17 @@ public static class AgentsEndpoints
         var tenantId = tenants.Require().TenantId;
         var agent = await db.AgentConfigs.FirstOrDefaultAsync(a => a.Code == code, ct);
         if (agent is null) return Results.NotFound();
+
+        // Validate any requested tool grants against the known catalog before touching anything (fail fast).
+        if (req.AllowedTools is not null)
+        {
+            var unknown = req.AllowedTools
+                .Select(t => t.Trim())
+                .Where(t => t.Length > 0 && !ToolRegistryFactory.KnownTools.ContainsKey(t))
+                .ToArray();
+            if (unknown.Length > 0)
+                return Results.BadRequest(new { error = "unknown_tools", tools = unknown });
+        }
 
         var displayName = NormalizeText(req.DisplayName, agent.DisplayName, maxLength: 256);
         var model = NormalizeText(req.Model, agent.Model, maxLength: 128);
@@ -167,8 +199,23 @@ public static class AgentsEndpoints
             JsonSerializer.Serialize(config, JsonOptions),
             clock.UtcNow);
 
+        // Tool grants live on the agent_definitions row the orchestrator plans over, not the agents table.
+        if (req.AllowedTools is not null)
+        {
+            var definition = await db.AgentDefinitions.FirstOrDefaultAsync(d => d.Code == code, ct);
+            if (definition is not null)
+            {
+                var cleaned = req.AllowedTools
+                    .Select(t => t.Trim())
+                    .Where(t => t.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                definition.SetAllowedTools(JsonSerializer.Serialize(cleaned, JsonOptions), clock.UtcNow);
+            }
+        }
+
         await db.SaveChangesAsync(ct);
-        return Results.Ok(ToSettings(agent));
+        return Results.Ok(ToSettings(agent, await LoadAllowedToolsAsync(db, code, ct)));
     }
 
     private static async Task<IResult> SandboxAsync(
@@ -268,7 +315,17 @@ public static class AgentsEndpoints
             new { errorCode = "forbidden", message = "Không có quyền", requestId = http.TraceIdentifier },
             statusCode: StatusCodes.Status403Forbidden);
 
-    private static AgentSettingsResponse ToSettings(AgentConfig agent)
+    // Reads the tool grants from the matching agent_definitions row (separate aggregate from the agents table).
+    private static async Task<IReadOnlyList<string>> LoadAllowedToolsAsync(AppDbContext db, string code, CancellationToken ct)
+    {
+        var json = await db.AgentDefinitions
+            .Where(d => d.Code == code)
+            .Select(d => d.AllowedToolsJson)
+            .FirstOrDefaultAsync(ct);
+        return DeserializeList(json);
+    }
+
+    private static AgentSettingsResponse ToSettings(AgentConfig agent, IReadOnlyList<string> allowedTools)
     {
         var config = ReadRuntimeConfig(agent.ConfigJson);
         return new AgentSettingsResponse(
@@ -283,6 +340,7 @@ public static class AgentsEndpoints
             config.MaxTokens,
             DeserializeList(agent.SkillFilesJson),
             DeserializeList(agent.KbModulesJson),
+            allowedTools,
             agent.LlmConfigId,
             agent.UpdatedAt);
     }

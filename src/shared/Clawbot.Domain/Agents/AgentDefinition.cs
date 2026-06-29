@@ -83,6 +83,14 @@ public sealed class AgentDefinition : AggregateRoot<Guid>, ITenantOwned
         UpdatedAt = updatedAt;
     }
 
+    // Narrow repair for the seeder: apply the catalog's tool grants to an existing row without rewriting the
+    // persona/schemas (the full UpdateDefinition would). Used so agents seeded before tools were assigned get them.
+    public void SetAllowedTools(string allowedToolsJson, DateTimeOffset updatedAt)
+    {
+        AllowedToolsJson = string.IsNullOrWhiteSpace(allowedToolsJson) ? "[]" : allowedToolsJson;
+        UpdatedAt = updatedAt;
+    }
+
     public void Archive(DateTimeOffset updatedAt)
     {
         DeletedAt = updatedAt;

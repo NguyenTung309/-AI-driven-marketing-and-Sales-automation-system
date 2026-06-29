@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { AgentListItem, UpdateAgentSettingsPayload } from "@/shared/api/agents";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { listAgentTools, type AgentListItem, type UpdateAgentSettingsPayload } from "@/shared/api/agents";
 import {
   createLlmConfig,
   updateLlmConfig,
@@ -23,6 +23,7 @@ export interface AgentSettingsForm {
   readonly maxTokens: number;
   readonly skillFiles: readonly string[];
   readonly kbModules: readonly string[];
+  readonly allowedTools: readonly string[];
   readonly llmConfigId: string;
 }
 
@@ -175,6 +176,14 @@ export function AgentConfigDrawer({
   readonly onTabChange: (tab: AgentConfigTab) => void;
 }) {
   const queryClient = useQueryClient();
+  const toolsCatalogQuery = useQuery({ queryKey: ["agent-tools"], queryFn: listAgentTools, staleTime: 5 * 60_000 });
+  const toolCatalog = toolsCatalogQuery.data ?? [];
+  const toggleTool = (name: string, on: boolean) => {
+    const current = new Set(form.allowedTools);
+    if (on) current.add(name);
+    else current.delete(name);
+    onDraftChange({ allowedTools: [...current] });
+  };
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [sandboxMinimized, setSandboxMinimized] = useState(false);
   const [llmDraft, setLlmDraft] = useState<LlmConfigDraft>(EMPTY_LLM_CONFIG_DRAFT);
@@ -373,6 +382,49 @@ export function AgentConfigDrawer({
 
           {tab === "tools" ? (
             <div className="grid grid-cols-1 gap-4">
+              <fieldset className="space-y-2">
+                <legend className="text-label-caps uppercase text-tertiary">Công cụ tác nghiệp (agent tự thao tác trên hệ thống)</legend>
+                <p className="text-body-md text-on-surface-variant">
+                  Bật công cụ để agent thực sự thao tác (tạo nháp, duyệt, lên lịch, đăng bài…) thay vì chỉ sinh văn bản. Không bật = chỉ trả về nội dung.
+                </p>
+                {toolCatalog.length ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {toolCatalog.map((toolInfo) => {
+                      const checked = form.allowedTools.includes(toolInfo.name);
+                      const highRisk = toolInfo.risk.toLowerCase() === "high";
+                      return (
+                        <label
+                          className={[
+                            "flex cursor-pointer items-start gap-2 rounded-lg border p-3 transition-colors",
+                            checked ? "border-primary bg-primary/5" : "border-outline bg-white hover:border-primary/50",
+                          ].join(" ")}
+                          key={toolInfo.name}
+                        >
+                          <input
+                            checked={checked}
+                            className="mt-0.5 accent-primary"
+                            onChange={(event) => toggleTool(toolInfo.name, event.target.checked)}
+                            type="checkbox"
+                          />
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-2">
+                              <span className="font-mono text-mono-status text-secondary">{toolInfo.name}</span>
+                              {highRisk ? (
+                                <span className="rounded bg-error/10 px-1.5 py-0.5 text-[11px] font-bold uppercase text-error">Rủi ro cao</span>
+                              ) : null}
+                            </span>
+                            <span className="mt-1 block text-body-md text-on-surface-variant">{toolInfo.description}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded border border-outline bg-surface p-3 text-body-md text-on-surface-variant">
+                    {toolsCatalogQuery.isLoading ? "Đang tải danh mục công cụ..." : "Chưa có công cụ khả dụng."}
+                  </div>
+                )}
+              </fieldset>
               <label className="space-y-2">
                 <span className="text-label-caps uppercase text-tertiary">Tệp kỹ năng</span>
                 <textarea className="min-h-32 w-full resize-y rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" onChange={(event) => onDraftChange({ skillFiles: textToList(event.target.value) })} placeholder="ky-nang-tu-van.md" value={listToText(form.skillFiles)} />

@@ -1,11 +1,13 @@
 using Clawbot.SharedKernel.Vectors;
+using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Agents.Core.Rag;
 
-public sealed class QdrantRagRetriever(
+public sealed partial class QdrantRagRetriever(
     IVectorStore store,
     IEmbeddingProvider embedder,
-    IEnumerable<IActiveKbVersionResolver> activeVersionResolvers) : IRagRetriever
+    IEnumerable<IActiveKbVersionResolver> activeVersionResolvers,
+    ILogger<QdrantRagRetriever> logger) : IRagRetriever
 {
     public async Task<IReadOnlyList<RagChunk>> RetrieveAsync(RagRequest request, CancellationToken ct = default)
     {
@@ -35,6 +37,20 @@ public sealed class QdrantRagRetriever(
             filters.Add(new VectorMetadataFilter("kb_version_id", activeVersionIds.ToArray()));
 
         var hits = await store.SearchAsync(collection, queryVec, request.TopK, filters, ct).ConfigureAwait(false);
+        var span = queryVec.Span;
+        var hasNaN = false;
+        double sumSq = 0;
+        for (var k = 0; k < span.Length; k++)
+        {
+            if (float.IsNaN(span[k]) || float.IsInfinity(span[k])) { hasNaN = true; break; }
+            sumSq += span[k] * span[k];
+        }
+        LogRetrieve(logger, collection, queryVec.Length, activeVersionIds?.Count ?? -1, hits.Count, hasNaN, Math.Sqrt(sumSq), request.TenantId, request.KbModuleCode ?? "");
+        if (hits.Count == 0)
+        {
+            var probe = await store.SearchAsync(collection, queryVec, request.TopK, null, ct).ConfigureAwait(false);
+            LogRetrieveProbe(logger, collection, probe.Count);
+        }
         var filtered = hits
             .Where(h => h.Metadata.TryGetValue("tenant_id", out var t) && string.Equals(t, tenantTag, StringComparison.Ordinal))
             .Where(h => string.IsNullOrEmpty(request.KbModuleCode)
@@ -51,4 +67,13 @@ public sealed class QdrantRagRetriever(
 
         return filtered;
     }
+
+    [LoggerMessage(EventId = 8101, Level = LogLevel.Information,
+        Message = "RAG retrieve: collection={Collection} queryDim={QueryDim} activeVersions={ActiveCount} rawHits={RawHits} hasNaN={HasNaN} magnitude={Magnitude} tenant={TenantId} module={ModuleCode}")]
+    private static partial void LogRetrieve(
+        ILogger logger, string collection, int queryDim, int activeCount, int rawHits, bool hasNaN, double magnitude, Guid tenantId, string moduleCode);
+
+    [LoggerMessage(EventId = 8102, Level = LogLevel.Information,
+        Message = "RAG retrieve probe (no filter): collection={Collection} probeHits={ProbeHits}")]
+    private static partial void LogRetrieveProbe(ILogger logger, string collection, int probeHits);
 }

@@ -29,7 +29,9 @@ public static class SkillsModule
         services.AddSingleton<IConversationSummarizer, ClaudeConversationSummarizer>();
 
         // Lead
-        services.AddSingleton<ILeadDeduplicator, QdrantLeadDeduplicator>();
+        // Scoped (not singleton like the other skills): depends on IEmbeddingProvider, which
+        // captures the scoped DbContext-backed IEmbeddingConfigResolver. Singleton = captive dep.
+        services.AddScoped<ILeadDeduplicator, QdrantLeadDeduplicator>();
         services.AddSingleton<IContactEnricher, HunterContactEnricher>();
         services.AddSingleton<ITimezoneDetector, NodaTimezoneDetector>();
         services.AddSingleton<ISpamDetector, AkismetSpamDetector>();

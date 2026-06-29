@@ -23,7 +23,6 @@ import { useInboxRealtime } from "./useInboxRealtime";
 import { toUserFriendlyError } from "@/shared/utils/userText";
 
 type StatusFilter = "all" | "open" | "escalated" | "resolved" | "mine";
-type PlatformFilter = "all" | "facebook" | "zalo" | "web";
 type NoticeTone = "info" | "success" | "warning" | "error";
 
 interface PageNotice {

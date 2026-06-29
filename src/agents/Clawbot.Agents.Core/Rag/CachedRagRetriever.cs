@@ -41,6 +41,12 @@ public sealed partial class CachedRagRetriever(
 
         var result = await inner.RetrieveAsync(request, ct).ConfigureAwait(false);
 
+        // Don't cache empty results: they're cheap to recompute and usually signal a transient
+        // misconfiguration (empty collection, just-deployed KB). Caching them for an hour would
+        // mask a fresh deploy until the TTL expires.
+        if (result.Count == 0)
+            return result;
+
         try
         {
             var json = JsonSerializer.Serialize(result, JsonOpts);
