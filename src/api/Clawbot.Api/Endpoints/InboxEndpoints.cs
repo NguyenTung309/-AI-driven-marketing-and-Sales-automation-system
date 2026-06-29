@@ -125,9 +125,9 @@ public static class InboxEndpoints
         if (inboxIds.Count > 0 && conv.InboxId.HasValue && !inboxIds.Contains(conv.InboxId.Value))
             return Results.Forbid();
 
-        var contactName = conv.ContactId is null ? null
+        var contact = conv.ContactId is null ? null
             : await db.Contacts.AsNoTracking().Where(c => c.Id == conv.ContactId)
-                .Select(c => c.DisplayName).FirstOrDefaultAsync(ct).ConfigureAwait(false);
+                .Select(c => new { c.DisplayName, c.AvatarUrl }).FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
         var messages = conv.Messages.OrderBy(m => m.SentAt)
             .Select(m => new MessageDto(m.Id, m.Direction, m.SenderType, m.SenderUserId, m.Content, m.ContentType, m.SentAt, m.SenderDisplayName))
@@ -150,7 +150,7 @@ public static class InboxEndpoints
 
         return Results.Ok(new ConversationDetailDto(
             conv.Id, conv.Platform, conv.ExternalThreadId, conv.Status, conv.ContactId,
-            contactName, null, conv.InboxId, inboxName, inboxAvatarUrl,
+            contact?.DisplayName, contact?.AvatarUrl, conv.InboxId, inboxName, inboxAvatarUrl,
             conv.AssignedTo, conv.LastMessageAt, conv.CreatedAt,
             conv.RowVersion, messages));
     }

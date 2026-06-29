@@ -11,4 +11,5 @@ BEGIN
         ALTER TABLE dbo.api_keys ADD scopes_json NVARCHAR(MAX) NOT NULL DEFAULT N'[]';
 END;
 
-UPDATE dbo.api_keys SET scopes_json = N'[]' WHERE scopes_json IS NULL;
+EXEC(N'UPDATE dbo.api_keys SET scopes_json = N''[]'' WHERE scopes_json IS NULL;');
+

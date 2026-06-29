@@ -10,6 +10,7 @@ import {
   escalateConversation,
   getConversation,
   listConversations,
+  listChannels,
   resolveConversation,
   sendConversationMessage,
   type ConversationDetail,
@@ -38,12 +39,7 @@ const STATUS_FILTERS: readonly { value: StatusFilter; label: string; icon?: stri
   { value: "resolved", label: "Đã xử lý", icon: "task_alt" },
 ];
 
-const PLATFORM_FILTERS: readonly { value: PlatformFilter; label: string }[] = [
-  { value: "all", label: "Mọi kênh" },
-  { value: "facebook", label: "Facebook" },
-  { value: "zalo", label: "Zalo" },
-  { value: "web", label: "Khung chat web" },
-];
+
 
 function toStatusTone(status: ConversationStatus) {
   if (status === "resolved") return "neutral";
@@ -175,13 +171,22 @@ function ConversationRow({ conversation, selected, onSelect }: ConversationRowPr
     >
       {selected ? <span className="absolute left-0 top-0 h-full w-1 bg-primary" /> : null}
       <div className="flex items-start gap-3">
-        <div
-          className={`flex size-10 shrink-0 items-center justify-center rounded-lg border text-xs font-bold ${platformColor(
-            conversation.platform
-          )}`}
-        >
-          {platformMark(conversation.platform)}
-        </div>
+        {conversation.contactAvatarUrl ? (
+          <img
+            src={conversation.contactAvatarUrl}
+            alt=""
+            className="size-10 rounded-full object-cover shrink-0"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+          />
+        ) : (
+          <div
+            className={`flex size-10 shrink-0 items-center justify-center rounded-lg border text-xs font-bold ${platformColor(
+              conversation.platform
+            )}`}
+          >
+            {platformMark(conversation.platform)}
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex items-start justify-between gap-2">
             <h3 className="truncate text-body-md font-bold text-on-surface">{name}</h3>
@@ -211,17 +216,28 @@ function ConversationRow({ conversation, selected, onSelect }: ConversationRowPr
 
 interface MessageBubbleProps {
   readonly message: InboxMessage;
+  readonly contactAvatarUrl: string | null;
+  readonly contactDisplayName: string | null;
 }
 
-function MessageBubble({ message }: MessageBubbleProps) {
+function MessageBubble({ message, contactAvatarUrl, contactDisplayName }: MessageBubbleProps) {
   const outbound = isOutbound(message);
   const byAi = message.senderType === "ai" || message.senderType === "bot";
   return (
     <div className={`flex gap-3 ${outbound ? "justify-end" : "justify-start"}`}>
       {!outbound ? (
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-variant text-label-sm font-bold text-secondary">
-          KH
-        </div>
+        contactAvatarUrl ? (
+          <img
+            src={contactAvatarUrl}
+            alt=""
+            className="size-8 rounded-full object-cover shrink-0"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+          />
+        ) : (
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-variant text-label-sm font-bold text-secondary">
+            {(message.senderDisplayName?.charAt(0) || contactDisplayName?.charAt(0) || "K").toUpperCase()}
+          </div>
+        )
       ) : null}
       <div
         className={[
@@ -230,9 +246,14 @@ function MessageBubble({ message }: MessageBubbleProps) {
             ? byAi
               ? "rounded-tr-sm border-tertiary/20 bg-tertiary/5"
               : "rounded-tr-sm border-primary/20 bg-primary/10"
-            : "rounded-tl-sm border-surface-variant bg-white",
+            : "rounded-tl-sm border-surface-variant bg-white dark:bg-[#242526]",
         ].join(" ")}
       >
+        <div className={`text-label-sm font-semibold mb-1 ${outbound ? "text-primary dark:text-primary-light" : "text-on-surface-variant"}`}>
+          {outbound
+            ? (message.senderDisplayName ?? (byAi ? "AI Agent" : "Hệ thống"))
+            : (message.senderDisplayName ?? contactDisplayName ?? "Khách hàng")}
+        </div>
         <p className="whitespace-pre-wrap text-body-md text-on-surface">{message.content}</p>
         <span className={`mt-1 block text-label-sm text-on-surface-variant ${outbound ? "text-right" : ""}`}>
           {formatTime(message.sentAt)}
@@ -339,7 +360,14 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
             Chưa có tin nhắn trong hội thoại này.
           </div>
         ) : (
-          conversation.messages.map((message) => <MessageBubble key={message.id} message={message} />)
+          conversation.messages.map((message) => (
+            <MessageBubble
+              key={message.id}
+              message={message}
+              contactAvatarUrl={conversation.contactAvatarUrl}
+              contactDisplayName={conversation.contactDisplayName}
+            />
+          ))
         )}
       </div>
 
@@ -413,8 +441,14 @@ function ContextPanel({
       <Card>
         <h3 className="mb-4 text-label-caps uppercase text-secondary">Thông tin khách hàng</h3>
         <div className="text-center">
-          <div className="mx-auto flex size-16 items-center justify-center rounded-full border-2 border-white bg-surface-variant text-headline-sm font-bold text-secondary shadow-sm">
-            {conversation ? customerName(conversation).slice(0, 1).toUpperCase() : "?"}
+          <div className="mx-auto flex size-16 items-center justify-center rounded-full border-2 border-white bg-surface-variant text-headline-sm font-bold text-secondary shadow-sm overflow-hidden">
+            {conversation?.contactAvatarUrl ? (
+              <img src={conversation.contactAvatarUrl} alt="" className="size-full object-cover" />
+            ) : conversation ? (
+              customerName(conversation).slice(0, 1).toUpperCase()
+            ) : (
+              "?"
+            )}
           </div>
           <h4 className="mt-3 text-headline-sm">{conversation ? customerName(conversation) : "Chưa chọn"}</h4>
           <div className="mt-2 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-3 py-1">
@@ -478,7 +512,7 @@ function ContextPanel({
 export default function ConversationsPage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [platformFilter, setPlatformFilter] = useState<PlatformFilter>("all");
+  const [inboxIdFilter, setInboxIdFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -498,13 +532,18 @@ export default function ConversationsPage() {
   const meId = meQuery.data?.sub ?? null;
   const realtimeState = useInboxRealtime(Boolean(meQuery.data));
 
+  const channelsQuery = useQuery({
+    queryKey: ["inbox", "channels"],
+    queryFn: listChannels,
+  });
+
   const backendStatus = statusFilter === "mine" || statusFilter === "all" ? undefined : statusFilter;
   const conversationsQuery = useQuery({
-    queryKey: ["inbox", "conversations", { status: backendStatus, platform: platformFilter }],
+    queryKey: ["inbox", "conversations", { status: backendStatus, inboxId: inboxIdFilter }],
     queryFn: () =>
       listConversations({
         status: backendStatus,
-        platform: platformFilter === "all" ? undefined : platformFilter,
+        inboxId: inboxIdFilter === "all" ? undefined : inboxIdFilter,
         page: 1,
         pageSize: 50,
       }),
@@ -659,13 +698,21 @@ export default function ConversationsPage() {
               ))}
             </div>
             <div className="mt-stack-sm flex flex-wrap gap-2">
-              {PLATFORM_FILTERS.map((item) => (
+              <FilterChip
+                active={inboxIdFilter === "all"}
+                label="Tất cả kênh"
+                onClick={() => {
+                  setInboxIdFilter("all");
+                  setSelectedId(null);
+                }}
+              />
+              {channelsQuery.data?.map((channel) => (
                 <FilterChip
-                  key={item.value}
-                  active={platformFilter === item.value}
-                  label={item.label}
+                  key={channel.id}
+                  active={inboxIdFilter === channel.id}
+                  label={channel.name}
                   onClick={() => {
-                    setPlatformFilter(item.value);
+                    setInboxIdFilter(channel.id);
                     setSelectedId(null);
                   }}
                 />
