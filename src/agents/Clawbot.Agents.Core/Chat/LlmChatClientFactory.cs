@@ -3,7 +3,7 @@ namespace Clawbot.Agents.Core.Chat;
 // Builds a provider-specific chat client per resolved config.
 // Anthropic uses a named HttpClient (resilience/timeouts configured at registration);
 // OpenAI uses the OpenAI SDK's own pipeline.
-public sealed class LlmChatClientFactory(IHttpClientFactory httpClientFactory, bool allowPrivateBaseUrls = false) : ILlmChatClientFactory
+public sealed class LlmChatClientFactory(IHttpClientFactory httpClientFactory, bool allowPrivateBaseUrls = false, int httpTimeoutSeconds = 120) : ILlmChatClientFactory
 {
     public const string AnthropicHttpClientName = "anthropic-llm";
 
@@ -25,9 +25,11 @@ public sealed class LlmChatClientFactory(IHttpClientFactory httpClientFactory, b
 
     private HttpClient CreateAnthropicHttpClient(ResolvedLlmConfig config)
     {
+        // ponytail: per-config TimeoutSeconds applies on the guarded (custom-BaseUrl) path; the pooled named
+        // client has a fixed registration-time timeout, so the no-BaseUrl case keeps the global default.
         if (string.IsNullOrWhiteSpace(config.BaseUrl))
             return _httpClientFactory.CreateClient(AnthropicHttpClientName);
 
-        return LlmBaseUrlGuard.CreateGuardedHttpClient(new Uri(config.BaseUrl, UriKind.Absolute), allowPrivateBaseUrls);
+        return LlmBaseUrlGuard.CreateGuardedHttpClient(new Uri(config.BaseUrl, UriKind.Absolute), allowPrivateBaseUrls, config.TimeoutSeconds ?? httpTimeoutSeconds);
     }
 }

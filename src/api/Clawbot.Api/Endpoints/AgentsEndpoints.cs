@@ -72,7 +72,7 @@ public static class AgentsEndpoints
             .Select(a => new
             {
                 a.Code,
-                a.DisplayName,
+                DisplayName = DisplayAgentLabel(a.Code, a.DisplayName, a.AgentType),
                 a.AgentType,
                 a.Model,
                 a.Status,
@@ -273,7 +273,7 @@ public static class AgentsEndpoints
         var config = ReadRuntimeConfig(agent.ConfigJson);
         return new AgentSettingsResponse(
             agent.Code,
-            agent.DisplayName,
+            DisplayAgentLabel(agent.Code, agent.DisplayName, agent.AgentType),
             agent.AgentType,
             agent.Model,
             agent.Status,
@@ -331,6 +331,20 @@ public static class AgentsEndpoints
             return [];
         }
     }
+
+    private static string DisplayAgentLabel(string code, string displayName, string agentType)
+    {
+        var normalizedCode = NormalizeSlug(code);
+        var normalizedType = NormalizeSlug(agentType);
+        return normalizedCode.Contains("orchestrator", StringComparison.OrdinalIgnoreCase)
+            || normalizedType.Contains("orchestrator", StringComparison.OrdinalIgnoreCase)
+            || normalizedType.Contains("planner", StringComparison.OrdinalIgnoreCase)
+            ? "Điều phối viên"
+            : displayName;
+    }
+
+    private static string NormalizeSlug(string? value) =>
+        (value ?? string.Empty).Trim().ToLowerInvariant();
 
     private static AgentRuntimeConfig ReadRuntimeConfig(string? json)
     {

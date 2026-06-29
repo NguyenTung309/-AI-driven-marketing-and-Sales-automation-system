@@ -144,7 +144,12 @@ public sealed class QdrantLeadDeduplicatorTests
 
         var store = Substitute.For<IVectorStore>();
         // Collection is versioned by embedder dimension (contacts_v{dim}).
-        store.SearchAsync("contacts_v384", Arg.Any<ReadOnlyMemory<float>>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+        store.SearchAsync(
+                "contacts_v384",
+                Arg.Any<ReadOnlyMemory<float>>(),
+                Arg.Any<int>(),
+                Arg.Any<IReadOnlyList<VectorMetadataFilter>?>(),
+                Arg.Any<CancellationToken>())
             .Returns(new List<VectorMatch>
             {
                 new(contactId.ToString("D"), 0.92f,

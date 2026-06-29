@@ -47,6 +47,8 @@ public sealed record KbTestCaseDto(Guid Id, string Question, string ExpectedAnsw
 
 public sealed record CreateKbTestCaseRequest(string Question, string ExpectedAnswer);
 
+public sealed record GenerateKbTestCasesRequest(int? Count);
+
 public sealed record KbTestRunResult(
     Guid VersionId,
     int Version,

@@ -5,8 +5,12 @@ using Clawbot.Agents.Core.Rag;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.SharedKernel.Vectors;
 using FluentAssertions;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using NSubstitute;
+using StackExchange.Redis;
 using Xunit;
 
 namespace Clawbot.Agents.Tests.Rag;
@@ -67,6 +71,54 @@ public sealed class HashEmbeddingProviderTests
     }
 }
 
+public sealed class ConfiguredEmbeddingProviderTests
+{
+    [Fact]
+    public async Task ResolveConfigAsync_uses_tenant_resolver_when_available()
+    {
+        var tenantId = Guid.NewGuid();
+        var resolver = Substitute.For<IEmbeddingConfigResolver>();
+        resolver.ResolveAsync(tenantId, Arg.Any<CancellationToken>())
+            .Returns(new ResolvedEmbeddingConfig("openai", "text-embedding-3-small", "key", null, 1536, "tenant-db"));
+        var sut = new ConfiguredEmbeddingProvider(
+            [resolver],
+            Options.Create(new EmbeddingOptions()),
+            Options.Create(new Clawbot.Agents.Core.Chat.LlmBaseUrlOptions()),
+            new TestHostEnvironment(),
+            NullLogger<ConfiguredEmbeddingProvider>.Instance);
+
+        var config = await sut.ResolveConfigAsync(tenantId, CancellationToken.None);
+
+        config.Source.Should().Be("tenant-db");
+        config.Dimension.Should().Be(1536);
+    }
+
+    [Fact]
+    public void CollectionName_includes_provider_model_and_dimension()
+    {
+        var config = new ResolvedEmbeddingConfig("openai", "text-embedding-3-small", "key", null, 1536, "tenant-db");
+
+        ConfiguredEmbeddingProvider.CollectionName(config).Should().Be("kb_openai_text_embedding_3_small_v1536");
+    }
+
+    [Fact]
+    public async Task ResolveConfigAsync_falls_back_to_hash_without_config()
+    {
+        var sut = new ConfiguredEmbeddingProvider(
+            [],
+            Options.Create(new EmbeddingOptions()),
+            Options.Create(new Clawbot.Agents.Core.Chat.LlmBaseUrlOptions()),
+            new TestHostEnvironment(),
+            NullLogger<ConfiguredEmbeddingProvider>.Instance);
+
+        var config = await sut.ResolveConfigAsync(Guid.NewGuid(), CancellationToken.None);
+
+        config.Provider.Should().Be("hash");
+        config.Dimension.Should().Be(384);
+        config.IsFallback.Should().BeTrue();
+    }
+}
+
 // M09 — QdrantRagRetriever client-side tenant + module filtering.
 public sealed class QdrantRagRetrieverTests
 {
@@ -89,12 +141,17 @@ public sealed class QdrantRagRetrieverTests
     private static QdrantRagRetriever Build(params VectorMatch[] hits)
     {
         var store = Substitute.For<IVectorStore>();
-        store.SearchAsync(Arg.Any<string>(), Arg.Any<ReadOnlyMemory<float>>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+        store.SearchAsync(
+                Arg.Any<string>(),
+                Arg.Any<ReadOnlyMemory<float>>(),
+                Arg.Any<int>(),
+                Arg.Any<IReadOnlyList<VectorMetadataFilter>?>(),
+                Arg.Any<CancellationToken>())
              .Returns(hits);
         var embedder = Substitute.For<IEmbeddingProvider>();
         embedder.EmbedAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(new ReadOnlyMemory<float>(new float[8]));
-        return new QdrantRagRetriever(store, embedder);
+        return new QdrantRagRetriever(store, embedder, []);
     }
 
     [Fact]
@@ -139,6 +196,41 @@ public sealed class QdrantRagRetrieverTests
     }
 
     [Fact]
+    public async Task Pushes_metadata_filters_to_vector_store_before_limit()
+    {
+        var tenant = Guid.NewGuid();
+        var store = Substitute.For<IVectorStore>();
+        store.SearchAsync(
+                Arg.Any<string>(),
+                Arg.Any<ReadOnlyMemory<float>>(),
+                Arg.Any<int>(),
+                Arg.Any<IReadOnlyList<VectorMetadataFilter>?>(),
+                Arg.Any<CancellationToken>())
+             .Returns([Match("1", tenant.ToString(), "KB-002", "a", 0.9f)]);
+        var embedder = Substitute.For<IEmbeddingProvider>();
+        embedder.Dimension.Returns(8);
+        embedder.EmbedAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns(new ReadOnlyMemory<float>(new float[8]));
+        var activeResolver = Substitute.For<IActiveKbVersionResolver>();
+        activeResolver.ResolveActiveVersionIdsAsync(tenant, "KB-002", Arg.Any<CancellationToken>())
+            .Returns(new HashSet<string>(["v1"], StringComparer.Ordinal));
+        var sut = new QdrantRagRetriever(store, embedder, [activeResolver]);
+
+        await sut.RetrieveAsync(new RagRequest(tenant, "KB-002", "q", TopK: 3), CancellationToken.None);
+
+        await store.Received(1).SearchAsync(
+            "kb_runtime_dim_8_v8",
+            Arg.Any<ReadOnlyMemory<float>>(),
+            3,
+            Arg.Is<IReadOnlyList<VectorMetadataFilter>?>(filters =>
+                filters != null
+                && filters.Any(f => f.Field == "tenant_id" && f.Values.Contains(tenant.ToString()))
+                && filters.Any(f => f.Field == "module_code" && f.Values.Contains("KB-002"))
+                && filters.Any(f => f.Field == "kb_version_id" && f.Values.Contains("v1"))),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Respects_topK()
     {
         var tenant = Guid.NewGuid();
@@ -166,6 +258,37 @@ public sealed class QdrantRagRetrieverTests
     }
 }
 
+public sealed class CachedRagRetrieverTests
+{
+    [Fact]
+    public async Task BuildCacheKeyAsync_includes_topK_and_embedding_collection()
+    {
+        var tenant = Guid.NewGuid();
+        var inner = Substitute.For<IRagRetriever>();
+        var redis = Substitute.For<IConnectionMultiplexer>();
+        var embedder = Substitute.For<IEmbeddingProvider>();
+        embedder.Dimension.Returns(8);
+        var sut = new CachedRagRetriever(inner, embedder, redis, [], NullLogger<CachedRagRetriever>.Instance);
+
+        var top3 = await sut.BuildCacheKeyAsync(new RagRequest(tenant, null, "q", TopK: 3), CancellationToken.None);
+        var top4 = await sut.BuildCacheKeyAsync(new RagRequest(tenant, null, "q", TopK: 4), CancellationToken.None);
+        embedder.Dimension.Returns(16);
+        var dim16 = await sut.BuildCacheKeyAsync(new RagRequest(tenant, null, "q", TopK: 3), CancellationToken.None);
+
+        top3.Should().Contain(":top3:kb_runtime_dim_8_v8:");
+        top4.Should().NotBe(top3);
+        dim16.Should().Contain(":top3:kb_runtime_dim_16_v16:");
+    }
+}
+
+internal sealed class TestHostEnvironment : IHostEnvironment
+{
+    public string EnvironmentName { get; set; } = Environments.Production;
+    public string ApplicationName { get; set; } = "Clawbot.Agents.Tests";
+    public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
+    public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
+}
+
 public sealed class KbDeployServiceTests
 {
     [Fact]
@@ -188,8 +311,33 @@ public sealed class KbDeployServiceTests
         version.Embedding.Should().NotBeNullOrWhiteSpace();
         JsonSerializer.Deserialize<float[]>(version.Embedding!).Should().Equal(0.25f, 0.75f);
         await store.Received(1).UpsertAsync(
-            "kb_v2",
+            "kb_runtime_dim_2_v2",
             Arg.Is<IEnumerable<VectorRecord>>(records => records.Single().Metadata["module_code"] == "HSK"),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task EmbedAndUpsertAsync_gives_each_chunk_a_distinct_id()
+    {
+        var tenantId = Guid.NewGuid();
+        // Three paragraphs each over maxChunkChars/2 force multiple chunks.
+        var big = string.Join("\n\n", Enumerable.Range(0, 3).Select(i => new string((char)('a' + i), 900)));
+        var version = KbVersion.Create(Guid.NewGuid(), 1, big, DateTimeOffset.UtcNow);
+        var embedder = Substitute.For<IEmbeddingProvider>();
+        embedder.Dimension.Returns(2);
+        embedder.EmbedAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ReadOnlyMemory<float>(new[] { 0.1f, 0.2f }));
+        var store = Substitute.For<IVectorStore>();
+        List<VectorRecord>? captured = null;
+        store.UpsertAsync(Arg.Any<string>(), Arg.Do<IEnumerable<VectorRecord>>(r => captured = r.ToList()), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var sut = new KbDeployService(embedder, store, NullLogger<KbDeployService>.Instance);
+
+        var count = await sut.EmbedAndUpsertAsync(version, "HSK", tenantId, CancellationToken.None);
+
+        count.Should().BeGreaterThan(1);
+        captured.Should().NotBeNull();
+        // Regression: every chunk used to share version.Id → Qdrant overwrote all but the last.
+        captured!.Select(r => r.Id).Should().OnlyHaveUniqueItems();
     }
 }

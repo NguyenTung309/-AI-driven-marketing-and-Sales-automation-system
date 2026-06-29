@@ -292,6 +292,7 @@ app.MapAgents();
 app.MapOrchestration();
 app.MapOrchestrationV2();
 app.MapLlmConfigs();
+app.MapEmbeddingConfigs();
 app.MapCompetitors();
 app.MapPublicWidget();
 app.MapBoundedContexts();

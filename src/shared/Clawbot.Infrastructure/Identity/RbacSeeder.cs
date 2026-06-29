@@ -71,7 +71,7 @@ public static partial class RbacSeeder
 
     private static readonly (string Code, string DisplayName, string AgentType)[] DefaultAgents =
     [
-        ("orchestrator", "Agent-Orchestrator", "planner"),
+        ("orchestrator", "Điều phối viên", "planner"),
         ("chat-agent", "Agent-Chat", "chat"),
         ("sale-assist", "Agent-SaleAssist", "sale_assist"),
         ("lead-agent", "Agent-Lead", "lead"),
@@ -358,7 +358,7 @@ public static partial class RbacSeeder
 
     private static string BuildOrchestrationConfig(string code) => code switch
     {
-        "orchestrator" => "{\"orchestration\":{\"description\":\"Plan and coordinate multi-agent DAGs.\",\"inputSchema\":\"{\\\"goal\\\":\\\"string\\\"}\",\"orchestratable\":false}}",
+        "orchestrator" => "{\"orchestration\":{\"description\":\"Lập kế hoạch và điều phối các tác vụ đa tác nhân.\",\"inputSchema\":\"{\\\"goal\\\":\\\"string\\\"}\",\"orchestratable\":false}}",
         "chat-agent" => "{\"orchestration\":{\"description\":\"Draft a non-streaming customer chat reply.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"user_text\\\":\\\"string\\\"}\",\"orchestratable\":true}}",
         "sale-assist" => "{\"orchestration\":{\"description\":\"Summarize, draft, or suggest upsells for sales conversations.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"conversation_id\\\":\\\"guid\\\",\\\"turns_json\\\":\\\"array\\\"}\",\"orchestratable\":true}}",
         "lead-agent" => "{\"orchestration\":{\"description\":\"Score or create lead records from campaign context.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"operation\\\":\\\"score|create\\\"}\",\"orchestratable\":true}}",

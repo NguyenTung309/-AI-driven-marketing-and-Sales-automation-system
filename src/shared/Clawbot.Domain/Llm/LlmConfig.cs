@@ -15,6 +15,8 @@ public sealed class LlmConfig : AggregateRoot<Guid>, ITenantOwned
     public bool IsActive { get; private set; } = true;
     public decimal? InputUsdPer1M { get; private set; }              // cost rate; null → provider default
     public decimal? OutputUsdPer1M { get; private set; }
+    public int? TimeoutSeconds { get; private set; }                 // request timeout; null → global Llm:HttpTimeoutSeconds
+    public int? MaxOutputTokens { get; private set; }                // generation cap; null → provider default (3000)
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -29,7 +31,9 @@ public sealed class LlmConfig : AggregateRoot<Guid>, ITenantOwned
         string? baseUrl = null,
         string? displayName = null,
         decimal? inputUsdPer1M = null,
-        decimal? outputUsdPer1M = null) =>
+        decimal? outputUsdPer1M = null,
+        int? timeoutSeconds = null,
+        int? maxOutputTokens = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -42,17 +46,21 @@ public sealed class LlmConfig : AggregateRoot<Guid>, ITenantOwned
             IsActive = true,
             InputUsdPer1M = inputUsdPer1M,
             OutputUsdPer1M = outputUsdPer1M,
+            TimeoutSeconds = timeoutSeconds,
+            MaxOutputTokens = maxOutputTokens,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         };
 
     // Update connection identity (provider/model/baseUrl/label) without touching the key.
-    public void UpdateConnection(string provider, string modelId, string? baseUrl, string? displayName, DateTimeOffset updatedAt)
+    public void UpdateConnection(string provider, string modelId, string? baseUrl, string? displayName, DateTimeOffset updatedAt, int? timeoutSeconds = null, int? maxOutputTokens = null)
     {
         Provider = provider;
         ModelId = modelId;
         BaseUrl = baseUrl;
         DisplayName = displayName;
+        TimeoutSeconds = timeoutSeconds;
+        MaxOutputTokens = maxOutputTokens;
         UpdatedAt = updatedAt;
     }
 

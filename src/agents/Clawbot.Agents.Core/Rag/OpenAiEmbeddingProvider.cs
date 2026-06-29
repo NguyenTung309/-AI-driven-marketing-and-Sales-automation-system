@@ -1,4 +1,6 @@
 using System.ClientModel;
+using System.ClientModel.Primitives;
+using Clawbot.Agents.Core.Chat;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenAI;
@@ -34,7 +36,12 @@ public sealed partial class OpenAiEmbeddingProvider : IEmbeddingProvider
 
         var clientOptions = new OpenAIClientOptions();
         if (!string.IsNullOrWhiteSpace(_options.BaseUrl))
-            clientOptions.Endpoint = new Uri(_options.BaseUrl, UriKind.Absolute);
+        {
+            var endpoint = new Uri(_options.BaseUrl, UriKind.Absolute);
+            clientOptions.Endpoint = endpoint;
+            clientOptions.Transport = new HttpClientPipelineTransport(
+                LlmBaseUrlGuard.CreateGuardedHttpClient(endpoint));
+        }
 
         _client = new EmbeddingClient(_options.Model, new ApiKeyCredential(_options.ApiKey), clientOptions);
     }

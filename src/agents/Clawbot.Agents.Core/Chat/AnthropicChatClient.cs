@@ -12,7 +12,7 @@ namespace Clawbot.Agents.Core.Chat;
 public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig config) : IClaudeChatClient
 {
     private const string DefaultBaseUrl = "https://api.anthropic.com";
-    private const int DefaultMaxTokens = 1024;
+    private const int DefaultMaxTokens = 3000;
     private const decimal DefaultInputUsdPer1M = 3.00m;
     private const decimal DefaultOutputUsdPer1M = 15.00m;
 
@@ -81,7 +81,7 @@ public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig confi
 
         var payload = new RequestBody(
             Model: _config.Model,
-            MaxTokens: DefaultMaxTokens,
+            MaxTokens: _config.MaxOutputTokens ?? DefaultMaxTokens,
             System: systemPrompt,
             Messages: msgs,
             Stream: stream);

@@ -19,6 +19,48 @@ public sealed class KbTestRunnerServiceTests
     }
 
     [Fact]
+    public void ParseGeneratedCases_extracts_valid_pairs_and_skips_incomplete()
+    {
+        var result = KbTestRunnerService.ParseGeneratedCases(
+            """
+            Here you go:
+            [
+              { "question": "Học phí HSK3?", "expectedAnswer": "9,840,000đ" },
+              { "question": "  ", "expectedAnswer": "x" },
+              { "question": "Địa chỉ?" }
+            ]
+            """);
+
+        result.Should().ContainSingle();
+        result[0].Question.Should().Be("Học phí HSK3?");
+        result[0].ExpectedAnswer.Should().Be("9,840,000đ");
+    }
+
+    [Fact]
+    public void ParseGeneratedCases_returns_empty_on_garbage()
+    {
+        KbTestRunnerService.ParseGeneratedCases("not json").Should().BeEmpty();
+        KbTestRunnerService.ParseGeneratedCases("").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GenerateCasesAsync_prompts_with_content_and_parses_reply()
+    {
+        var tenantId = Guid.NewGuid();
+        var rag = new CapturingRagRetriever(Array.Empty<RagChunk>());
+        var claude = new CapturingClaude(
+            """[{"question":"Học phí HSK3?","expectedAnswer":"9,840,000đ"}]""");
+        var sut = new KbTestRunnerService(rag, claude, new LlmCallScope());
+
+        var result = await sut.GenerateCasesAsync(tenantId, "HSK3: 3 học viên, học phí 9,840,000đ", 3, CancellationToken.None);
+
+        result.Should().ContainSingle();
+        result[0].Question.Should().Be("Học phí HSK3?");
+        claude.CapturedPrompt.Should().Contain("9,840,000đ");
+        claude.CapturedPrompt.Should().Contain("3 realistic customer questions");
+    }
+
+    [Fact]
     public async Task EvaluateAsync_uses_rag_and_claude_reason_as_case_answer()
     {
         var tenantId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");

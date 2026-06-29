@@ -1,4 +1,6 @@
+using System.IO.Compression;
 using System.Text;
+using Microsoft.Net.Http.Headers;
 using Clawbot.Api.Auth;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Kb;
@@ -43,6 +45,7 @@ public static class KbEndpoints
 
         modules.MapGet("/{id:guid}/test-cases", ListTestCasesAsync).RequirePermission("kb:read");
         modules.MapPost("/{id:guid}/test-cases", AddTestCaseAsync).RequirePermission("kb:write");
+        modules.MapPost("/{id:guid}/test-cases/generate", GenerateTestCasesAsync).RequirePermission("kb:write");
         modules.MapPost("/{id:guid}/test", RunTestAsync).RequirePermission("kb:write");
 
         app.MapGet("/api/kb/accuracy", AccuracyDashboardAsync).RequirePermission("kb:read");
@@ -184,6 +187,88 @@ public static class KbEndpoints
 
     private const long MaxUploadBytes = 10 * 1024 * 1024;
 
+    private static async Task<string?> ResolveUploadFileNameAsync(IFormFile file, IDocumentTextExtractor extractor, CancellationToken ct)
+    {
+        // Browsers/proxies sometimes post Blob metadata as FileName="blob" and ContentType="application/octet-stream".
+        // Prefer metadata names first; if all fail, sniff bytes/package entries so real .docx/.xlsx uploads don't die at
+        // unsupported_format before the markdown extractor gets a chance to run.
+        var candidates = new[]
+        {
+            file.FileName,
+            SafeContentDispositionFileName(file.ContentDisposition),
+            SafeContentDispositionFileNameStar(file.ContentDisposition),
+            FileNameFromContentType(file.ContentType),
+        };
+
+        var metadataName = candidates.FirstOrDefault(name => !string.IsNullOrWhiteSpace(name) && extractor.CanExtract(name));
+        if (metadataName is not null)
+            return metadataName;
+
+        await using var stream = file.OpenReadStream();
+        return await FileNameFromMagicBytesAsync(stream, ct).ConfigureAwait(false);
+    }
+
+    private static string? SafeContentDispositionFileName(string? contentDisposition)
+    {
+        if (string.IsNullOrWhiteSpace(contentDisposition)) return null;
+        return ContentDispositionHeaderValue.TryParse(contentDisposition, out var value) ? value.FileName.Value : null;
+    }
+
+    private static string? SafeContentDispositionFileNameStar(string? contentDisposition)
+    {
+        if (string.IsNullOrWhiteSpace(contentDisposition)) return null;
+        return ContentDispositionHeaderValue.TryParse(contentDisposition, out var value) ? value.FileNameStar.Value : null;
+    }
+
+    private static string? FileNameFromContentType(string? contentType) => contentType?.ToLowerInvariant() switch
+    {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => "upload.docx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => "upload.xlsx",
+        "application/pdf" => "upload.pdf",
+        "text/csv" => "upload.csv",
+        "text/markdown" => "upload.md",
+        "text/plain" => "upload.txt",
+        _ => null,
+    };
+
+    private static async Task<string?> FileNameFromMagicBytesAsync(Stream stream, CancellationToken ct)
+    {
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, ct).ConfigureAwait(false);
+        if (buffer.Length == 0) return null;
+
+        var head = buffer.GetBuffer().AsSpan(0, (int)Math.Min(4, buffer.Length));
+        if (head.Length >= 4 && head[0] == 0x25 && head[1] == 0x50 && head[2] == 0x44 && head[3] == 0x46)
+            return "upload.pdf";
+
+        if (head.Length >= 2 && head[0] == 0x50 && head[1] == 0x4B)
+            return OfficeFileNameFromZip(buffer);
+
+        return LooksLikeText(buffer) ? "upload.txt" : null;
+    }
+
+    private static string? OfficeFileNameFromZip(MemoryStream buffer)
+    {
+        try
+        {
+            buffer.Position = 0;
+            using var zip = new ZipArchive(buffer, ZipArchiveMode.Read, leaveOpen: true);
+            if (zip.GetEntry("word/document.xml") is not null) return "upload.docx";
+            if (zip.GetEntry("xl/workbook.xml") is not null) return "upload.xlsx";
+        }
+        catch (InvalidDataException)
+        {
+            return null;
+        }
+        return null;
+    }
+
+    private static bool LooksLikeText(MemoryStream buffer)
+    {
+        var sample = buffer.GetBuffer().AsSpan(0, (int)Math.Min(512, buffer.Length));
+        return sample.IndexOf((byte)0) < 0;
+    }
+
     // Upload a file (docx/xlsx/csv/pdf/txt/md) → auto-convert to markdown → save as a DRAFT version.
     // Deliberately does NOT deploy: the operator reviews/edits the converted text, then deploys.
     private static async Task<IResult> UploadVersionAsync(
@@ -198,7 +283,8 @@ public static class KbEndpoints
     {
         if (file is null || file.Length == 0) return Results.BadRequest("file_required");
         if (file.Length > MaxUploadBytes) return Results.BadRequest("file_too_large");
-        if (!extractor.CanExtract(file.FileName))
+        var uploadFileName = await ResolveUploadFileNameAsync(file, extractor, ct).ConfigureAwait(false);
+        if (uploadFileName is null)
             return Results.BadRequest("unsupported_format");
 
         var tenantId = tenants.Require().TenantId;
@@ -209,7 +295,7 @@ public static class KbEndpoints
         try
         {
             await using var stream = file.OpenReadStream();
-            extracted = await extractor.ExtractAsync(stream, file.FileName, ct);
+            extracted = await extractor.ExtractAsync(stream, uploadFileName, ct);
         }
         catch (DocumentExtractionException ex)
         {
@@ -355,6 +441,54 @@ public static class KbEndpoints
         await db.SaveChangesAsync(ct);
         return Results.Created($"/api/kb/modules/{id}/test-cases/{test.Id}",
             new KbTestCaseDto(test.Id, test.Question, test.ExpectedAnswer, test.IsActive));
+    }
+
+    private const int MaxGeneratedCases = 10;
+
+    // Auto-author Q&A test cases from the latest KB content (draft or deployed) so operators don't
+    // have to hand-write the whole accuracy suite. Skips questions already present (case-insensitive).
+    private static async Task<IResult> GenerateTestCasesAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        KbTestRunnerService testRunner,
+        GenerateKbTestCasesRequest? req,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var owns = await db.KbModules.AnyAsync(m => m.Id == id && m.TenantId == tenantId, ct);
+        if (!owns) return Results.NotFound();
+
+        var count = Math.Clamp(req?.Count ?? 5, 1, MaxGeneratedCases);
+
+        var latest = await db.KbVersions
+            .Where(v => v.KbModuleId == id)
+            .OrderByDescending(v => v.Version)
+            .Select(v => v.ContentMd)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(latest)) return Results.BadRequest("no_content");
+
+        var generated = await testRunner.GenerateCasesAsync(tenantId, latest, count, ct);
+        if (generated.Count == 0) return Results.BadRequest("generation_failed");
+
+        var existing = await db.KbTestCases
+            .Where(t => t.KbModuleId == id)
+            .Select(t => t.Question)
+            .ToListAsync(ct);
+        var seen = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
+
+        var created = new List<KbTestCaseDto>();
+        foreach (var g in generated)
+        {
+            if (!seen.Add(g.Question)) continue;
+            var test = KbTestCase.Create(id, g.Question, g.ExpectedAnswer, clock.UtcNow);
+            db.KbTestCases.Add(test);
+            created.Add(new KbTestCaseDto(test.Id, test.Question, test.ExpectedAnswer, test.IsActive));
+        }
+        await db.SaveChangesAsync(ct);
+
+        return Results.Ok(created);
     }
 
     private static async Task<IResult> RunTestAsync(

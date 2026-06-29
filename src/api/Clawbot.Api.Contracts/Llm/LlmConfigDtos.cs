@@ -12,7 +12,9 @@ public sealed record LlmConfigDto(
     decimal? InputUsdPer1M,
     decimal? OutputUsdPer1M,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    int? TimeoutSeconds = null,
+    int? MaxOutputTokens = null);
 
 public sealed record CreateLlmConfigRequest(
     string Provider,
@@ -21,7 +23,9 @@ public sealed record CreateLlmConfigRequest(
     string? DisplayName = null,
     string? BaseUrl = null,
     decimal? InputUsdPer1M = null,
-    decimal? OutputUsdPer1M = null);
+    decimal? OutputUsdPer1M = null,
+    int? TimeoutSeconds = null,
+    int? MaxOutputTokens = null);
 
 // Update never carries the key — rotate it via the dedicated endpoint.
 public sealed record UpdateLlmConfigRequest(
@@ -30,7 +34,9 @@ public sealed record UpdateLlmConfigRequest(
     string? DisplayName = null,
     string? BaseUrl = null,
     decimal? InputUsdPer1M = null,
-    decimal? OutputUsdPer1M = null);
+    decimal? OutputUsdPer1M = null,
+    int? TimeoutSeconds = null,
+    int? MaxOutputTokens = null);
 
 public sealed record RotateLlmKeyRequest(string ApiKey);
 

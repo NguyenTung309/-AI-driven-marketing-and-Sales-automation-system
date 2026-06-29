@@ -90,14 +90,17 @@ public static class OrchestrationV2Endpoints
         var traces = await db.AgentTraces.IgnoreQueryFilters().AsNoTracking()
             .Where(t => t.SessionId == id)
             .OrderBy(t => t.OccurredAt)
-            .Select(t => new OrchestrationV2TraceDto(t.TaskId ?? string.Empty, t.AgentName ?? string.Empty, t.Phase ?? string.Empty, t.Message ?? string.Empty, t.OccurredAt))
+            .Select(t => new { t.TaskId, t.AgentName, t.Phase, t.Message, t.OccurredAt })
             .ToListAsync(ct).ConfigureAwait(false);
+        var traceDtos = traces
+            .Select(t => new OrchestrationV2TraceDto(t.TaskId ?? string.Empty, DisplayAgentLabel(t.AgentName), t.Phase ?? string.Empty, t.Message ?? string.Empty, t.OccurredAt))
+            .ToArray();
         var messages = await db.AgentA2AMessages.IgnoreQueryFilters().AsNoTracking()
             .Where(m => m.SessionId == id && m.TenantId == tenant.TenantId)
             .OrderBy(m => m.CreatedAt)
             .Select(m => new OrchestrationV2MessageDto(m.Id, m.TaskId, m.Intent, m.Status, m.PayloadJson, m.Error, m.CreatedAt, m.ProcessedAt))
             .ToListAsync(ct).ConfigureAwait(false);
-        return Results.Ok(new OrchestrationV2RunDto(session.Id, session.Status, session.Goal ?? string.Empty, session.StartedAt, session.FinishedAt, traces, messages));
+        return Results.Ok(new OrchestrationV2RunDto(session.Id, session.Status, session.Goal ?? string.Empty, session.StartedAt, session.FinishedAt, traceDtos, messages));
     }
 
     private static async Task<IResult> ControlRunAsync(Guid id, OrchestrationV2ControlRequest body, ITenantAccessor tenants, Orchestrator.OrchestratorClient grpc, CancellationToken ct)
@@ -250,6 +253,14 @@ public static class OrchestrationV2Endpoints
 
     private static OrchestrationV2ScheduleDto ToScheduleDto(AgentSchedule s) =>
         new(s.Id, s.Name, s.GoalTemplate, s.Cadence, s.TimezoneId, s.NextRunAt, s.LastRunAt, s.IsActive, s.RequiresApproval);
+
+    private static string DisplayAgentLabel(string? agentName)
+    {
+        var value = (agentName ?? string.Empty).Trim();
+        return value.Equals("orchestrator", StringComparison.OrdinalIgnoreCase)
+            ? "Điều phối viên"
+            : value;
+    }
 
     private static bool IsKnownCadence(string cadence) => cadence.Trim().ToLowerInvariant() is "daily" or "weekly" or "monthly" or "quarterly";
 

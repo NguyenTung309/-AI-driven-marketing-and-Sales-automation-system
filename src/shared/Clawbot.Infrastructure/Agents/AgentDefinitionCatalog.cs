@@ -33,11 +33,26 @@ public sealed class AgentDefinitionCatalog(AppDbContext db, ITenantAccessor tena
                 d.IsOrchestratable,
                 d.KbModuleCode,
                 d.AllowedToolsJson,
+                d.LlmConfigId,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // Only surface agents the planner can actually run: an agent resolves an LLM config from its
+        // definition OR from an agents-table row (LlmConfigResolver checks both). Hiding unbindable agents
+        // stops the planner from picking one that fails at runtime with llm_config_not_configured —
+        // which otherwise triggers a re-plan and can exhaust the orchestrator's round budget (max_rounds).
+        var agentBoundCodes = await _db.AgentConfigs
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(a => a.TenantId == tenantId && a.DeletedAt == null && a.LlmConfigId != null)
+            .Select(a => a.Code)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var boundCodes = new HashSet<string>(agentBoundCodes, StringComparer.OrdinalIgnoreCase);
+
         return rows
+            .Where(d => d.LlmConfigId != null || boundCodes.Contains(d.Code))
             .Select(d => new AgentDefinitionCatalogEntry(
                 d.Id,
                 d.Code,

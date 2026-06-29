@@ -121,6 +121,20 @@ public sealed class LlmConfigValidationTests
         source.Should().Contain("AnyAsync(a => a.TenantId == row.TenantId && a.LlmConfigId == row.Id && a.DeletedAt == null");
     }
 
+    [Theory]
+    [InlineData("openai", "https://api.openai.com", "https://api.openai.com/v1")]
+    [InlineData("openai-compatible", "https://proxy.example.com/v1", "https://proxy.example.com/v1")]
+    public void Embedding_NormalizeBaseUrl_appends_v1_for_openai_providers(string provider, string input, string expected)
+    {
+        EmbeddingConfigsEndpoints.NormalizeBaseUrl(provider, input).Should().Be(expected);
+    }
+
+    [Fact]
+    public void Embedding_NormalizeBaseUrl_returns_null_for_hash()
+    {
+        EmbeddingConfigsEndpoints.NormalizeBaseUrl("hash", "https://api.openai.com").Should().BeNull();
+    }
+
     [Fact]
     public void Llm_provider_config_no_longer_exposes_max_tokens_or_temperature()
     {
