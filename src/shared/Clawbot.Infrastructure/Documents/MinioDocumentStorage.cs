@@ -5,15 +5,15 @@ using Minio.DataModel.Args;
 
 namespace Clawbot.Infrastructure.Documents;
 
-// MinIO-backed document storage (M17): uploads the rendered PDF and returns a 7-day presigned GET URL.
-// Config-gated via MinioOptions (Docs:Storage:Minio) — registered only when an endpoint is configured;
-// otherwise LocalDocumentStorage (registered by DocsModule) remains the fallback.
+// MinIO-backed document storage (M17): uploads objects and returns PublicBaseUrl when configured,
+// otherwise a 7-day presigned GET URL.
 public sealed class MinioDocumentStorage : IDocumentStorage
 {
     private const int ExpirySeconds = 7 * 24 * 60 * 60; // 7 days
 
     private readonly IMinioClient _client;
     private readonly string _bucket;
+    private readonly string _publicBaseUrl;
     private volatile bool _bucketEnsured;
 
     public MinioDocumentStorage(IOptions<MinioOptions> options)
@@ -23,6 +23,7 @@ public sealed class MinioDocumentStorage : IDocumentStorage
         var endpoint = opts.Endpoint
             ?? throw new InvalidOperationException("Docs:Storage:Minio:Endpoint not configured.");
         _bucket = opts.Bucket;
+        _publicBaseUrl = opts.PublicBaseUrl.TrimEnd('/');
 
         _client = new MinioClient()
             .WithEndpoint(endpoint)
@@ -53,6 +54,9 @@ public sealed class MinioDocumentStorage : IDocumentStorage
             .WithStreamData(ms)
             .WithObjectSize(ms.Length)
             .WithContentType(string.IsNullOrWhiteSpace(contentType) ? "application/pdf" : contentType), ct).ConfigureAwait(false);
+
+        if (!string.IsNullOrWhiteSpace(_publicBaseUrl))
+            return $"{_publicBaseUrl}/{Uri.EscapeDataString(fileName)}";
 
         return await _client.PresignedGetObjectAsync(new PresignedGetObjectArgs()
             .WithBucket(_bucket)

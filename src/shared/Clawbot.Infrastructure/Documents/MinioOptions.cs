@@ -10,4 +10,5 @@ public sealed class MinioOptions
     public string SecretKey { get; init; } = string.Empty;
     public bool Secure { get; init; }
     public string Bucket { get; init; } = "clawbot-docs";
+    public string PublicBaseUrl { get; init; } = string.Empty;
 }

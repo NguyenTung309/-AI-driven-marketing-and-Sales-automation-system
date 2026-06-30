@@ -1,4 +1,9 @@
+using System.ClientModel;
 using System.Diagnostics;
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Llm;
@@ -14,7 +19,7 @@ namespace Clawbot.Api.Endpoints;
 
 // Per-tenant LLM provider configuration (Anthropic / OpenAI-compatible).
 // Credentials are encrypted at rest (IEncryptor) and never returned (masked via HasApiKey).
-public static class LlmConfigsEndpoints
+public static partial class LlmConfigsEndpoints
 {
     private static readonly HashSet<string> AllowedProviders =
         new(StringComparer.OrdinalIgnoreCase) { "anthropic", "openai", "openai-compatible" };
@@ -127,6 +132,7 @@ public static class LlmConfigsEndpoints
         ITenantAccessor tenants,
         IEncryptor encryptor,
         IClock clock,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(req.ApiKey)) return Results.BadRequest(new { error = "api_key_required" });
@@ -135,6 +141,9 @@ public static class LlmConfigsEndpoints
 
         row.RotateApiKey(encryptor.Encrypt(req.ApiKey), clock.UtcNow);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        LogLlmConfigKeyRotated(
+            loggerFactory.CreateLogger(nameof(LlmConfigsEndpoints)), row.Id, row.Provider, row.ModelId, row.BaseUrl,
+            MaskSecret(req.ApiKey), SecretHash(req.ApiKey), req.ApiKey.Trim().Length);
         return Results.NoContent();
     }
 
@@ -167,6 +176,7 @@ public static class LlmConfigsEndpoints
         ITenantAccessor tenants,
         IEncryptor encryptor,
         ILlmChatClientFactory factory,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var row = await FindAsync(db, tenants, id, ct).ConfigureAwait(false);
@@ -175,10 +185,13 @@ public static class LlmConfigsEndpoints
             return Results.Ok(new TestLlmConfigResponse(false, 0, "llm_config_requires_key_rotation"));
 
         var sw = Stopwatch.StartNew();
+        var logger = loggerFactory.CreateLogger(nameof(LlmConfigsEndpoints));
+        string? apiKey = null;
         try
         {
+            apiKey = encryptor.Decrypt(row.ApiKeyEncrypted);
             var resolved = new ResolvedLlmConfig(
-                row.Provider, row.ModelId, encryptor.Decrypt(row.ApiKeyEncrypted), row.BaseUrl,
+                row.Provider, row.ModelId, apiKey, row.BaseUrl,
                 row.InputUsdPer1M, row.OutputUsdPer1M, row.TimeoutSeconds, row.MaxOutputTokens);
             var client = factory.Create(resolved);
             await client.CompleteAsync("You are a connection test. Reply with 'ok'.", Array.Empty<ChatTurn>(), "ping", ct)
@@ -189,7 +202,12 @@ public static class LlmConfigsEndpoints
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             sw.Stop();
-            return Results.Ok(new TestLlmConfigResponse(false, sw.ElapsedMilliseconds, SafeTestConnectionError(ex)));
+            var error = SafeTestConnectionError(ex);
+            LogLlmConfigTestFailed(
+                logger, row.Id, row.Provider, row.ModelId, row.BaseUrl, MaskSecret(apiKey), SecretHash(apiKey), apiKey?.Trim().Length ?? 0, TestConnectionStatus(ex), error);
+            if (apiKey is not null && IsOpenAiProvider(row.Provider) && row.BaseUrl is not null && TestConnectionStatus(ex) is 401 or 403)
+                await LogOpenAiCompatibleProbeAsync(logger, row, apiKey, ct).ConfigureAwait(false);
+            return Results.Ok(new TestLlmConfigResponse(false, sw.ElapsedMilliseconds, error));
         }
     }
 
@@ -223,8 +241,137 @@ public static class LlmConfigsEndpoints
     private static string? Trimmed(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    internal static string SafeTestConnectionError(Exception _) =>
-        "llm_connection_test_failed";
+    internal static string MaskSecret(string? secret)
+    {
+        if (string.IsNullOrWhiteSpace(secret)) return "<empty>";
+        var trimmed = secret.Trim();
+        if (trimmed.Length <= 10) return $"***{trimmed[^2..]}";
+        return $"{trimmed[..6]}...{trimmed[^4..]}";
+    }
+
+    internal static string SecretHash(string? secret)
+    {
+        if (string.IsNullOrWhiteSpace(secret)) return "<empty>";
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(secret.Trim()));
+        return Convert.ToHexString(bytes)[..12];
+    }
+
+    internal static int TestConnectionStatus(Exception ex) => ex switch
+    {
+        HttpRequestException { StatusCode: { } status } => (int)status,
+        ClientResultException cre => cre.Status,
+        _ => 0
+    };
+
+    private static bool IsOpenAiProvider(string provider) =>
+        provider.Equals("openai", StringComparison.OrdinalIgnoreCase)
+        || provider.Equals("openai-compatible", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeBearerToken(string apiKey)
+    {
+        const string bearerPrefix = "Bearer ";
+        var trimmed = apiKey.Trim();
+        return trimmed.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase)
+            ? trimmed[bearerPrefix.Length..].TrimStart()
+            : trimmed;
+    }
+
+    private static async Task LogOpenAiCompatibleProbeAsync(ILogger logger, LlmConfig row, string apiKey, CancellationToken ct)
+    {
+        const int responseLimit = 512;
+        var url = row.BaseUrl!.TrimEnd('/') + "/chat/completions";
+        var body = JsonSerializer.Serialize(new
+        {
+            model = row.ModelId,
+            messages = new[]
+            {
+                new
+                {
+                    role = "user",
+                    content = new[] { new { type = "text", text = "ping" } }
+                }
+            }
+        });
+
+        try
+        {
+            var http = LlmBaseUrlGuard.CreateGuardedHttpClient(new Uri(row.BaseUrl, UriKind.Absolute), timeoutSeconds: row.TimeoutSeconds ?? 120);
+            using var req = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            };
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", NormalizeBearerToken(apiKey));
+            using var res = await http.SendAsync(req, ct).ConfigureAwait(false);
+            var response = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            if (response.Length > responseLimit) response = response[..responseLimit];
+            LogOpenAiCompatibleProbe(logger, url, MaskSecret(apiKey), SecretHash(apiKey), apiKey.Trim().Length, body, (int)res.StatusCode, response);
+        }
+        catch (Exception probeEx) when (probeEx is not OperationCanceledException)
+        {
+            LogOpenAiCompatibleProbeFailed(logger, url, probeEx.GetType().Name);
+        }
+    }
+
+    [LoggerMessage(EventId = 7200, Level = LogLevel.Information,
+        Message = "LLM config key rotated: configId={ConfigId} provider={Provider} model={Model} baseUrl={BaseUrl} key={KeyHint} keyHash={KeyHash} keyLength={KeyLength}")]
+    private static partial void LogLlmConfigKeyRotated(
+        ILogger logger,
+        Guid configId,
+        string provider,
+        string model,
+        string? baseUrl,
+        string keyHint,
+        string keyHash,
+        int keyLength);
+
+    [LoggerMessage(EventId = 7201, Level = LogLevel.Warning,
+        Message = "LLM config test failed: configId={ConfigId} provider={Provider} model={Model} baseUrl={BaseUrl} key={KeyHint} keyHash={KeyHash} keyLength={KeyLength} status={Status} error={Error}")]
+    private static partial void LogLlmConfigTestFailed(
+        ILogger logger,
+        Guid configId,
+        string provider,
+        string model,
+        string? baseUrl,
+        string keyHint,
+        string keyHash,
+        int keyLength,
+        int status,
+        string error);
+
+    [LoggerMessage(EventId = 7202, Level = LogLevel.Warning,
+        Message = "OpenAI-compatible direct probe: url={Url} key={KeyHint} keyHash={KeyHash} keyLength={KeyLength} body={Body} status={Status} response={Response}")]
+    private static partial void LogOpenAiCompatibleProbe(
+        ILogger logger,
+        string url,
+        string keyHint,
+        string keyHash,
+        int keyLength,
+        string body,
+        int status,
+        string response);
+
+    [LoggerMessage(EventId = 7203, Level = LogLevel.Warning,
+        Message = "OpenAI-compatible direct probe failed before response: url={Url} exception={ExceptionType}")]
+    private static partial void LogOpenAiCompatibleProbeFailed(
+        ILogger logger,
+        string url,
+        string exceptionType);
+
+    internal static string SafeTestConnectionError(Exception ex) => ex switch
+    {
+        TimeoutException or TaskCanceledException => "llm_connection_timeout",
+        HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden } => "llm_connection_auth_failed",
+        HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } => "llm_connection_rate_limited",
+        HttpRequestException { StatusCode: HttpStatusCode.BadRequest or HttpStatusCode.NotFound or HttpStatusCode.UnprocessableEntity } => "llm_connection_invalid_request",
+        HttpRequestException { StatusCode: null } => "llm_connection_unreachable",
+        HttpRequestException => "llm_connection_upstream_error",
+        ClientResultException { Status: 401 or 403 } => "llm_connection_auth_failed",
+        ClientResultException { Status: 429 } => "llm_connection_rate_limited",
+        ClientResultException { Status: 400 or 404 or 422 } => "llm_connection_invalid_request",
+        ClientResultException => "llm_connection_upstream_error",
+        NotSupportedException => "llm_connection_provider_unsupported",
+        _ => "llm_connection_test_failed"
+    };
 
     // D10 — make the per-provider baseUrl suffix difference invisible to the admin. The OpenAI SDK
     // appends only `/chat/completions` (endpoint must already carry `/v1`), while AnthropicChatClient
@@ -235,10 +382,19 @@ public static class LlmConfigsEndpoints
         var url = baseUrl.Trim().TrimEnd('/');
         return provider switch
         {
-            "openai" or "openai-compatible" => url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? url : url + "/v1",
+            "openai" => NormalizeOpenAiBaseUrl(url, forceV1: true),
+            "openai-compatible" => NormalizeOpenAiBaseUrl(url, forceV1: false),
             "anthropic" => url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? url[..^"/v1".Length] : url,
             _ => url,
         };
+    }
+
+    private static string NormalizeOpenAiBaseUrl(string url, bool forceV1)
+    {
+        const string chatCompletionsPath = "/chat/completions";
+        if (url.EndsWith(chatCompletionsPath, StringComparison.OrdinalIgnoreCase))
+            url = url[..^chatCompletionsPath.Length];
+        return forceV1 && !url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? url + "/v1" : url;
     }
 
     // Request timeout bounds: 1s floor, 600s (10 min) ceiling. null → global default.

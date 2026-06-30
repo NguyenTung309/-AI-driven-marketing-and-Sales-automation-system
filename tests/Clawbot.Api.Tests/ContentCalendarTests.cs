@@ -54,6 +54,23 @@ public sealed class ContentCalendarTests
     }
 
     [Fact]
+    public void TryNormalizeAssetsJson_rejects_non_image_payload()
+    {
+        var ok = ContentEndpoints.TryNormalizeAssetsJson("""[{"type":"html","url":"javascript:alert(1)"}]""", out _);
+
+        ok.Should().BeFalse();
+    }
+
+    [Fact]
+    public void LooksLikeAllowedImage_matches_declared_png_signature()
+    {
+        var bytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+
+        ContentEndpoints.LooksLikeAllowedImage(bytes, "image/png").Should().BeTrue();
+        ContentEndpoints.LooksLikeAllowedImage(bytes, "image/jpeg").Should().BeFalse();
+    }
+
+    [Fact]
     public void BuildCalendarRows_maps_all_status_variants()
     {
         var tenantId = Guid.NewGuid();

@@ -1,6 +1,11 @@
 using System.ClientModel;
 using System.ClientModel.Primitives;
+using System.Net;
+using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using OpenAI;
 using OpenAI.Chat;
 
@@ -12,9 +17,11 @@ public sealed class OpenAiChatClient : IClaudeChatClient
 {
     private const decimal DefaultInputUsdPer1M = 3.00m;
     private const decimal DefaultOutputUsdPer1M = 15.00m;
+    private static readonly JsonSerializerOptions DirectJsonOptions = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
     private readonly ResolvedLlmConfig _config;
     private readonly ChatClient _client;
+    private readonly HttpClient? _directHttp;
 
     public OpenAiChatClient(ResolvedLlmConfig config, bool allowPrivateBaseUrls = false)
     {
@@ -22,26 +29,38 @@ public sealed class OpenAiChatClient : IClaudeChatClient
         if (string.IsNullOrWhiteSpace(config.ApiKey))
             throw new InvalidOperationException("OpenAI API key not configured.");
         _config = config;
+        var apiKey = NormalizeApiKey(config.ApiKey);
 
         var options = new OpenAIClientOptions();
         if (!string.IsNullOrWhiteSpace(config.BaseUrl))
         {
             var endpoint = new Uri(config.BaseUrl, UriKind.Absolute);
+            _directHttp = LlmBaseUrlGuard.CreateGuardedHttpClient(endpoint, allowPrivateBaseUrls, config.TimeoutSeconds ?? 120);
             options.Endpoint = endpoint;
-            options.Transport = new HttpClientPipelineTransport(LlmBaseUrlGuard.CreateGuardedHttpClient(endpoint, allowPrivateBaseUrls));
+            options.Transport = new HttpClientPipelineTransport(_directHttp);
         }
 
-        _client = new ChatClient(config.Model, new ApiKeyCredential(config.ApiKey), options);
+        _client = new ChatClient(config.Model, new ApiKeyCredential(apiKey), options);
     }
 
     // Test seam: inject a ChatClient backed by a stub transport so the request/usage mapping can be
     // exercised without a live OpenAI endpoint.
-    internal OpenAiChatClient(ChatClient client, ResolvedLlmConfig config)
+    internal OpenAiChatClient(ChatClient client, ResolvedLlmConfig config, HttpClient? directHttp = null)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(config);
         _config = config;
         _client = client;
+        _directHttp = directHttp;
+    }
+
+    internal static string NormalizeApiKey(string apiKey)
+    {
+        const string bearerPrefix = "Bearer ";
+        var trimmed = apiKey.Trim();
+        return trimmed.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase)
+            ? trimmed[bearerPrefix.Length..].TrimStart()
+            : trimmed;
     }
 
     private decimal InputRate => _config.InputUsdPer1M ?? DefaultInputUsdPer1M;
@@ -54,14 +73,21 @@ public sealed class OpenAiChatClient : IClaudeChatClient
         string userMessage,
         CancellationToken ct = default)
     {
-        var completion = await _client.CompleteChatAsync(BuildMessages(systemPrompt, history, userMessage), BuildOptions(), ct)
-            .ConfigureAwait(false);
+        try
+        {
+            var completion = await _client.CompleteChatAsync(BuildMessages(systemPrompt, history, userMessage), BuildOptions(), ct)
+                .ConfigureAwait(false);
 
-        var value = completion.Value;
-        var text = string.Concat(value.Content.Select(part => part.Text));
-        var inTok = value.Usage?.InputTokenCount ?? 0;
-        var outTok = value.Usage?.OutputTokenCount ?? 0;
-        return new ClaudeReply(text, inTok, outTok, Cost(inTok, outTok), _config.Model);
+            var value = completion.Value;
+            var text = string.Concat(value.Content.Select(part => part.Text));
+            var inTok = value.Usage?.InputTokenCount ?? 0;
+            var outTok = value.Usage?.OutputTokenCount ?? 0;
+            return new ClaudeReply(text, inTok, outTok, Cost(inTok, outTok), _config.Model);
+        }
+        catch (Exception ex) when (CanUseDirectFallback(ex))
+        {
+            return await CompleteDirectAsync(systemPrompt, history, userMessage, ct).ConfigureAwait(false);
+        }
     }
 
     // OpenAI SDK 2.11.0 exposes no public way to request streaming token-usage
@@ -75,18 +101,12 @@ public sealed class OpenAiChatClient : IClaudeChatClient
         string userMessage,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var completion = await _client.CompleteChatAsync(BuildMessages(systemPrompt, history, userMessage), BuildOptions(), ct)
-            .ConfigureAwait(false);
+        var reply = await CompleteAsync(systemPrompt, history, userMessage, ct).ConfigureAwait(false);
 
-        var value = completion.Value;
-        var text = string.Concat(value.Content.Select(part => part.Text));
-        var inTok = value.Usage?.InputTokenCount ?? 0;
-        var outTok = value.Usage?.OutputTokenCount ?? 0;
+        if (reply.Text.Length > 0)
+            yield return new ClaudeStreamChunk(reply.Text, Final: false, 0, 0, 0m, reply.Model);
 
-        if (text.Length > 0)
-            yield return new ClaudeStreamChunk(text, Final: false, 0, 0, 0m, _config.Model);
-
-        yield return new ClaudeStreamChunk(string.Empty, Final: true, inTok, outTok, Cost(inTok, outTok), _config.Model);
+        yield return new ClaudeStreamChunk(string.Empty, Final: true, reply.InputTokens, reply.OutputTokens, reply.UsdCost, reply.Model);
     }
 
     // Only emit a token cap when the config sets one explicitly. The OpenAI SDK serializes
@@ -95,6 +115,123 @@ public sealed class OpenAiChatClient : IClaudeChatClient
     // 3000 default here — the server's own default stands unless the admin opts in.
     private ChatCompletionOptions BuildOptions() =>
         _config.MaxOutputTokens is int max ? new() { MaxOutputTokenCount = max } : new();
+
+    private bool CanUseDirectFallback(Exception ex) =>
+        _directHttp is not null
+        && !string.IsNullOrWhiteSpace(_config.BaseUrl)
+        && IsDirectFallbackEndpoint()
+        && IsFallbackStatus(ex);
+
+    private bool IsDirectFallbackEndpoint()
+    {
+        if (string.Equals(_config.Provider, "openai-compatible", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!string.Equals(_config.Provider, "openai", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return Uri.TryCreate(_config.BaseUrl, UriKind.Absolute, out var uri)
+            && !string.Equals(uri.Host, "api.openai.com", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsFallbackStatus(Exception ex) => ex switch
+    {
+        ClientResultException { Status: 400 or 401 or 403 or 404 or 422 } => true,
+        HttpRequestException { StatusCode: HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound or HttpStatusCode.UnprocessableEntity } => true,
+        _ => false,
+    };
+
+    private async Task<ClaudeReply> CompleteDirectAsync(
+        string systemPrompt,
+        IReadOnlyList<ChatTurn> history,
+        string userMessage,
+        CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, BuildDirectUrl())
+        {
+            Content = new StringContent(BuildDirectRequestBody(systemPrompt, history, userMessage), Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", NormalizeApiKey(_config.ApiKey));
+
+        using var response = await _directHttp!.SendAsync(request, ct).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException("OpenAI-compatible fallback failed.", null, response.StatusCode);
+
+        return ParseDirectReply(body);
+    }
+
+    private string BuildDirectUrl() => _config.BaseUrl!.TrimEnd('/') + "/chat/completions";
+
+    private string BuildDirectRequestBody(string systemPrompt, IReadOnlyList<ChatTurn> history, string userMessage)
+    {
+        var messages = new List<DirectMessage>(history.Count + 1);
+        foreach (var turn in history)
+            messages.Add(new DirectMessage(turn.Role == "assistant" ? "assistant" : "user", [new DirectTextPart("text", turn.Content)]));
+
+        var currentUserMessage = string.IsNullOrWhiteSpace(systemPrompt)
+            ? userMessage
+            : systemPrompt + "\n\n" + userMessage;
+        messages.Add(new DirectMessage("user", [new DirectTextPart("text", currentUserMessage)]));
+
+        return JsonSerializer.Serialize(new DirectRequest(_config.Model, messages, _config.MaxOutputTokens), DirectJsonOptions);
+    }
+
+    private ClaudeReply ParseDirectReply(string body)
+    {
+        var parsed = JsonSerializer.Deserialize<DirectResponse>(body);
+        var text = ExtractDirectText(parsed?.Choices?.FirstOrDefault()?.Message?.Content);
+        var inTok = parsed?.Usage?.PromptTokens ?? 0;
+        var outTok = parsed?.Usage?.CompletionTokens ?? 0;
+        return new ClaudeReply(text, inTok, outTok, Cost(inTok, outTok), _config.Model);
+    }
+
+    private static string ExtractDirectText(JsonElement? content)
+    {
+        if (content is null)
+            return string.Empty;
+
+        var value = content.Value;
+        if (value.ValueKind == JsonValueKind.String)
+            return value.GetString() ?? string.Empty;
+
+        if (value.ValueKind != JsonValueKind.Array)
+            return string.Empty;
+
+        var text = new StringBuilder();
+        foreach (var part in value.EnumerateArray())
+        {
+            if (part.TryGetProperty("text", out var partText) && partText.ValueKind == JsonValueKind.String)
+                text.Append(partText.GetString());
+        }
+
+        return text.ToString();
+    }
+
+    private sealed record DirectRequest(
+        [property: JsonPropertyName("model")] string Model,
+        [property: JsonPropertyName("messages")] IReadOnlyList<DirectMessage> Messages,
+        [property: JsonPropertyName("max_tokens")] int? MaxTokens);
+
+    private sealed record DirectMessage(
+        [property: JsonPropertyName("role")] string Role,
+        [property: JsonPropertyName("content")] IReadOnlyList<DirectTextPart> Content);
+
+    private sealed record DirectTextPart(
+        [property: JsonPropertyName("type")] string Type,
+        [property: JsonPropertyName("text")] string Text);
+
+    private sealed record DirectResponse(
+        [property: JsonPropertyName("choices")] DirectChoice[]? Choices,
+        [property: JsonPropertyName("usage")] DirectUsage? Usage);
+
+    private sealed record DirectChoice([property: JsonPropertyName("message")] DirectResponseMessage? Message);
+
+    private sealed record DirectResponseMessage([property: JsonPropertyName("content")] JsonElement? Content);
+
+    private sealed record DirectUsage(
+        [property: JsonPropertyName("prompt_tokens")] int PromptTokens,
+        [property: JsonPropertyName("completion_tokens")] int CompletionTokens);
 
     private static List<ChatMessage> BuildMessages(string systemPrompt, IReadOnlyList<ChatTurn> history, string userMessage)
     {
