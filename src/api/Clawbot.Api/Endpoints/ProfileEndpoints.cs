@@ -73,20 +73,28 @@ public static class ProfileEndpoints
         if (user is null) return Results.Unauthorized();
         if (file is null || file.Length == 0) return Results.BadRequest("Thiếu file ảnh.");
         if (file.Length > 2 * 1024 * 1024) return Results.BadRequest("Ảnh tối đa 2MB.");
-        if (!(file.ContentType ?? string.Empty).StartsWith("image/", StringComparison.OrdinalIgnoreCase))
-            return Results.BadRequest("Chỉ chấp nhận file ảnh.");
-
-        var ext = Path.GetExtension(file.FileName);
-        if (string.IsNullOrWhiteSpace(ext)) ext = ".png";
 
         using var ms = new MemoryStream();
         await file.CopyToAsync(ms, ct);
-        var url = await storage.SaveAsync(ms.ToArray(), $"avatar-{user.Id}{ext}", file.ContentType, ct);
+        var bytes = ms.ToArray();
+        if (!ContentEndpoints.LooksLikeAllowedImage(bytes, file.ContentType))
+            return Results.BadRequest("Chỉ chấp nhận file ảnh PNG, JPG, WebP hoặc GIF.");
+
+        var url = await storage.SaveAsync(bytes, $"avatar-{Guid.NewGuid():N}{AvatarExtension(file.ContentType)}", file.ContentType, ct);
 
         user.AvatarUrl = url;
         await users.UpdateAsync(user);
         return Results.Ok(new { avatarUrl = url });
     }
+
+    private static string AvatarExtension(string? contentType) => contentType?.ToLowerInvariant() switch
+    {
+        "image/gif" => ".gif",
+        "image/jpeg" => ".jpg",
+        "image/png" => ".png",
+        "image/webp" => ".webp",
+        _ => ".png",
+    };
 
     private static async Task<IResult> LoginHistoryAsync(
         UserManager<AppUser> users,

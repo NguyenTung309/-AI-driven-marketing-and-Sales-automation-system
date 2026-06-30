@@ -1,3 +1,4 @@
+using System.Net;
 using Clawbot.Api.Endpoints;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -15,6 +16,10 @@ public sealed class LlmConfigValidationTests
     [InlineData("openai", "https://api.openai.com/", "https://api.openai.com/v1")]
     [InlineData("openai", "https://api.openai.com/v1", "https://api.openai.com/v1")]
     [InlineData("openai", "https://host/openai/v1", "https://host/openai/v1")]
+    [InlineData("openai", "https://api.openai.com/v1/chat/completions", "https://api.openai.com/v1")]
+    [InlineData("openai-compatible", "https://aigatewayport.com/v1/chat/completions", "https://aigatewayport.com/v1")]
+    [InlineData("openai-compatible", "https://host/api/openai", "https://host/api/openai")]
+    [InlineData("openai-compatible", "https://host/api/openai/chat/completions", "https://host/api/openai")]
     [InlineData("anthropic", "https://api.anthropic.com", "https://api.anthropic.com")]
     [InlineData("anthropic", "https://api.anthropic.com/v1", "https://api.anthropic.com")]
     [InlineData("anthropic", "https://api.anthropic.com/v1/", "https://api.anthropic.com")]
@@ -51,6 +56,37 @@ public sealed class LlmConfigValidationTests
     }
 
 
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, "llm_connection_auth_failed")]
+    [InlineData(HttpStatusCode.Forbidden, "llm_connection_auth_failed")]
+    [InlineData(HttpStatusCode.TooManyRequests, "llm_connection_rate_limited")]
+    [InlineData(HttpStatusCode.BadRequest, "llm_connection_invalid_request")]
+    [InlineData(HttpStatusCode.NotFound, "llm_connection_invalid_request")]
+    [InlineData(HttpStatusCode.UnprocessableEntity, "llm_connection_invalid_request")]
+    [InlineData(HttpStatusCode.BadGateway, "llm_connection_upstream_error")]
+    public void SafeTestConnectionError_maps_http_statuses(HttpStatusCode status, string expected)
+    {
+        var error = LlmConfigsEndpoints.SafeTestConnectionError(new HttpRequestException("https://internal.local secret stack", null, status));
+
+        error.Should().Be(expected);
+    }
+
+    [Fact]
+    public void SafeTestConnectionError_maps_network_failures_without_status()
+    {
+        var error = LlmConfigsEndpoints.SafeTestConnectionError(new HttpRequestException("https://internal.local secret stack"));
+
+        error.Should().Be("llm_connection_unreachable");
+    }
+
+    [Fact]
+    public void SafeTestConnectionError_maps_timeouts()
+    {
+        var error = LlmConfigsEndpoints.SafeTestConnectionError(new TimeoutException("https://internal.local secret stack"));
+
+        error.Should().Be("llm_connection_timeout");
+    }
+
     [Fact]
     public void SafeTestConnectionError_does_not_expose_raw_exception_message()
     {
@@ -58,6 +94,28 @@ public sealed class LlmConfigValidationTests
 
         error.Should().Be("llm_connection_test_failed");
     }
+
+    [Fact]
+    public void MaskSecret_returns_hint_without_exposing_full_secret()
+    {
+        LlmConfigsEndpoints.MaskSecret("aigw_FmRCnmFJ8mZATw1DjDp4FTm0OYpckYvx")
+            .Should().Be("aigw_F...kYvx");
+    }
+
+    [Fact]
+    public void SecretHash_returns_stable_short_fingerprint()
+    {
+        LlmConfigsEndpoints.SecretHash("token").Should().Be(LlmConfigsEndpoints.SecretHash(" token "));
+        LlmConfigsEndpoints.SecretHash("token").Should().HaveLength(12);
+    }
+
+    [Fact]
+    public void TestConnectionStatus_maps_provider_status_codes()
+    {
+        LlmConfigsEndpoints.TestConnectionStatus(new HttpRequestException("auth", null, HttpStatusCode.Unauthorized))
+            .Should().Be(401);
+    }
+
 
     [Theory]
     [InlineData("Development", "true", true)]

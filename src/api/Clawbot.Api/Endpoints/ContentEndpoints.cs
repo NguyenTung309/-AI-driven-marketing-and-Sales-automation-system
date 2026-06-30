@@ -21,6 +21,8 @@ namespace Clawbot.Api.Endpoints;
 
 public static class ContentEndpoints
 {
+    private const int MaxAssetsPerContentItem = 10;
+    private const int MaxAssetUrlChars = 2048;
     private const long MaxAssetUploadBytes = 5 * 1024 * 1024;
     private static readonly HashSet<string> AllowedAssetContentTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -260,7 +262,11 @@ public static class ContentEndpoints
 
         item.UpdateBody(body.Body, clock.UtcNow);
         if (body.AssetsJson is not null)
-            item.SetAssets(body.AssetsJson, clock.UtcNow);
+        {
+            if (!TryNormalizeAssetsJson(body.AssetsJson, out var normalizedAssetsJson))
+                return Error(http, StatusCodes.Status400BadRequest, "content.assets_invalid", "assetsJson must be an image asset array.");
+            item.SetAssets(normalizedAssetsJson, clock.UtcNow);
+        }
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.Ok(ToDto(item));
@@ -291,8 +297,12 @@ public static class ContentEndpoints
 
         using var ms = new MemoryStream();
         await file.CopyToAsync(ms, ct).ConfigureAwait(false);
+        var bytes = ms.ToArray();
+        if (!LooksLikeAllowedImage(bytes, file.ContentType))
+            return Error(http, StatusCodes.Status400BadRequest, "content.asset_invalid_type", "File không khớp định dạng ảnh.");
+
         var fileName = $"content-{item.Id}-{Guid.NewGuid():N}{ResolveAssetExtension(file)}";
-        var url = await storage.SaveAsync(ms.ToArray(), fileName, file.ContentType, ct).ConfigureAwait(false);
+        var url = await storage.SaveAsync(bytes, fileName, file.ContentType, ct).ConfigureAwait(false);
         var assetsJson = AddImageAsset(item.AssetsJson, url, file.FileName, file.ContentType);
         item.SetAssets(assetsJson, clock.UtcNow);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -671,31 +681,94 @@ public static class ContentEndpoints
 
     internal static string AddImageAsset(string assetsJson, string url, string? fileName, string? contentType)
     {
-        var assets = ParseAssetsArray(assetsJson);
-        assets.Add(new JsonObject
+        _ = TryNormalizeAssetsJson(assetsJson, out var normalizedExisting);
+        var assets = JsonNode.Parse(normalizedExisting) as JsonArray ?? [];
+        assets.Add(CreateAssetObject(url, fileName, contentType));
+        return assets.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    }
+
+    internal static bool TryNormalizeAssetsJson(string assetsJson, out string normalized)
+    {
+        normalized = "[]";
+        if (string.IsNullOrWhiteSpace(assetsJson))
+            return true;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(assetsJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                return false;
+
+            var assets = new JsonArray();
+            foreach (var asset in doc.RootElement.EnumerateArray())
+            {
+                if (assets.Count >= MaxAssetsPerContentItem || !TryReadImageAsset(asset, out var url, out var fileName, out var contentType))
+                    return false;
+                assets.Add(CreateAssetObject(url, fileName, contentType));
+            }
+            normalized = assets.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReadImageAsset(JsonElement asset, out string url, out string? fileName, out string? contentType)
+    {
+        url = string.Empty;
+        fileName = null;
+        contentType = null;
+        if (asset.ValueKind != JsonValueKind.Object)
+            return false;
+        var type = asset.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : "image";
+        if (!string.Equals(type, "image", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!asset.TryGetProperty("url", out var urlElement) || urlElement.ValueKind != JsonValueKind.String)
+            return false;
+        url = urlElement.GetString() ?? string.Empty;
+        if (!IsAllowedAssetUrl(url))
+            return false;
+        if (asset.TryGetProperty("fileName", out var fileNameElement) && fileNameElement.ValueKind == JsonValueKind.String)
+            fileName = fileNameElement.GetString();
+        if (asset.TryGetProperty("contentType", out var contentTypeElement) && contentTypeElement.ValueKind == JsonValueKind.String)
+            contentType = contentTypeElement.GetString();
+        return string.IsNullOrWhiteSpace(contentType) || AllowedAssetContentTypes.Contains(contentType);
+    }
+
+    private static bool IsAllowedAssetUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || url.Length > MaxAssetUrlChars)
+            return false;
+        return Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
+    }
+
+    private static JsonObject CreateAssetObject(string url, string? fileName, string? contentType) =>
+        new()
         {
             ["type"] = "image",
             ["url"] = url,
             ["fileName"] = string.IsNullOrWhiteSpace(fileName) ? null : Path.GetFileName(fileName),
-            ["contentType"] = contentType ?? string.Empty,
-        });
-        return assets.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web));
-    }
+            ["contentType"] = string.IsNullOrWhiteSpace(contentType) ? null : contentType,
+        };
 
-    private static JsonArray ParseAssetsArray(string assetsJson)
-    {
-        if (string.IsNullOrWhiteSpace(assetsJson))
-            return [];
-
-        try
+    internal static bool LooksLikeAllowedImage(ReadOnlySpan<byte> bytes, string? contentType) =>
+        contentType?.ToLowerInvariant() switch
         {
-            return JsonNode.Parse(assetsJson) as JsonArray ?? [];
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
-    }
+            "image/png" => bytes.Length >= 8
+                && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47
+                && bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A,
+            "image/jpeg" => bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF,
+            "image/gif" => bytes.Length >= 6
+                && bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x38
+                && (bytes[4] == 0x37 || bytes[4] == 0x39) && bytes[5] == 0x61,
+            "image/webp" => bytes.Length >= 12
+                && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46
+                && bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50,
+            _ => false,
+        };
 
     private static string ResolveAssetExtension(IFormFile file)
     {

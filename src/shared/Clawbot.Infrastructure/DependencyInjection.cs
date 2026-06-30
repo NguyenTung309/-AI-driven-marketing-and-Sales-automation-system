@@ -152,8 +152,8 @@ public static class DependencyInjection
         services.Configure<GraphPublisherOptions>(cfg.GetSection(GraphPublisherOptions.SectionName));
         // SPEC-16 Module M-1: encrypted DB credential resolver for FB/Zalo (falls back to options in GraphSocialPublisher).
         services.AddScoped<ISocialCredentialResolver, EfSocialCredentialResolver>();
-        var graphPublisherEnabled = cfg.GetSection($"{GraphPublisherOptions.SectionName}:Facebook:Enabled").Exists()
-            || cfg.GetSection($"{GraphPublisherOptions.SectionName}:Zalo:Enabled").Exists();
+        var graphPublisherOptions = cfg.GetSection(GraphPublisherOptions.SectionName).Get<GraphPublisherOptions>() ?? new GraphPublisherOptions();
+        var graphPublisherEnabled = graphPublisherOptions.Facebook.Enabled || graphPublisherOptions.Zalo.Enabled;
         if (graphPublisherEnabled)
         {
             services.AddHttpClient<ISocialPublisher, GraphSocialPublisher>()
