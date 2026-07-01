@@ -79,7 +79,7 @@ export default function OrchestrationV2Page() {
 
   const agents = useQuery({ queryKey: ["orchestration-v2", "agents"], queryFn: listOrchestrationV2Agents });
   const schedules = useQuery({ queryKey: ["orchestration-v2", "schedules"], queryFn: listOrchestrationV2Schedules });
-  const runs = useQuery({ queryKey: ["orchestration-v2", "runs"], queryFn: listOrchestrationV2Runs });
+  const runs = useQuery({ queryKey: ["orchestration-v2", "runs"], queryFn: () => listOrchestrationV2Runs() });
 
   const refreshAll = async (): Promise<void> => {
     await Promise.all([

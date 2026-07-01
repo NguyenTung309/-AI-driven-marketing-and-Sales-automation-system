@@ -5,102 +5,27 @@ import { Alert } from "@/shared/ui/Alert";
 import { Button } from "@/shared/ui/Button";
 import { Card } from "@/shared/ui/Card";
 import { Modal } from "@/shared/ui/Modal";
-import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
+import { StatusPill } from "@/shared/ui/StatusPill";
 import { useAuthStore } from "@/shared/auth/authStore";
 import { toSafeOperationalText, operationalPhaseLabel } from "@/shared/utils/userText";
 import { TaskResultDetails } from "./TaskResultDetails";
+import { statusLabel, statusTone, taskTone, tasksByDepth } from "./orchestrationStatus";
 import {
-  approveOrchestration,
-  archiveOrchestrationRun,
-  controlOrchestration,
-  controlOrchestrationRun,
-  getOrchestrationPlan,
-  getOrchestrationTrace,
-  listOrchestrationRuns,
-  submitOrchestration,
-  updateOrchestrationPlan,
-  type OrchestrationControlAction,
-  type OrchestrationRunListItem,
-  type OrchestrationSessionDto,
-  type OrchestrationStatus,
-  type OrchestrationTaskDto,
-  type OrchestrationTraceDto,
-} from "@/shared/api/orchestration";
+  approveOrchestrationV2Run,
+  archiveOrchestrationV2Run,
+  controlOrchestrationV2Run,
+  createOrchestrationV2Run,
+  getOrchestrationV2Run,
+  listOrchestrationV2Runs,
+  updateOrchestrationV2Plan,
+  type OrchestrationV2ControlAction,
+  type OrchestrationV2RunSummary,
+  type OrchestrationV2Status,
+  type OrchestrationV2Trace,
+} from "@/shared/api/orchestrationV2";
 
-const ACTIVE_STATUSES = new Set<OrchestrationStatus>(["draft", "pending_approval", "running", "paused"]);
+const ACTIVE_STATUSES = new Set<OrchestrationV2Status>(["draft", "pending_approval", "running", "paused"]);
 const POLL_INTERVAL_MS = 3_000;
-
-function statusTone(status: OrchestrationStatus): StatusTone {
-  switch (status) {
-    case "completed":
-      return "success";
-    case "failed":
-    case "cancelled":
-      return "error";
-    case "running":
-    case "paused":
-    case "pending_approval":
-      return "warning";
-    default:
-      return "neutral";
-  }
-}
-
-function statusLabel(status: OrchestrationStatus): string {
-  switch (status) {
-    case "draft":
-      return "Nháp";
-    case "pending_approval":
-      return "Chờ phê duyệt";
-    case "running":
-      return "Đang chạy";
-    case "paused":
-      return "Tạm dừng";
-    case "completed":
-      return "Hoàn tất";
-    case "failed":
-      return "Thất bại";
-    case "cancelled":
-      return "Đã hủy";
-    default:
-      return status;
-  }
-}
-
-function taskTone(status: string): StatusTone {
-  switch (status) {
-    case "completed":
-      return "success";
-    case "failed":
-      return "error";
-    case "skipped":
-      return "neutral";
-    default:
-      return "warning";
-  }
-}
-
-// SPEC-16 P3-2: order tasks by dependency depth (topological) so the DAG reads root→leaf, and expose each
-// task's depth for indentation — a lightweight graph visualization without a layout engine.
-function tasksByDepth(tasks: readonly OrchestrationTaskDto[]): readonly { task: OrchestrationTaskDto; depth: number }[] {
-  const depthById = new Map<string, number>();
-  const byId = new Map(tasks.map((t) => [t.id, t]));
-  const resolve = (id: string): number => {
-    const cached = depthById.get(id);
-    if (cached !== undefined) return cached;
-    const task = byId.get(id);
-    if (!task || task.dependsOn.length === 0) {
-      depthById.set(id, 0);
-      return 0;
-    }
-    const d = 1 + Math.max(...task.dependsOn.map((dep) => resolve(dep)));
-    depthById.set(id, d);
-    return d;
-  };
-  return tasks
-    .map((task) => ({ task, depth: resolve(task.id) }))
-    .sort((a, b) => a.depth - b.depth || a.task.id.localeCompare(b.task.id));
-}
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -138,7 +63,7 @@ export function OrchestrationPanel() {
   // Durable session state: read by sessionId from the URL so it survives route changes and F5.
   const sessionQuery = useQuery({
     queryKey: ["orchestration", "session", sessionId],
-    queryFn: () => getOrchestrationPlan(sessionId!),
+    queryFn: () => getOrchestrationV2Run(sessionId!),
     enabled: Boolean(sessionId),
     refetchInterval: (query) =>
       query.state.data && ACTIVE_STATUSES.has(query.state.data.status) ? POLL_INTERVAL_MS : false,
@@ -148,22 +73,17 @@ export function OrchestrationPanel() {
   // SPEC-16 P3-6: recent/in-flight run list (URL-independent) so the user can switch runs without a sessionId in hand.
   const runsQuery = useQuery({
     queryKey: ["orchestration", "runs"],
-    queryFn: () => listOrchestrationRuns(false),
+    queryFn: () => listOrchestrationV2Runs(false),
     refetchInterval: POLL_INTERVAL_MS,
   });
 
-  const traceQuery = useQuery({
-    queryKey: ["orchestration", "trace", sessionId],
-    queryFn: () => getOrchestrationTrace(sessionId!),
-    enabled: Boolean(sessionId),
-    refetchInterval: () => (session && ACTIVE_STATUSES.has(session.status) ? POLL_INTERVAL_MS : false),
-  });
-  const traceItems = traceQuery.data ?? [];
+  // Traces are embedded in the run-detail response, so no separate polling query is needed.
+  const traceItems = session?.traces ?? [];
 
   // Group tool-action traces (tool_executed/tool_failed/tool_blocked/…) by the task that produced them, so each
   // agent step can show exactly what it did on the system.
   const toolTracesByTask = useMemo(() => {
-    const map = new Map<string, OrchestrationTraceDto[]>();
+    const map = new Map<string, OrchestrationV2Trace[]>();
     for (const trace of traceItems) {
       if (!trace.phase?.toLowerCase().startsWith("tool")) continue;
       const list = map.get(trace.taskId) ?? [];
@@ -182,38 +102,33 @@ export function OrchestrationPanel() {
   const setPlanDraft = (text: string): void =>
     setDraft((current) => ({ source: current?.source ?? planSource ?? "", text }));
 
-  const onSession = (next: OrchestrationSessionDto): void => {
-    queryClient.setQueryData(["orchestration", "session", next.sessionId], next);
-    setSessionId(next.sessionId);
-  };
-
   const submit = useMutation({
-    mutationFn: () => submitOrchestration(goal.trim()),
-    onSuccess: onSession,
+    mutationFn: () => createOrchestrationV2Run(goal.trim()),
+    onSuccess: (result) => setSessionId(result.sessionId),
   });
   const approve = useMutation({
-    mutationFn: (vars: { sessionId: string; etag: string }) => approveOrchestration(vars.sessionId, vars.etag),
-    onSuccess: onSession,
+    mutationFn: (vars: { sessionId: string; etag: string }) => approveOrchestrationV2Run(vars.sessionId, vars.etag),
+    onSuccess: () => sessionQuery.refetch(),
   });
   const control = useMutation({
-    mutationFn: (vars: { sessionId: string; action: OrchestrationControlAction; etag: string }) =>
-      controlOrchestration(vars.sessionId, vars.action, vars.etag),
-    onSuccess: onSession,
+    mutationFn: (vars: { sessionId: string; action: OrchestrationV2ControlAction; etag: string }) =>
+      controlOrchestrationV2Run(vars.sessionId, vars.action, vars.etag),
+    onSuccess: () => sessionQuery.refetch(),
   });
   const updatePlan = useMutation({
     mutationFn: (vars: { sessionId: string; planJson: string; etag: string }) =>
-      updateOrchestrationPlan(vars.sessionId, vars.planJson, vars.etag),
-    onSuccess: onSession,
+      updateOrchestrationV2Plan(vars.sessionId, vars.planJson, vars.etag),
+    onSuccess: () => sessionQuery.refetch(),
   });
   const archiveRun = useMutation({
-    mutationFn: archiveOrchestrationRun,
+    mutationFn: archiveOrchestrationV2Run,
     onSuccess: async (_data, archivedSessionId) => {
       if (sessionId === archivedSessionId) setSessionId(null);
       await queryClient.invalidateQueries({ queryKey: ["orchestration", "runs"] });
     },
   });
   const cancelRun = useMutation({
-    mutationFn: (runSessionId: string) => controlOrchestrationRun(runSessionId, "cancel"),
+    mutationFn: (runSessionId: string) => controlOrchestrationV2Run(runSessionId, "cancel"),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["orchestration", "runs"] });
     },
@@ -315,7 +230,7 @@ export function OrchestrationPanel() {
         {runsQuery.isFetching && <p className="text-label-sm text-on-surface-variant">Đang cập nhật...</p>}
         {runsQuery.data && runsQuery.data.length > 0 ? (
           <ul className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto pr-1">
-            {runsQuery.data.map((run: OrchestrationRunListItem) => {
+            {runsQuery.data.map((run: OrchestrationV2RunSummary) => {
               const canCancelRun = run.status === "running" || run.status === "paused";
               const canArchiveRun = run.status === "completed" || run.status === "failed" || run.status === "cancelled";
               return (
@@ -466,7 +381,7 @@ export function OrchestrationPanel() {
           <div className="rounded-lg border border-outline p-3">
             <div className="flex items-center justify-between">
               <h3 className="text-label-md text-on-surface">Nhật ký điều phối</h3>
-              {traceQuery.isFetching && <span className="text-label-sm text-on-surface-variant">đang cập nhật...</span>}
+              {sessionQuery.isFetching && <span className="text-label-sm text-on-surface-variant">đang cập nhật...</span>}
             </div>
             {traceItems.length > 0 ? (
               <ul className="mt-2 flex flex-col gap-1">

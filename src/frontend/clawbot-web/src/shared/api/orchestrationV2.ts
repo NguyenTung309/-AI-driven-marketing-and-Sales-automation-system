@@ -31,12 +31,25 @@ export interface OrchestrationV2RunNowResponse {
   readonly nextRunAt: string;
 }
 
+export type OrchestrationV2Status =
+  | "draft"
+  | "pending_approval"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | string;
+
+export type OrchestrationV2ControlAction = "pause" | "resume" | "cancel";
+
 export interface OrchestrationV2RunSummary {
   readonly sessionId: string;
-  readonly status: string;
+  readonly status: OrchestrationV2Status;
   readonly goal: string | null;
   readonly startedAt: string;
   readonly finishedAt: string | null;
+  readonly userId?: string | null;
 }
 
 export interface OrchestrationV2Trace {
@@ -58,7 +71,36 @@ export interface OrchestrationV2Message {
   readonly processedAt: string | null;
 }
 
-export interface OrchestrationV2RunDetail extends OrchestrationV2RunSummary {
+export interface OrchestrationV2TaskDto {
+  readonly id: string;
+  readonly agent: string;
+  readonly description: string;
+  readonly dependsOn: readonly string[];
+  readonly input: Readonly<Record<string, string>>;
+  readonly status: string;
+  readonly output: string | null;
+  readonly error: string | null;
+  readonly useCount?: number;
+  readonly currentTaskId?: string | null;
+}
+
+export interface OrchestrationV2Plan {
+  readonly sessionId: string;
+  readonly status: OrchestrationV2Status;
+  readonly goal: string;
+  readonly requiresApproval: boolean;
+  readonly costBlocked: boolean;
+  readonly costReason: string | null;
+  readonly replanCount: number;
+  readonly etag: string;
+  readonly planJson: string;
+  readonly tasks: readonly OrchestrationV2TaskDto[];
+}
+
+export interface OrchestrationV2RunDetail extends OrchestrationV2Plan {
+  readonly startedAt: string;
+  readonly finishedAt: string | null;
+  readonly archivedAt: string | null;
   readonly traces: readonly OrchestrationV2Trace[];
   readonly messages: readonly OrchestrationV2Message[];
 }
@@ -108,8 +150,13 @@ export async function runOrchestrationV2ScheduleNow(id: string): Promise<Orchest
   return res.data;
 }
 
-export async function listOrchestrationV2Runs(): Promise<readonly OrchestrationV2RunSummary[]> {
-  const res = await apiClient.get<ListResponse<OrchestrationV2RunSummary>>("/api/orchestration/v2/runs");
+// `mine` filters to the current user's runs; `archived` switches to the archived list.
+export async function listOrchestrationV2Runs(mine = false, archived = false): Promise<readonly OrchestrationV2RunSummary[]> {
+  const params = new URLSearchParams();
+  if (mine) params.set("mine", "true");
+  if (archived) params.set("archived", "true");
+  const suffix = params.toString() ? `?${params}` : "";
+  const res = await apiClient.get<ListResponse<OrchestrationV2RunSummary>>(`/api/orchestration/v2/runs${suffix}`);
   return res.data.items;
 }
 
@@ -120,5 +167,41 @@ export async function createOrchestrationV2Run(goal: string): Promise<{ readonly
 
 export async function getOrchestrationV2Run(id: string): Promise<OrchestrationV2RunDetail> {
   const res = await apiClient.get<OrchestrationV2RunDetail>(`/api/orchestration/v2/runs/${encodeURIComponent(id)}`);
+  return res.data;
+}
+
+export async function updateOrchestrationV2Plan(sessionId: string, planJson: string, etag: string): Promise<OrchestrationV2Plan> {
+  const res = await apiClient.put<OrchestrationV2Plan>(
+    `/api/orchestration/v2/runs/${encodeURIComponent(sessionId)}/plan`,
+    { planJson, etag },
+  );
+  return res.data;
+}
+
+export async function approveOrchestrationV2Run(sessionId: string, etag: string): Promise<OrchestrationV2Plan> {
+  const res = await apiClient.post<OrchestrationV2Plan>(`/api/orchestration/v2/runs/${encodeURIComponent(sessionId)}/approve`, { etag });
+  return res.data;
+}
+
+// `etag` is optional because the recent-runs list (OrchestrationV2RunSummary) doesn't carry one; omitting it
+// preserves today's behavior for that path (control still requires a match, so an etag-less call there 409s).
+export async function controlOrchestrationV2Run(
+  sessionId: string,
+  action: OrchestrationV2ControlAction,
+  etag?: string,
+): Promise<{ readonly sessionId: string; readonly status: string }> {
+  const res = await apiClient.post<{ readonly sessionId: string; readonly status: string }>(
+    `/api/orchestration/v2/runs/${encodeURIComponent(sessionId)}/control`,
+    { action, etag },
+  );
+  return res.data;
+}
+
+export async function archiveOrchestrationV2Run(
+  sessionId: string,
+): Promise<{ readonly sessionId: string; readonly status: string; readonly archivedAt: string | null }> {
+  const res = await apiClient.post<{ readonly sessionId: string; readonly status: string; readonly archivedAt: string | null }>(
+    `/api/orchestration/v2/runs/${encodeURIComponent(sessionId)}/archive`,
+  );
   return res.data;
 }

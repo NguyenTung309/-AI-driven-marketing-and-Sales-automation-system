@@ -1,5 +1,5 @@
 import { splitToolResults, operationalPhaseLabel } from "@/shared/utils/userText";
-import type { OrchestrationTaskDto, OrchestrationTraceDto } from "@/shared/api/orchestration";
+import type { OrchestrationV2TaskDto, OrchestrationV2Trace } from "@/shared/api/orchestrationV2";
 
 // Renders the per-agent step detail: structured tool results (content_id, post_url…), the tool actions that
 // ran, the human-readable output, and the static input. Shared by the dashboard panel and the run-detail page.
@@ -7,8 +7,8 @@ export function TaskResultDetails({
   task,
   toolTraces,
 }: {
-  readonly task: OrchestrationTaskDto;
-  readonly toolTraces: readonly OrchestrationTraceDto[];
+  readonly task: OrchestrationV2TaskDto;
+  readonly toolTraces: readonly OrchestrationV2Trace[];
 }) {
   const { text, toolResults } = splitToolResults(task.output);
   const hasInput = Object.keys(task.input).length > 0;

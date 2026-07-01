@@ -1,0 +1,76 @@
+import type { StatusTone } from "@/shared/ui/StatusPill";
+import type { OrchestrationV2Status, OrchestrationV2TaskDto } from "@/shared/api/orchestrationV2";
+
+export function statusTone(status: OrchestrationV2Status): StatusTone {
+  switch (status) {
+    case "completed":
+      return "success";
+    case "failed":
+    case "cancelled":
+      return "error";
+    case "running":
+    case "paused":
+    case "pending_approval":
+      return "warning";
+    default:
+      return "neutral";
+  }
+}
+
+export function statusLabel(status: OrchestrationV2Status): string {
+  switch (status) {
+    case "draft":
+      return "Nháp";
+    case "pending_approval":
+      return "Chờ phê duyệt";
+    case "running":
+      return "Đang chạy";
+    case "paused":
+      return "Tạm dừng";
+    case "completed":
+      return "Hoàn tất";
+    case "failed":
+      return "Thất bại";
+    case "cancelled":
+      return "Đã hủy";
+    default:
+      return status;
+  }
+}
+
+export function taskTone(status: string): StatusTone {
+  switch (status) {
+    case "completed":
+      return "success";
+    case "failed":
+      return "error";
+    case "skipped":
+      return "neutral";
+    default:
+      return "warning";
+  }
+}
+
+// SPEC-16 P3-2: order tasks by dependency depth (topological) so the DAG reads root→leaf, and expose each
+// task's depth for indentation — a lightweight graph visualization without a layout engine.
+export function tasksByDepth(
+  tasks: readonly OrchestrationV2TaskDto[],
+): readonly { task: OrchestrationV2TaskDto; depth: number }[] {
+  const depthById = new Map<string, number>();
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const resolve = (id: string): number => {
+    const cached = depthById.get(id);
+    if (cached !== undefined) return cached;
+    const task = byId.get(id);
+    if (!task || task.dependsOn.length === 0) {
+      depthById.set(id, 0);
+      return 0;
+    }
+    const d = 1 + Math.max(...task.dependsOn.map((dep) => resolve(dep)));
+    depthById.set(id, d);
+    return d;
+  };
+  return tasks
+    .map((task) => ({ task, depth: resolve(task.id) }))
+    .sort((a, b) => a.depth - b.depth || a.task.id.localeCompare(b.task.id));
+}
