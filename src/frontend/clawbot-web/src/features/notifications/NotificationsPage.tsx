@@ -12,9 +12,9 @@ import {
   type NotificationSeverity,
 } from "@/shared/api/notifications";
 import { useNotificationsRealtime } from "./useNotificationsRealtime";
+import { toneClasses, type SemanticTone } from "@/shared/theme/colors";
 
 type NotificationTab = "all" | "unread" | "system" | "lead";
-type NotificationTone = "info" | "success" | "warning" | "error";
 
 const TABS: readonly { value: NotificationTab; label: string }[] = [
   { value: "all", label: "Tất cả" },
@@ -28,19 +28,12 @@ function normalize(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function notificationTone(severity: NotificationSeverity): NotificationTone {
+function notificationTone(severity: NotificationSeverity): SemanticTone {
   const value = normalize(severity);
   if (value.includes("error") || value.includes("critical")) return "error";
   if (value.includes("warn")) return "warning";
   if (value.includes("success")) return "success";
   return "info";
-}
-
-function toneClasses(tone: NotificationTone): string {
-  if (tone === "error") return "bg-red-100 text-red-700";
-  if (tone === "warning") return "bg-amber-100 text-amber-700";
-  if (tone === "success") return "bg-emerald-100 text-emerald-700";
-  return "bg-blue-100 text-blue-700";
 }
 
 function typeIcon(notification: AppNotification): string {

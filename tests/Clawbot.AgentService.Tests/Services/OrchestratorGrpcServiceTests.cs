@@ -38,32 +38,6 @@ public sealed class OrchestratorGrpcServiceTests
     """;
 
     [Fact]
-    public async Task Plan_and_trace_stream_planned_events_for_session()
-    {
-        using var harness = Harness.Build(OneTaskPlan);
-        var service = harness.Service;
-
-        var plan = await service.Plan(new PlanRequest
-        {
-            TenantId = TenantId.ToString("D"),
-            Goal = "chat with learner",
-        }, TestServerCallContext.Create());
-
-        plan.Tasks.Should().ContainSingle(task => task.Agent == "chat");
-
-        var stream = new CapturingTraceStream();
-        await service.Trace(new TraceRequest
-        {
-            TenantId = TenantId.ToString("D"),
-            SessionId = plan.SessionId,
-        }, stream, TestServerCallContext.Create());
-
-        stream.Messages.Should().ContainSingle();
-        stream.Messages[0].Phase.Should().Be("planned");
-        stream.Messages[0].Message.Should().Contain("chat");
-    }
-
-    [Fact]
     public async Task Submit_auto_runs_plan_to_completion()
     {
         using var harness = Harness.Build(OneTaskPlan);
@@ -105,26 +79,6 @@ public sealed class OrchestratorGrpcServiceTests
         planJson.Should().Contain("tasks");
         inputJson.Should().Contain("brief");
         inputJson.Should().NotContain("0912345678");
-    }
-
-    [Fact]
-    public async Task Trace_streams_persisted_dynamic_session_traces()
-    {
-        using var harness = Harness.Build(OneTaskPlan);
-        var submitted = await harness.Service.Submit(new SubmitRequest
-        {
-            TenantId = TenantId.ToString("D"),
-            Goal = "launch HSK4 campaign",
-        }, TestServerCallContext.Create());
-
-        var stream = new CapturingTraceStream();
-        await harness.Service.Trace(new TraceRequest
-        {
-            TenantId = TenantId.ToString("D"),
-            SessionId = submitted.SessionId,
-        }, stream, TestServerCallContext.Create());
-
-        stream.Messages.Should().Contain(message => message.TaskId == "t1" && message.Phase == "completed");
     }
 
     [Fact]
@@ -611,7 +565,6 @@ public sealed class OrchestratorGrpcServiceTests
             var catalog = new FakeCatalog();
             var planGen = new SemanticKernelPlanGenerator(new ClawbotChatCompletionService(new FixedChatClient(planJson, plannerError)));
             var costGuard = new OrchestratorCostGuard(tracker ?? new FixedTracker());
-            var legacy = new PlanningOrchestrator(new AgentRegistry([ChatAgentStub()]));
             var adapters = new IAgent[] { adapter };
             var clock = Substitute.For<IClock>();
             clock.UtcNow.Returns(clockAt ?? new DateTimeOffset(2026, 6, 21, 0, 0, 0, TimeSpan.Zero));
@@ -633,20 +586,13 @@ public sealed class OrchestratorGrpcServiceTests
                 clock);
 
             var service = new OrchestratorGrpcService(
-                legacy, planGen, autonomous, catalog, adapters, llmScopeValue, redactor, costGuard,
+                planGen, autonomous, catalog, adapters, llmScopeValue, redactor, costGuard,
                 dbHarness.Db, clock, NullLogger<OrchestratorGrpcService>.Instance);
 
             return new Harness(dbHarness, service);
         }
 
         public void Dispose() => _dbHarness.Dispose();
-
-        private static IAgent ChatAgentStub()
-        {
-            var agent = Substitute.For<IAgent>();
-            agent.Name.Returns("chat");
-            return agent;
-        }
     }
 
     private sealed class FakeCatalog : IAgentCatalog
@@ -801,18 +747,6 @@ public sealed class OrchestratorGrpcServiceTests
         {
             var reply = await CompleteAsync(systemPrompt, history, userMessage, ct).ConfigureAwait(false);
             yield return new ClaudeStreamChunk(reply.Text, Final: true, reply.InputTokens, reply.OutputTokens, reply.UsdCost, reply.Model);
-        }
-    }
-
-    private sealed class CapturingTraceStream : IServerStreamWriter<TraceEvent>
-    {
-        public List<TraceEvent> Messages { get; } = [];
-        public WriteOptions? WriteOptions { get; set; }
-
-        public Task WriteAsync(TraceEvent message)
-        {
-            Messages.Add(message);
-            return Task.CompletedTask;
         }
     }
 }

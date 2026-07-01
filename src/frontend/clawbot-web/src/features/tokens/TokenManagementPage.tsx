@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert } from "@/shared/ui/Alert";
 import { Button } from "@/shared/ui/Button";
@@ -129,7 +129,7 @@ function ModelMix({ data }: { readonly data: TokenUsageResponse }) {
   );
 }
 
-function AgentMix({ agents }: { readonly agents: readonly TokenAgentUsage[] }) {
+function AgentMix({ agents, isLoading }: { readonly agents: readonly TokenAgentUsage[]; readonly isLoading: boolean }) {
   const total = agents.reduce((sum, agent) => sum + agent.totalTokens, 0);
   let cursor = 0;
   const segments = agents.slice(0, 6).map((agent, index) => {
@@ -164,7 +164,11 @@ function AgentMix({ agents }: { readonly agents: readonly TokenAgentUsage[] }) {
               </div>
             );
           })}
-          {agents.length === 0 ? <p className="text-body-md text-on-surface-variant">Chưa có agent để tổng hợp dữ liệu.</p> : null}
+          {isLoading ? (
+            <p className="text-body-md text-on-surface-variant">Đang tải dữ liệu agent...</p>
+          ) : agents.length === 0 ? (
+            <p className="text-body-md text-on-surface-variant">Chưa có agent để tổng hợp dữ liệu.</p>
+          ) : null}
         </div>
       </div>
     </Card>
@@ -175,6 +179,12 @@ export default function TokenManagementPage() {
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(null), 3_800);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
   const [quotaDrafts, setQuotaDrafts] = useState<readonly TokenQuotaUpdate[] | null>(null);
   const [alertDraft, setAlertDraft] = useState<TokenAlertSettings | null>(null);
 
@@ -282,7 +292,7 @@ export default function TokenManagementPage() {
 
       <section className="mb-gutter grid grid-cols-1 gap-gutter xl:grid-cols-2">
         {data ? <ModelMix data={data} /> : <Card><p className="text-body-md text-on-surface-variant">Đang tải phân bổ chi phí...</p></Card>}
-        <AgentMix agents={agents} />
+        <AgentMix agents={agents} isLoading={usageQuery.isLoading} />
       </section>
 
       <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
@@ -365,7 +375,11 @@ export default function TokenManagementPage() {
                 })}
               </tbody>
             </table>
-            {agents.length === 0 ? <div className="p-card-padding text-body-md text-on-surface-variant">Đơn vị hiện tại chưa có agent.</div> : null}
+            {usageQuery.isLoading ? (
+              <div className="p-card-padding text-body-md text-on-surface-variant">Đang tải danh sách agent...</div>
+            ) : agents.length === 0 ? (
+              <div className="p-card-padding text-body-md text-on-surface-variant">Đơn vị hiện tại chưa có agent.</div>
+            ) : null}
           </div>
           <div className="border-t border-outline p-card-padding">
             <label className="flex items-start gap-3">
@@ -385,7 +399,7 @@ export default function TokenManagementPage() {
                   min={0}
                   onChange={(event) => {
                     setDirty(true);
-                  setAlertDraft((current) => ({ ...(current ?? data?.alert ?? DEFAULT_ALERT), lowBalanceThresholdTokens: Number(event.target.value) }));
+                    setAlertDraft((current) => ({ ...(current ?? data?.alert ?? DEFAULT_ALERT), lowBalanceThresholdTokens: Number(event.target.value) }));
                   }}
                   step={1000}
                   type="number"

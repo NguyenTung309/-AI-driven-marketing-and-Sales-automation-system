@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, Modal, StatusPill, type StatusTone } from "@/shared/ui";
+import { platformClasses } from "@/shared/theme/colors";
 import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
   approveContentItem,
@@ -57,10 +58,10 @@ interface PlatformConfig {
 }
 
 const PLATFORMS: readonly PlatformConfig[] = [
-  { value: "facebook", label: "Facebook", icon: "thumb_up", accent: "bg-blue-50 text-blue-700 border-blue-100" },
-  { value: "zalo", label: "Zalo", icon: "chat", accent: "bg-emerald-50 text-emerald-700 border-emerald-100" },
-  { value: "tiktok", label: "TikTok", icon: "music_note", accent: "bg-slate-100 text-slate-800 border-slate-200" },
-  { value: "website", label: "Trang web", icon: "language", accent: "bg-amber-50 text-amber-700 border-amber-100" },
+  { value: "facebook", label: "Facebook", icon: "thumb_up", accent: platformClasses("facebook") },
+  { value: "zalo", label: "Zalo", icon: "chat", accent: platformClasses("zalo") },
+  { value: "tiktok", label: "TikTok", icon: "music_note", accent: platformClasses("tiktok") },
+  { value: "website", label: "Trang web", icon: "language", accent: platformClasses("website") },
 ];
 
 const STATUS_FILTERS: readonly { readonly value: QueueStatusFilter; readonly label: string }[] = [

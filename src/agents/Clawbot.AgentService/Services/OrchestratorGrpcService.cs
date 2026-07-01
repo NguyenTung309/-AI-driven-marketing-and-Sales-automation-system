@@ -15,7 +15,6 @@ using Microsoft.Extensions.Logging;
 namespace Clawbot.AgentService.Services;
 
 public sealed partial class OrchestratorGrpcService(
-    PlanningOrchestrator legacyOrchestrator,
     SemanticKernelPlanGenerator planGenerator,
     AutonomousOrchestrator autonomousOrchestrator,
     IAgentCatalog catalog,
@@ -35,7 +34,6 @@ public sealed partial class OrchestratorGrpcService(
     private static readonly System.Text.Json.JsonSerializerOptions WebJsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web);
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, CancellationTokenSource> RunningSessions = new();
 
-    private readonly PlanningOrchestrator _legacy = legacyOrchestrator;
     private readonly SemanticKernelPlanGenerator _planGenerator = planGenerator;
     private readonly AutonomousOrchestrator _autonomous = autonomousOrchestrator;
     private readonly IAgentCatalog _catalog = catalog;
@@ -47,85 +45,6 @@ public sealed partial class OrchestratorGrpcService(
     private readonly IClock _clock = clock;
     private readonly ILogger<OrchestratorGrpcService> _logger = logger;
     private readonly IServiceScopeFactory? _scopeFactory = scopeFactory;
-
-    // --- Legacy keyword planner (kept for compatibility) ---
-
-    public override Task<PlanResponse> Plan(PlanRequest request, ServerCallContext context)
-    {
-        var plan = _legacy.Plan(request.TenantId, request.Goal);
-        var response = new PlanResponse { SessionId = plan.SessionId };
-        response.Tasks.AddRange(plan.Tasks.Select(t => new PlannedTask
-        {
-            Id = t.Id,
-            Agent = t.AgentName,
-            Description = t.Description,
-        }));
-        return Task.FromResult(response);
-    }
-
-    public override async Task Trace(TraceRequest request, IServerStreamWriter<TraceEvent> responseStream, ServerCallContext context)
-    {
-        var tenantId = ParseTenant(request.TenantId);
-        if (Guid.TryParse(request.SessionId, out var sessionId) && sessionId != Guid.Empty)
-        {
-            var sessionExists = await _db.AgentSessions
-                .IgnoreQueryFilters()
-                .AsNoTracking()
-                .AnyAsync(session => session.Id == sessionId && session.TenantId == tenantId, context.CancellationToken)
-                .ConfigureAwait(false);
-            if (sessionExists)
-            {
-                var traces = await _db.AgentTraces
-                    .IgnoreQueryFilters()
-                    .AsNoTracking()
-                    .Where(trace => _db.AgentSessions
-                        .IgnoreQueryFilters()
-                        .Any(session => session.Id == trace.SessionId && session.Id == sessionId && session.TenantId == tenantId))
-                    .ToArrayAsync(context.CancellationToken)
-                    .ConfigureAwait(false);
-
-                if (traces.Length > 0)
-                {
-                    foreach (var trace in traces.OrderBy(trace => trace.OccurredAt))
-                    {
-                        await responseStream.WriteAsync(new TraceEvent
-                        {
-                            TaskId = trace.TaskId ?? string.Empty,
-                            Phase = trace.Phase ?? string.Empty,
-                            Message = trace.Message ?? string.Empty,
-                            At = Timestamp.FromDateTime(trace.OccurredAt.UtcDateTime),
-                            AgentName = trace.AgentName ?? string.Empty,
-                        });
-                    }
-                    return;
-                }
-            }
-        }
-
-        var legacyTraces = _legacy.GetTrace(request.SessionId, request.TenantId);
-        if (legacyTraces.Count == 0)
-        {
-            await responseStream.WriteAsync(new TraceEvent
-            {
-                Phase = "missing",
-                Message = $"No orchestrator trace found for session {request.SessionId}.",
-                At = Timestamp.FromDateTime(DateTime.UtcNow),
-            });
-            return;
-        }
-
-        foreach (var trace in legacyTraces)
-        {
-            await responseStream.WriteAsync(new TraceEvent
-            {
-                TaskId = trace.TaskId,
-                Phase = trace.Phase,
-                Message = trace.Message,
-                At = Timestamp.FromDateTime(trace.At.UtcDateTime),
-                AgentName = string.Empty,
-            });
-        }
-    }
 
     // --- Dynamic orchestration lifecycle ---
 
@@ -355,154 +274,6 @@ public sealed partial class OrchestratorGrpcService(
         await scopedDb.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
-    private async Task RunAsync(AgentSession session, string goal, CancellationToken ct)
-    {
-        var plan = OrchestrationPlanJson.TryParse(session.PlanJson);
-        if (plan is null || plan.Tasks.Count == 0)
-        {
-            session.Finish(_clock.UtcNow);
-            await SaveAsync(ct).ConfigureAwait(false);
-            return;
-        }
-
-        var catalogEntries = await _catalog.ListAsync(ct).ConfigureAwait(false);
-        foreach (var task in plan.Tasks)
-        {
-            session.AppendTrace(task.Id, task.Agent, "planned", task.Description, _clock.UtcNow);
-        }
-        await SaveAsync(ct).ConfigureAwait(false);
-
-        var agents = OrchestrationAgents.Build(_adapters, catalogEntries);
-        using var efBackedAgentGate = new SemaphoreSlim(1, 1);
-        var guardedAgents = agents.ToDictionary(
-            pair => pair.Key,
-            pair => (IAgent)new RuntimeGuardedAgent(
-                WrapEfBackedAgent(pair.Value, efBackedAgentGate),
-                session.Id,
-                session.TenantId,
-                _db,
-                _clock,
-                _redactor,
-                _costGuard,
-                _llmScope,
-                efBackedAgentGate),
-            StringComparer.OrdinalIgnoreCase);
-
-        ParallelDagExecutor.ReplanCallback replanner = async (current, failed, attempt, replanCt) =>
-        {
-            try
-            {
-                var replanGoal = OrchestrationReplan.BuildReplanGoal(goal, failed);
-                OrchestrationPlanDocument regenerated;
-                using (_llmScope.Begin(session.TenantId, OrchestratorAgentCode))
-                {
-                    regenerated = await _planGenerator.GenerateAsync(replanGoal, catalogEntries, replanCt).ConfigureAwait(false);
-                }
-
-                session.IncrementReplan();
-                session.AppendTrace(
-                    failed[0].Id,
-                    failed[0].Agent,
-                    "re-planned",
-                    $"Re-plan attempt {attempt} after failure: {failed[0].Error}",
-                    _clock.UtcNow);
-                await SaveAsync(replanCt).ConfigureAwait(false);
-                return OrchestrationReplan.Merge(current, regenerated, attempt);
-            }
-            catch (Exception ex)
-            {
-                LogReplanFailed(_logger, ex, session.Id);
-                return null;
-            }
-        };
-
-        var executor = new ParallelDagExecutor(guardedAgents, MaxConcurrency, replanner, MaxReplans,
-            async (current, task, result, progressCt) =>
-            {
-                if (await ApplyExternalStopAsync(session, progressCt).ConfigureAwait(false))
-                    return;
-
-                session.RecordRun(OrchestrationPlanJson.Serialize(current));
-                var status = current.Tasks.FirstOrDefault(t => t.Id == task.Id)?.Status ?? task.Status;
-                session.AppendTrace(
-                    task.Id,
-                    task.Agent,
-                    result.Success ? "completed" : status == "skipped" ? "skipped" : "failed",
-                    result.Error ?? result.Output ?? string.Empty,
-                    _clock.UtcNow);
-                await SaveAsync(progressCt).ConfigureAwait(false);
-            },
-            async (task, progressCt) =>
-            {
-                if (await ApplyExternalStopAsync(session, progressCt).ConfigureAwait(false))
-                    return;
-
-                session.AppendTrace(task.Id, task.Agent, "started", task.Description, _clock.UtcNow);
-                await SaveAsync(progressCt).ConfigureAwait(false);
-            });
-
-        OrchestrationPlanDocument final;
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        RunningSessions[session.Id] = linkedCts;
-        try
-        {
-            using (_llmScope.Begin(session.TenantId, OrchestratorAgentCode))
-            {
-                final = await executor.ExecuteAsync(plan, linkedCts.Token).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            return;
-        }
-        finally
-        {
-            if (RunningSessions.TryRemove(session.Id, out var registeredCts))
-                registeredCts.Dispose();
-        }
-
-        session.RecordRun(OrchestrationPlanJson.Serialize(final));
-        if (session.Status is AgentSessionStatuses.Paused or AgentSessionStatuses.Cancelled)
-        {
-            await SaveAsync(ct).ConfigureAwait(false);
-            return;
-        }
-
-        var anyFailed = final.Tasks.Any(task =>
-            string.Equals(task.Status, "failed", StringComparison.OrdinalIgnoreCase));
-        if (anyFailed)
-            session.Fail(_clock.UtcNow);
-        else
-            session.Finish(_clock.UtcNow);
-
-        await SaveAsync(ct).ConfigureAwait(false);
-    }
-
-    private async Task<bool> ApplyExternalStopAsync(AgentSession session, CancellationToken ct)
-    {
-        var latest = await _db.AgentSessions
-            .IgnoreQueryFilters()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(s => s.Id == session.Id && s.TenantId == session.TenantId, ct)
-            .ConfigureAwait(false);
-
-        if (latest?.Status == AgentSessionStatuses.Cancelled)
-        {
-            if (session.Status != AgentSessionStatuses.Cancelled)
-                session.Cancel(_clock.UtcNow);
-            return true;
-        }
-
-        if (latest?.Status == AgentSessionStatuses.Paused)
-        {
-            if (session.Status == AgentSessionStatuses.Running)
-                session.Pause();
-            return true;
-        }
-
-        return false;
-    }
-
     private async Task SaveAsync(CancellationToken ct)
     {
         try
@@ -612,131 +383,11 @@ public sealed partial class OrchestratorGrpcService(
     private static string SerializeInput(IReadOnlyDictionary<string, string> input) =>
         System.Text.Json.JsonSerializer.Serialize(input, WebJsonOptions);
 
-    private static IAgent WrapEfBackedAgent(IAgent agent, SemaphoreSlim gate) =>
-        agent.Name is "lead-agent" or "report-agent"
-            ? new SerializingAgent(agent, gate)
-            : agent;
-
     private static void CancelRunningSession(Guid sessionId)
     {
         if (RunningSessions.TryGetValue(sessionId, out var cts))
             cts.Cancel();
     }
-
-    private sealed class RuntimeGuardedAgent(
-        IAgent inner,
-        Guid sessionId,
-        Guid tenantId,
-        AppDbContext db,
-        IClock clock,
-        IPiiRedactor redactor,
-        OrchestratorCostGuard costGuard,
-        ILlmCallScope llmScope,
-        SemaphoreSlim dbGate) : IAgent
-    {
-        private const decimal EstimatedUsd = SemanticKernelOrchestrator.PerTaskEstimateUsd;
-
-        public string Name => inner.Name;
-
-        public async Task<AgentResult> ExecuteAsync(AgentTask task, CancellationToken ct)
-        {
-            AgentSession? session;
-            await dbGate.WaitAsync(ct).ConfigureAwait(false);
-            try
-            {
-                session = await db.AgentSessions
-                    .IgnoreQueryFilters()
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(s => s.Id == sessionId && s.TenantId == tenantId, ct).ConfigureAwait(false);
-            }
-            finally
-            {
-                dbGate.Release();
-            }
-            if (session is null)
-                return await RedactAsync(new AgentResult(task.Id, Success: false, Output: string.Empty, Error: "session_not_found"), ct).ConfigureAwait(false);
-            if (session.Status == AgentSessionStatuses.Cancelled)
-                return await RedactAsync(new AgentResult(task.Id, Success: false, Output: string.Empty, Error: "cancelled"), ct).ConfigureAwait(false);
-            if (session.Status == AgentSessionStatuses.Paused)
-                return await RedactAsync(new AgentResult(task.Id, Success: false, Output: string.Empty, Error: "paused"), ct).ConfigureAwait(false);
-
-            var reservationAt = clock.UtcNow;
-            var reserved = await costGuard.TryReserveAsync(tenantId, EstimatedUsd, reservationAt, ct).ConfigureAwait(false);
-            if (!reserved.Allowed)
-                return await RedactAsync(new AgentResult(task.Id, Success: false, Output: string.Empty, Error: reserved.Reason ?? "cost_cap_midrun"), ct).ConfigureAwait(false);
-
-            AgentResult result;
-            try
-            {
-                using var _costScope = llmScope.Begin(tenantId, inner.Name, reservationAt, reserved.ReservationId);
-                result = await inner.ExecuteAsync(WithServerTenant(task), ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                await costGuard.ReleaseReservationAsync(tenantId, reserved.ReservationId, ct).ConfigureAwait(false);
-                throw;
-            }
-
-            return await RedactAsync(result, ct).ConfigureAwait(false);
-        }
-
-        private async Task<AgentResult> RedactAsync(AgentResult result, CancellationToken ct)
-        {
-            var output = string.IsNullOrEmpty(result.Output)
-                ? result.Output
-                : (await redactor.RedactAsync(result.Output, ct).ConfigureAwait(false)).RedactedText;
-            var error = string.IsNullOrEmpty(result.Error)
-                ? result.Error
-                : (await redactor.RedactAsync(result.Error, ct).ConfigureAwait(false)).RedactedText;
-            return result with { Output = output, Error = error };
-        }
-
-        private AgentTask WithServerTenant(AgentTask task)
-        {
-            var input = task.Input.ToDictionary(StringComparer.OrdinalIgnoreCase);
-            input["tenant_id"] = tenantId.ToString("D");
-            return task with { Input = input };
-        }
-
-        private static decimal? ExtractUsdCost(string output)
-        {
-            if (string.IsNullOrWhiteSpace(output))
-                return null;
-
-            try
-            {
-                using var doc = System.Text.Json.JsonDocument.Parse(output);
-                return TryFindDecimal(doc.RootElement, "usdCost")
-                    ?? TryFindDecimal(doc.RootElement, "usd_cost")
-                    ?? TryFindDecimal(doc.RootElement, "UsdCost");
-            }
-            catch (System.Text.Json.JsonException)
-            {
-                return null;
-            }
-        }
-
-        private static decimal? TryFindDecimal(System.Text.Json.JsonElement element, string name)
-        {
-            if (element.ValueKind == System.Text.Json.JsonValueKind.Object && element.TryGetProperty(name, out var prop) && prop.TryGetDecimal(out var value))
-                return value;
-
-            if (element.ValueKind != System.Text.Json.JsonValueKind.Object)
-                return null;
-
-            foreach (var child in element.EnumerateObject())
-            {
-                var nested = TryFindDecimal(child.Value, name);
-                if (nested.HasValue)
-                    return nested;
-            }
-
-            return null;
-        }
-    }
-
-    [LoggerMessage(EventId = 4101, Level = LogLevel.Warning, Message = "Orchestration re-plan failed for session {SessionId}")]
-    private static partial void LogReplanFailed(ILogger logger, Exception ex, Guid sessionId);
 
     [LoggerMessage(EventId = 4102, Level = LogLevel.Error, Message = "Background orchestration run failed for session {SessionId}")]
     private static partial void LogBackgroundRunFailed(ILogger logger, Exception ex, Guid sessionId);

@@ -76,6 +76,7 @@
   --color-warning: #f59e0b;
   --color-error: #ef4444;
   --color-tertiary: #10b981;
+  --color-brand-accent: #800000;            /* login hero gradient endpoint */
 
   /* ---- Type ---- */
   --font-sans: "Inter", system-ui, "Segoe UI", Roboto, sans-serif;

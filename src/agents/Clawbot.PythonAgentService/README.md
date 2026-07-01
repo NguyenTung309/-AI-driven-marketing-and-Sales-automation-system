@@ -4,6 +4,16 @@ Contract-compatible Python alternative for the .NET `Clawbot.AgentService` gRPC 
 
 This service compiles the repository `proto/*.proto` files at startup and registers default gRPC servicers for every current AgentService contract. It is intended as a deployable Python host skeleton for AI-heavy implementations while keeping the API-side `AgentService:Url` contract unchanged.
 
+## Status: placeholder, not wired
+
+This is a **reference scaffold**, not a running deployment target:
+
+- Not referenced by any C# project — the .NET `Clawbot.AgentService` is the live implementation behind `AgentService:Url`.
+- Not started by `run-all.bat` or any other local/CI run path.
+- RPC method bodies return default messages only (see Implementation Notes below); no AI pipeline logic is ported here.
+
+It exists to prove the proto contracts stay Python-compatible, in case a future Python rewrite of `Clawbot.AgentService` is undertaken. Structure is covered by `PythonAgentServiceScaffoldTests`; treat any change here as scaffold maintenance, not feature work.
+
 ## Covered gRPC Services
 
 - `Orchestrator`

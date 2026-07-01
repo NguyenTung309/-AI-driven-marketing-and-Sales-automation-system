@@ -291,7 +291,6 @@ app.MapAdminUsers();
 app.MapProfile();
 app.MapNotifications();
 app.MapAgents();
-app.MapOrchestration();
 app.MapOrchestrationV2();
 app.MapLlmConfigs();
 app.MapEmbeddingConfigs();

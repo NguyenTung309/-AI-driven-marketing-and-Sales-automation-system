@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { AppShell } from "@/shared/layout/AppShell";
+import { Alert } from "@/shared/ui/Alert";
 import { Card } from "@/shared/ui/Card";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import {
@@ -16,6 +17,7 @@ import {
   type LeadListItem,
   type LeadStage,
 } from "@/shared/api/leads";
+import { toUserFriendlyError } from "@/shared/utils/userText";
 
 type OwnerFilter = "all" | "assigned" | "unassigned";
 type DrawerTab = "timeline" | "context";
@@ -40,6 +42,10 @@ const EMPTY_ACTIVITIES: readonly LeadContextActivity[] = [];
 
 function normalize(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
+}
+
+function errorMessage(error: unknown): string {
+  return toUserFriendlyError(error, "Không thể xử lý yêu cầu.");
 }
 
 function stageConfig(stage: LeadStage) {
@@ -547,6 +553,13 @@ export default function LeadsPage() {
   const [stage, setStage] = useState("all");
   const [owner, setOwner] = useState<OwnerFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ readonly tone: "success" | "error"; readonly message: string } | null>(null);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(null), 3_800);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
 
   const leadsQuery = useQuery({
     queryKey: ["leads", "list"],
@@ -584,7 +597,9 @@ export default function LeadsPage() {
         queryClient.invalidateQueries({ queryKey: ["leads", "list"] }),
         queryClient.invalidateQueries({ queryKey: ["leads", selectedId] }),
       ]);
+      setNotice({ tone: "success", message: "Đã nhận lead thành công." });
     },
+    onError: (error) => setNotice({ tone: "error", message: errorMessage(error) }),
   });
 
   const activityMutation = useMutation({
@@ -595,7 +610,9 @@ export default function LeadsPage() {
         queryClient.invalidateQueries({ queryKey: ["leads", "list"] }),
         queryClient.invalidateQueries({ queryKey: ["leads", selectedId] }),
       ]);
+      setNotice({ tone: "success", message: "Đã ghi nhận hoạt động." });
     },
+    onError: (error) => setNotice({ tone: "error", message: errorMessage(error) }),
   });
 
   return (
@@ -620,6 +637,12 @@ export default function LeadsPage() {
           </button>
         </div>
       </div>
+
+      {notice ? (
+        <div className="mb-gutter">
+          <Alert tone={notice.tone}>{notice.message}</Alert>
+        </div>
+      ) : null}
 
       <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-4">
         <Card>

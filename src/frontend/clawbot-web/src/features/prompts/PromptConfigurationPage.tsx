@@ -301,6 +301,11 @@ export default function PromptConfigurationPage() {
   const [draft, setDraft] = useState<PromptDraft>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(null), 3_800);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [sandboxInput, setSandboxInput] = useState(DEFAULT_SANDBOX_INPUT);
   const [sandboxResult, setSandboxResult] = useState<PromptSandboxResponse | null>(null);
@@ -458,7 +463,13 @@ export default function PromptConfigurationPage() {
             selected={config.code === effectiveSelectedCode}
           />
         ))}
-        {configs.length === 0 ? (
+        {listQuery.isLoading ? (
+          <Card className="lg:col-span-2 xl:col-span-3">
+            <div className="rounded-lg border border-dashed border-outline bg-surface p-6 text-center text-body-md text-on-surface-variant">
+              Đang tải cấu hình agent...
+            </div>
+          </Card>
+        ) : configs.length === 0 ? (
           <Card className="lg:col-span-2 xl:col-span-3">
             <div className="rounded-lg border border-dashed border-outline bg-surface p-6 text-center text-body-md text-on-surface-variant">
               Chưa có cấu hình agent trong đơn vị hiện tại.
