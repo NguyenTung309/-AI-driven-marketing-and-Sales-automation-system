@@ -21,3 +21,13 @@ appsettings*.Local.json
 .DS_Store
 .tmp-build/
 .playwright-mcp/
+.claude/worktrees/
+.agents/
+.codegraph/
+.codex/
+.kilocode/
+.serena/
+.superpowers/
+decoded.txt
+/package.json
+/package-lock.json
