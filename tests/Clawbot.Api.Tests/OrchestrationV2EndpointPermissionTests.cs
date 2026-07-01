@@ -11,6 +11,8 @@ public sealed class OrchestrationV2EndpointPermissionTests
 
         source.Should().Contain("group.MapPost(\"/runs\", CreateRunAsync).RequirePermission(\"orchestration:run\")");
         source.Should().Contain("group.MapGet(\"/runs/{id:guid}\", GetRunAsync).RequirePermission(\"orchestration:view\")");
+        source.Should().Contain("group.MapPut(\"/runs/{id:guid}/plan\", UpdateRunPlanAsync).RequirePermission(\"orchestration:run\")");
+        source.Should().Contain("group.MapPost(\"/runs/{id:guid}/approve\", ApproveRunAsync).RequirePermission(\"orchestration:approve\")");
         source.Should().Contain("group.MapPost(\"/runs/{id:guid}/control\", ControlRunAsync).RequirePermission(\"orchestration:manage\")");
         source.Should().Contain("group.MapGet(\"/agents\", ListAgentsAsync).RequirePermission(\"orchestration:view\")");
         source.Should().Contain("group.MapPost(\"/agents\", UpsertAgentAsync).RequirePermission(\"orchestration:manage\")");

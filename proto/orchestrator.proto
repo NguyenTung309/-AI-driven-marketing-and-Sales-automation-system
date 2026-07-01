@@ -7,9 +7,14 @@ package clawbot.agents.orchestrator;
 import "google/protobuf/timestamp.proto";
 
 service Orchestrator {
-  // Legacy keyword planner (kept for compatibility).
-  rpc Plan (PlanRequest) returns (PlanResponse);
-  rpc Trace (TraceRequest) returns (stream TraceEvent);
+  // Legacy keyword planner. Deprecated: no server implementation or caller remains (see V2 lifecycle below).
+  // Field numbers kept reserved for wire compatibility; do not reuse.
+  rpc Plan (PlanRequest) returns (PlanResponse) {
+    option deprecated = true;
+  }
+  rpc Trace (TraceRequest) returns (stream TraceEvent) {
+    option deprecated = true;
+  }
 
   // Dynamic agent orchestration lifecycle.
   rpc Submit (SubmitRequest) returns (SessionResponse);
@@ -20,12 +25,14 @@ service Orchestrator {
 }
 
 message PlanRequest {
+  option deprecated = true;
   string tenant_id = 1;
   string goal = 2;
   google.protobuf.Timestamp requested_at = 3;
 }
 
 message PlanResponse {
+  option deprecated = true;
   string session_id = 1;
   repeated PlannedTask tasks = 2;
 }
@@ -42,11 +49,13 @@ message PlannedTask {
 }
 
 message TraceRequest {
+  option deprecated = true;
   string session_id = 1;
   string tenant_id = 2;
 }
 
 message TraceEvent {
+  option deprecated = true;
   string task_id = 1;
   string phase = 2;
   string message = 3;

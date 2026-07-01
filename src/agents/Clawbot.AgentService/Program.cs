@@ -23,14 +23,12 @@ builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddClawbotTelemetry(builder.Configuration, "clawbot-agent");
 builder.Services.AddSingleton<AgentRegistry>(_ => DefaultAgentRegistry.Create());
-builder.Services.AddSingleton<PlanningOrchestrator>();
 builder.Services.AddClawbotSkills(builder.Configuration);
-// Dynamic agent orchestration (SK planner + parallel DAG executor + lifecycle).
+// Dynamic agent orchestration (SK planner + lifecycle).
 builder.Services.AddScoped<IAgentCatalog, Clawbot.Infrastructure.Agents.DbAgentCatalog>();
 builder.Services.AddScoped<Microsoft.SemanticKernel.ChatCompletion.IChatCompletionService, ClawbotChatCompletionService>();
 builder.Services.AddScoped<SemanticKernelPlanGenerator>();
 builder.Services.AddSingleton<OrchestratorCostGuard>();
-builder.Services.AddScoped<SemanticKernelOrchestrator>();
 // Dynamic agent orchestration v2: data-defined sub-agents + A2A mailbox + autonomous coordinator.
 builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IAgentDefinitionCatalog, Clawbot.Infrastructure.Agents.AgentDefinitionCatalog>();
 builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IA2AMailbox, Clawbot.Infrastructure.Agents.EfA2AMailbox>();

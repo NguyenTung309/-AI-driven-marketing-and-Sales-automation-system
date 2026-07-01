@@ -16,12 +16,56 @@ public sealed record OrchestrationV2RunRequest(string Goal, string? Source = nul
 public sealed record OrchestrationV2AgentRequest(string Code, string DisplayName, string AgentType, string PersonaPrompt, bool IsOrchestratable = true, string? KbModuleCode = null, string? AllowedToolsJson = null, string? InputSchemaJson = null);
 public sealed record OrchestrationV2ScheduleRequest(string Name, string GoalTemplate, string Cadence, string TimezoneId, DateTimeOffset? NextRunAt = null, bool RequiresApproval = false);
 public sealed record OrchestrationV2ControlRequest(string Action, string? Etag = null);
+public sealed record OrchestrationV2UpdatePlanRequest(string PlanJson, string? Etag = null);
+public sealed record OrchestrationV2ApproveRequest(string? Etag = null);
 
 public sealed record OrchestrationV2AgentDto(Guid Id, string Code, string DisplayName, string AgentType, bool IsOrchestratable, int Version, string? KbModuleCode, string AllowedToolsJson = "[]", string InputSchemaJson = "{}", string PersonaPrompt = "");
 public sealed record OrchestrationV2ScheduleDto(Guid Id, string Name, string GoalTemplate, string Cadence, string TimezoneId, DateTimeOffset NextRunAt, DateTimeOffset? LastRunAt, bool IsActive, bool RequiresApproval);
 public sealed record OrchestrationV2TraceDto(string TaskId, string AgentName, string Phase, string Message, DateTimeOffset OccurredAt);
 public sealed record OrchestrationV2MessageDto(Guid Id, string TaskId, string Intent, string Status, string PayloadJson, string? Error, DateTimeOffset CreatedAt, DateTimeOffset? ProcessedAt);
-public sealed record OrchestrationV2RunDto(Guid SessionId, string Status, string Goal, DateTimeOffset StartedAt, DateTimeOffset? FinishedAt, IReadOnlyList<OrchestrationV2TraceDto> Traces, IReadOnlyList<OrchestrationV2MessageDto> Messages);
+
+// SPEC-16 P3-2: derive per-agent UseCount (how many tasks in this session use that agent) and CurrentTaskId
+// (the in-progress task for that agent, if any), mirrored from the legacy V1 endpoint mapping.
+public sealed record OrchestrationV2TaskDto(
+    string Id,
+    string Agent,
+    string Description,
+    IReadOnlyList<string> DependsOn,
+    IReadOnlyDictionary<string, string> Input,
+    string Status,
+    string? Output,
+    string? Error,
+    int UseCount = 0,
+    string? CurrentTaskId = null);
+
+public sealed record OrchestrationV2PlanDto(
+    Guid SessionId,
+    string Status,
+    string Goal,
+    bool RequiresApproval,
+    bool CostBlocked,
+    string? CostReason,
+    int ReplanCount,
+    string Etag,
+    string PlanJson,
+    IReadOnlyList<OrchestrationV2TaskDto> Tasks);
+
+public sealed record OrchestrationV2RunDto(
+    Guid SessionId,
+    string Status,
+    string Goal,
+    DateTimeOffset StartedAt,
+    DateTimeOffset? FinishedAt,
+    DateTimeOffset? ArchivedAt,
+    bool RequiresApproval,
+    bool CostBlocked,
+    string? CostReason,
+    int ReplanCount,
+    string Etag,
+    string PlanJson,
+    IReadOnlyList<OrchestrationV2TaskDto> Tasks,
+    IReadOnlyList<OrchestrationV2TraceDto> Traces,
+    IReadOnlyList<OrchestrationV2MessageDto> Messages);
 
 public static class OrchestrationV2Endpoints
 {
@@ -36,6 +80,8 @@ public static class OrchestrationV2Endpoints
         group.MapPost("/runs", CreateRunAsync).RequirePermission("orchestration:run");
         group.MapGet("/runs", ListRunsAsync).RequirePermission("orchestration:view");
         group.MapGet("/runs/{id:guid}", GetRunAsync).RequirePermission("orchestration:view");
+        group.MapPut("/runs/{id:guid}/plan", UpdateRunPlanAsync).RequirePermission("orchestration:run");
+        group.MapPost("/runs/{id:guid}/approve", ApproveRunAsync).RequirePermission("orchestration:approve");
         group.MapPost("/runs/{id:guid}/control", ControlRunAsync).RequirePermission("orchestration:manage");
         group.MapPost("/runs/{id:guid}/archive", ArchiveRunAsync).RequirePermission("orchestration:manage");
         group.MapGet("/agents", ListAgentsAsync).RequirePermission("orchestration:view");
@@ -84,12 +130,24 @@ public static class OrchestrationV2Endpoints
         return Results.Ok(new { items = runs });
     }
 
-    private static async Task<IResult> GetRunAsync(Guid id, AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
+    private static async Task<IResult> GetRunAsync(Guid id, AppDbContext db, ITenantAccessor tenants, Orchestrator.OrchestratorClient grpc, CancellationToken ct)
     {
         var tenant = tenants.Require();
-        var session = await db.AgentSessions.IgnoreQueryFilters().AsNoTracking()
-            .FirstOrDefaultAsync(s => s.Id == id && s.TenantId == tenant.TenantId, ct).ConfigureAwait(false);
-        if (session is null) return Results.NotFound(new { error = "session_not_found" });
+        SessionResponse plan;
+        try
+        {
+            plan = await grpc.GetPlanAsync(new SessionRef { TenantId = tenant.TenantId.ToString("D"), SessionId = id.ToString("D") }, cancellationToken: ct).ConfigureAwait(false);
+        }
+        catch (RpcException ex)
+        {
+            return ToGrpcResult(ex);
+        }
+
+        // SessionResponse carries plan/status/etag but not lifecycle timestamps; pull those from EF alongside traces/messages.
+        var timestamps = await db.AgentSessions.IgnoreQueryFilters().AsNoTracking()
+            .Where(s => s.Id == id && s.TenantId == tenant.TenantId)
+            .Select(s => new { s.StartedAt, s.FinishedAt, s.ArchivedAt })
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
         var traces = await db.AgentTraces.IgnoreQueryFilters().AsNoTracking()
             .Where(t => t.SessionId == id)
             .OrderBy(t => t.OccurredAt)
@@ -103,7 +161,114 @@ public static class OrchestrationV2Endpoints
             .OrderBy(m => m.CreatedAt)
             .Select(m => new OrchestrationV2MessageDto(m.Id, m.TaskId, m.Intent, m.Status, m.PayloadJson, m.Error, m.CreatedAt, m.ProcessedAt))
             .ToListAsync(ct).ConfigureAwait(false);
-        return Results.Ok(new OrchestrationV2RunDto(session.Id, session.Status, session.Goal ?? string.Empty, session.StartedAt, session.FinishedAt, traceDtos, messages));
+
+        return Results.Ok(new OrchestrationV2RunDto(
+            id,
+            plan.Status,
+            plan.Goal,
+            timestamps?.StartedAt ?? default,
+            timestamps?.FinishedAt,
+            timestamps?.ArchivedAt,
+            plan.RequiresApproval,
+            plan.CostBlocked,
+            string.IsNullOrEmpty(plan.CostReason) ? null : plan.CostReason,
+            plan.ReplanCount,
+            plan.Etag,
+            plan.PlanJson,
+            ToTaskDtos(plan.Tasks).ToArray(),
+            traceDtos,
+            messages));
+    }
+
+    private static async Task<IResult> UpdateRunPlanAsync(Guid id, OrchestrationV2UpdatePlanRequest body, ITenantAccessor tenants, Orchestrator.OrchestratorClient grpc, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body.PlanJson)) return Results.BadRequest(new { error = "plan_json_required" });
+        var tenant = tenants.Require();
+        try
+        {
+            var response = await grpc.UpdatePlanAsync(new UpdatePlanRequest
+            {
+                TenantId = tenant.TenantId.ToString("D"),
+                SessionId = id.ToString("D"),
+                PlanJson = body.PlanJson,
+                ExpectedEtag = body.Etag ?? string.Empty,
+            }, cancellationToken: ct).ConfigureAwait(false);
+            return Results.Ok(ToPlanDto(id, response));
+        }
+        catch (RpcException ex)
+        {
+            return ToGrpcResult(ex);
+        }
+    }
+
+    private static async Task<IResult> ApproveRunAsync(Guid id, OrchestrationV2ApproveRequest? body, ITenantAccessor tenants, Orchestrator.OrchestratorClient grpc, CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        try
+        {
+            var response = await grpc.ApproveAsync(new SessionRef
+            {
+                TenantId = tenant.TenantId.ToString("D"),
+                SessionId = id.ToString("D"),
+                ExpectedEtag = body?.Etag ?? string.Empty,
+            }, cancellationToken: ct).ConfigureAwait(false);
+            return Results.Ok(ToPlanDto(id, response));
+        }
+        catch (RpcException ex)
+        {
+            return ToGrpcResult(ex);
+        }
+    }
+
+    private static OrchestrationV2PlanDto ToPlanDto(Guid sessionId, SessionResponse response) =>
+        new(
+            sessionId,
+            response.Status,
+            response.Goal,
+            response.RequiresApproval,
+            response.CostBlocked,
+            string.IsNullOrEmpty(response.CostReason) ? null : response.CostReason,
+            response.ReplanCount,
+            response.Etag,
+            response.PlanJson,
+            ToTaskDtos(response.Tasks).ToArray());
+
+    private static IEnumerable<OrchestrationV2TaskDto> ToTaskDtos(IReadOnlyList<PlannedTask> tasks)
+    {
+        var useCounts = tasks
+            .GroupBy(t => t.Agent, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+        var currentByAgent = tasks
+            .Where(t => string.Equals(t.Status, "running", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(t => t.Agent, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+
+        return tasks.Select(task => new OrchestrationV2TaskDto(
+            task.Id,
+            task.Agent,
+            task.Description,
+            task.DependsOn.ToArray(),
+            ParseInput(task.InputJson),
+            task.Status,
+            string.IsNullOrEmpty(task.Output) ? null : task.Output,
+            string.IsNullOrEmpty(task.Error) ? null : task.Error,
+            useCounts.TryGetValue(task.Agent, out var count) ? count : 1,
+            currentByAgent.TryGetValue(task.Agent, out var curId) ? curId : null));
+    }
+
+    private static Dictionary<string, string> ParseInput(string inputJson)
+    {
+        if (string.IsNullOrWhiteSpace(inputJson))
+            return new Dictionary<string, string>();
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(inputJson, WebJsonOptions)
+                ?? new Dictionary<string, string>();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return new Dictionary<string, string>();
+        }
     }
 
     private static async Task<IResult> ControlRunAsync(Guid id, OrchestrationV2ControlRequest body, ITenantAccessor tenants, Orchestrator.OrchestratorClient grpc, CancellationToken ct)
