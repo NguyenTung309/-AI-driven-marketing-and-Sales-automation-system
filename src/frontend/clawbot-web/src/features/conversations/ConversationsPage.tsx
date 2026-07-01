@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AxiosError } from "axios";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, Input, StatusPill } from "@/shared/ui";
+import { platformClasses } from "@/shared/theme/colors";
 import { getMe } from "@/shared/api/auth";
 import {
   assignConversation,
@@ -67,14 +68,6 @@ function platformMark(platform: string): string {
   if (label === "Zalo OA") return "Z";
   if (label === "Khung chat web") return "W";
   return label.slice(0, 2).toUpperCase();
-}
-
-function platformColor(platform: string): string {
-  const label = platformLabel(platform);
-  if (label === "Facebook") return "bg-blue-100 text-blue-700 border-blue-200";
-  if (label === "Zalo OA") return "bg-indigo-100 text-indigo-700 border-indigo-200";
-  if (label === "Khung chat web") return "bg-emerald-100 text-emerald-700 border-emerald-200";
-  return "bg-surface-container text-secondary border-outline";
 }
 
 function formatRelative(value: string | null): string {
@@ -179,7 +172,7 @@ function ConversationRow({ conversation, selected, onSelect }: ConversationRowPr
           />
         ) : (
           <div
-            className={`flex size-10 shrink-0 items-center justify-center rounded-lg border text-xs font-bold ${platformColor(
+            className={`flex size-10 shrink-0 items-center justify-center rounded-lg border text-xs font-bold ${platformClasses(
               conversation.platform
             )}`}
           >
@@ -287,7 +280,7 @@ interface ChatPanelProps {
 function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSubmit, sending }: ChatPanelProps) {
   if (isLoading) {
     return (
-      <section className="flex h-full min-h-[720px] flex-col rounded-lg border border-outline bg-surface-container-lowest">
+      <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-[720px]">
         <div className="m-auto text-body-md text-on-surface-variant">Đang tải hội thoại...</div>
       </section>
     );
@@ -295,7 +288,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
 
   if (error) {
     return (
-      <section className="flex h-full min-h-[720px] flex-col rounded-lg border border-outline bg-surface-container-lowest">
+      <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-[720px]">
         <div className="m-auto max-w-md text-center">
           <span aria-hidden="true" className="material-symbols-outlined text-[40px] text-error">error</span>
           <p className="mt-3 text-body-md text-on-surface">{errorMessage(error)}</p>
@@ -306,7 +299,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
 
   if (!conversation) {
     return (
-      <section className="flex h-full min-h-[720px] flex-col rounded-lg border border-outline bg-surface-container-lowest">
+      <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-[720px]">
         <div className="m-auto max-w-md text-center">
           <span aria-hidden="true" className="material-symbols-outlined text-[44px] text-on-surface-variant">forum</span>
           <h2 className="mt-3 text-headline-sm">Chưa có hội thoại</h2>
@@ -319,7 +312,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
   }
 
   return (
-    <section className="flex h-full min-h-[720px] flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest">
+    <section className="flex h-full min-h-[480px] flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest xl:min-h-[720px]">
       {conversation.status === "escalated" ? (
         <div className="flex items-center justify-between bg-warning px-gutter py-2 text-label-lg font-semibold text-white">
           <span className="flex items-center gap-2">
@@ -332,7 +325,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
       <header className="flex shrink-0 items-center justify-between border-b border-outline bg-white p-gutter">
         <div className="flex items-center gap-3">
           <div
-            className={`flex size-10 items-center justify-center rounded-full border text-sm font-bold ${platformColor(
+            className={`flex size-10 items-center justify-center rounded-full border text-sm font-bold ${platformClasses(
               conversation.platform
             )}`}
           >
@@ -435,14 +428,22 @@ function ContextPanel({
   busy,
 }: ContextPanelProps) {
   const assignedToMe = Boolean(conversation?.assignedTo && meId && conversation.assignedTo === meId);
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+  const avatarUrl = conversation?.contactAvatarUrl ?? null;
+  const showAvatar = Boolean(avatarUrl && failedAvatarUrl !== avatarUrl);
   return (
-    <aside className="flex min-h-[720px] flex-col gap-gutter overflow-y-auto">
+    <aside className="flex min-h-0 flex-col gap-gutter overflow-y-auto xl:min-h-[720px]">
       <Card>
         <h3 className="mb-4 text-label-caps uppercase text-secondary">Thông tin khách hàng</h3>
         <div className="text-center">
           <div className="mx-auto flex size-16 items-center justify-center rounded-full border-2 border-white bg-surface-variant text-headline-sm font-bold text-secondary shadow-sm overflow-hidden">
-            {conversation?.contactAvatarUrl ? (
-              <img src={conversation.contactAvatarUrl} alt="" className="size-full object-cover" />
+            {showAvatar ? (
+              <img
+                src={avatarUrl!}
+                alt=""
+                className="size-full object-cover"
+                onError={() => setFailedAvatarUrl(avatarUrl)}
+              />
             ) : conversation ? (
               customerName(conversation).slice(0, 1).toUpperCase()
             ) : (
@@ -672,8 +673,8 @@ export default function ConversationsPage() {
         </div>
       ) : null}
 
-      <div className="grid min-h-[720px] grid-cols-1 gap-gutter xl:grid-cols-[minmax(280px,1fr)_minmax(480px,2fr)_minmax(280px,1fr)]">
-        <aside className="flex min-h-[720px] flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest">
+      <div className="grid grid-cols-1 gap-gutter xl:min-h-[720px] xl:grid-cols-[minmax(280px,1fr)_minmax(480px,2fr)_minmax(280px,1fr)]">
+        <aside className="flex min-h-[480px] flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest xl:min-h-[720px]">
           <div className="shrink-0 border-b border-outline p-gutter">
             <h2 className="mb-stack-md text-headline-sm">Danh sách hội thoại</h2>
             <Input

@@ -7,4 +7,5 @@ export * from "./Input";
 export * from "./DataTable";
 export * from "./WorkflowNode";
 export * from "./Modal";
+export * from "./ConfirmDialog";
 export * from "./Alert";

@@ -22,7 +22,7 @@ const FLOW: readonly FlowNode[] = [
 function BrandPanel() {
   return (
     <section className="hidden md:flex w-1/2 relative bg-primary overflow-hidden flex-col">
-      <div className="absolute inset-0 bg-gradient-to-br from-primary via-primary-container to-[#800000] opacity-90 z-0" />
+      <div className="absolute inset-0 bg-gradient-to-br from-primary via-primary-container to-brand-accent opacity-90 z-0" />
       <div className="absolute top-0 left-0 w-full flex items-center px-8 py-6 z-10">
         <span className="text-headline-md font-bold text-on-primary tracking-tight">Học Bá AI</span>
       </div>

@@ -1,10 +1,15 @@
-import type { InputHTMLAttributes } from "react";
+import { useId, type InputHTMLAttributes } from "react";
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   readonly icon?: string; // optional leading Material Symbols icon
+  readonly error?: string;
 }
 
-export function Input({ icon, className = "", ...rest }: InputProps) {
+export function Input({ icon, error, className = "", id, "aria-describedby": describedBy, ...rest }: InputProps) {
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
+  const errorId = `${inputId}-error`;
+
   return (
     <div className="relative">
       {icon ? (
@@ -13,9 +18,17 @@ export function Input({ icon, className = "", ...rest }: InputProps) {
         </span>
       ) : null}
       <input
-        className={`bg-surface-container-lowest border border-surface-variant rounded ${icon ? "pl-10" : "pl-3"} pr-3 py-2 text-body-md w-full focus:outline-none focus:ring-2 focus:ring-primary/30 ${className}`}
+        id={inputId}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? [errorId, describedBy].filter(Boolean).join(" ") : describedBy}
+        className={`bg-surface-container-lowest border rounded ${icon ? "pl-10" : "pl-3"} pr-3 py-2 text-body-md w-full focus:outline-none focus:ring-2 ${error ? "border-error focus:ring-error/30" : "border-surface-variant focus:ring-primary/30"} ${className}`}
         {...rest}
       />
+      {error ? (
+        <p id={errorId} role="alert" className="mt-1 text-body-sm text-error">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

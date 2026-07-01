@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
-import { Alert, Button, Card, DataTable, StatusPill, ToggleSwitch, type Column } from "@/shared/ui";
+import { Alert, Button, Card, ConfirmDialog, DataTable, StatusPill, ToggleSwitch, type Column } from "@/shared/ui";
 import { toUserFriendlyError } from "@/shared/utils/userText";
 import { disableTwoFactor, getMe } from "@/shared/api/auth";
 import {
@@ -115,17 +115,25 @@ function Field({
 function TwoFactorRow() {
   const [on, setOn] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [disabling, setDisabling] = useState(false);
 
-  async function toggle(next: boolean) {
+  function toggle(next: boolean) {
     if (next) {
       setSetupOpen(true);
       return;
     }
+    setConfirmOpen(true);
+  }
 
+  async function confirmDisable() {
+    setDisabling(true);
     try {
       await disableTwoFactor();
-    } finally {
       setOn(false);
+    } finally {
+      setDisabling(false);
+      setConfirmOpen(false);
     }
   }
 
@@ -148,6 +156,15 @@ function TwoFactorRow() {
         open={setupOpen}
         onClose={() => setSetupOpen(false)}
         onVerified={() => setOn(true)}
+      />
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Tắt xác thực hai lớp?"
+        message="Tài khoản của bạn sẽ không còn được bảo vệ bởi xác thực hai lớp nữa."
+        confirmLabel="Tắt"
+        pending={disabling}
+        onConfirm={confirmDisable}
+        onCancel={() => setConfirmOpen(false)}
       />
     </>
   );
