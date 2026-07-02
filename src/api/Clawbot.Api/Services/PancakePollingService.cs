@@ -169,35 +169,63 @@ public sealed partial class PancakePollingService : BackgroundService
                 var ingestor = scope.ServiceProvider.GetRequiredService<Clawbot.Infrastructure.Channels.IChannelMessageIngestor>();
                 var tenantId = await resolver.ResolveTenantIdAsync(ct);
 
-                var metadata = new Dictionary<string, string>
+                                var metadata = new Dictionary<string, string>
                 {
                     ["external_message_id"] = latestMsg.Id,
                     ["content_type"] = "text",
                 };
+
+                // Per-message sender info
+                if (latestMsg.From != null)
+                {
+                    if (!string.IsNullOrEmpty(latestMsg.From.Name)) metadata["sender_name"] = latestMsg.From.Name;
+                    if (!string.IsNullOrEmpty(latestMsg.From.AvatarUrl)) metadata["sender_avatar_url"] = latestMsg.From.AvatarUrl;
+                    metadata["sender_id"] = latestMsg.From.Id ?? "";
+                }
+
                 if (conv.From != null)
                 {
-                    if (!string.IsNullOrEmpty(conv.From.Name)) metadata["display_name"] = conv.From.Name;
-                    if (!string.IsNullOrEmpty(conv.From.AvatarUrl)) metadata["avatar_url"] = conv.From.AvatarUrl;
+                    if (!string.IsNullOrEmpty(conv.From.Name) && !metadata.ContainsKey("sender_name")) metadata["sender_name"] = conv.From.Name;
+                    if (!string.IsNullOrEmpty(conv.From.AvatarUrl) && !metadata.ContainsKey("sender_avatar_url")) metadata["sender_avatar_url"] = conv.From.AvatarUrl;
                     if (conv.From.IsGroup == true) metadata["is_group"] = "true";
                     metadata["from_id"] = conv.From.Id ?? "";
                 }
                 if (conv.LastSentBy != null)
                 {
-                    var senderName = conv.LastSentBy.DisplayName ?? conv.LastSentBy.Name ?? conv.LastSentBy.AdminName;
-                    if (!string.IsNullOrEmpty(senderName)) metadata["sender_name"] = senderName;
                     metadata["sender_id"] = conv.LastSentBy.Id ?? "";
                 }
                 if (!string.IsNullOrEmpty(conv.PageId)) metadata["page_id"] = conv.PageId;
-                if (conv.Customers != null && conv.Customers.Count > 0)
+
+                // Parse attachments for rich content
+                string text = snippet;
+                if (latestMsg.Attachments != null && latestMsg.Attachments.Count > 0)
                 {
-                    var c0 = conv.Customers[0];
-                    if (!string.IsNullOrEmpty(c0.Name) && !metadata.ContainsKey("display_name")) metadata["display_name"] = c0.Name;
-                    if (!string.IsNullOrEmpty(c0.AvatarUrl) && !metadata.ContainsKey("avatar_url")) metadata["avatar_url"] = c0.AvatarUrl;
+                    var att = latestMsg.Attachments[0];
+                    switch (att.Type)
+                    {
+                        case "photo":
+                            metadata["content_type"] = "photo";
+                            text = att.Url ?? "";
+                            break;
+                        case "sticker":
+                            metadata["content_type"] = "sticker";
+                            text = att.Url ?? "";
+                            break;
+                        case "document":
+                            metadata["content_type"] = "document";
+                            text = att.Name ?? "Tai lieu";
+                            if (!string.IsNullOrEmpty(att.Url)) metadata["attachment_url"] = att.Url;
+                            break;
+                        case "pzl_chat_recommended":
+                            metadata["content_type"] = "call_missed";
+                            text = "Cuoc goi nhlo";
+                            break;
+                    }
                 }
 
                 var channelMsg = new Clawbot.SharedKernel.Channels.ChannelMessage(
                     Channel: "zalo", ExternalThreadId: convId,
-                    ExternalUserId: latestMsg.From?.Id ?? "unknown", Text: snippet,
+                    ExternalUserId: conv.From?.Id ?? latestMsg.From?.Id ?? "unknown", Text: text,
                     SentAt: conv.UpdatedAt.HasValue ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow,
                     Metadata: metadata);
                 await ingestor.IngestAsync(tenantId, channelMsg, ct);
