@@ -256,6 +256,20 @@ function MessageBubble({ message, contactAvatarUrl, contactDisplayName }: Messag
           <div className="flex items-center gap-2 rounded-lg border border-outline bg-surface p-2">
             <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-secondary">description</span>
             <span className="text-body-md text-on-surface">{message.content}</span>
+            {message.attachmentUrl && (
+              <a href={message.attachmentUrl} target="_blank" rel="noopener noreferrer" className="text-label-sm text-primary underline ml-1">Tai ve</a>
+            )}
+          </div>
+        ) : message.contentType === "video" && message.attachmentUrl ? (
+          <video controls src={message.attachmentUrl} className="max-h-48 rounded-lg" />
+        ) : message.contentType === "audio" ? (
+          <div className="flex items-center gap-2">
+            <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-secondary">headphones</span>
+            {message.attachmentUrl ? (
+              <audio controls src={message.attachmentUrl} className="max-w-[200px]" />
+            ) : (
+              <span className="text-body-md text-on-surface">Am thanh</span>
+            )}
           </div>
         ) : message.contentType === "call_missed" ? (
           <div className="flex items-center gap-2 text-body-md text-on-surface-variant">

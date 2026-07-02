@@ -216,6 +216,16 @@ public sealed partial class PancakePollingService : BackgroundService
                             text = att.Name ?? "Tai lieu";
                             if (!string.IsNullOrEmpty(att.Url)) metadata["attachment_url"] = att.Url;
                             break;
+                        case "audio":
+                            metadata["content_type"] = "audio";
+                            text = att.Name ?? "Am thanh";
+                            if (!string.IsNullOrEmpty(att.Url)) metadata["attachment_url"] = att.Url;
+                            break;
+                        case "video":
+                            metadata["content_type"] = "video";
+                            text = att.Name ?? "Video";
+                            if (!string.IsNullOrEmpty(att.Url)) metadata["attachment_url"] = att.Url;
+                            break;
                         case "pzl_chat_recommended":
                             metadata["content_type"] = "call_missed";
                             text = "Cuoc goi nhlo";
@@ -225,7 +235,7 @@ public sealed partial class PancakePollingService : BackgroundService
 
                 var channelMsg = new Clawbot.SharedKernel.Channels.ChannelMessage(
                     Channel: "zalo", ExternalThreadId: convId,
-                    ExternalUserId: conv.From?.Id ?? latestMsg.From?.Id ?? "unknown", Text: text,
+                    ExternalUserId: latestMsg.From?.Id ?? conv.From?.Id ?? "unknown", Text: text,
                     SentAt: conv.UpdatedAt.HasValue ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow,
                     Metadata: metadata);
                 await ingestor.IngestAsync(tenantId, channelMsg, ct);

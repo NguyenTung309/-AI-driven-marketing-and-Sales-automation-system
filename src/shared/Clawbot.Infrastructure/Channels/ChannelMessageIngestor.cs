@@ -67,6 +67,7 @@ public sealed partial class ChannelMessageIngestor(
         var direction = isOwner ? "out" : "in";
         var senderType = isOwner ? "user" : "contact";
         var senderDisplayName = message.Metadata.TryGetValue("sender_name", out var sn) ? sn : null;
+        var senderAvatarFromMeta = message.Metadata.TryGetValue("sender_avatar_url", out var sav) ? sav : null;
         var attachmentUrl = message.Metadata.TryGetValue("attachment_url", out var attUrl) ? attUrl : null;
 
         var msg = conversation.AppendMessage(
@@ -82,7 +83,7 @@ public sealed partial class ChannelMessageIngestor(
             messageType: message.MessageType,
             parentPostId: message.ParentPostId,
             senderDisplayName: senderDisplayName,
-            senderAvatarUrl: senderContact?.AvatarUrl,
+            senderAvatarUrl: senderAvatarFromMeta ?? senderContact?.AvatarUrl,
             attachmentUrl: attachmentUrl);
 
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
