@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Clawbot.Domain.Channels;
 using Clawbot.Infrastructure.Channels;
@@ -215,8 +215,27 @@ public sealed partial class PancakePollingService : BackgroundService
     }
 public sealed record PancakeConversationsResponse(bool? Success, PancakeConversation[]? Conversations);
 public sealed record PancakeMessagesResponse(bool? Success, PancakeMessage[]? Messages);
-public sealed record PancakeMessage(string? Id, PancakeMessageSender? From);
-public sealed record PancakeMessageSender(string? Id, string? AdminId, bool? IsAutomated);
+public sealed record PancakeMessage(
+    string? Id,
+    string? Message,
+    PancakeMessageSender? From,
+    IReadOnlyList<PancakeAttachment>? Attachments);
+public sealed record PancakeMessageSender(
+    string? Id,
+    string? Name,
+    string? AvatarUrl,
+    bool? IsGroup,
+    string? AdminId,
+    bool? IsAutomated);
+public sealed record PancakeAttachment(
+    string? Type,
+    string? Url,
+    string? OriginUrl,
+    string? Name,
+    string? MimeType,
+    PancakeImageData? ImageData);
+public sealed record PancakeImageData(int? Width, int? Height);
+
 /// <summary>
 /// The other party in the conversation (customer contact or group info).
 /// </summary>
