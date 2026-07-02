@@ -224,7 +224,7 @@ public sealed partial class PancakePollingService : BackgroundService
                 }
 
                 var channelMsg = new Clawbot.SharedKernel.Channels.ChannelMessage(
-                    Channel: "zalo", ExternalThreadId: convId,
+                    Channel: "zalo", ExternalThreadId: string.IsNullOrEmpty(conv.PageId) ? convId : $"{conv.PageId}:{convId}",
                     ExternalUserId: conv.From?.Id ?? latestMsg.From?.Id ?? "unknown", Text: text,
                     SentAt: conv.UpdatedAt.HasValue ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow,
                     Metadata: metadata);
