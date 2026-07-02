@@ -66,6 +66,8 @@ export interface InboxMessage {
   readonly contentType: string;
   readonly sentAt: string;
   readonly senderDisplayName: string | null;
+  readonly senderAvatarUrl: string | null;
+  readonly attachmentUrl: string | null;
 }
 
 export interface ConversationDetail {
@@ -101,6 +103,9 @@ export interface InboxMessageEvent {
   readonly content: string;
   readonly contentType: string;
   readonly sentAt: string;
+  readonly senderDisplayName?: string | null;
+  readonly senderAvatarUrl?: string | null;
+  readonly attachmentUrl?: string | null;
 }
 
 export interface ListConversationsParams {

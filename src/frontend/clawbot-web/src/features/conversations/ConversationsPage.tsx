@@ -215,19 +215,21 @@ interface MessageBubbleProps {
 function MessageBubble({ message, contactAvatarUrl, contactDisplayName }: MessageBubbleProps) {
   const outbound = isOutbound(message);
   const byAi = message.senderType === "ai" || message.senderType === "bot";
+  const avatarUrl = message.senderAvatarUrl || contactAvatarUrl;
+  const displayName = message.senderDisplayName || contactDisplayName;
   return (
     <div className={`flex gap-3 ${outbound ? "justify-end" : "justify-start"}`}>
       {!outbound ? (
-        contactAvatarUrl ? (
+        avatarUrl ? (
           <img
-            src={contactAvatarUrl}
+            src={avatarUrl}
             alt=""
             className="size-8 rounded-full object-cover shrink-0"
             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
           />
         ) : (
           <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-variant text-label-sm font-bold text-secondary">
-            {(message.senderDisplayName?.charAt(0) || contactDisplayName?.charAt(0) || "K").toUpperCase()}
+            {(displayName?.charAt(0) || "K").toUpperCase()}
           </div>
         )
       ) : null}
@@ -246,7 +248,23 @@ function MessageBubble({ message, contactAvatarUrl, contactDisplayName }: Messag
             ? (message.senderDisplayName ?? (byAi ? "AI Agent" : "Hệ thống"))
             : (message.senderDisplayName ?? contactDisplayName ?? "Khách hàng")}
         </div>
-        <p className="whitespace-pre-wrap text-body-md text-on-surface">{message.content}</p>
+        {message.contentType === "photo" && message.content ? (
+          <img src={message.content} alt="Anh dinh kem" className="max-h-48 rounded-lg object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+        ) : message.contentType === "sticker" && message.content ? (
+          <img src={message.content} alt="Sticker" className="max-h-24 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+        ) : message.contentType === "document" ? (
+          <div className="flex items-center gap-2 rounded-lg border border-outline bg-surface p-2">
+            <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-secondary">description</span>
+            <span className="text-body-md text-on-surface">{message.content}</span>
+          </div>
+        ) : message.contentType === "call_missed" ? (
+          <div className="flex items-center gap-2 text-body-md text-on-surface-variant">
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-error">call_missed</span>
+            {message.content}
+          </div>
+        ) : (
+          <p className="whitespace-pre-wrap text-body-md text-on-surface">{message.content}</p>
+        )}
         <span className={`mt-1 block text-label-sm text-on-surface-variant ${outbound ? "text-right" : ""}`}>
           {formatTime(message.sentAt)}
           {byAi ? " - AI trả lời" : outbound ? " - Đã gửi" : ""}
