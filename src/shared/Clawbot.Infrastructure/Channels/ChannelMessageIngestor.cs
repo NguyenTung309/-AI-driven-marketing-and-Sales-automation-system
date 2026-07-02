@@ -70,6 +70,16 @@ public sealed partial class ChannelMessageIngestor(
         var senderAvatarFromMeta = message.Metadata.TryGetValue("sender_avatar_url", out var sav) ? sav : null;
         var attachmentUrl = message.Metadata.TryGetValue("attachment_url", out var attUrl) ? attUrl : null;
 
+        var finalAvatarUrl = senderAvatarFromMeta;
+        if (IsDefaultAvatar(finalAvatarUrl) && senderContact != null && !IsDefaultAvatar(senderContact.AvatarUrl))
+        {
+            finalAvatarUrl = senderContact.AvatarUrl;
+        }
+        else if (string.IsNullOrEmpty(finalAvatarUrl))
+        {
+            finalAvatarUrl = senderContact?.AvatarUrl;
+        }
+
         var msg = conversation.AppendMessage(
             direction: direction,
             senderType: senderType,
@@ -82,8 +92,8 @@ public sealed partial class ChannelMessageIngestor(
             redactedContent: redacted.RedactedText,
             messageType: message.MessageType,
             parentPostId: message.ParentPostId,
-            senderDisplayName: senderDisplayName,
-            senderAvatarUrl: senderAvatarFromMeta ?? senderContact?.AvatarUrl,
+            senderDisplayName: senderDisplayName ?? senderContact?.DisplayName,
+            senderAvatarUrl: finalAvatarUrl,
             attachmentUrl: attachmentUrl);
 
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -107,7 +117,10 @@ public sealed partial class ChannelMessageIngestor(
 
         if (existing is not null) return existing;
 
-        var contact = await UpsertContactAsync(tenantId, message, ct).ConfigureAwait(false);
+        // Ensure we link the conversation to the customer Contact, not the Page Contact (even if the first message is outbound)
+        var customerExternalId = ExtractCustomerExternalId(message.Channel, message.ExternalThreadId);
+        var customerMessage = message with { ExternalUserId = customerExternalId };
+        var contact = await UpsertContactAsync(tenantId, customerMessage, ct).ConfigureAwait(false);
         var inboxId = await ResolveInboxIdAsync(tenantId, message, ct).ConfigureAwait(false);
         var conv = Conversation.Open(tenantId, message.Channel, message.ExternalThreadId, _clock.UtcNow, contact?.Id, inboxId);
         _db.Conversations.Add(conv);
@@ -125,9 +138,12 @@ public sealed partial class ChannelMessageIngestor(
             senderContact.UpdateDisplayName(newName);
         }
 
-        if (message.Metadata.TryGetValue("avatar_url", out var av) && !string.IsNullOrWhiteSpace(av))
+        var avatarUrl = message.Metadata.TryGetValue("avatar_url", out var av) && !string.IsNullOrWhiteSpace(av) ? av 
+            : (message.Metadata.TryGetValue("sender_avatar_url", out var sav) && !string.IsNullOrWhiteSpace(sav) ? sav : null);
+
+        if (avatarUrl != null && !IsDefaultAvatar(avatarUrl))
         {
-            senderContact.UpdateAvatar(av, _clock.UtcNow);
+            senderContact.UpdateAvatar(avatarUrl, _clock.UtcNow);
         }
 
         return Task.CompletedTask;
@@ -198,6 +214,9 @@ public sealed partial class ChannelMessageIngestor(
             .Where(c => c.TenantId == tenantId)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
+        var avatarUrl = message.Metadata.TryGetValue("avatar_url", out var av) && !string.IsNullOrWhiteSpace(av) ? av 
+            : (message.Metadata.TryGetValue("sender_avatar_url", out var sav) && !string.IsNullOrWhiteSpace(sav) ? sav : null);
+
         if (existing is not null)
         {
             var newName = message.Metadata.TryGetValue("display_name", out var dn) && !string.IsNullOrWhiteSpace(dn) ? dn : null;
@@ -206,9 +225,9 @@ public sealed partial class ChannelMessageIngestor(
                 existing.UpdateDisplayName(newName);
             }
 
-            if (message.Metadata.TryGetValue("avatar_url", out var av) && !string.IsNullOrWhiteSpace(av))
+            if (avatarUrl != null && !IsDefaultAvatar(avatarUrl))
             {
-                existing.UpdateAvatar(av, _clock.UtcNow);
+                existing.UpdateAvatar(avatarUrl, _clock.UtcNow);
             }
             return existing;
         }
@@ -216,9 +235,8 @@ public sealed partial class ChannelMessageIngestor(
         var displayName = message.Metadata.TryGetValue("display_name", out var existingDn) && !string.IsNullOrWhiteSpace(existingDn)
             ? existingDn
             : message.ExternalUserId;
-        var avatarUrl = message.Metadata.TryGetValue("avatar_url", out var av2) ? av2 : null;
         var contact = Contact.Create(tenantId, displayName, _clock.UtcNow);
-        if (!string.IsNullOrEmpty(avatarUrl))
+        if (avatarUrl != null && !IsDefaultAvatar(avatarUrl))
             contact.UpdateAvatar(avatarUrl, _clock.UtcNow);
         contact.LinkExternalId(message.Channel, message.ExternalUserId, _clock.UtcNow);
         _db.Contacts.Add(contact);
@@ -260,4 +278,18 @@ public sealed partial class ChannelMessageIngestor(
 
     [LoggerMessage(EventId = 3002, Level = LogLevel.Warning, Message = "Contact embedding upsert failed for {ContactId}")]
     private static partial void LogEmbeddingUpsertFailed(ILogger logger, Exception ex, Guid contactId);
+
+    private static bool IsDefaultAvatar(string? url)
+    {
+        if (string.IsNullOrEmpty(url)) return true;
+        return url.Contains("b4.jpg", StringComparison.OrdinalIgnoreCase) 
+            || url.Contains("b0.jpg", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ExtractCustomerExternalId(string platform, string externalThreadId)
+    {
+        if (string.IsNullOrEmpty(externalThreadId)) return string.Empty;
+        var idx = externalThreadId.IndexOf(':', StringComparison.Ordinal);
+        return idx > 0 ? externalThreadId[(idx + 1)..] : externalThreadId;
+    }
 }
