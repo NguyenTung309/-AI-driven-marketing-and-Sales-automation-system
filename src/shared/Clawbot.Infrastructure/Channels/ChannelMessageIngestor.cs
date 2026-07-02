@@ -1,4 +1,4 @@
-﻿using Clawbot.Agents.Core.Skills.Nlp;
+using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Domain.Channels;
 using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Conversations;
@@ -41,8 +41,9 @@ public sealed partial class ChannelMessageIngestor(
 
         var conversation = await UpsertConversationAsync(tenantId, message, ct).ConfigureAwait(false);
 
-        // Update contact display name / avatar even for existing conversations
-        await UpdateContactMetadataAsync(tenantId, conversation, message, ct).ConfigureAwait(false);
+        // Update contact display name / avatar only for the sender contact (not the whole conversation contact)
+        var senderContact = await UpsertContactAsync(tenantId, message, ct).ConfigureAwait(false);
+        await UpdateContactMetadataAsync(tenantId, senderContact, message, ct).ConfigureAwait(false);
 
         // Section 9: Auto-reopen resolved/snoozed on inbound message
         conversation.ReopenIfNeeded();
@@ -66,6 +67,7 @@ public sealed partial class ChannelMessageIngestor(
         var direction = isOwner ? "out" : "in";
         var senderType = isOwner ? "user" : "contact";
         var senderDisplayName = message.Metadata.TryGetValue("sender_name", out var sn) ? sn : null;
+        var attachmentUrl = message.Metadata.TryGetValue("attachment_url", out var attUrl) ? attUrl : null;
 
         var msg = conversation.AppendMessage(
             direction: direction,
@@ -79,12 +81,16 @@ public sealed partial class ChannelMessageIngestor(
             redactedContent: redacted.RedactedText,
             messageType: message.MessageType,
             parentPostId: message.ParentPostId,
-            senderDisplayName: senderDisplayName);
+            senderDisplayName: senderDisplayName,
+            senderAvatarUrl: senderContact?.AvatarUrl,
+            attachmentUrl: attachmentUrl);
 
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await _notifier.NotifyMessageAsync(tenantId, new InboxMessageEvent(
-            conversation.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt), ct).ConfigureAwait(false);
+            conversation.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt,
+            SenderDisplayName: msg.SenderDisplayName,
+            SenderAvatarUrl: msg.SenderAvatarUrl), ct).ConfigureAwait(false);
 
         return new IngestResult(conversation.Id, msg.Id, false);
     }
@@ -108,24 +114,22 @@ public sealed partial class ChannelMessageIngestor(
         return conv;
     }
 
-    private async Task UpdateContactMetadataAsync(Guid tenantId, Conversation conversation, ChannelMessage message, CancellationToken ct)
+    private Task UpdateContactMetadataAsync(Guid tenantId, Contact? senderContact, ChannelMessage message, CancellationToken ct)
     {
-        if (conversation.ContactId is null) return;
-
-        var contact = await _db.Contacts.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(c => c.Id == conversation.ContactId, ct).ConfigureAwait(false);
-        if (contact is null) return;
+        if (senderContact is null) return Task.CompletedTask;
 
         var newName = message.Metadata.TryGetValue("display_name", out var dn) && !string.IsNullOrWhiteSpace(dn) ? dn : null;
-        if (newName != null && (contact.DisplayName == message.ExternalUserId || contact.DisplayName.StartsWith("pzl_", StringComparison.Ordinal)))
+        if (newName != null && (senderContact.DisplayName == message.ExternalUserId || senderContact.DisplayName.StartsWith("pzl_", StringComparison.Ordinal)))
         {
-            contact.UpdateDisplayName(newName);
+            senderContact.UpdateDisplayName(newName);
         }
 
         if (message.Metadata.TryGetValue("avatar_url", out var av) && !string.IsNullOrWhiteSpace(av))
         {
-            contact.UpdateAvatar(av, _clock.UtcNow);
+            senderContact.UpdateAvatar(av, _clock.UtcNow);
         }
+
+        return Task.CompletedTask;
     }
     private async Task<Guid?> ResolveInboxIdAsync(Guid tenantId, ChannelMessage message, CancellationToken ct)
     {

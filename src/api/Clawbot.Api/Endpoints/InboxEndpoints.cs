@@ -130,7 +130,7 @@ public static class InboxEndpoints
                 .Select(c => new { c.DisplayName, c.AvatarUrl }).FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
         var messages = conv.Messages.OrderBy(m => m.SentAt)
-            .Select(m => new MessageDto(m.Id, m.Direction, m.SenderType, m.SenderUserId, m.Content, m.ContentType, m.SentAt, m.SenderDisplayName))
+            .Select(m => new MessageDto(m.Id, m.Direction, m.SenderType, m.SenderUserId, m.Content, m.ContentType, m.SentAt, m.SenderDisplayName, m.SenderAvatarUrl, m.AttachmentUrl))
             .ToList();
 
         string? inboxName = null;
@@ -315,9 +315,9 @@ public static class InboxEndpoints
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await notifier.NotifyMessageAsync(tenant.TenantId,
-            new InboxMessageEvent(conv.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt, conv.AssignedTo), ct).ConfigureAwait(false);
+            new InboxMessageEvent(conv.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt, conv.AssignedTo, msg.SenderDisplayName, msg.SenderAvatarUrl), ct).ConfigureAwait(false);
 
-        return Results.Ok(new MessageDto(msg.Id, msg.Direction, msg.SenderType, msg.SenderUserId, msg.Content, msg.ContentType, msg.SentAt, null));
+        return Results.Ok(new MessageDto(msg.Id, msg.Direction, msg.SenderType, msg.SenderUserId, msg.Content, msg.ContentType, msg.SentAt, msg.SenderDisplayName, msg.SenderAvatarUrl, msg.AttachmentUrl));
     }
 
     private static string Preview(string text) =>

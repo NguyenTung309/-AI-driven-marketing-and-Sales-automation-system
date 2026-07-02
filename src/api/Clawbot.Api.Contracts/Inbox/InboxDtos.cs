@@ -42,7 +42,9 @@ public sealed record MessageDto(
     string Content,
     string ContentType,
     DateTimeOffset SentAt,
-    string? SenderDisplayName);
+    string? SenderDisplayName,
+    string? SenderAvatarUrl = null,
+    string? AttachmentUrl = null);
 
 public sealed record AssignConversationRequest(Guid UserId);
 
