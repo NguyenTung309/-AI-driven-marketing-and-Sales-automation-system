@@ -32,7 +32,7 @@ public sealed class GenericLlmAgentWorkerToolThreadingTests
             definition,
             new EmptyRag(),
             chat,
-            new OrchestratorCostGuard(new InMemoryClaudeCostTracker()),
+            new OrchestratorCostGuard(new InMemoryLlmCostTracker()),
             new LlmCallScope(),
             registry);
     }

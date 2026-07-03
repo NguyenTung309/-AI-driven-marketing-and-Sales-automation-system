@@ -6,11 +6,11 @@ namespace Clawbot.Agents.Core.Chat;
 
 public sealed class ClawbotChatCompletionService(
     IClaudeChatClient client,
-    IClaudeCostTracker? costTracker = null,
+    ILlmCostTracker? costTracker = null,
     ILlmCallScope? llmScope = null) : IChatCompletionService
 {
     private readonly IClaudeChatClient _client = client;
-    private readonly IClaudeCostTracker? _costTracker = costTracker;
+    private readonly ILlmCostTracker? _costTracker = costTracker;
     private readonly ILlmCallScope? _llmScope = llmScope;
 
     public IReadOnlyDictionary<string, object?> Attributes { get; } = new Dictionary<string, object?>();

@@ -71,6 +71,8 @@ message SubmitRequest {
   google.protobuf.Timestamp requested_at = 3;
   // SPEC-16 P3-3: the user initiating the run, so the session (and terminal notifications) can be attributed to them.
   string user_id = 4;
+  // Dry-run: plan + walk the DAG but tools only return "[dry-run] would ..." previews (no real side effects).
+  bool dry_run = 5;
 }
 
 message SessionRef {

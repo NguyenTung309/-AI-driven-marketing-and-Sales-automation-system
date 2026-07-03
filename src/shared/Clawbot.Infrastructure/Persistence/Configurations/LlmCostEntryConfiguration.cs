@@ -4,9 +4,9 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Clawbot.Infrastructure.Persistence.Configurations;
 
-public sealed class ClaudeCostEntryConfiguration : IEntityTypeConfiguration<ClaudeCostEntry>
+public sealed class LlmCostEntryConfiguration : IEntityTypeConfiguration<LlmCostEntry>
 {
-    public void Configure(EntityTypeBuilder<ClaudeCostEntry> builder)
+    public void Configure(EntityTypeBuilder<LlmCostEntry> builder)
     {
         builder.ToTable("claude_cost_ledger");
         builder.HasKey(x => x.Id);
@@ -14,5 +14,7 @@ public sealed class ClaudeCostEntryConfiguration : IEntityTypeConfiguration<Clau
         builder.Property(x => x.Model).HasMaxLength(80).IsRequired();
         builder.Property(x => x.Usd).HasColumnType("decimal(12,6)");
         builder.HasIndex(x => new { x.TenantId, x.AgentCode, x.CreatedAt });
+        // Truy chi phí thực theo phiên điều phối.
+        builder.HasIndex(x => x.SessionId);
     }
 }

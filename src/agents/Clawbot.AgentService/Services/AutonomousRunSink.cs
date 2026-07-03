@@ -17,13 +17,33 @@ public sealed partial class AutonomousRunSink(
     IPiiRedactor pii,
     IClock clock,
     INotificationPublisher? publisher = null,
-    ILogger<AutonomousRunSink>? logger = null) : IAutonomousRunSink
+    ILogger<AutonomousRunSink>? logger = null,
+    StackExchange.Redis.IConnectionMultiplexer? redis = null) : IAutonomousRunSink
 {
     private readonly AppDbContext _db = db;
     private readonly IPiiRedactor _pii = pii;
     private readonly IClock _clock = clock;
     private readonly INotificationPublisher? _publisher = publisher;
     private readonly ILogger<AutonomousRunSink> _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AutonomousRunSink>.Instance;
+    private readonly StackExchange.Redis.IConnectionMultiplexer? _redis = redis;
+
+    // C1: nudge the API-side relay so connected FE clients refetch this run instead of polling.
+    // Fire-and-forget: losing an event only means the FE falls back to its slow poll.
+    private void PublishRunEvent(Guid tenantId, Guid sessionId)
+    {
+        if (_redis is null) return;
+        try
+        {
+            _redis.GetSubscriber().Publish(
+                StackExchange.Redis.RedisChannel.Literal(Clawbot.Infrastructure.Notifications.RunEventsChannel.Name),
+                $"{{\"tenantId\":\"{tenantId:D}\",\"sessionId\":\"{sessionId:D}\"}}",
+                StackExchange.Redis.CommandFlags.FireAndForget);
+        }
+        catch (StackExchange.Redis.RedisException)
+        {
+            // FE polling fallback still covers it.
+        }
+    }
 
     public async Task TraceAsync(Guid tenantId, Guid sessionId, string taskId, string agent, string phase, string message, DateTimeOffset at, CancellationToken ct = default)
     {
@@ -32,6 +52,7 @@ public sealed partial class AutonomousRunSink(
         var redacted = await RedactAsync(message, ct).ConfigureAwait(false);
         session.AppendTrace(taskId, agent, phase, redacted, at);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+        PublishRunEvent(tenantId, sessionId);
     }
 
     public async Task PersistPlanAsync(Guid tenantId, Guid sessionId, OrchestrationPlanDocument plan, bool requiresApproval = false, CancellationToken ct = default)
@@ -47,11 +68,12 @@ public sealed partial class AutonomousRunSink(
             await NotifyAsync(session, "orchestration_approval", "Kế hoạch chờ duyệt",
                 Severity: "info",
                 Body: $"Kế hoạch orchestration cho \"{session.Goal}\" đang chờ bạn duyệt.",
-                Link: "/orchestration", ct).ConfigureAwait(false);
+                Link: $"/agents/runs/{session.Id}", ct).ConfigureAwait(false);
         }
         else
             session.RecordRun(planJson);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+        PublishRunEvent(tenantId, sessionId);
     }
 
     public async Task<bool> IsStoppedAsync(Guid tenantId, Guid sessionId, CancellationToken ct = default)
@@ -66,11 +88,12 @@ public sealed partial class AutonomousRunSink(
         if (session is null) return;
         session.Finish(at);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+        PublishRunEvent(tenantId, sessionId);
         // EARS[WHEN a run completes THE SYSTEM SHALL notify the initiating user with the outcome]
         await NotifyAsync(session, "orchestration_completed", "Hoàn thành orchestration",
             Severity: "success",
             Body: $"Mục tiêu \"{session.Goal}\" đã hoàn thành.",
-            Link: "/orchestration", ct).ConfigureAwait(false);
+            Link: $"/agents/runs/{session.Id}", ct).ConfigureAwait(false);
     }
 
     public async Task FailAsync(Guid tenantId, Guid sessionId, string reason, DateTimeOffset at, CancellationToken ct = default)
@@ -80,10 +103,11 @@ public sealed partial class AutonomousRunSink(
         session.AppendTrace(string.Empty, "orchestrator", "failed", await RedactAsync(reason, ct).ConfigureAwait(false), at);
         session.Fail(at);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+        PublishRunEvent(tenantId, sessionId);
         await NotifyAsync(session, "orchestration_failed", "Orchestration thất bại",
             Severity: "warning",
             Body: BuildFailBody(session.Goal, reason),
-            Link: "/orchestration", ct).ConfigureAwait(false);
+            Link: $"/agents/runs/{session.Id}", ct).ConfigureAwait(false);
     }
 
     // SPEC-16 Module M-6: when the failure looks like an auth/token problem, surface a re-auth hint so the admin
@@ -102,6 +126,7 @@ public sealed partial class AutonomousRunSink(
         if (session is null) return;
         session.Cancel(at);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+        PublishRunEvent(tenantId, sessionId);
     }
 
     private async Task<AgentSession?> LoadAsync(Guid tenantId, Guid sessionId, CancellationToken ct) =>

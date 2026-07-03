@@ -92,7 +92,7 @@ public sealed class OrchestratorCostGuardTests
         results.Count(result => !result.Allowed).Should().Be(1);
     }
 
-    private sealed class FixedSummaryTracker(CostSummary summary) : IClaudeCostTracker, IClaudeCostReservationStore
+    private sealed class FixedSummaryTracker(CostSummary summary) : ILlmCostTracker, ILlmCostReservationStore
     {
         private readonly object _gate = new();
         private decimal _reserved;
@@ -131,7 +131,7 @@ public sealed class OrchestratorCostGuardTests
         }
     }
 
-    private sealed class SequencedSummaryTracker(IReadOnlyList<CostSummary> summaries) : IClaudeCostTracker, IClaudeCostReservationStore
+    private sealed class SequencedSummaryTracker(IReadOnlyList<CostSummary> summaries) : ILlmCostTracker, ILlmCostReservationStore
     {
         private readonly object _gate = new();
         private int _index;

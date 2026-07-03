@@ -38,6 +38,36 @@ export function statusLabel(status: OrchestrationV2Status): string {
   }
 }
 
+export function taskStatusLabel(status: string): string {
+  switch (status) {
+    case "pending":
+      return "Chờ chạy";
+    case "running":
+      return "Đang chạy";
+    case "completed":
+      return "Hoàn tất";
+    case "failed":
+      return "Thất bại";
+    case "skipped":
+      return "Bỏ qua";
+    default:
+      return status;
+  }
+}
+
+export function a2aStatusLabel(status: string): string {
+  switch (status) {
+    case "pending":
+      return "Chờ xử lý";
+    case "processed":
+      return "Đã xử lý";
+    case "failed":
+      return "Thất bại";
+    default:
+      return status;
+  }
+}
+
 export function taskTone(status: string): StatusTone {
   switch (status) {
     case "completed":

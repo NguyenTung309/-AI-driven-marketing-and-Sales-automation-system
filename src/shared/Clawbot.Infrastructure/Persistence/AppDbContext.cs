@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Clawbot.Application.Abstractions;
 using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
@@ -82,7 +82,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<InboxMember> InboxMembers => Set<InboxMember>();
     public DbSet<ChannelToken> ChannelTokens => Set<ChannelToken>();
     public DbSet<AgentTrace> AgentTraces => Set<AgentTrace>();
-    public DbSet<ClaudeCostEntry> ClaudeCostLedger => Set<ClaudeCostEntry>();
+    public DbSet<LlmCostEntry> LlmCostLedger => Set<LlmCostEntry>();
 
     // Sale Assist
     public DbSet<QuickReplyTemplate> QuickReplyTemplates => Set<QuickReplyTemplate>();

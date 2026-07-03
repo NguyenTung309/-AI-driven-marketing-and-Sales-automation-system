@@ -15,6 +15,8 @@ public sealed class Tenant : AggregateRoot<Guid>
     public string? SupportName { get; private set; }
     public string? WidgetGreeting { get; private set; }
     public bool RequireOrchestrationApproval { get; private set; }
+    // Hạn mức chi tiêu LLM mỗi tháng (USD). null = dùng mặc định hệ thống.
+    public decimal? MonthlyCostCapUsd { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     private Tenant() { }
@@ -48,6 +50,10 @@ public sealed class Tenant : AggregateRoot<Guid>
 
     public void SetRequireOrchestrationApproval(bool requireApproval) =>
         RequireOrchestrationApproval = requireApproval;
+
+    // null hoặc <= 0 → xoá hạn mức riêng, quay về mặc định hệ thống.
+    public void SetMonthlyCostCapUsd(decimal? capUsd) =>
+        MonthlyCostCapUsd = capUsd is > 0m ? capUsd : null;
 
     private static string? NormalizeNullable(string? value)
     {

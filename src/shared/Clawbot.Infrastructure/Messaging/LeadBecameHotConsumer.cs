@@ -33,6 +33,10 @@ public sealed partial class LeadBecameHotConsumer(
             .ConfigureAwait(false);
         if (lead is null) return;
 
+        // C2: đánh thức các lịch event-trigger "khi có lead nóng" (vd. orchestrator tự soạn kịch bản chăm sóc).
+        await Agents.ScheduleEventDispatcher.FireAsync(
+            _db, msg.TenantId, Clawbot.SharedKernel.Orchestration.ScheduleEventKeys.LeadBecameHot, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+
         var ownerId = lead.OwnerUserId;
         if (ownerId is null)
         {

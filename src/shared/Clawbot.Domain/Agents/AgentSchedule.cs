@@ -16,6 +16,10 @@ public sealed class AgentSchedule : AggregateRoot<Guid>, ITenantOwned
     public string MisfirePolicy { get; private set; } = "skip_missed";
     public bool RequiresApproval { get; private set; }
     public string? ApprovalPolicyJson { get; private set; }
+    // "cadence" = fires on the recurrence clock; "event" = sleeps until ScheduleEventDispatcher
+    // pulls NextRunAt to now for the matching EventKey.
+    public string TriggerType { get; private set; } = "cadence";
+    public string? EventKey { get; private set; }
     public bool IsActive { get; private set; } = true;
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -35,9 +39,13 @@ public sealed class AgentSchedule : AggregateRoot<Guid>, ITenantOwned
         DateTimeOffset createdAt,
         string overlapPolicy = "skip",
         string misfirePolicy = "skip_missed",
-        string? approvalPolicyJson = null) =>
+        string? approvalPolicyJson = null,
+        string triggerType = "cadence",
+        string? eventKey = null) =>
         new()
         {
+            TriggerType = string.IsNullOrWhiteSpace(triggerType) ? "cadence" : triggerType.Trim().ToLowerInvariant(),
+            EventKey = string.IsNullOrWhiteSpace(eventKey) ? null : eventKey.Trim().ToLowerInvariant(),
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             Name = name.Trim(),

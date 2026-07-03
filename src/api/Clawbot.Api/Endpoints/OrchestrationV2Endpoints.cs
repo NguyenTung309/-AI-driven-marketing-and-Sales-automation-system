@@ -12,15 +12,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
 
-public sealed record OrchestrationV2RunRequest(string Goal, string? Source = null);
-public sealed record OrchestrationV2AgentRequest(string Code, string DisplayName, string AgentType, string PersonaPrompt, bool IsOrchestratable = true, string? KbModuleCode = null, string? AllowedToolsJson = null, string? InputSchemaJson = null);
-public sealed record OrchestrationV2ScheduleRequest(string Name, string GoalTemplate, string Cadence, string TimezoneId, DateTimeOffset? NextRunAt = null, bool RequiresApproval = false);
+public sealed record OrchestrationV2RunRequest(string Goal, string? Source = null, bool DryRun = false);
+// LlmConfigId: null = keep current binding, Guid.Empty = unbind, value = bind (validated against the tenant's llm_configs).
+public sealed record OrchestrationV2AgentRequest(string Code, string DisplayName, string AgentType, string PersonaPrompt, bool IsOrchestratable = true, string? KbModuleCode = null, string? AllowedToolsJson = null, string? InputSchemaJson = null, Guid? LlmConfigId = null);
+public sealed record OrchestrationV2ScheduleRequest(string Name, string GoalTemplate, string Cadence, string TimezoneId, DateTimeOffset? NextRunAt = null, bool RequiresApproval = false, string TriggerType = "cadence", string? EventKey = null);
 public sealed record OrchestrationV2ControlRequest(string Action, string? Etag = null);
 public sealed record OrchestrationV2UpdatePlanRequest(string PlanJson, string? Etag = null);
 public sealed record OrchestrationV2ApproveRequest(string? Etag = null);
 
-public sealed record OrchestrationV2AgentDto(Guid Id, string Code, string DisplayName, string AgentType, bool IsOrchestratable, int Version, string? KbModuleCode, string AllowedToolsJson = "[]", string InputSchemaJson = "{}", string PersonaPrompt = "");
-public sealed record OrchestrationV2ScheduleDto(Guid Id, string Name, string GoalTemplate, string Cadence, string TimezoneId, DateTimeOffset NextRunAt, DateTimeOffset? LastRunAt, bool IsActive, bool RequiresApproval);
+public sealed record OrchestrationV2AgentDto(Guid Id, string Code, string DisplayName, string AgentType, bool IsOrchestratable, int Version, string? KbModuleCode, string AllowedToolsJson = "[]", string InputSchemaJson = "{}", string PersonaPrompt = "", Guid? LlmConfigId = null);
+public sealed record OrchestrationV2ScheduleDto(Guid Id, string Name, string GoalTemplate, string Cadence, string TimezoneId, DateTimeOffset NextRunAt, DateTimeOffset? LastRunAt, bool IsActive, bool RequiresApproval, string TriggerType = "cadence", string? EventKey = null);
 public sealed record OrchestrationV2TraceDto(string TaskId, string AgentName, string Phase, string Message, DateTimeOffset OccurredAt);
 public sealed record OrchestrationV2MessageDto(Guid Id, string TaskId, string Intent, string Status, string PayloadJson, string? Error, DateTimeOffset CreatedAt, DateTimeOffset? ProcessedAt);
 
@@ -65,7 +66,8 @@ public sealed record OrchestrationV2RunDto(
     string PlanJson,
     IReadOnlyList<OrchestrationV2TaskDto> Tasks,
     IReadOnlyList<OrchestrationV2TraceDto> Traces,
-    IReadOnlyList<OrchestrationV2MessageDto> Messages);
+    IReadOnlyList<OrchestrationV2MessageDto> Messages,
+    decimal ActualCostUsd = 0m);
 
 public static class OrchestrationV2Endpoints
 {
@@ -84,11 +86,15 @@ public static class OrchestrationV2Endpoints
         group.MapPost("/runs/{id:guid}/approve", ApproveRunAsync).RequirePermission("orchestration:approve");
         group.MapPost("/runs/{id:guid}/control", ControlRunAsync).RequirePermission("orchestration:manage");
         group.MapPost("/runs/{id:guid}/archive", ArchiveRunAsync).RequirePermission("orchestration:manage");
+        group.MapPost("/runs/{id:guid}/unarchive", UnarchiveRunAsync).RequirePermission("orchestration:manage");
+        group.MapGet("/cost-summary", CostSummaryAsync).RequirePermission("orchestration:view");
         group.MapGet("/agents", ListAgentsAsync).RequirePermission("orchestration:view");
         group.MapPost("/agents", UpsertAgentAsync).RequirePermission("orchestration:manage");
         group.MapGet("/schedules", ListSchedulesAsync).RequirePermission("orchestration:view");
         group.MapPost("/schedules", CreateScheduleAsync).RequirePermission("orchestration:manage");
         group.MapPost("/schedules/{id:guid}/run-now", RunScheduleNowAsync).RequirePermission("orchestration:run");
+        group.MapPost("/schedules/{id:guid}/pause", PauseScheduleAsync).RequirePermission("orchestration:manage");
+        group.MapPost("/schedules/{id:guid}/activate", ActivateScheduleAsync).RequirePermission("orchestration:manage");
         return app;
     }
 
@@ -100,7 +106,7 @@ public static class OrchestrationV2Endpoints
         var userId = http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         try
         {
-            var response = await grpc.SubmitAsync(new SubmitRequest { TenantId = tenant.TenantId.ToString("D"), Goal = body.Goal.Trim(), UserId = userId ?? string.Empty }, cancellationToken: ct).ConfigureAwait(false);
+            var response = await grpc.SubmitAsync(new SubmitRequest { TenantId = tenant.TenantId.ToString("D"), Goal = body.Goal.Trim(), UserId = userId ?? string.Empty, DryRun = body.DryRun }, cancellationToken: ct).ConfigureAwait(false);
             return Results.Ok(new { sessionId = response.SessionId, status = response.Status });
         }
         catch (RpcException ex)
@@ -162,6 +168,13 @@ public static class OrchestrationV2Endpoints
             .Select(m => new OrchestrationV2MessageDto(m.Id, m.TaskId, m.Intent, m.Status, m.PayloadJson, m.Error, m.CreatedAt, m.ProcessedAt))
             .ToListAsync(ct).ConfigureAwait(false);
 
+        // Chi phí thực của phiên: tổng USD ledger gắn session này (bỏ dòng đặt chỗ chưa quyết toán).
+        var actualCostUsd = await db.LlmCostLedger.IgnoreQueryFilters().AsNoTracking()
+            .Where(c => c.SessionId == id
+                && c.TenantId == tenant.TenantId
+                && c.AgentCode != Clawbot.Domain.Agents.LlmCostEntry.ReservationAgentCode)
+            .SumAsync(c => (decimal?)c.Usd, ct).ConfigureAwait(false) ?? 0m;
+
         return Results.Ok(new OrchestrationV2RunDto(
             id,
             plan.Status,
@@ -177,7 +190,8 @@ public static class OrchestrationV2Endpoints
             plan.PlanJson,
             ToTaskDtos(plan.Tasks).ToArray(),
             traceDtos,
-            messages));
+            messages,
+            actualCostUsd));
     }
 
     private static async Task<IResult> UpdateRunPlanAsync(Guid id, OrchestrationV2UpdatePlanRequest body, ITenantAccessor tenants, Orchestrator.OrchestratorClient grpc, CancellationToken ct)
@@ -315,7 +329,7 @@ public static class OrchestrationV2Endpoints
         var agents = await db.AgentDefinitions.IgnoreQueryFilters().AsNoTracking()
             .Where(a => a.TenantId == tenant.TenantId && a.DeletedAt == null)
             .OrderBy(a => a.Code)
-            .Select(a => new OrchestrationV2AgentDto(a.Id, a.Code, a.DisplayName, a.AgentType, a.IsOrchestratable, a.Version, a.KbModuleCode, a.AllowedToolsJson, a.InputSchemaJson, a.PersonaPrompt))
+            .Select(a => new OrchestrationV2AgentDto(a.Id, a.Code, a.DisplayName, a.AgentType, a.IsOrchestratable, a.Version, a.KbModuleCode, a.AllowedToolsJson, a.InputSchemaJson, a.PersonaPrompt, a.LlmConfigId))
             .ToListAsync(ct).ConfigureAwait(false);
         return Results.Ok(new { items = agents });
     }
@@ -340,6 +354,15 @@ public static class OrchestrationV2Endpoints
         if (inputSchema is null)
             return Results.BadRequest(new { error = "invalid_input_schema_json" });
         var tenant = tenants.Require();
+        // EARS[WHEN an LLM binding is provided THE SYSTEM SHALL validate the config belongs to the tenant and is
+        // active, so a definition cannot bind to another tenant's provider]
+        if (body.LlmConfigId is { } bindId && bindId != Guid.Empty)
+        {
+            var configExists = await db.LlmConfigs.IgnoreQueryFilters()
+                .AnyAsync(c => c.Id == bindId && c.TenantId == tenant.TenantId && c.IsActive, ct).ConfigureAwait(false);
+            if (!configExists)
+                return Results.BadRequest(new { error = "llm_config_not_found" });
+        }
         var code = body.Code.Trim();
         var existing = await db.AgentDefinitions.IgnoreQueryFilters()
             .FirstOrDefaultAsync(a => a.TenantId == tenant.TenantId && a.Code == code && a.DeletedAt == null, ct).ConfigureAwait(false);
@@ -349,13 +372,14 @@ public static class OrchestrationV2Endpoints
                 allowedToolsJson: allowedTools, inputSchemaJson: inputSchema, isOrchestratable: body.IsOrchestratable, kbModuleCode: body.KbModuleCode);
             db.AgentDefinitions.Add(existing);
         }
-        else
-        {
-            existing.UpdateDefinition(body.DisplayName, body.AgentType, body.PersonaPrompt, allowedTools, inputSchema,
-                existing.OutputSchemaJson, existing.MemoryScope, existing.LlmConfigId, body.IsOrchestratable, clock.UtcNow, body.KbModuleCode);
-        }
+
+        var llmConfigId = body.LlmConfigId is null
+            ? existing.LlmConfigId
+            : (body.LlmConfigId == Guid.Empty ? null : body.LlmConfigId);
+        existing.UpdateDefinition(body.DisplayName, body.AgentType, body.PersonaPrompt, allowedTools, inputSchema,
+            existing.OutputSchemaJson, existing.MemoryScope, llmConfigId, body.IsOrchestratable, clock.UtcNow, body.KbModuleCode);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return Results.Ok(new OrchestrationV2AgentDto(existing.Id, existing.Code, existing.DisplayName, existing.AgentType, existing.IsOrchestratable, existing.Version, existing.KbModuleCode, existing.AllowedToolsJson, existing.InputSchemaJson, existing.PersonaPrompt));
+        return Results.Ok(new OrchestrationV2AgentDto(existing.Id, existing.Code, existing.DisplayName, existing.AgentType, existing.IsOrchestratable, existing.Version, existing.KbModuleCode, existing.AllowedToolsJson, existing.InputSchemaJson, existing.PersonaPrompt, existing.LlmConfigId));
     }
 
     // ponytail: validate JSON shape without a schema lib; allowedTools must be a JSON array, inputSchema a JSON object.
@@ -420,8 +444,18 @@ public static class OrchestrationV2Endpoints
         try { _ = TimeZoneInfo.FindSystemTimeZoneById(body.TimezoneId); }
         catch (TimeZoneNotFoundException) { return Results.BadRequest(new { error = "invalid_timezone" }); }
         catch (InvalidTimeZoneException) { return Results.BadRequest(new { error = "invalid_timezone" }); }
+        // C2: event-triggered schedules — event key phải nằm trong catalog đã nối dây dispatcher.
+        var triggerType = string.IsNullOrWhiteSpace(body.TriggerType) ? "cadence" : body.TriggerType.Trim().ToLowerInvariant();
+        if (triggerType is not ("cadence" or "event")) return Results.BadRequest(new { error = "invalid_trigger_type" });
+        if (triggerType == "event"
+            && !Clawbot.SharedKernel.Orchestration.ScheduleEventKeys.All.Contains(body.EventKey?.Trim().ToLowerInvariant() ?? string.Empty))
+        {
+            return Results.BadRequest(new { error = "invalid_event_key" });
+        }
         var tenant = tenants.Require();
-        var schedule = AgentSchedule.Create(tenant.TenantId, body.Name, body.GoalTemplate, body.Cadence, null, body.TimezoneId, body.NextRunAt ?? clock.UtcNow, body.RequiresApproval, clock.UtcNow);
+        // Event schedules ngủ tới khi sự kiện kéo NextRunAt về; cadence schedules chạy ngay mốc đầu.
+        var nextRunAt = triggerType == "event" ? DateTimeOffset.MaxValue : body.NextRunAt ?? clock.UtcNow;
+        var schedule = AgentSchedule.Create(tenant.TenantId, body.Name, body.GoalTemplate, body.Cadence, null, body.TimezoneId, nextRunAt, body.RequiresApproval, clock.UtcNow, triggerType: triggerType, eventKey: body.EventKey);
         db.AgentSchedules.Add(schedule);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.Ok(ToScheduleDto(schedule));
@@ -440,8 +474,58 @@ public static class OrchestrationV2Endpoints
         return Results.Accepted($"/api/orchestration/v2/schedules/{id}", new { status = "queued", nextRunAt = schedule.NextRunAt });
     }
 
+    private static async Task<IResult> PauseScheduleAsync(Guid id, AppDbContext db, ITenantAccessor tenants, IClock clock, CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var schedule = await db.AgentSchedules.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(s => s.Id == id && s.TenantId == tenant.TenantId && s.DeletedAt == null, ct).ConfigureAwait(false);
+        if (schedule is null) return Results.NotFound(new { error = "schedule_not_found" });
+
+        schedule.Pause(clock.UtcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.Ok(ToScheduleDto(schedule));
+    }
+
+    private static async Task<IResult> ActivateScheduleAsync(Guid id, AppDbContext db, ITenantAccessor tenants, IClock clock, CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var schedule = await db.AgentSchedules.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(s => s.Id == id && s.TenantId == tenant.TenantId && s.DeletedAt == null, ct).ConfigureAwait(false);
+        if (schedule is null) return Results.NotFound(new { error = "schedule_not_found" });
+
+        schedule.Activate(clock.UtcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.Ok(ToScheduleDto(schedule));
+    }
+
+    private static async Task<IResult> UnarchiveRunAsync(Guid id, AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var session = await db.AgentSessions.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(s => s.Id == id && s.TenantId == tenant.TenantId, ct)
+            .ConfigureAwait(false);
+        if (session is null) return Results.NotFound(new { error = "session_not_found" });
+
+        session.Unarchive();
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.Ok(new { sessionId = session.Id, session.Status, session.ArchivedAt });
+    }
+
+    // B5: chi tiêu LLM tháng này + hạn mức — cùng nguồn số liệu với OrchestratorCostGuard (LlmCostLedger),
+    // để người duyệt thấy guardrail thật ngay tại điểm phê duyệt.
+    private static async Task<IResult> CostSummaryAsync(
+        Clawbot.Agents.Core.Skills.Ops.ILlmCostTracker tracker,
+        ITenantAccessor tenants,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var summary = await tracker.SummaryAsync(tenant.TenantId, clock.UtcNow, ct).ConfigureAwait(false);
+        return Results.Ok(new { monthToDateUsd = summary.MonthToDateUsd, capUsd = summary.CapUsd });
+    }
+
     private static OrchestrationV2ScheduleDto ToScheduleDto(AgentSchedule s) =>
-        new(s.Id, s.Name, s.GoalTemplate, s.Cadence, s.TimezoneId, s.NextRunAt, s.LastRunAt, s.IsActive, s.RequiresApproval);
+        new(s.Id, s.Name, s.GoalTemplate, s.Cadence, s.TimezoneId, s.NextRunAt, s.LastRunAt, s.IsActive, s.RequiresApproval, s.TriggerType, s.EventKey);
 
     private static string DisplayAgentLabel(string? agentName)
     {

@@ -10,7 +10,8 @@ public sealed record CostEntry(
     int OutputTokens,
     decimal UsdCost,
     DateTimeOffset At,
-    Guid? ReservationId = null);
+    Guid? ReservationId = null,
+    Guid? SessionId = null);
 
 public sealed record CostSummary(Guid TenantId, decimal MonthToDateUsd, decimal CapUsd, float PercentUsed);
 
@@ -20,13 +21,13 @@ public sealed record CostReservationResult(bool Allowed, string? Reason, Guid? R
     public static CostReservationResult Deny(string reason) => new(false, reason);
 }
 
-public interface IClaudeCostTracker : ISkill
+public interface ILlmCostTracker : ISkill
 {
     Task RecordAsync(CostEntry entry, CancellationToken ct);
     Task<CostSummary> SummaryAsync(Guid tenantId, DateTimeOffset month, CancellationToken ct);
 }
 
-public interface IClaudeCostReservationStore
+public interface ILlmCostReservationStore
 {
     Task<CostReservationResult> TryReserveAsync(Guid tenantId, decimal estimatedUsd, DateTimeOffset at, CancellationToken ct);
     Task ReleaseReservationAsync(Guid tenantId, Guid reservationId, CancellationToken ct);
@@ -35,7 +36,7 @@ public interface IClaudeCostReservationStore
 // Baseline in-memory tracker keyed by (tenant, year-month).
 // Records observed spend; cap enforcement lives in OrchestratorCostGuard.
 // Vendor swap target: SQLite ledger + OTel gen_ai.cost metric emission.
-internal sealed class InMemoryClaudeCostTracker : IClaudeCostTracker, IClaudeCostReservationStore
+internal sealed class InMemoryLlmCostTracker : ILlmCostTracker, ILlmCostReservationStore
 {
     private const decimal DefaultCapUsd = 200m;
 

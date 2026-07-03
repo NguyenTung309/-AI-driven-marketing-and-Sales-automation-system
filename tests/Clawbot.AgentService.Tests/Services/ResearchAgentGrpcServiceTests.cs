@@ -1,6 +1,7 @@
 using Clawbot.AgentService.Services;
 using Clawbot.Agents.Contracts.Research;
 using Clawbot.Domain.KnowledgeBase;
+using Clawbot.SharedKernel.Security;
 using Clawbot.SharedKernel.Time;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -45,7 +46,8 @@ public sealed class ResearchAgentGrpcServiceTests
                 return Task.FromResult(trends);
             });
         var clock = new FixedClock(Now);
-        var service = new ResearchAgentGrpcService(agent, fx.Db, clock);
+        var scanner = new TrendScanService(fx.Db, Substitute.For<IEncryptor>(), agent, clock);
+        var service = new ResearchAgentGrpcService(scanner, clock);
         var request = new TrendRequest { TenantId = tenantId.ToString(), WeekOf = "2026-W23" };
 
         var first = await service.WeeklyTrends(request, TestServerCallContext.Create());

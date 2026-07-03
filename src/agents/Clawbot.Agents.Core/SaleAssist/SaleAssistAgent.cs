@@ -49,7 +49,7 @@ public sealed class SaleAssistAgent(
     IToxicityFilter toxicity,
     IOptions<ToxicityOptions> toxicityOptions,
     ILlmCallScope llmScope,
-    IClaudeCostTracker? costTracker = null)
+    ILlmCostTracker? costTracker = null)
 {
     private const string AgentCode = "sale-assist";
 
@@ -75,7 +75,7 @@ public sealed class SaleAssistAgent(
     private readonly IToxicityFilter _toxicity = toxicity;
     private readonly ToxicityOptions _toxicityOptions = toxicityOptions.Value;
     private readonly ILlmCallScope _llmScope = llmScope;
-    private readonly IClaudeCostTracker? _costTracker = costTracker;
+    private readonly ILlmCostTracker? _costTracker = costTracker;
 
     public async Task<DraftResult> DraftAsync(ConversationContext ctx, CancellationToken ct = default)
     {

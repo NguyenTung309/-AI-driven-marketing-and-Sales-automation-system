@@ -97,11 +97,11 @@ public static class TokensEndpoints
             .ThenBy(agent => agent.Code)
             .ToListAsync(ct);
 
-        var costs = await db.ClaudeCostLedger
+        var costs = await db.LlmCostLedger
             .IgnoreQueryFilters()
             .Where(cost =>
                 cost.TenantId == tenant.TenantId &&
-                cost.AgentCode != Clawbot.Domain.Agents.ClaudeCostEntry.ReservationAgentCode &&
+                cost.AgentCode != Clawbot.Domain.Agents.LlmCostEntry.ReservationAgentCode &&
                 cost.CreatedAt >= range.From &&
                 cost.CreatedAt <= range.To)
             .ToListAsync(ct);

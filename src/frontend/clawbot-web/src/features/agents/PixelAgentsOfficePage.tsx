@@ -186,9 +186,13 @@ function TraceRow({ trace }: { readonly trace: AgentTraceItem }) {
 }
 
 export default function PixelAgentsOfficePage() {
+  // ponytail: SAMPLE_* chỉ hiển thị ở môi trường dev — production với tenant chưa có agent phải thấy
+  // trạng thái trống thật, không phải đội agent hư cấu.
+  const allowSamples = import.meta.env.DEV;
   const agentsQuery = useQuery({ queryKey: ["agents", "office"], queryFn: listAgents, refetchInterval: 5_000 });
-  const agents = agentsQuery.data?.items?.length ? agentsQuery.data.items : SAMPLE_AGENTS;
-  const usingFallback = !agentsQuery.data?.items?.length;
+  const realAgents = agentsQuery.data?.items ?? [];
+  const usingFallback = !realAgents.length;
+  const agents = realAgents.length ? realAgents : allowSamples ? SAMPLE_AGENTS : [];
   const [selectedCode, setSelectedCode] = useState<string>(agents[0]?.code ?? "chat");
   const selectedAgent = agents.find((agent) => agent.code === selectedCode) ?? agents[0] ?? null;
 
@@ -199,16 +203,21 @@ export default function PixelAgentsOfficePage() {
     refetchInterval: 5_000,
   });
 
-  const traces = tracesQuery.data?.items?.length ? tracesQuery.data.items : SAMPLE_TRACES;
+  const traces = tracesQuery.data?.items?.length
+    ? tracesQuery.data.items
+    : usingFallback && allowSamples
+      ? SAMPLE_TRACES
+      : [];
   const runningCount = agents.filter((agent) => statusTone(agent.status) === "running").length;
   const errorCount = agents.filter((agent) => statusTone(agent.status) === "error").length;
   const queue = useMemo(
     () =>
       agents
-        .map((agent, index) => ({
+        .map((agent) => ({
           agent,
           task: `${agentLabel(agent)} ${statusTone(agent.status) === "running" ? "đang xử lý tác vụ" : "đang chờ lượt chạy"}`,
-          priority: statusTone(agent.status) === "error" ? "P0" : index % 3 === 0 ? "P1" : "P2",
+          // Nhãn theo trạng thái thật — không bịa mức ưu tiên từ vị trí trong danh sách.
+          priority: statusTone(agent.status) === "error" ? "Cần xử lý" : statusTone(agent.status) === "running" ? "Đang chạy" : "Chờ",
         }))
         .slice(0, 6),
     [agents],
@@ -221,13 +230,12 @@ export default function PixelAgentsOfficePage() {
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <h1 className="text-[32px] font-black leading-10 tracking-[0] text-slate-950">Không gian agents</h1>
-            <p className="mt-1 text-[15px] leading-6 text-slate-600">Mặt bằng vận hành agent, hàng đợi tác vụ và sự kiện đang chạy theo thời gian thực.</p>
+            <p className="mt-1 text-[15px] leading-6 text-slate-600">Mặt bằng vận hành agent, hàng đợi tác vụ và sự kiện — cập nhật mỗi 5 giây.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-bold uppercase text-red-700">
-              <span className="size-2 animate-pulse bg-red-600" />
-              Đang đồng bộ
-            </span>
+            {usingFallback && allowSamples ? (
+              <span className="border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] font-bold uppercase text-amber-700">Dữ liệu minh họa</span>
+            ) : null}
             <span className="border border-slate-200 px-3 py-2 font-mono text-[12px] uppercase text-slate-500">Làm mới 5 giây</span>
           </div>
         </div>

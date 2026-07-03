@@ -1,6 +1,7 @@
 import { Alert, Button, Card, StatusPill } from "@/shared/ui";
 import { errorMessage, Field, inputClass, type BrandingForm, type PancakeForm } from "./adminHelpers";
 import type { PancakeConfig, PancakeWebhookUrl } from "@/shared/api/admin";
+import { AdminSocialChannelsSection } from "./AdminSocialChannelsSection";
 
 interface AdminIntegrationsTabProps {
   readonly brandingForm: BrandingForm;
@@ -196,6 +197,8 @@ export function AdminIntegrationsTab({
           </div>
         </Card>
       </div>
+
+      <AdminSocialChannelsSection />
     </section>
   );
 }

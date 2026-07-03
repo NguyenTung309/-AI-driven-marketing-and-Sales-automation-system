@@ -1,5 +1,6 @@
 using Clawbot.Agents.Core.Research;
 using FluentAssertions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Clawbot.Agents.Tests.Research;
@@ -30,6 +31,29 @@ public sealed class TrendSourceParserTests
     }
 
     [Fact]
+    public void Google_trends_rss_parser_reads_current_trending_rss_namespace()
+    {
+        const string xml = """
+            <rss xmlns:ht="https://trends.google.com/trending/rss" version="2.0">
+              <channel>
+                <item>
+                  <title>tây ban nha vs áo</title>
+                  <ht:approx_traffic>10,000+</ht:approx_traffic>
+                  <description/>
+                </item>
+              </channel>
+            </rss>
+            """;
+
+        var trends = GoogleTrendsRssSource.ParseRss(xml);
+
+        trends.Should().ContainSingle();
+        trends[0].Topic.Should().Be("tây ban nha vs áo");
+        trends[0].Metric.Should().Be("10,000+");
+        trends[0].SourceScore.Should().Be(10_000d);
+    }
+
+    [Fact]
     public void YouTube_json_parser_reads_video_titles_and_view_counts()
     {
         const string json = """
@@ -56,6 +80,31 @@ public sealed class TrendSourceParserTests
         trends[0].Metric.Should().Be("12345 views");
         trends[0].SourceScore.Should().Be(12_345d);
         trends[0].ContentIdeas.Should().Contain("mandarin");
+    }
+
+    [Fact]
+    public async Task Html_source_returns_empty_when_tenant_override_disables_it()
+    {
+        using var http = new HttpClient();
+        var source = new TikTokScrapeSource(http, Options.Create(new TikTokScrapeOptions { Url = "https://example.com/trends" }));
+
+        var trends = await source.FetchAsync("VN", new TrendSourceOverride(Enabled: false), CancellationToken.None);
+
+        trends.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Html_source_blocks_private_tenant_url()
+    {
+        using var http = new HttpClient();
+        var source = new TikTokScrapeSource(http, Options.Create(new TikTokScrapeOptions()));
+
+        var trends = await source.FetchAsync(
+            "VN",
+            new TrendSourceOverride(Enabled: true, Url: "https://localhost/internal"),
+            CancellationToken.None);
+
+        trends.Should().BeEmpty();
     }
 
     [Fact]

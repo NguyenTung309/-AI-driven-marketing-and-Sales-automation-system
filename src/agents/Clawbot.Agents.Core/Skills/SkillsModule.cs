@@ -51,7 +51,7 @@ public static class SkillsModule
         services.AddSingleton<IAnomalyDetector, ZScoreAnomalyDetector>();
         services.AddSingleton<IForecaster, MlNetForecaster>();
         services.AddSingleton<IPromptInjectionDefender, HeuristicPromptInjectionDefender>();
-        services.AddSingleton<IClaudeCostTracker, InMemoryClaudeCostTracker>();
+        services.AddSingleton<ILlmCostTracker, InMemoryLlmCostTracker>();
         services.AddSingleton<Chat.IAgentToggleGate, Chat.AlwaysEnabledAgentToggleGate>();
 
         // HttpClient for contact enricher (config-gated Hunter/Apollo)
@@ -90,7 +90,7 @@ public static class SkillsModule
         services.TryAddSingleton<IToxicityFilter, DetoxifyToxicityFilter>();
         services.TryAddSingleton<ISpamDetector, AkismetSpamDetector>();
         services.TryAddSingleton<IPromptInjectionDefender, HeuristicPromptInjectionDefender>();
-        services.TryAddSingleton<IClaudeCostTracker, InMemoryClaudeCostTracker>();
+        services.TryAddSingleton<ILlmCostTracker, InMemoryLlmCostTracker>();
         services.TryAddSingleton<Chat.IAgentToggleGate, Chat.AlwaysEnabledAgentToggleGate>();
         return services;
     }

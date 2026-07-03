@@ -199,7 +199,7 @@ public sealed class ChatAgentGrpcServiceTests
         rag.RetrieveAsync(Arg.Any<RagRequest>(), Arg.Any<CancellationToken>())
             .Returns(Array.Empty<RagChunk>());
 
-        var cost = Substitute.For<IClaudeCostTracker>();
+        var cost = Substitute.For<ILlmCostTracker>();
 
         return new CoreChat.ChatAgent(
             rag,

@@ -536,7 +536,20 @@ export function AgentConfigDrawer({
                     <span className="text-label-caps uppercase text-tertiary">Max output tokens</span>
                     <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" type="number" min={1} max={200000} step={1} onChange={(event) => setLlmDraft((current) => ({ ...current, maxOutputTokens: event.target.value }))} placeholder="mặc định 3000" value={llmDraft.maxOutputTokens} />
                   </label>
+                  <label className="space-y-1">
+                    <span className="text-label-caps uppercase text-tertiary">Giá input ($/1M token)</span>
+                    <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" type="number" min={0} step="0.01" onChange={(event) => setLlmDraft((current) => ({ ...current, inputUsdPer1M: event.target.value }))} placeholder="theo bảng giá model" value={llmDraft.inputUsdPer1M} />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-label-caps uppercase text-tertiary">Giá output ($/1M token)</span>
+                    <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" type="number" min={0} step="0.01" onChange={(event) => setLlmDraft((current) => ({ ...current, outputUsdPer1M: event.target.value }))} placeholder="theo bảng giá model" value={llmDraft.outputUsdPer1M} />
+                  </label>
                 </div>
+                {(!llmDraft.inputUsdPer1M.trim() || !llmDraft.outputUsdPer1M.trim()) ? (
+                  <p className="mt-2 text-label-sm text-amber-700">
+                    ⚠ Bỏ trống giá → chi phí tính theo giá mặc định Claude Sonnet ($3 / $15 per 1M). Nếu dùng model khác, số liệu chi phí sẽ sai — nhập giá thực của model.
+                  </p>
+                ) : null}
               </div>
               {llmConfigs.map((config) => {
                 const selected = config.id === form.llmConfigId;
@@ -597,6 +610,19 @@ export function AgentConfigDrawer({
                           <span className="text-label-caps uppercase text-tertiary">Max output tokens</span>
                           <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" type="number" min={1} max={200000} step={1} onChange={(event) => setEditDraft((current) => ({ ...current, maxOutputTokens: event.target.value }))} placeholder="mặc định 3000" value={editDraft.maxOutputTokens} />
                         </label>
+                        <label className="space-y-1">
+                          <span className="text-label-caps uppercase text-tertiary">Giá input ($/1M token)</span>
+                          <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" type="number" min={0} step="0.01" onChange={(event) => setEditDraft((current) => ({ ...current, inputUsdPer1M: event.target.value }))} placeholder="theo bảng giá model" value={editDraft.inputUsdPer1M} />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="text-label-caps uppercase text-tertiary">Giá output ($/1M token)</span>
+                          <input className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" type="number" min={0} step="0.01" onChange={(event) => setEditDraft((current) => ({ ...current, outputUsdPer1M: event.target.value }))} placeholder="theo bảng giá model" value={editDraft.outputUsdPer1M} />
+                        </label>
+                        {(!editDraft.inputUsdPer1M.trim() || !editDraft.outputUsdPer1M.trim()) ? (
+                          <p className="text-label-sm text-amber-700 md:col-span-2">
+                            ⚠ Bỏ trống giá → chi phí tính theo giá mặc định Claude Sonnet ($3 / $15 per 1M), có thể sai với model khác.
+                          </p>
+                        ) : null}
                         <div className="flex justify-end gap-2 md:col-span-2">
                           <button className="rounded border border-outline px-3 py-1.5 text-body-md font-bold text-on-surface-variant hover:bg-surface-variant" onClick={() => setEditingId(null)} type="button">
                             Hủy
@@ -629,11 +655,11 @@ export function AgentConfigDrawer({
                           className="ml-auto rounded border border-red-300 px-3 py-1.5 text-body-md font-bold text-red-700 hover:bg-red-50 disabled:opacity-60"
                           disabled={busy}
                           onClick={() => {
-                            if (window.confirm(`Xoá cấu hình "${config.displayName || config.modelId}"?`)) deleteLlmMutation.mutate(config.id);
+                            if (window.confirm(`Xóa cấu hình "${config.displayName || config.modelId}"?`)) deleteLlmMutation.mutate(config.id);
                           }}
                           type="button"
                         >
-                          Xoá
+                          Xóa
                         </button>
                       </div>
                     )}
