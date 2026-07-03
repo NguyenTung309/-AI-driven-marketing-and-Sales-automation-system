@@ -9,6 +9,8 @@ using Clawbot.SharedKernel.Inbox;
 using Clawbot.SharedKernel.Time;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.RegularExpressions;
+using System.Net;
 
 namespace Clawbot.Infrastructure.Channels;
 
@@ -56,8 +58,10 @@ public sealed partial class ChannelMessageIngestor(
 
         var externalMsgId = message.Metadata.TryGetValue("external_message_id", out var extId) ? extId : null;
 
+        var cleanText = StripHtml(message.Text);
+
         // PII redaction: store original + redacted versions
-        var redacted = await _pii.RedactAsync(message.Text, ct).ConfigureAwait(false);
+        var redacted = await _pii.RedactAsync(cleanText, ct).ConfigureAwait(false);
 
         // Xac dinh direction: so sanh sender_id vs page_id
         var senderId = message.Metadata.TryGetValue("sender_id", out var sid) ? sid : "";
@@ -88,7 +92,7 @@ public sealed partial class ChannelMessageIngestor(
             sentAt: message.SentAt,
             senderUserId: null,
             externalMessageId: externalMsgId,
-            originalContent: message.Text,
+            originalContent: cleanText,
             redactedContent: redacted.RedactedText,
             messageType: message.MessageType,
             parentPostId: message.ParentPostId,
@@ -291,5 +295,26 @@ public sealed partial class ChannelMessageIngestor(
         if (string.IsNullOrEmpty(externalThreadId)) return string.Empty;
         var idx = externalThreadId.IndexOf(':', StringComparison.Ordinal);
         return idx > 0 ? externalThreadId[(idx + 1)..] : externalThreadId;
+    }
+
+    private static string StripHtml(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return string.Empty;
+
+        // Replace common line break tags with newlines
+        var text = input;
+        text = Regex.Replace(text, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"</?(p|div|h[1-6]|li)[^>]*>", "\n", RegexOptions.IgnoreCase);
+
+        // Strip all other HTML tags
+        text = Regex.Replace(text, @"<[^>]+>", string.Empty);
+
+        // Decode HTML entities (e.g. &amp;, &lt;, &gt;, &quot;)
+        text = WebUtility.HtmlDecode(text);
+
+        // Normalize multiple consecutive newlines
+        text = Regex.Replace(text, @"\n+", "\n");
+
+        return text.Trim();
     }
 }

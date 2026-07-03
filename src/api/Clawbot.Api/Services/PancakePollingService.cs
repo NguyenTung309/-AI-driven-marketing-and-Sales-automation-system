@@ -195,14 +195,20 @@ public sealed partial class PancakePollingService : BackgroundService
                     if (conv.From.IsGroup == true) metadata["is_group"] = "true";
                     metadata["from_id"] = conv.From.Id ?? "";
                 }
-                if (conv.LastSentBy != null)
+                // Fallback: use conv.LastSentBy only when per-message sender (msg.From) is absent
+                if (msg.From == null && conv.LastSentBy != null)
                 {
                     metadata["sender_id"] = conv.LastSentBy.Id ?? "";
+                    if (!metadata.ContainsKey("sender_name") && !string.IsNullOrEmpty(conv.LastSentBy.Name))
+                        metadata["sender_name"] = conv.LastSentBy.Name;
+                    if (!metadata.ContainsKey("sender_avatar_url") && !string.IsNullOrEmpty(conv.LastSentBy.AvatarUrl))
+                        metadata["sender_avatar_url"] = conv.LastSentBy.AvatarUrl;
                 }
                 if (!string.IsNullOrEmpty(conv.PageId)) metadata["page_id"] = conv.PageId;
 
                 // Parse attachments for rich content
-                string text = snippet;
+                // Use per-message text; fallback to conv.Snippet when msg.Message is empty
+                string text = !string.IsNullOrWhiteSpace(msg.Message) ? msg.Message! : snippet;
                 if (msg.Attachments != null && msg.Attachments.Count > 0)
                 {
                     var att = msg.Attachments[0];
