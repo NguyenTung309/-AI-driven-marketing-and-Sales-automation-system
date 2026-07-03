@@ -35,6 +35,7 @@ import {
 } from "@/shared/api/admin";
 import { AdminAuditTab } from "./AdminAuditTab";
 import { AdminIntegrationsTab } from "./AdminIntegrationsTab";
+import { AdminJobsTab } from "./AdminJobsTab";
 import { AdminKeyModal } from "./AdminKeyModal";
 import { AdminKeysTab } from "./AdminKeysTab";
 import { AdminRoleModal, type RoleModalMode } from "./AdminRoleModal";
@@ -55,7 +56,7 @@ import {
   type ConfirmTarget,
 } from "./adminHelpers";
 
-type AdminTab = "users" | "roles" | "keys" | "integrations" | "audit";
+type AdminTab = "users" | "roles" | "keys" | "integrations" | "audit" | "jobs";
 
 const EMPTY_USERS: readonly AdminUser[] = [];
 const EMPTY_ROLES: readonly Role[] = [];
@@ -508,6 +509,7 @@ export default function AdminConsolePage() {
             <TabButton active={tab === "keys"} icon="vpn_key" label="Khóa tích hợp" onClick={() => setTab("keys")} />
             <TabButton active={tab === "integrations"} icon="hub" label="Tích hợp" onClick={() => setTab("integrations")} />
             <TabButton active={tab === "audit"} icon="receipt_long" label="Nhật ký quản trị" onClick={() => setTab("audit")} />
+            <TabButton active={tab === "jobs"} icon="schedule" label="Tác vụ tự động" onClick={() => setTab("jobs")} />
           </>
         ) : null}
       </div>
@@ -580,6 +582,8 @@ export default function AdminConsolePage() {
       ) : null}
 
       {tab === "audit" ? <AdminAuditTab auditLogs={auditLogs} /> : null}
+
+      {tab === "jobs" ? <AdminJobsTab /> : null}
 
       <AdminUserModal
         mode={userModal}

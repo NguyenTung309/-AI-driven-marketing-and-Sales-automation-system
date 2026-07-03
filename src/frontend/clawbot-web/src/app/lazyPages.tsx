@@ -5,6 +5,7 @@ export const LoginPage = lazy(() => import("@/features/auth/LoginPage"));
 export const ForgotPasswordPage = lazy(() => import("@/features/auth/ForgotPasswordPage"));
 export const AgentDashboardPage = lazy(() => import("@/features/agents/AgentDashboardPage"));
 export const AgentRunDetailPage = lazy(() => import("@/features/agents/AgentRunDetailPage"));
+export const AgentRunsPage = lazy(() => import("@/features/agents/AgentRunsPage"));
 export const PixelAgentsOfficePage = lazy(() => import("@/features/agents/PixelAgentsOfficePage"));
 export const DashboardPage = lazy(() => import("@/features/dashboard/DashboardPage"));
 export const ConversationsPage = lazy(() => import("@/features/conversations/ConversationsPage"));
@@ -21,6 +22,5 @@ export const SupportFaqPage = lazy(() => import("@/features/public/SupportFaqPag
 export const WidgetDemoPage = lazy(() => import("@/features/public/WidgetDemoPage"));
 export const TokenManagementPage = lazy(() => import("@/features/tokens/TokenManagementPage"));
 export const LlmProvidersPage = lazy(() => import("@/features/llm-providers/LlmProvidersPage"));
-export const OrchestrationV2Page = lazy(() => import("@/features/orchestration/OrchestrationV2Page"));
 export const ChannelManagementPage = lazy(() => import("@/features/admin/ChannelManagementPage"));
 export const AgentHubLayout = lazy(() => import("@/features/agent-hub/AgentHubLayout"));

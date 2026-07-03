@@ -84,7 +84,7 @@ public sealed class ClawbotChatCompletionServiceTests
             entry.UsdCost == 0.01m);
     }
 
-    private sealed class RecordingCostTracker : IClaudeCostTracker
+    private sealed class RecordingCostTracker : ILlmCostTracker
     {
         public string Name => "cost";
         public List<CostEntry> Entries { get; } = [];

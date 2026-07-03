@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Alert } from "@/shared/ui/Alert";
 import { Button } from "@/shared/ui/Button";
 import { Card } from "@/shared/ui/Card";
@@ -9,12 +9,14 @@ import { StatusPill } from "@/shared/ui/StatusPill";
 import { useAuthStore } from "@/shared/auth/authStore";
 import { toSafeOperationalText, operationalPhaseLabel } from "@/shared/utils/userText";
 import { TaskResultDetails } from "./TaskResultDetails";
-import { statusLabel, statusTone, taskTone, tasksByDepth } from "./orchestrationStatus";
+import { TaskDagCanvas } from "./TaskDagCanvas";
+import { a2aStatusLabel, statusLabel, statusTone, taskStatusLabel, taskTone } from "./orchestrationStatus";
 import {
   approveOrchestrationV2Run,
   archiveOrchestrationV2Run,
   controlOrchestrationV2Run,
   createOrchestrationV2Run,
+  getOrchestrationV2CostSummary,
   getOrchestrationV2Run,
   listOrchestrationV2Runs,
   updateOrchestrationV2Plan,
@@ -27,12 +29,41 @@ import {
 const ACTIVE_STATUSES = new Set<OrchestrationV2Status>(["draft", "pending_approval", "running", "paused"]);
 const POLL_INTERVAL_MS = 3_000;
 
+// Khớp AutonomousOrchestratorOptions.PerTaskEstimateUsd mặc định (server có thể cấu hình khác).
+const PER_TASK_ESTIMATE_USD = 0.01;
+
+// B4: map mã lỗi máy trong traces sang diễn giải hành động được.
+const FAILURE_HINTS: readonly { readonly needle: string; readonly message: string }[] = [
+  { needle: "llm_config_not_configured", message: "Có agent trong kế hoạch chưa được gắn LLM. Mở Sơ đồ agent → Cấu hình → tab LLM để gắn, rồi gửi lại mục tiêu." },
+  { needle: "cost_cap", message: "Phiên bị chặn vì vượt hạn mức chi phí AI của tháng. Kiểm tra thẻ Chi phí AI hoặc nâng hạn mức trước khi chạy lại." },
+  { needle: "planning_failed", message: "Orchestrator không lập được kế hoạch từ mục tiêu này. Viết mục tiêu cụ thể hơn (kênh, số lượng, thời hạn) rồi gửi lại." },
+  { needle: "tool_permission_denied", message: "Một agent bị chặn vì thiếu quyền dùng công cụ. Kiểm tra danh sách công cụ được phép của agent trong phần Cấu hình." },
+  { needle: "max_rounds", message: "Đã dùng hết số lần lập lại kế hoạch cho phép — mục tiêu có thể quá phức tạp, thử chia nhỏ thành nhiều mục tiêu." },
+];
+
+function failureExplanation(traces: readonly OrchestrationV2Trace[]): string | null {
+  const haystack = traces.map((trace) => `${trace.phase} ${trace.message}`).join(" ").toLowerCase();
+  return FAILURE_HINTS.find((hint) => haystack.includes(hint.needle))?.message ?? null;
+}
+
+// Khớp AutonomousOrchestratorOptions.MaxRounds mặc định (server có thể cấu hình khác qua appsettings).
+const DEFAULT_MAX_ROUNDS = 3;
+
+// Mục tiêu mẫu — map đúng năng lực tool thật của orchestrator (content/research/lead/report).
+const GOAL_TEMPLATES: readonly { readonly label: string; readonly goal: string }[] = [
+  { label: "Lịch content tuần", goal: "Lên lịch content tuần này: quét xu hướng thị trường VN, chọn 3 chủ đề phù hợp, soạn bài Facebook và TikTok cho từng chủ đề rồi lên lịch đăng." },
+  { label: "Chiến dịch ra mắt", goal: "Lập chiến dịch ra mắt khóa HSK4: nghiên cứu xu hướng, soạn nội dung đa kênh (Facebook, TikTok, Zalo) và trình duyệt trước khi đăng." },
+  { label: "Báo cáo tháng", goal: "Tổng hợp báo cáo hiệu suất tháng này: số liệu KPI, bất thường cần chú ý và đề xuất hành động cho tháng sau." },
+  { label: "Chăm sóc lead", goal: "Rà soát các lead mới trong 7 ngày qua, chấm điểm và đề xuất bước chăm sóc tiếp theo cho từng nhóm." },
+  { label: "Nghiên cứu xu hướng", goal: "Quét xu hướng thị trường VN tuần này với từ khóa tiếng Trung, HSK; tóm tắt 5 chủ đề nổi bật kèm gợi ý nội dung." },
+];
+
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "Đã xảy ra lỗi không xác định.";
 }
 
-export function OrchestrationPanel() {
+export function OrchestrationPanel({ live = false }: { readonly live?: boolean }) {
   const permissions = useAuthStore((s) => s.permissions);
   const can = (code: string) => permissions.includes(code);
   const queryClient = useQueryClient();
@@ -41,6 +72,8 @@ export function OrchestrationPanel() {
   const sessionId = searchParams.get("sessionId");
 
   const [goal, setGoal] = useState("");
+  // B9: dry-run — orchestrator vẫn lập kế hoạch + đi hết DAG nhưng tool chỉ trả preview "[dry-run] would ...".
+  const [dryRun, setDryRun] = useState(false);
   // Editable plan draft. `planSource` tracks which fetched plan the draft was seeded from, so we can
   // re-seed during render when a new plan arrives (React's "adjust state on prop change" pattern)
   // without an effect-driven cascading render.
@@ -48,6 +81,8 @@ export function OrchestrationPanel() {
   // SPEC-16 P3-1: raw-JSON plan edit is behind an "advanced" toggle so the structured DAG is the primary view.
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showRecentRuns, setShowRecentRuns] = useState(false);
+  // Node the user clicked on the DAG; falls back to the running task so the detail pane follows execution.
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const setSessionId = (next: string | null): void => {
     setSearchParams(
@@ -65,8 +100,9 @@ export function OrchestrationPanel() {
     queryKey: ["orchestration", "session", sessionId],
     queryFn: () => getOrchestrationV2Run(sessionId!),
     enabled: Boolean(sessionId),
+    // C1: realtime đẩy invalidation qua SignalR — polling chỉ còn là dự phòng 30s khi hub sống.
     refetchInterval: (query) =>
-      query.state.data && ACTIVE_STATUSES.has(query.state.data.status) ? POLL_INTERVAL_MS : false,
+      query.state.data && ACTIVE_STATUSES.has(query.state.data.status) ? (live ? 30_000 : POLL_INTERVAL_MS) : false,
   });
   const session = sessionQuery.data ?? null;
 
@@ -74,11 +110,19 @@ export function OrchestrationPanel() {
   const runsQuery = useQuery({
     queryKey: ["orchestration", "runs"],
     queryFn: () => listOrchestrationV2Runs(false),
-    refetchInterval: POLL_INTERVAL_MS,
+    refetchInterval: live ? 30_000 : POLL_INTERVAL_MS,
   });
 
   // Traces are embedded in the run-detail response, so no separate polling query is needed.
   const traceItems = session?.traces ?? [];
+
+  // B5: guardrail chi phí hiển thị tại điểm phê duyệt — cùng ledger với cost guard của orchestrator.
+  const costSummaryQuery = useQuery({
+    queryKey: ["orchestration", "cost-summary"],
+    queryFn: getOrchestrationV2CostSummary,
+    enabled: session?.status === "pending_approval",
+    staleTime: 60_000,
+  });
 
   // Group tool-action traces (tool_executed/tool_failed/tool_blocked/…) by the task that produced them, so each
   // agent step can show exactly what it did on the system.
@@ -93,6 +137,13 @@ export function OrchestrationPanel() {
     return map;
   }, [traceItems]);
 
+  const sessionTasks = session?.tasks ?? [];
+  const runningTask = sessionTasks.find((task) => task.status === "running") ?? null;
+  const selectedTask = sessionTasks.find((task) => task.id === selectedTaskId) ?? runningTask ?? sessionTasks[0] ?? null;
+  const taskMessages = selectedTask
+    ? (session?.messages ?? []).filter((message) => message.taskId === selectedTask.id)
+    : [];
+
   // Re-seed the editable draft when the fetched plan changes (keyed by sessionId + planJson).
   const planSource = session ? `${session.sessionId}:${session.planJson}` : null;
   if (planSource && draft?.source !== planSource) {
@@ -103,8 +154,16 @@ export function OrchestrationPanel() {
     setDraft((current) => ({ source: current?.source ?? planSource ?? "", text }));
 
   const submit = useMutation({
-    mutationFn: () => createOrchestrationV2Run(goal.trim()),
+    mutationFn: () => createOrchestrationV2Run(goal.trim(), dryRun),
     onSuccess: (result) => setSessionId(result.sessionId),
+  });
+  // Chạy lại mục tiêu của bản chạy thử ở chế độ thật.
+  const rerunReal = useMutation({
+    mutationFn: (runGoal: string) => createOrchestrationV2Run(runGoal, false),
+    onSuccess: (result) => {
+      setDryRun(false);
+      setSessionId(result.sessionId);
+    },
   });
   const approve = useMutation({
     mutationFn: (vars: { sessionId: string; etag: string }) => approveOrchestrationV2Run(vars.sessionId, vars.etag),
@@ -127,15 +186,20 @@ export function OrchestrationPanel() {
       await queryClient.invalidateQueries({ queryKey: ["orchestration", "runs"] });
     },
   });
+  // Run summary không mang etag mà control lại bắt buộc etag → fetch detail lấy etag mới trước khi hủy
+  // (fix lỗi 409 cố hữu của nút "Hủy" trong danh sách phiên).
   const cancelRun = useMutation({
-    mutationFn: (runSessionId: string) => controlOrchestrationV2Run(runSessionId, "cancel"),
+    mutationFn: async (runSessionId: string) => {
+      const detail = await getOrchestrationV2Run(runSessionId);
+      return controlOrchestrationV2Run(runSessionId, "cancel", detail.etag);
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["orchestration", "runs"] });
     },
   });
 
-  const busy = submit.isPending || approve.isPending || control.isPending || updatePlan.isPending || archiveRun.isPending || cancelRun.isPending;
-  const activeError = submit.error ?? approve.error ?? control.error ?? updatePlan.error ?? archiveRun.error ?? cancelRun.error ?? sessionQuery.error;
+  const busy = submit.isPending || approve.isPending || control.isPending || updatePlan.isPending || archiveRun.isPending || cancelRun.isPending || rerunReal.isPending;
+  const activeError = submit.error ?? approve.error ?? control.error ?? updatePlan.error ?? archiveRun.error ?? cancelRun.error ?? rerunReal.error ?? sessionQuery.error;
   const canRun = can("orchestration:run");
   const canApprove = can("orchestration:approve");
   const canManage = can("orchestration:manage");
@@ -151,7 +215,16 @@ export function OrchestrationPanel() {
             Nhập mục tiêu, hệ thống lập kế hoạch nhiều tác nhân và thực thi theo DAG.
           </p>
         </div>
-        {session && <StatusPill tone={statusTone(session.status)}>{statusLabel(session.status)}</StatusPill>}
+        <div className="flex items-center gap-2">
+          <span className="flex items-center gap-1 text-label-sm text-on-surface-variant" title={live ? "Cập nhật đẩy qua SignalR" : "Hub realtime chưa kết nối — tự làm mới định kỳ"}>
+            <span aria-hidden="true" className={`size-2 rounded-full ${live ? "bg-success" : "bg-on-surface-variant/40"}`} />
+            {live ? "Realtime" : "Dự phòng"}
+          </span>
+          {session && traceItems.some((trace) => trace.phase === "dry_run") && (
+            <StatusPill tone="warning">Bản chạy thử</StatusPill>
+          )}
+          {session && <StatusPill tone={statusTone(session.status)}>{statusLabel(session.status)}</StatusPill>}
+        </div>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -163,15 +236,28 @@ export function OrchestrationPanel() {
           className="w-full rounded-lg border border-outline bg-surface-container-lowest p-3 text-body-md text-on-surface focus:border-primary focus:outline-none"
           disabled={!canRun || busy}
         />
+        {goal.trim().length === 0 && canRun && (
+          <div className="flex flex-wrap gap-2">
+            {GOAL_TEMPLATES.map((template) => (
+              <button
+                className="rounded-full border border-outline bg-surface-container-lowest px-3 py-1 text-label-sm text-secondary transition-colors hover:border-primary hover:text-primary"
+                key={template.label}
+                onClick={() => setGoal(template.goal)}
+                type="button"
+              >
+                {template.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <label className="flex items-center gap-2 text-label-sm text-on-surface-variant">
+          <input checked={dryRun} disabled={!canRun || busy} onChange={(event) => setDryRun(event.target.checked)} type="checkbox" />
+          Chạy thử — công cụ chỉ mô phỏng hành động, không thực thi thật
+        </label>
         <div className="flex items-center gap-2">
           <Button onClick={() => submit.mutate()} disabled={!canRun || busy || goal.trim().length === 0}>
-            Gửi mục tiêu
+            {dryRun ? "Chạy thử mục tiêu" : "Gửi mục tiêu"}
           </Button>
-          {session && (
-            <Button variant="outline" onClick={() => void sessionQuery.refetch()} disabled={busy || sessionQuery.isFetching}>
-              Làm mới
-            </Button>
-          )}
           {session && (
             <Button
               variant="ghost"
@@ -197,9 +283,14 @@ export function OrchestrationPanel() {
             <h3 className="text-label-md text-on-surface">Phiên gần đây</h3>
             <p className="text-label-sm text-on-surface-variant">{runsQuery.data.length} phiên có thể mở lại.</p>
           </div>
-          <Button variant="outline" onClick={() => setShowRecentRuns(true)} disabled={busy}>
-            Xem phiên
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setShowRecentRuns(true)} disabled={busy}>
+              Xem phiên
+            </Button>
+            <Link className="text-label-sm text-primary hover:underline" to="/agents/runs">
+              Tất cả phiên ↗
+            </Link>
+          </div>
         </div>
       )}
 
@@ -214,9 +305,29 @@ export function OrchestrationPanel() {
 
       {activeError && <Alert tone="error">{errorMessage(activeError)}</Alert>}
 
+      {session?.status === "pending_approval" && (
+        <Alert tone="warning">
+          {canApprove
+            ? "Kế hoạch đang chờ duyệt — xem DAG bên dưới rồi bấm \"Phê duyệt & chạy\"."
+            : "Kế hoạch đang chờ người có quyền phê duyệt (orchestration:approve) xử lý."}
+        </Alert>
+      )}
+
       {session?.status === "failed" && (
         <Alert tone="error">
-          Lập kế hoạch hoặc thực thi thất bại. Xem nhật ký bên dưới để biết bước bị lỗi, chỉnh lại mục tiêu rồi gửi lại.
+          <span className="flex flex-col gap-2">
+            <span>
+              {failureExplanation(traceItems)
+                ?? "Lập kế hoạch hoặc thực thi thất bại. Xem nhật ký bên dưới để biết bước bị lỗi, chỉnh lại mục tiêu rồi gửi lại."}
+            </span>
+            <button
+              className="self-start font-bold underline"
+              onClick={() => setGoal(session.goal)}
+              type="button"
+            >
+              Gửi lại mục tiêu này
+            </button>
+          </span>
         </Alert>
       )}
 
@@ -247,14 +358,17 @@ export function OrchestrationPanel() {
                     <StatusPill tone={statusTone(run.status)}>{statusLabel(run.status)}</StatusPill>
                     <span className="min-w-0 flex-1 truncate text-body-sm text-on-surface">{run.goal || "(không có mục tiêu)"}</span>
                     <span className="shrink-0 text-label-sm text-on-surface-variant">
-                      {new Date(run.startedAt).toLocaleString()}
+                      {new Date(run.startedAt).toLocaleString("vi-VN")}
                     </span>
                   </button>
                   {canCancelRun ? (
                     <Button
                       variant="ghost"
-                      onClick={() => cancelRun.mutate(run.sessionId)}
+                      onClick={() => {
+                        if (window.confirm("Hủy phiên này? Các task đang chạy sẽ dừng lại.")) cancelRun.mutate(run.sessionId);
+                      }}
                       disabled={!canManage || busy}
+                      title={!canManage ? "Cần quyền orchestration:manage" : undefined}
                     >
                       Hủy
                     </Button>
@@ -264,6 +378,7 @@ export function OrchestrationPanel() {
                       variant="ghost"
                       onClick={() => archiveRun.mutate(run.sessionId)}
                       disabled={!canManage || busy}
+                      title={!canManage ? "Cần quyền orchestration:manage" : undefined}
                     >
                       Ẩn
                     </Button>
@@ -282,7 +397,14 @@ export function OrchestrationPanel() {
           <div className="flex flex-wrap items-center gap-2 text-label-sm text-on-surface-variant">
             <span>Mục tiêu: {session.goal}</span>
             {session.requiresApproval && <StatusPill tone="warning">Cần phê duyệt</StatusPill>}
-            {session.replanCount > 0 && <span>Lập lại kế hoạch: {session.replanCount}</span>}
+            {session.replanCount > 0 && (
+              <StatusPill tone={session.replanCount >= DEFAULT_MAX_ROUNDS ? "error" : "warning"}>
+                Lập lại kế hoạch {session.replanCount}/{DEFAULT_MAX_ROUNDS}
+              </StatusPill>
+            )}
+            {session.actualCostUsd > 0 && (
+              <span title="Chi phí LLM thực của phiên này">💵 Chi phí thực: ${session.actualCostUsd.toFixed(4)}</span>
+            )}
           </div>
 
           {session.tasks.length > 0 && (
@@ -340,42 +462,60 @@ export function OrchestrationPanel() {
             />
           </Modal>
 
-          <ul className="flex flex-col gap-2">
-            {tasksByDepth(session.tasks).map(({ task, depth }) => (
-              <li
-                key={task.id}
-                className="flex items-start justify-between gap-3 rounded-lg border border-outline p-3"
-                style={{ marginLeft: `${depth * 20}px` }}
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    {depth > 0 && <span className="text-label-sm text-on-surface-variant" aria-hidden>↳</span>}
-                    <span className="font-mono text-mono-status text-on-surface-variant">{task.agent}</span>
-                    <StatusPill tone={taskTone(task.status)}>{task.status}</StatusPill>
-                    {task.useCount && task.useCount > 1 ? (
-                      <span className="rounded-full bg-surface-container-high px-2 text-label-sm text-on-surface-variant" title={`Agent ${task.agent} được dùng ${task.useCount} lần trong phiên`}>
-                        ×{task.useCount}
-                      </span>
-                    ) : null}
-                    {task.currentTaskId === task.id ? (
-                      <span className="rounded-full bg-primary/10 px-2 text-label-sm text-primary">đang chạy</span>
-                    ) : null}
-                  </div>
-                  <p className="text-body-md text-on-surface">{task.description}</p>
-                  {task.error && <p className="text-label-sm text-error">{task.error}</p>}
-                  <TaskResultDetails task={task} toolTraces={toolTracesByTask.get(task.id) ?? []} />
-                </div>
-              </li>
-            ))}
-          </ul>
+          <TaskDagCanvas
+            onSelect={setSelectedTaskId}
+            selectedTaskId={selectedTask?.id ?? null}
+            tasks={session.tasks}
+          />
+
+          {selectedTask && (
+            <div className="rounded-lg border border-outline bg-surface-container-lowest p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-mono-status text-secondary">{selectedTask.agent}</span>
+                <StatusPill tone={taskTone(selectedTask.status)}>{taskStatusLabel(selectedTask.status)}</StatusPill>
+                {selectedTask.dependsOn.length > 0 && (
+                  <span className="text-label-sm text-on-surface-variant">
+                    Nhận đầu vào từ: {selectedTask.dependsOn.join(", ")}
+                  </span>
+                )}
+              </div>
+              <p className="mt-2 text-body-md text-on-surface">{selectedTask.description}</p>
+              {selectedTask.error && <p className="mt-1 text-label-sm text-error">{selectedTask.error}</p>}
+              <TaskResultDetails task={selectedTask} toolTraces={toolTracesByTask.get(selectedTask.id) ?? []} />
+              {taskMessages.length > 0 && (
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-label-sm text-primary">
+                    Tin nhắn A2A giữa các agent ({taskMessages.length})
+                  </summary>
+                  <ul className="mt-2 flex flex-col gap-2">
+                    {taskMessages.map((message) => (
+                      <li className="rounded border border-outline bg-surface p-2" key={message.id}>
+                        <div className="flex flex-wrap items-center gap-2 text-label-sm">
+                          <span className="font-mono text-secondary">{message.intent}</span>
+                          <StatusPill tone={message.error ? "error" : message.processedAt ? "success" : "warning"}>
+                            {a2aStatusLabel(message.status)}
+                          </StatusPill>
+                          <span className="text-on-surface-variant">{new Date(message.createdAt).toLocaleString("vi-VN")}</span>
+                        </div>
+                        {message.error ? <p className="mt-1 text-label-sm text-error">{message.error}</p> : null}
+                        <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-mono-status text-on-surface-variant">
+                          {message.payloadJson}
+                        </pre>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
 
           {sessionId && (
-            <a
+            <Link
               className="self-start text-label-sm text-primary hover:underline"
-              href={`/agents/runs/${encodeURIComponent(sessionId)}`}
+              to={`/agents/runs/${encodeURIComponent(sessionId)}`}
             >
               Mở chi tiết phiên ↗
-            </a>
+            </Link>
           )}
 
           <div className="rounded-lg border border-outline p-3">
@@ -403,6 +543,28 @@ export function OrchestrationPanel() {
                 Phê duyệt &amp; chạy
               </Button>
             )}
+            {session.status === "pending_approval" && session.tasks.length > 0 && (
+              <span className="text-label-sm text-on-surface-variant">
+                Ước tính ~${(session.tasks.length * PER_TASK_ESTIMATE_USD).toFixed(2)} ({session.tasks.length} task × ${PER_TASK_ESTIMATE_USD.toFixed(2)})
+              </span>
+            )}
+            {session.status === "pending_approval" && costSummaryQuery.data && (
+              <span
+                className={`text-label-sm ${
+                  costSummaryQuery.data.capUsd > 0 && costSummaryQuery.data.monthToDateUsd / costSummaryQuery.data.capUsd > 0.8
+                    ? "font-bold text-error"
+                    : "text-on-surface-variant"
+                }`}
+              >
+                · Đã dùng ${costSummaryQuery.data.monthToDateUsd.toFixed(2)} / hạn mức ${costSummaryQuery.data.capUsd.toFixed(0)} tháng này
+              </span>
+            )}
+            {traceItems.some((trace) => trace.phase === "dry_run")
+              && (session.status === "completed" || session.status === "pending_approval") && (
+              <Button disabled={!canRun || busy} onClick={() => rerunReal.mutate(session.goal)} variant="outline">
+                Chạy thật với mục tiêu này
+              </Button>
+            )}
             {session.status === "running" && (
               <Button
                 variant="outline"
@@ -424,8 +586,13 @@ export function OrchestrationPanel() {
             {(session.status === "running" || session.status === "paused") && (
               <Button
                 variant="ghost"
-                onClick={() => control.mutate({ sessionId: session.sessionId, action: "cancel", etag: session.etag })}
+                onClick={() => {
+                  if (window.confirm("Hủy phiên này? Các task đang chạy sẽ dừng lại.")) {
+                    control.mutate({ sessionId: session.sessionId, action: "cancel", etag: session.etag });
+                  }
+                }}
                 disabled={!canManage || busy}
+                title={!canManage ? "Cần quyền orchestration:manage" : undefined}
               >
                 Hủy
               </Button>

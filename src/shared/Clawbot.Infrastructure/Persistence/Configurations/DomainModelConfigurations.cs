@@ -38,6 +38,7 @@ public sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.Property(x => x.SupportName).HasMaxLength(256);
         builder.Property(x => x.WidgetGreeting).HasMaxLength(1024);
         builder.Property(x => x.RequireOrchestrationApproval).HasDefaultValue(false);
+        builder.Property(x => x.MonthlyCostCapUsd).HasColumnType("decimal(12,2)");
         builder.HasIndex(x => x.Slug).IsUnique();
     }
 }
@@ -422,6 +423,8 @@ public sealed class AgentScheduleConfiguration : IEntityTypeConfiguration<AgentS
         builder.Property(x => x.OverlapPolicy).HasMaxLength(32).HasDefaultValue("skip").IsRequired();
         builder.Property(x => x.MisfirePolicy).HasMaxLength(32).HasDefaultValue("skip_missed").IsRequired();
         builder.Property(x => x.ApprovalPolicyJson).HasColumnType("nvarchar(max)");
+        builder.Property(x => x.TriggerType).HasMaxLength(16).HasDefaultValue("cadence").IsRequired();
+        builder.Property(x => x.EventKey).HasMaxLength(64);
         builder.HasIndex(x => new { x.TenantId, x.IsActive, x.NextRunAt });
         builder.HasIndex(x => new { x.TenantId, x.Name });
     }

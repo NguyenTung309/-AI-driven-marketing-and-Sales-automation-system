@@ -86,6 +86,7 @@ public static class AgentsEndpoints
                 a.Model,
                 a.Status,
                 a.UpdatedAt,
+                a.LlmConfigId,
                 LastRunAt = db.AgentSessions.Where(s => s.AgentId == a.Id).Max(s => (DateTimeOffset?)s.StartedAt),
             })
             .ToListAsync(ct);

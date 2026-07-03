@@ -93,3 +93,24 @@ public sealed record TrendDto(
     IReadOnlyList<string> ContentIdeas);
 
 public sealed record TrendScanResponse(IReadOnlyList<TrendDto> Trends);
+
+public sealed record TrendSourceSettingDto(bool Enabled, bool HasApiKey, string? Url);
+
+public sealed record TrendScheduleDto(string Cadence, DateTimeOffset? NextRunAt, DateTimeOffset? LastRunAt);
+
+public sealed record TrendSettingsResponse(
+    string Geo,
+    TrendSourceSettingDto Google,
+    TrendSourceSettingDto YouTube,
+    TrendSourceSettingDto TikTok,
+    TrendScheduleDto Schedule);
+
+// ApiKey/Url semantics: null = keep current value, empty string = clear it.
+public sealed record UpdateTrendSourceSetting(bool? Enabled = null, string? ApiKey = null, string? Url = null);
+
+public sealed record UpdateTrendSettingsRequest(
+    string? Geo = null,
+    UpdateTrendSourceSetting? Google = null,
+    UpdateTrendSourceSetting? YouTube = null,
+    UpdateTrendSourceSetting? TikTok = null,
+    string? ScheduleCadence = null);

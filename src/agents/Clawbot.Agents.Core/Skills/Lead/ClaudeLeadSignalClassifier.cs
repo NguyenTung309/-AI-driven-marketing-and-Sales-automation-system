@@ -12,12 +12,12 @@ namespace Clawbot.Agents.Core.Skills.Lead;
 public sealed partial class ClaudeLeadSignalClassifier(
     IClaudeChatClient claude,
     KeywordLeadSignalClassifier fallback,
-    IClaudeCostTracker? costTracker = null,
+    ILlmCostTracker? costTracker = null,
     ILlmCallScope? llmScope = null) : ILeadSignalClassifier
 {
     private readonly IClaudeChatClient _claude = claude;
     private readonly KeywordLeadSignalClassifier _fallback = fallback;
-    private readonly IClaudeCostTracker? _costTracker = costTracker;
+    private readonly ILlmCostTracker? _costTracker = costTracker;
     private readonly ILlmCallScope? _llmScope = llmScope;
 
     private static readonly string SystemPrompt =

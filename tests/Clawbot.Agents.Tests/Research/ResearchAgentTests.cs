@@ -55,10 +55,14 @@ public sealed class ResearchAgentTests
         public string Source => source;
         public bool Enabled => enabled;
 
-        public Task<IReadOnlyList<RawTrend>> FetchAsync(string geo, CancellationToken ct = default)
+        public Task<IReadOnlyList<RawTrend>> FetchAsync(string geo, TrendSourceOverride? tenantOverride = null, CancellationToken ct = default)
         {
             _ = geo;
             _ = ct;
+            // Mirrors real sources: a disabled source self-guards inside FetchAsync and does not fetch.
+            if (!(tenantOverride?.Enabled ?? enabled))
+                return Task.FromResult<IReadOnlyList<RawTrend>>([]);
+
             FetchCount++;
             if (throwOnFetch)
                 throw new HttpRequestException("source down");

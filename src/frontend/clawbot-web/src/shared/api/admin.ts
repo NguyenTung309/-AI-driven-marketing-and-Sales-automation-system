@@ -230,13 +230,25 @@ export async function updateTenantBranding(body: TenantBrandingUpdate): Promise<
 
 // Tenant orchestration autonomy: when requireApproval is true, high-risk agent tools (publish, ad spend,
 // customer messages) pause for a human instead of auto-executing. Default false = full auto-publish.
-export async function getTenantOrchestration(): Promise<{ readonly requireApproval: boolean }> {
-  const res = await apiClient.get<{ requireApproval: boolean }>("/api/admin/tenant/orchestration");
+export interface TenantOrchestrationSettings {
+  readonly requireApproval: boolean;
+  /** Hạn mức chi tiêu LLM/tháng (USD); null = dùng mặc định hệ thống ($200). */
+  readonly monthlyCostCapUsd: number | null;
+}
+
+export async function getTenantOrchestration(): Promise<TenantOrchestrationSettings> {
+  const res = await apiClient.get<TenantOrchestrationSettings>("/api/admin/tenant/orchestration");
   return res.data;
 }
 
-export async function setTenantOrchestration(requireApproval: boolean): Promise<{ readonly requireOrchestrationApproval: boolean }> {
-  const res = await apiClient.put<{ requireOrchestrationApproval: boolean }>("/api/admin/tenant/orchestration", { requireApproval });
+export async function setTenantOrchestration(
+  requireApproval: boolean,
+  monthlyCostCapUsd?: number | null,
+): Promise<{ readonly requireOrchestrationApproval: boolean; readonly monthlyCostCapUsd: number | null }> {
+  const res = await apiClient.put<{ requireOrchestrationApproval: boolean; monthlyCostCapUsd: number | null }>(
+    "/api/admin/tenant/orchestration",
+    { requireApproval, monthlyCostCapUsd: monthlyCostCapUsd ?? null },
+  );
   return res.data;
 }
 
@@ -344,4 +356,92 @@ export async function listConnectedPancakePages(): Promise<readonly ConnectedPan
     "/api/admin/channels/pancake/pages",
   );
   return res.data.items;
+}
+
+export interface AdminRecurringJob {
+  readonly id: string;
+  readonly cron: string;
+  readonly queue: string;
+  readonly nextExecution?: string | null;
+  readonly lastExecution?: string | null;
+  readonly lastState?: string | null;
+  readonly agent?: string | null;
+  readonly description?: string | null;
+}
+
+export interface AdminScheduleJob {
+  readonly id: string;
+  readonly name: string;
+  readonly goalTemplate: string;
+  readonly cadence: string;
+  readonly timezoneId: string;
+  readonly nextRunAt: string;
+  readonly lastRunAt?: string | null;
+  readonly isActive: boolean;
+  readonly requiresApproval: boolean;
+  readonly agent?: string | null;
+  readonly kind: string;
+}
+
+export interface AdminJobsResponse {
+  readonly recurring: readonly AdminRecurringJob[];
+  readonly schedules: readonly AdminScheduleJob[];
+}
+
+export async function getAdminJobs(): Promise<AdminJobsResponse> {
+  const res = await apiClient.get<AdminJobsResponse>("/api/admin/jobs");
+  return res.data;
+}
+
+export async function triggerAdminRecurringJob(id: string): Promise<void> {
+  await apiClient.post(`/api/admin/jobs/recurring/${encodeURIComponent(id)}/trigger`);
+}
+
+export async function pauseAdminScheduleJob(id: string): Promise<void> {
+  await apiClient.post(`/api/admin/jobs/schedules/${encodeURIComponent(id)}/pause`);
+}
+
+export async function activateAdminScheduleJob(id: string): Promise<void> {
+  await apiClient.post(`/api/admin/jobs/schedules/${encodeURIComponent(id)}/activate`);
+}
+
+export async function runAdminScheduleJobNow(id: string): Promise<void> {
+  await apiClient.post(`/api/admin/jobs/schedules/${encodeURIComponent(id)}/run-now`);
+}
+
+export interface SocialChannelCredential {
+  readonly provider: string;
+  readonly enabled: boolean;
+  readonly endpoint: string;
+  readonly pageId: string;
+  readonly oaId: string;
+  readonly hasPageAccessToken: boolean;
+  readonly hasOaAccessToken: boolean;
+  readonly updatedAt?: string | null;
+}
+
+/** Secret semantics: null = giữ giá trị đã lưu, chuỗi rỗng = xoá. */
+export interface UpdateSocialChannelPayload {
+  readonly enabled?: boolean | null;
+  readonly endpoint?: string | null;
+  readonly pageId?: string | null;
+  readonly pageAccessToken?: string | null;
+  readonly oaId?: string | null;
+  readonly oaAccessToken?: string | null;
+}
+
+export async function getSocialCredentials(): Promise<readonly SocialChannelCredential[]> {
+  const res = await apiClient.get<{ items: readonly SocialChannelCredential[] }>("/api/admin/social-credentials");
+  return res.data.items;
+}
+
+export async function updateSocialCredential(
+  provider: string,
+  payload: UpdateSocialChannelPayload,
+): Promise<SocialChannelCredential> {
+  const res = await apiClient.put<SocialChannelCredential>(
+    `/api/admin/social-credentials/${encodeURIComponent(provider)}`,
+    payload,
+  );
+  return res.data;
 }

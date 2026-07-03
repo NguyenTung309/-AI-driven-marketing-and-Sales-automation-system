@@ -22,7 +22,7 @@ public sealed class ChatAgentWiringTests
         ISpamDetector? spam = null,
         IClaudeChatClient? claude = null,
         IRagRetriever? rag = null,
-        IClaudeCostTracker? cost = null)
+        ILlmCostTracker? cost = null)
     {
         injection ??= SafeInjection();
         pii ??= SafePii();
@@ -216,7 +216,7 @@ public sealed class ChatAgentWiringTests
     {
         var tenant = Guid.NewGuid();
         var claude = Substitute.For<IClaudeChatClient>();
-        var cost = Substitute.For<IClaudeCostTracker>();
+        var cost = Substitute.For<ILlmCostTracker>();
         cost.SummaryAsync(tenant, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(new CostSummary(tenant, 200m, 200m, 1f));
         var sut = CreateAgent(claude: claude, cost: cost);
@@ -328,9 +328,9 @@ public sealed class ChatAgentWiringTests
         return rag;
     }
 
-    private static IClaudeCostTracker SafeCost()
+    private static ILlmCostTracker SafeCost()
     {
-        var cost = Substitute.For<IClaudeCostTracker>();
+        var cost = Substitute.For<ILlmCostTracker>();
         cost.SummaryAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {

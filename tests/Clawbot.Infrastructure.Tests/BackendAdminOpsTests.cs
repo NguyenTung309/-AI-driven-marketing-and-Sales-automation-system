@@ -49,30 +49,30 @@ public sealed class BackendAdminOpsTests
     }
 
     [Fact]
-    public async Task ClaudeCostLedger_persists_and_sums()
+    public async Task LlmCostLedger_persists_and_sums()
     {
         using var t = new TestAppDb();
         var now = DateTimeOffset.UtcNow;
-        t.Db.ClaudeCostLedger.Add(ClaudeCostEntry.Create(t.TenantId, "chat-agent", "claude", 100, 50, 0.01m, now));
-        t.Db.ClaudeCostLedger.Add(ClaudeCostEntry.Create(t.TenantId, "chat-agent", "claude", 200, 80, 0.02m, now));
+        t.Db.LlmCostLedger.Add(LlmCostEntry.Create(t.TenantId, "chat-agent", "claude", 100, 50, 0.01m, now));
+        t.Db.LlmCostLedger.Add(LlmCostEntry.Create(t.TenantId, "chat-agent", "claude", 200, 80, 0.02m, now));
         await t.Db.SaveChangesAsync();
 
         // Sum client-side: SQLite SUM over decimal-as-TEXT drifts to float.
-        var entries = await t.Db.ClaudeCostLedger.IgnoreQueryFilters().ToListAsync();
+        var entries = await t.Db.LlmCostLedger.IgnoreQueryFilters().ToListAsync();
         entries.Sum(e => e.Usd).Should().Be(0.03m);
     }
 
     [Fact]
-    public async Task DbClaudeCostTracker_records_actual_spend_even_when_monthly_cap_is_exceeded()
+    public async Task DbLlmCostTracker_records_actual_spend_even_when_monthly_cap_is_exceeded()
     {
         using var t = new TestAppDb();
-        var sut = new DbClaudeCostTracker(ScopeFactoryFor(t.Db));
+        var sut = new DbLlmCostTracker(ScopeFactoryFor(t.Db));
         var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
 
         await sut.RecordAsync(new CostEntry(t.TenantId, "chat", "claude", 100, 50, 199m, month), CancellationToken.None);
         await sut.RecordAsync(new CostEntry(t.TenantId, "chat", "claude", 100, 50, 2m, month.AddDays(1)), CancellationToken.None);
 
-        var entries = await t.Db.ClaudeCostLedger.IgnoreQueryFilters().ToListAsync();
+        var entries = await t.Db.LlmCostLedger.IgnoreQueryFilters().ToListAsync();
         entries.Should().HaveCount(2);
         entries.Sum(e => e.Usd).Should().Be(201m);
 
@@ -82,10 +82,48 @@ public sealed class BackendAdminOpsTests
     }
 
     [Fact]
-    public async Task DbClaudeCostTracker_reserves_and_releases_budget_through_ledger()
+    public async Task DbLlmCostTracker_stamps_session_id_for_per_run_cost()
     {
         using var t = new TestAppDb();
-        var sut = new DbClaudeCostTracker(ScopeFactoryFor(t.Db));
+        var sut = new DbLlmCostTracker(ScopeFactoryFor(t.Db));
+        var now = DateTimeOffset.UtcNow;
+        var sessionId = Guid.NewGuid();
+
+        await sut.RecordAsync(new CostEntry(t.TenantId, "content-agent", "claude", 100, 50, 0.02m, now, SessionId: sessionId), CancellationToken.None);
+        await sut.RecordAsync(new CostEntry(t.TenantId, "research-agent", "claude", 80, 40, 0.03m, now, SessionId: sessionId), CancellationToken.None);
+        await sut.RecordAsync(new CostEntry(t.TenantId, "chat-agent", "claude", 10, 5, 0.99m, now), CancellationToken.None); // ngoài run
+
+        var entries = await t.Db.LlmCostLedger.IgnoreQueryFilters().ToListAsync();
+        // Per-run cost = tổng đúng của session, không dính chi phí ngoài run.
+        entries.Where(e => e.SessionId == sessionId).Sum(e => e.Usd).Should().Be(0.05m);
+        entries.Single(e => e.AgentCode == "chat-agent").SessionId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DbLlmCostTracker_honors_per_tenant_cap()
+    {
+        var tenant = Clawbot.Domain.Tenants.Tenant.Create("acme", "Acme", "pro", DateTimeOffset.UtcNow);
+        tenant.SetMonthlyCostCapUsd(50m);
+        using var t = new TestAppDb(tenant.Id);
+        t.Db.Tenants.Add(tenant);
+        await t.Db.SaveChangesAsync();
+        var sut = new DbLlmCostTracker(ScopeFactoryFor(t.Db));
+        var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        await sut.RecordAsync(new CostEntry(tenant.Id, "chat", "claude", 100, 50, 49m, month), CancellationToken.None);
+        var denied = await sut.TryReserveAsync(tenant.Id, 2m, month.AddDays(1), CancellationToken.None);
+        var summary = await sut.SummaryAsync(tenant.Id, month, CancellationToken.None);
+
+        // Cap riêng $50 (không phải mặc định $200): 49 + 2 > 50 → chặn.
+        denied.Allowed.Should().BeFalse();
+        summary.CapUsd.Should().Be(50m);
+    }
+
+    [Fact]
+    public async Task DbLlmCostTracker_reserves_and_releases_budget_through_ledger()
+    {
+        using var t = new TestAppDb();
+        var sut = new DbLlmCostTracker(ScopeFactoryFor(t.Db));
         var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
 
         await sut.RecordAsync(new CostEntry(t.TenantId, "chat", "claude", 100, 50, 198m, month), CancellationToken.None);
@@ -107,10 +145,10 @@ public sealed class BackendAdminOpsTests
     }
 
     [Fact]
-    public async Task DbClaudeCostTracker_release_targets_only_requested_reservation_row()
+    public async Task DbLlmCostTracker_release_targets_only_requested_reservation_row()
     {
         using var t = new TestAppDb();
-        var tracker = new DbClaudeCostTracker(ScopeFactoryFor(t.Db));
+        var tracker = new DbLlmCostTracker(ScopeFactoryFor(t.Db));
         var guard = new Clawbot.Agents.Core.Orchestrator.OrchestratorCostGuard(tracker);
         var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
 
@@ -121,24 +159,24 @@ public sealed class BackendAdminOpsTests
         await guard.AdjustReservationAsync(t.TenantId, first.ReservationId, CancellationToken.None);
         await guard.AdjustReservationAsync(t.TenantId, first.ReservationId, CancellationToken.None);
 
-        var entries = await t.Db.ClaudeCostLedger.IgnoreQueryFilters().ToListAsync();
+        var entries = await t.Db.LlmCostLedger.IgnoreQueryFilters().ToListAsync();
         entries.Single(e => e.Id == first.ReservationId).Usd.Should().Be(0m);
         entries.Single(e => e.Id == second.ReservationId).Usd.Should().Be(3m);
         entries.Single(e => e.AgentCode == "chat").Usd.Should().Be(10m);
     }
 
     [Fact]
-    public async Task DbClaudeCostTracker_applies_actual_cost_to_reservation_row()
+    public async Task DbLlmCostTracker_applies_actual_cost_to_reservation_row()
     {
         using var t = new TestAppDb();
-        var tracker = new DbClaudeCostTracker(ScopeFactoryFor(t.Db));
+        var tracker = new DbLlmCostTracker(ScopeFactoryFor(t.Db));
         var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
 
         var reserved = await tracker.TryReserveAsync(t.TenantId, 2m, month, CancellationToken.None);
         await tracker.RecordAsync(new CostEntry(t.TenantId, "content-agent", "claude", 10, 20, 0.50m, month, reserved.ReservationId), CancellationToken.None);
         await tracker.ReleaseReservationAsync(t.TenantId, reserved.ReservationId!.Value, CancellationToken.None);
 
-        var entry = await t.Db.ClaudeCostLedger.IgnoreQueryFilters().SingleAsync();
+        var entry = await t.Db.LlmCostLedger.IgnoreQueryFilters().SingleAsync();
         entry.AgentCode.Should().Be("content-agent");
         entry.Model.Should().Be("claude");
         entry.Usd.Should().Be(0.50m);

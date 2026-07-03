@@ -557,7 +557,7 @@ public sealed class OrchestratorGrpcServiceTests
             string planJson,
             IAgent adapter,
             AgentServiceTestAppDb dbHarness,
-            IClaudeCostTracker? tracker = null,
+            ILlmCostTracker? tracker = null,
             DateTimeOffset? clockAt = null,
             ILlmCallScope? llmScope = null,
             Exception? plannerError = null)
@@ -679,7 +679,7 @@ public sealed class OrchestratorGrpcServiceTests
         }
     }
 
-    private sealed class FixedTracker : IClaudeCostTracker
+    private sealed class FixedTracker : ILlmCostTracker
     {
         public string Name => "cost";
         public Task RecordAsync(CostEntry entry, CancellationToken ct) => Task.CompletedTask;
@@ -687,7 +687,7 @@ public sealed class OrchestratorGrpcServiceTests
             Task.FromResult(new CostSummary(tenantId, 1m, 200m, 0.005f));
     }
 
-    private sealed class SequencedTracker(IReadOnlyList<CostSummary> summaries) : IClaudeCostTracker
+    private sealed class SequencedTracker(IReadOnlyList<CostSummary> summaries) : ILlmCostTracker
     {
         private int _index;
         public string Name => "cost";

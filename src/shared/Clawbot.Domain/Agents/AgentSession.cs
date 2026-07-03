@@ -145,5 +145,8 @@ public sealed class AgentSession : AggregateRoot<Guid>, ITenantOwned
 
         ArchivedAt = at;
     }
+
+    // ArchivedAt is just a visibility flag, so restoring an archived session is always safe.
+    public void Unarchive() => ArchivedAt = null;
 }
 

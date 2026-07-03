@@ -65,6 +65,9 @@ builder.Services.AddScoped<AutonomousOrchestrator>(sp => new AutonomousOrchestra
     sp.GetRequiredService<AutonomousOrchestratorOptions>(),
     sp.GetRequiredService<ToolRegistry>(),
     sp.GetRequiredService<Clawbot.Agents.Core.Orchestrator.IOrchestrationApprovalResolver>()));
+// Tenant trend scan (settings-aware, persists briefs): used by the gRPC research endpoint and by
+// "[trend-scan]" schedules, which bypass the LLM orchestrator entirely.
+builder.Services.AddScoped<Clawbot.AgentService.Services.ITenantTrendScanner, Clawbot.AgentService.Services.TrendScanService>();
 builder.Services.AddScoped<Clawbot.AgentService.Services.AgentScheduleRunner>();
 builder.Services.AddHostedService<Clawbot.AgentService.Services.AgentScheduleWorker>();
 builder.Services.AddScoped<IAgent, ChatAgentAdapter>();
@@ -83,13 +86,15 @@ builder.Services.AddScoped<LeadAutoScorer>();
 builder.Services.AddScoped<IAgent, LeadOrchestrationAdapter>();
 builder.Services.AddScoped<IAgent, ReportOrchestrationAdapter>();
 // M25: persist Claude cost to claude_cost_ledger (overrides in-memory tracker from the skills module).
-builder.Services.RemoveAll<Clawbot.Agents.Core.Skills.Ops.IClaudeCostTracker>();
-builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Ops.IClaudeCostTracker, Clawbot.Infrastructure.Agents.DbClaudeCostTracker>();
+builder.Services.RemoveAll<Clawbot.Agents.Core.Skills.Ops.ILlmCostTracker>();
+builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Ops.ILlmCostTracker, Clawbot.Infrastructure.Agents.DbLlmCostTracker>();
 // M25: chat agent honors per-tenant enable/disable (AgentConfig.Status).
 builder.Services.RemoveAll<Clawbot.Agents.Core.Chat.IAgentToggleGate>();
 builder.Services.AddSingleton<Clawbot.Agents.Core.Chat.IAgentToggleGate, Clawbot.Infrastructure.Agents.DbAgentToggleGate>();
 // Persist-only notification publisher (no SignalR hub in AgentService); FE polls unread count.
-builder.Services.AddSingleton<Clawbot.SharedKernel.Notifications.INotificationPublisher, Clawbot.Infrastructure.Notifications.DbOnlyNotificationPublisher>();
+// Persist + publish to Redis so the API-side relay pushes realtime through NotificationHub
+// (run failed / pending approval reach the bell + toast without F5).
+builder.Services.AddSingleton<Clawbot.SharedKernel.Notifications.INotificationPublisher, Clawbot.Infrastructure.Notifications.RedisBridgeNotificationPublisher>();
 builder.Services.TryAddSingleton<Clawbot.SharedKernel.Inbox.IInboxNotifier, Clawbot.Infrastructure.Notifications.NoopInboxNotifier>();
 builder.Services.AddClawbotRag(builder.Configuration);
 builder.Services.AddClawbotChat(builder.Configuration, builder.Environment);

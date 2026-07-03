@@ -84,6 +84,9 @@ public sealed partial class ContentPublishJob(
                             now),
                         ct).ConfigureAwait(false);
                     LogPublishFailed(_logger, schedule.TenantId, item.Id, schedule.Id, reason);
+                    // C2: đánh thức các lịch event-trigger "khi đăng bài thất bại" (vd. tự tạo lại bản nháp thay thế).
+                    await Agents.ScheduleEventDispatcher.FireAsync(
+                        _db, schedule.TenantId, Clawbot.SharedKernel.Orchestration.ScheduleEventKeys.ContentPublishFailed, now, ct).ConfigureAwait(false);
                 }
             }
 

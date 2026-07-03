@@ -294,12 +294,12 @@ public static class LogsEndpoints
 
         IReadOnlyList<CostRow> costs = agentCodes.Length == 0
             ? []
-            : await db.ClaudeCostLedger
+            : await db.LlmCostLedger
                 .IgnoreQueryFilters()
                 .AsNoTracking()
                 .Where(cost =>
                     cost.TenantId == tenantId &&
-                    cost.AgentCode != Clawbot.Domain.Agents.ClaudeCostEntry.ReservationAgentCode &&
+                    cost.AgentCode != Clawbot.Domain.Agents.LlmCostEntry.ReservationAgentCode &&
                     cost.CreatedAt >= minStarted &&
                     cost.CreatedAt <= maxFinished &&
                     agentCodes.Contains(cost.AgentCode))
@@ -347,12 +347,12 @@ public static class LogsEndpoints
     {
         var sessionIds = db.AgentSessions.AsNoTracking().Select(session => session.Id);
         var since = now.AddDays(-30);
-        var tokens = await db.ClaudeCostLedger
+        var tokens = await db.LlmCostLedger
             .IgnoreQueryFilters()
             .AsNoTracking()
             .Where(cost =>
                 cost.TenantId == tenantId &&
-                cost.AgentCode != Clawbot.Domain.Agents.ClaudeCostEntry.ReservationAgentCode &&
+                cost.AgentCode != Clawbot.Domain.Agents.LlmCostEntry.ReservationAgentCode &&
                 cost.CreatedAt >= since &&
                 cost.CreatedAt <= now)
             .SumAsync(cost => (int?)(cost.InputTokens + cost.OutputTokens), ct) ?? 0;

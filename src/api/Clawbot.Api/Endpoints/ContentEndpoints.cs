@@ -44,6 +44,7 @@ public static class ContentEndpoints
 
         grp.MapGet("/trends", TrendsAsync).RequirePermission("content:read");
         grp.MapPost("/trends/scan", ScanTrendsAsync).RequirePermission("content:write");
+        ContentTrendSettingsEndpoints.Map(grp);
 
         grp.MapPost("/items/generate", GenerateItemAsync).RequirePermission("content:write");
         grp.MapPost("/image-prompts", GenerateImagePromptAsync).RequirePermission("content:write");

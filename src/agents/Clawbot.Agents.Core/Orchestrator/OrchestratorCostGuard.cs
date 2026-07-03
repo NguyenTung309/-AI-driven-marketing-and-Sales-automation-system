@@ -9,10 +9,10 @@ public sealed record CostGuardResult(bool Allowed, string? Reason, Guid? Reserva
     public static CostGuardResult Deny(string reason) => new(false, reason);
 }
 
-public sealed class OrchestratorCostGuard(IClaudeCostTracker tracker)
+public sealed class OrchestratorCostGuard(ILlmCostTracker tracker)
 {
-    private readonly IClaudeCostTracker _tracker = tracker;
-    private readonly IClaudeCostReservationStore? _reservations = tracker as IClaudeCostReservationStore;
+    private readonly ILlmCostTracker _tracker = tracker;
+    private readonly ILlmCostReservationStore? _reservations = tracker as ILlmCostReservationStore;
 
     public async Task<CostGuardResult> CanStartAsync(
         Guid tenantId,
@@ -52,10 +52,11 @@ public sealed class OrchestratorCostGuard(IClaudeCostTracker tracker)
         ClaudeReply reply,
         DateTimeOffset at,
         Guid? reservationId,
+        Guid? sessionId = null,
         CancellationToken ct = default) =>
         reply.UsdCost <= 0m
             ? Task.CompletedTask
-            : _tracker.RecordAsync(new CostEntry(tenantId, agentCode, reply.Model, reply.InputTokens, reply.OutputTokens, reply.UsdCost, at, reservationId), ct);
+            : _tracker.RecordAsync(new CostEntry(tenantId, agentCode, reply.Model, reply.InputTokens, reply.OutputTokens, reply.UsdCost, at, reservationId, sessionId), ct);
 
     public Task AdjustReservationAsync(
         Guid tenantId,
