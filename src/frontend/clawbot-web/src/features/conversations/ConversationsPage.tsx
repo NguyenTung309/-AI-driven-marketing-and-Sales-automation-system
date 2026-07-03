@@ -248,8 +248,8 @@ function MessageBubble({ message, contactAvatarUrl, contactDisplayName }: Messag
             ? (message.senderDisplayName ?? (byAi ? "AI Agent" : "Hệ thống"))
             : (message.senderDisplayName ?? contactDisplayName ?? "Khách hàng")}
         </div>
-        {message.contentType === "photo" && message.content ? (
-          <img src={message.content} alt="Anh dinh kem" className="max-h-48 rounded-lg object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+        {message.contentType === "photo" && (message.attachmentUrl || message.content) ? (
+          <img src={message.attachmentUrl || message.content} alt="Anh dinh kem" className="max-h-48 rounded-lg object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
         ) : message.contentType === "sticker" && message.content ? (
           <img src={message.content} alt="Sticker" className="max-h-24 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
         ) : message.contentType === "document" ? (

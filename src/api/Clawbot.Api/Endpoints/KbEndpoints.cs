@@ -237,11 +237,12 @@ public static class KbEndpoints
         await stream.CopyToAsync(buffer, ct).ConfigureAwait(false);
         if (buffer.Length == 0) return null;
 
-        var head = buffer.GetBuffer().AsSpan(0, (int)Math.Min(4, buffer.Length));
-        if (head.Length >= 4 && head[0] == 0x25 && head[1] == 0x50 && head[2] == 0x44 && head[3] == 0x46)
+        var head = buffer.GetBuffer();
+        var len = (int)Math.Min(4, buffer.Length);
+        if (len >= 4 && head[0] == 0x25 && head[1] == 0x50 && head[2] == 0x44 && head[3] == 0x46)
             return "upload.pdf";
 
-        if (head.Length >= 2 && head[0] == 0x50 && head[1] == 0x4B)
+        if (len >= 2 && head[0] == 0x50 && head[1] == 0x4B)
             return OfficeFileNameFromZip(buffer);
 
         return LooksLikeText(buffer) ? "upload.txt" : null;

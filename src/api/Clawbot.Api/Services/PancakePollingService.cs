@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Linq;
 using Clawbot.Domain.Channels;
 using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Persistence;
@@ -145,42 +146,46 @@ public sealed partial class PancakePollingService : BackgroundService
             if (!msgResp.IsSuccessStatusCode) continue;
             var msgJson = await msgResp.Content.ReadAsStringAsync(ct);
             var msgData = JsonSerializer.Deserialize<PancakeMessagesResponse>(msgJson, JsonOpts);
-            var latestMsg = msgData?.Messages?.FirstOrDefault();
-            if (latestMsg?.Id is null) continue;
-
             var convId = conv.Id ?? "unknown";
-
+            var messages = msgData?.Messages;
+            if (messages is null || messages.Length == 0) continue;
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<Clawbot.Infrastructure.Persistence.AppDbContext>();
+            var resolver = scope.ServiceProvider.GetRequiredService<Clawbot.SharedKernel.Multitenancy.ITenantResolver>();
+            var ingestor = scope.ServiceProvider.GetRequiredService<Clawbot.Infrastructure.Channels.IChannelMessageIngestor>();
+            var tenantId = await resolver.ResolveTenantIdAsync(ct);
 
-            var alreadyProcessed = await db.ProcessedMessages
-                .AnyAsync(p => p.Platform == "zalo" && p.ExternalMessageId == latestMsg.Id, ct);
-            if (alreadyProcessed) { LogSkippedProcessed(_log, latestMsg.Id, convId); continue; }
+            // Batch-load already processed message IDs for this conversation
+            var processedIds = (await db.ProcessedMessages
+                .Where(p => p.Platform == "zalo" && p.ConversationExternalId == convId)
+                .Select(p => p.ExternalMessageId)
+                .ToListAsync(ct))
+                .ToHashSet();
 
-            // ponytail: was skipping admin/automated; now ingest all for correct backfill
-
-            db.ProcessedMessages.Add(new ProcessedMessage("zalo", latestMsg.Id, convId));
-            await db.SaveChangesAsync(ct);
-            LogProcessedNew(_log, latestMsg.Id, convId);
-
-            try
+            foreach (var msg in messages)
             {
-                var resolver = scope.ServiceProvider.GetRequiredService<Clawbot.SharedKernel.Multitenancy.ITenantResolver>();
-                var ingestor = scope.ServiceProvider.GetRequiredService<Clawbot.Infrastructure.Channels.IChannelMessageIngestor>();
-                var tenantId = await resolver.ResolveTenantIdAsync(ct);
+                if (msg?.Id is null) continue;
+                if (processedIds.Contains(msg.Id)) { LogSkippedProcessed(_log, msg.Id, convId); continue; }
+                processedIds.Add(msg.Id);
+
+                db.ProcessedMessages.Add(new ProcessedMessage("zalo", msg.Id, convId));
+                LogProcessedNew(_log, msg.Id, convId);
+
+                try
+                {
 
                                 var metadata = new Dictionary<string, string>
                 {
-                    ["external_message_id"] = latestMsg.Id,
+                    ["external_message_id"] = msg.Id,
                     ["content_type"] = "text",
                 };
 
                 // Per-message sender info
-                if (latestMsg.From != null)
+                if (msg.From != null)
                 {
-                    if (!string.IsNullOrEmpty(latestMsg.From.Name)) metadata["sender_name"] = latestMsg.From.Name;
-                    if (!string.IsNullOrEmpty(latestMsg.From.AvatarUrl)) metadata["sender_avatar_url"] = latestMsg.From.AvatarUrl;
-                    metadata["sender_id"] = latestMsg.From.Id ?? "";
+                    if (!string.IsNullOrEmpty(msg.From.Name)) metadata["sender_name"] = msg.From.Name;
+                    if (!string.IsNullOrEmpty(msg.From.AvatarUrl)) metadata["sender_avatar_url"] = msg.From.AvatarUrl;
+                    metadata["sender_id"] = msg.From.Id ?? "";
                 }
 
                 if (conv.From != null)
@@ -198,9 +203,9 @@ public sealed partial class PancakePollingService : BackgroundService
 
                 // Parse attachments for rich content
                 string text = snippet;
-                if (latestMsg.Attachments != null && latestMsg.Attachments.Count > 0)
+                if (msg.Attachments != null && msg.Attachments.Count > 0)
                 {
-                    var att = latestMsg.Attachments[0];
+                    var att = msg.Attachments[0];
                     switch (att.Type)
                     {
                         case "photo":
@@ -235,12 +240,13 @@ public sealed partial class PancakePollingService : BackgroundService
 
                 var channelMsg = new Clawbot.SharedKernel.Channels.ChannelMessage(
                     Channel: "zalo", ExternalThreadId: convId,
-                    ExternalUserId: latestMsg.From?.Id ?? conv.From?.Id ?? "unknown", Text: text,
-                    SentAt: conv.UpdatedAt.HasValue ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow,
+                    ExternalUserId: msg.From?.Id ?? conv.From?.Id ?? "unknown", Text: text,
+                    SentAt: msg.InsertedAt.HasValue ? new DateTimeOffset(msg.InsertedAt.Value, TimeSpan.Zero) : (conv.UpdatedAt.HasValue ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow),
                     Metadata: metadata);
                 await ingestor.IngestAsync(tenantId, channelMsg, ct);
             }
-            catch (Exception ex) { LogIngestFailed(_log, latestMsg.Id, ex.Message); }
+            catch (Exception ex) { LogIngestFailed(_log, msg.Id, ex.Message); }
+            }
 
             var traceId = await _traces.CreateTraceAsync();
             await _traces.AppendStepAsync(traceId, new DemoTraceStep
@@ -257,7 +263,8 @@ public sealed record PancakeMessage(
     string? Id,
     string? Message,
     PancakeMessageSender? From,
-    IReadOnlyList<PancakeAttachment>? Attachments);
+    IReadOnlyList<PancakeAttachment>? Attachments,
+    DateTime? InsertedAt);
 public sealed record PancakeMessageSender(
     string? Id,
     string? Name,

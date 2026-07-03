@@ -87,6 +87,7 @@ public sealed class PancakeChannelAdapter(
             if (!string.IsNullOrEmpty(evt.PageId)) meta["page_id"] = evt.PageId;
             if (!string.IsNullOrEmpty(evt.Type)) meta["event_type"] = evt.Type;
             if (!string.IsNullOrEmpty(evt.SenderId)) meta["sender_id"] = evt.SenderId;
+            if (!string.IsNullOrEmpty(evt.AvatarUrl)) meta["page_avatar_url"] = evt.AvatarUrl;
 
             var messageType = NormalizeMessageType(evt.Type);
             var externalThreadId = string.IsNullOrEmpty(evt.PageId) ? evt.ThreadId : $"{evt.PageId}:{evt.ThreadId}";
@@ -210,5 +211,6 @@ public sealed class PancakeChannelAdapter(
         [property: JsonPropertyName("text")] string? Text,
         [property: JsonPropertyName("type")] string? Type,
         [property: JsonPropertyName("post_id")] string? PostId,
-        [property: JsonPropertyName("sent_at")] DateTimeOffset? SentAt);
+        [property: JsonPropertyName("sent_at")] DateTimeOffset? SentAt,
+        [property: JsonPropertyName("avatar_url")] string? AvatarUrl);
 }

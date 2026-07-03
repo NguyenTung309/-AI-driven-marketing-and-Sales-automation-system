@@ -1,3 +1,4 @@
+// Stitch design system branding defaults: primaryColor: "#d32f2f"
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/shared/auth/authStore";

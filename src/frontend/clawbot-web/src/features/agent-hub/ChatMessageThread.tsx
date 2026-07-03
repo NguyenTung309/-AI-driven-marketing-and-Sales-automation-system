@@ -69,8 +69,8 @@ export default function ChatMessageThread({ messages, loading, contactAvatarUrl,
                     : "bg-surface-variant text-on-surface-variant"
                   }`}
               >
-                {msg.contentType === "photo" && msg.content ? (
-                  <img src={msg.content} alt="Anh dinh kem" className="max-h-48 rounded-lg object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                {msg.contentType === "photo" && (msg.attachmentUrl || msg.content) ? (
+                  <img src={msg.attachmentUrl || msg.content} alt="Anh dinh kem" className="max-h-48 rounded-lg object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                 ) : msg.contentType === "sticker" && msg.content ? (
                   <img src={msg.content} alt="Sticker" className="max-h-24 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                 ) : msg.contentType === "document" ? (

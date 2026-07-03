@@ -1,0 +1,5 @@
+BEGIN TRANSACTION;
+
+ALTER TABLE messages ADD sender_avatar_url NVARCHAR(512) NULL;
+
+COMMIT;

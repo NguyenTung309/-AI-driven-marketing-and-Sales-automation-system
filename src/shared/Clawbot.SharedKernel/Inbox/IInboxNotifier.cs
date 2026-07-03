@@ -1,4 +1,4 @@
-﻿namespace Clawbot.SharedKernel.Inbox;
+namespace Clawbot.SharedKernel.Inbox;
 
 public interface IInboxNotifier
 {
@@ -14,7 +14,9 @@ public sealed record InboxMessageEvent(
     string Content,
     string ContentType,
     DateTimeOffset SentAt,
-    Guid? AssignedTo = null);
+    Guid? AssignedTo = null,
+    string? SenderDisplayName = null,
+    string? SenderAvatarUrl = null);
 
 public sealed record InboxConversationEvent(
     Guid ConversationId,
