@@ -157,7 +157,7 @@ public sealed partial class PancakePollingService : BackgroundService
 
             // Batch-load already processed message IDs for this conversation
             var processedIds = (await db.ProcessedMessages
-                .Where(p => p.Platform == "zalo" && p.ConversationExternalId == convId)
+                .Where(p => p.TenantId == tenantId && p.Platform == "zalo" && p.ConversationExternalId == convId)
                 .Select(p => p.ExternalMessageId)
                 .ToListAsync(ct))
                 .ToHashSet();
@@ -168,7 +168,7 @@ public sealed partial class PancakePollingService : BackgroundService
                 if (processedIds.Contains(msg.Id)) { LogSkippedProcessed(_log, msg.Id, convId); continue; }
                 processedIds.Add(msg.Id);
 
-                db.ProcessedMessages.Add(new ProcessedMessage("zalo", msg.Id, convId));
+                db.ProcessedMessages.Add(new ProcessedMessage(tenantId, "zalo", msg.Id, convId));
                 LogProcessedNew(_log, msg.Id, convId);
 
                 try
@@ -183,14 +183,24 @@ public sealed partial class PancakePollingService : BackgroundService
                 // Per-message sender info
                 if (msg.From != null)
                 {
-                    if (!string.IsNullOrEmpty(msg.From.Name)) metadata["sender_name"] = msg.From.Name;
-                    if (!string.IsNullOrEmpty(msg.From.AvatarUrl)) metadata["sender_avatar_url"] = msg.From.AvatarUrl;
+                    if (!string.IsNullOrEmpty(msg.From.Name))
+                    {
+                        metadata["sender_name"] = msg.From.Name;
+                        metadata["display_name"] = msg.From.Name;
+                    }
+                    
+                // Detect admin/automated outbound message
+                if (!string.IsNullOrEmpty(msg.From.AvatarUrl)) metadata["sender_avatar_url"] = msg.From.AvatarUrl;
                     metadata["sender_id"] = msg.From.Id ?? "";
                 }
 
                 if (conv.From != null)
                 {
-                    if (!string.IsNullOrEmpty(conv.From.Name) && !metadata.ContainsKey("sender_name")) metadata["sender_name"] = conv.From.Name;
+                    if (!string.IsNullOrEmpty(conv.From.Name))
+                    {
+                        if (!metadata.ContainsKey("sender_name")) metadata["sender_name"] = conv.From.Name;
+                        if (!metadata.ContainsKey("display_name")) metadata["display_name"] = conv.From.Name;
+                    }
                     if (!string.IsNullOrEmpty(conv.From.AvatarUrl) && !metadata.ContainsKey("sender_avatar_url")) metadata["sender_avatar_url"] = conv.From.AvatarUrl;
                     if (conv.From.IsGroup == true) metadata["is_group"] = "true";
                     metadata["from_id"] = conv.From.Id ?? "";
@@ -199,11 +209,17 @@ public sealed partial class PancakePollingService : BackgroundService
                 if (msg.From == null && conv.LastSentBy != null)
                 {
                     metadata["sender_id"] = conv.LastSentBy.Id ?? "";
-                    if (!metadata.ContainsKey("sender_name") && !string.IsNullOrEmpty(conv.LastSentBy.Name))
-                        metadata["sender_name"] = conv.LastSentBy.Name;
+                    if (!string.IsNullOrEmpty(conv.LastSentBy.Name))
+                    {
+                        if (!metadata.ContainsKey("sender_name")) metadata["sender_name"] = conv.LastSentBy.Name;
+                        if (!metadata.ContainsKey("display_name")) metadata["display_name"] = conv.LastSentBy.Name;
+                    }
                     if (!metadata.ContainsKey("sender_avatar_url") && !string.IsNullOrEmpty(conv.LastSentBy.AvatarUrl))
                         metadata["sender_avatar_url"] = conv.LastSentBy.AvatarUrl;
                 }
+                // Detect outbound message: admin (AdminId) or automated system
+                if (msg.From?.AdminId != null || msg.From?.IsAutomated == true)
+                    metadata["is_owner"] = "true";
                 if (!string.IsNullOrEmpty(conv.PageId)) metadata["page_id"] = conv.PageId;
 
                 // Parse attachments for rich content
@@ -245,7 +261,7 @@ public sealed partial class PancakePollingService : BackgroundService
                 }
 
                 var channelMsg = new Clawbot.SharedKernel.Channels.ChannelMessage(
-                    Channel: "zalo", ExternalThreadId: convId,
+                    Channel: "zalo", ExternalThreadId: $"{pageId}:{convId}",
                     ExternalUserId: msg.From?.Id ?? conv.From?.Id ?? "unknown", Text: text,
                     SentAt: msg.InsertedAt.HasValue ? new DateTimeOffset(msg.InsertedAt.Value, TimeSpan.Zero) : (conv.UpdatedAt.HasValue ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow),
                     Metadata: metadata);
@@ -287,19 +303,14 @@ public sealed record PancakeAttachment(
     PancakeImageData? ImageData);
 public sealed record PancakeImageData(int? Width, int? Height);
 
-/// <summary>
-/// The other party in the conversation (customer contact or group info).
-/// </summary>
+
 public sealed record PancakeFrom(
     string? Id,
     string? Name,
     string? AvatarUrl,
     bool? IsGroup);
 
-/// <summary>
-/// The user who sent the last message in this conversation.
-/// When LastSentBy.Id == PageId, the sender is the page owner/admin.
-/// </summary>
+
 public sealed record PancakeLastSentBy(
     string? Id,
     string? Name,
@@ -307,9 +318,7 @@ public sealed record PancakeLastSentBy(
     string? AvatarUrl,
     string? AdminName);
 
-/// <summary>
-/// A customer/participant in the conversation (used for group chats).
-/// </summary>
+
 public sealed record PancakeCustomer(
     string? Id,
     string? Name,
@@ -322,5 +331,3 @@ public sealed record PancakeConversation(
     PancakeFrom? From, PancakeLastSentBy? LastSentBy,
     IReadOnlyList<PancakeCustomer>? Customers);
 }
-
-

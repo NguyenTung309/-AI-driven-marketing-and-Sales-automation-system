@@ -1,4 +1,4 @@
-﻿using Clawbot.Agents.Contracts.SaleAssist;
+using Clawbot.Agents.Contracts.SaleAssist;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.SaleAssist;
 using Clawbot.Api.Middleware;
@@ -44,13 +44,20 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
         var tenant = tenants.Require();
         if (conversationId == Guid.Empty) return Results.BadRequest(new { error = "conversationId required" });
 
-        var resp = await grpc.UpsellAsync(new UpsellRequest
+        try
         {
-            TenantId = tenant.TenantId.ToString(),
-            ConversationId = conversationId.ToString(),
-        }, cancellationToken: ct);
+            var resp = await grpc.UpsellAsync(new UpsellRequest
+            {
+                TenantId = tenant.TenantId.ToString(),
+                ConversationId = conversationId.ToString(),
+            }, cancellationToken: ct);
 
-        return Results.Ok(new SaleAssistUpsellResponse(resp.Eligible, resp.Suggestion, resp.Reason, resp.LeadScore));
+            return Results.Ok(new SaleAssistUpsellResponse(resp.Eligible, resp.Suggestion, resp.Reason, resp.LeadScore));
+        }
+        catch (Exception ex)
+        {
+            return Results.Ok(new SaleAssistUpsellResponse(false, "Không thể tải gợi ý upsell.", "Lỗi kết nối AgentService: " + ex.Message, 0));
+        }
     }
 
     private static async Task<IResult> DraftAsync(
@@ -61,14 +68,21 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
     {
         var tenant = tenants.Require();
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var resp = await grpc.DraftAsync(new DraftRequest
+        try
         {
-            TenantId = tenant.TenantId.ToString(),
-            ConversationId = body.ConversationId.ToString(),
-            SaleUserId = string.Empty,
-        }, cancellationToken: ct);
-        sw.Stop();
-        return Results.Ok(new SaleAssistDraftResponse(resp.DraftText, resp.SuggestedAction, resp.LeadScore, sw.ElapsedMilliseconds));
+            var resp = await grpc.DraftAsync(new DraftRequest
+            {
+                TenantId = tenant.TenantId.ToString(),
+                ConversationId = body.ConversationId.ToString(),
+                SaleUserId = string.Empty,
+            }, cancellationToken: ct);
+            sw.Stop();
+            return Results.Ok(new SaleAssistDraftResponse(resp.DraftText, resp.SuggestedAction, resp.LeadScore, sw.ElapsedMilliseconds));
+        }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { error = "agent_service_error", message = "Không thể kết nối AgentService để tạo câu trả lời nháp: " + ex.Message });
+        }
     }
 
     private static async Task<IResult> DraftFeedbackAsync(
@@ -100,13 +114,20 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
     {
         var tenant = tenants.Require();
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var resp = await grpc.SummarizeAsync(new SummarizeRequest
+        try
         {
-            TenantId = tenant.TenantId.ToString(),
-            ConversationId = body.ConversationId.ToString(),
-        }, cancellationToken: ct);
-        sw.Stop();
-        return Results.Ok(new SaleAssistSummaryResponse(resp.Summary, sw.ElapsedMilliseconds));
+            var resp = await grpc.SummarizeAsync(new SummarizeRequest
+            {
+                TenantId = tenant.TenantId.ToString(),
+                ConversationId = body.ConversationId.ToString(),
+            }, cancellationToken: ct);
+            sw.Stop();
+            return Results.Ok(new SaleAssistSummaryResponse(resp.Summary, sw.ElapsedMilliseconds));
+        }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { error = "agent_service_error", message = "Không thể kết nối AgentService để tóm tắt cuộc hội thoại: " + ex.Message });
+        }
     }
 
     private static async Task<IResult> ListQuickRepliesAsync(AppDbContext db, ITenantAccessor tenants, CancellationToken ct)

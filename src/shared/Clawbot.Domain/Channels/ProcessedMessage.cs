@@ -1,8 +1,13 @@
-﻿namespace Clawbot.Domain.Channels;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace Clawbot.Domain.Channels;
 
 public sealed class ProcessedMessage
 {
     public Guid Id { get; private set; }
+
+    [Column("tenant_id")]
+    public Guid TenantId { get; private set; }
     public string Platform { get; private set; } = string.Empty;
     public string ExternalMessageId { get; private set; } = string.Empty;
     public string ConversationExternalId { get; private set; } = string.Empty;
@@ -10,9 +15,10 @@ public sealed class ProcessedMessage
 
     private ProcessedMessage() { }
 
-    public ProcessedMessage(string platform, string externalMessageId, string conversationExternalId)
+    public ProcessedMessage(Guid tenantId, string platform, string externalMessageId, string conversationExternalId)
     {
         Id = Guid.NewGuid();
+        TenantId = tenantId;
         Platform = platform;
         ExternalMessageId = externalMessageId;
         ConversationExternalId = conversationExternalId;

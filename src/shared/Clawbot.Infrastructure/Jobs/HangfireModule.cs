@@ -53,8 +53,7 @@ public static class HangfireModule
         services.AddScoped<AutoSummaryJob>();
         services.AddScoped<CommentAutoReplyJob>();
         services.AddScoped<HealthCheckJob>();
-        services.AddScoped<OutOfHoursAutoReplyJob>();
-        services.AddScoped<DripSequenceJob>();
+                services.AddScoped<DripSequenceJob>();
         services.AddScoped<IIdleEscalationRecipientResolver, SalesLeadIdleEscalationRecipientResolver>();
         services.AddScoped<IdleConversationAlertJob>();
         services.AddScoped<LeadFollowUpJob>();
@@ -163,11 +162,6 @@ public static class HangfireModule
             "default",
             j => j.RunAsync(CancellationToken.None),
             Cron.Hourly);
-        recurring.AddOrUpdate<OutOfHoursAutoReplyJob>(
-            "out-of-hours-auto-reply",
-            "default",
-            j => j.RunAsync(CancellationToken.None),
-            "*/10 * * * *");
         recurring.AddOrUpdate<DripSequenceJob>(
             "drip-sequence-sender",
             "default",

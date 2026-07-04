@@ -68,6 +68,9 @@ public sealed partial class ChannelMessageIngestor(
         var pageId = message.Metadata.TryGetValue("page_id", out var pid) ? pid : "";
         var isOwner = !string.IsNullOrEmpty(senderId) && !string.IsNullOrEmpty(pageId)
             && string.Equals(senderId, pageId, StringComparison.Ordinal);
+        // Fallback: channel adapter override (Pancake admin id != page id)
+        if (!isOwner && message.Metadata.TryGetValue("is_owner", out var ownerFlag))
+            isOwner = string.Equals(ownerFlag, "true", StringComparison.OrdinalIgnoreCase);
         var direction = isOwner ? "out" : "in";
         var senderType = isOwner ? "user" : "contact";
         var senderDisplayName = message.Metadata.TryGetValue("sender_name", out var sn) ? sn : null;
@@ -112,20 +115,32 @@ public sealed partial class ChannelMessageIngestor(
 
     private async Task<Conversation> UpsertConversationAsync(Guid tenantId, ChannelMessage message, CancellationToken ct)
     {
+        var normalizedThread = ExtractCustomerExternalId(message.Channel, message.ExternalThreadId);
         var existing = await _db.Conversations
             .IgnoreQueryFilters()
             .Where(c => c.TenantId == tenantId
                 && c.Platform == message.Channel
-                && c.ExternalThreadId == message.ExternalThreadId)
+                && (c.ExternalThreadId == message.ExternalThreadId || c.ExternalThreadId == normalizedThread))
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
-        if (existing is not null) return existing;
-
-        // Ensure we link the conversation to the customer Contact, not the Page Contact (even if the first message is outbound)
-        var customerExternalId = ExtractCustomerExternalId(message.Channel, message.ExternalThreadId);
-        var customerMessage = message with { ExternalUserId = customerExternalId };
+        // Use customer_id from metadata (set by polling service) or extract from thread ID
+        var customerExternalId = message.Metadata.TryGetValue("customer_id", out var cid) && !string.IsNullOrWhiteSpace(cid)
+            ? cid
+            : ExtractCustomerExternalId(message.Channel, message.ExternalThreadId);
+        // Strip sender metadata only for outbound (owner) messages to avoid overwriting customer contact
+        var custMeta = message.Metadata;
+        if (message.Metadata.TryGetValue("is_owner", out var ownerFlag) && string.Equals(ownerFlag, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            custMeta = message.Metadata
+                .Where(kv => kv.Key is not ("display_name" or "sender_name" or "sender_avatar_url" or "avatar_url"))
+                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+        }
+        var customerMessage = message with { ExternalUserId = customerExternalId, Metadata = custMeta };
         var contact = await UpsertContactAsync(tenantId, customerMessage, ct).ConfigureAwait(false);
         var inboxId = await ResolveInboxIdAsync(tenantId, message, ct).ConfigureAwait(false);
+        if (existing is not null)
+            return existing;
+
         var conv = Conversation.Open(tenantId, message.Channel, message.ExternalThreadId, _clock.UtcNow, contact?.Id, inboxId);
         _db.Conversations.Add(conv);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -197,14 +212,12 @@ public sealed partial class ChannelMessageIngestor(
         if (string.IsNullOrWhiteSpace(externalThreadId) || string.IsNullOrWhiteSpace(externalPageId))
             return false;
 
-        if (externalThreadId.Contains(externalPageId, StringComparison.OrdinalIgnoreCase))
-            return true;
+        // Thread ID format: {pageId}:{convId}
+        // Extract prefix before colon and compare exactly with externalPageId
+        var colonIdx = externalThreadId.IndexOf(':');
+        var prefix = colonIdx > 0 ? externalThreadId[..colonIdx] : externalThreadId;
 
-        var pageDigits = new string(externalPageId.Where(char.IsDigit).ToArray());
-        if (!string.IsNullOrEmpty(pageDigits) && externalThreadId.Contains(pageDigits, StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        return false;
+        return string.Equals(prefix, externalPageId, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<Contact?> UpsertContactAsync(Guid tenantId, ChannelMessage message, CancellationToken ct)

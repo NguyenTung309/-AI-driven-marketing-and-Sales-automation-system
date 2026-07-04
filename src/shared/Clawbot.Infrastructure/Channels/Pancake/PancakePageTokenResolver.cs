@@ -29,17 +29,23 @@ public sealed partial class PancakePageTokenResolver(
             return null;
         }
 
-        var row = await _db.PancakePages
+        var row = await _db.Inboxes
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(p => p.TenantId == tenantId && p.PageId == pageId && p.DeletedAt == null && p.IsActive)
-            .Select(p => new { p.PageAccessTokenEncrypted, p.Name, p.Platform })
+            .Where(i => i.TenantId == tenantId && i.ExternalPageId == pageId && i.DeletedAt == null && i.IsActive)
+            .OrderBy(i => i.Id)
+            .Select(i => new { i.EncryptedAccessToken, i.Name, i.Platform })
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
-        if (row is null || string.IsNullOrEmpty(row.PageAccessTokenEncrypted))
+        if (row is null || string.IsNullOrEmpty(row.EncryptedAccessToken))
             return null;
 
-        var token = SafeDecrypt(row.PageAccessTokenEncrypted);
+        var token = SafeDecrypt(row.EncryptedAccessToken);
+        // Decryption fail ? raw JWT (plaintext) from admin UI. Use as-is.
+        // ponytail: remove once all inbox tokens are properly encrypted.
+        if (string.IsNullOrEmpty(token))
+            token = row.EncryptedAccessToken;
+
         if (string.IsNullOrEmpty(token))
             return null;
 

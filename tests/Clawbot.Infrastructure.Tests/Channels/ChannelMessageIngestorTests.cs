@@ -1,4 +1,4 @@
-﻿using Clawbot.Agents.Core.Skills.Nlp;
+using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Vectors;
 using Clawbot.SharedKernel.Channels;
@@ -30,9 +30,16 @@ public sealed class ChannelMessageIngestorTests
         return (sut, notifier);
     }
 
-    private static ChannelMessage Msg(string text, string thread = "page1:thread1", string user = "user1",
-        IReadOnlyDictionary<string, string>? meta = null) =>
-        new("facebook", thread, user, text, Now, meta ?? new Dictionary<string, string>());
+    private static ChannelMessage Msg(string text, string thread = "page1:thread1", string? user = null,
+        IReadOnlyDictionary<string, string>? meta = null)
+    {
+        if (user == null)
+        {
+            var idx = thread.IndexOf(':');
+            user = idx > 0 ? thread[(idx + 1)..] : thread;
+        }
+        return new("facebook", thread, user, text, Now, meta ?? new Dictionary<string, string>());
+    }
 
     [Fact]
     public async Task New_message_creates_contact_conversation_and_message()
@@ -86,7 +93,7 @@ public sealed class ChannelMessageIngestorTests
         using var fx = new TestAppDb();
         var (sut, _) = Build(fx);
 
-        await sut.IngestAsync(fx.TenantId, Msg("hi", user: "fb-12345"));
+        await sut.IngestAsync(fx.TenantId, Msg("hi", thread: "page1:fb-12345", user: "fb-12345"));
 
         var contact = await fx.Db.Contacts.IgnoreQueryFilters().SingleAsync();
         contact.DisplayName.Should().Be("fb-12345");
@@ -155,7 +162,7 @@ public sealed class ChannelMessageIngestorTests
             ["avatar_url"] = "https://cdn.example.com/avatar.jpg",
         };
 
-        await sut.IngestAsync(fx.TenantId, Msg("hi", user: "ext-user-1", meta: meta));
+        await sut.IngestAsync(fx.TenantId, Msg("hi", thread: "page1:ext-user-1", user: "ext-user-1", meta: meta));
 
         var contact = await fx.Db.Contacts.IgnoreQueryFilters().SingleAsync();
         contact.AvatarUrl.Should().Be("https://cdn.example.com/avatar.jpg");
@@ -168,14 +175,14 @@ public sealed class ChannelMessageIngestorTests
         var (sut, _) = Build(fx);
 
         // Simulate a contact initially created with pzl_ prefix (from old system)
-        await sut.IngestAsync(fx.TenantId, Msg("first msg", user: "pzl_u_abc123", meta: new Dictionary<string, string>()));
+        await sut.IngestAsync(fx.TenantId, Msg("first msg", thread: "page1:pzl_u_abc123", user: "pzl_u_abc123", meta: new Dictionary<string, string>()));
 
         // Now ingest with real display_name
         var meta = new Dictionary<string, string>
         {
             ["display_name"] = "Nguyen Van B",
         };
-        await sut.IngestAsync(fx.TenantId, Msg("second msg", user: "pzl_u_abc123", meta: meta));
+        await sut.IngestAsync(fx.TenantId, Msg("second msg", thread: "page1:pzl_u_abc123", user: "pzl_u_abc123", meta: meta));
 
         var contact = await fx.Db.Contacts.IgnoreQueryFilters().SingleAsync();
         contact.DisplayName.Should().Be("Nguyen Van B");

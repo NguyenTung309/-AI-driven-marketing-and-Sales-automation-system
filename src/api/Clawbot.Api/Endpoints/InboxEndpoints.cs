@@ -271,7 +271,7 @@ public static class InboxEndpoints
         Guid id, SendMessageRequest body,
         AppDbContext db, ITenantAccessor tenants, IInboxNotifier notifier,
         IChannelAdapter adapter, OutboundMessageSafetyService safety, IClock clock,
-        IEncryptor encryptor, ClaimsPrincipal user, IPermissionResolver permResolver,
+        IEncryptor encryptor, ClaimsPrincipal user,
         IUserInboxResolver resolver,
         CancellationToken ct)
     {
@@ -285,20 +285,6 @@ public static class InboxEndpoints
         if (inboxIds.Count > 0 && conv.InboxId.HasValue && !inboxIds.Contains(conv.InboxId.Value))
             return Results.Forbid();
 
-        var roleIdStr = user.FindFirstValue("role_id");
-        if (Guid.TryParse(roleIdStr, out var adminRoleId))
-        {
-            var adminPerms = await permResolver.GetPermissionsAsync(adminRoleId, ct);
-            if (adminPerms.Contains("admin:inboxes"))
-            {
-                var adminUid = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
-                var isMember = await db.InboxMembers
-                    .AnyAsync(m => m.AgentId == adminUid && m.InboxId == conv.InboxId, ct);
-                if (!isMember)
-                    return Results.Forbid();
-            }
-        }
-
         try { await safety.EnsureAllowedAsync(body.Content, ct).ConfigureAwait(false); }
         catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
@@ -310,7 +296,14 @@ public static class InboxEndpoints
             .ConfigureAwait(false);
         var accessToken = string.IsNullOrEmpty(userToken) ? null : encryptor.Decrypt(userToken);
 
-        await adapter.SendAsync(conv.ExternalThreadId, body.Content, accessToken, ct).ConfigureAwait(false);
+        try
+        {
+            await adapter.SendAsync(conv.ExternalThreadId, body.Content, accessToken, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { error = "channel_send_failed", message = "Không thể gửi tin nhắn qua kênh kết nối: " + ex.Message });
+        }
         var msg = conv.AppendMessage("out", "user", body.Content, body.ContentType, clock.UtcNow, senderUserId: senderUserId);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 

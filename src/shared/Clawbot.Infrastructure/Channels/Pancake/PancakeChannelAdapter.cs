@@ -162,8 +162,15 @@ public sealed class PancakeChannelAdapter(
         if (string.Equals(cfg.AuthMode, "bearer", StringComparison.Ordinal))
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", outboundToken);
 
-        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
-        resp.EnsureSuccessStatusCode();
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            resp.EnsureSuccessStatusCode();
+        }
+        catch (Exception) when (string.Equals(Environment.GetEnvironmentVariable("DEMO_MODE"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            // In demo mode, ignore outbound connection/token failures so messages can still be saved locally for manual/agent review
+        }
     }
 
     private async Task<PancakeRuntimeConfig?> CurrentConfigAsync(CancellationToken ct)
