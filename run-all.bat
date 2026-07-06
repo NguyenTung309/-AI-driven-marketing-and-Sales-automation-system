@@ -41,6 +41,7 @@ if "%DRY_RUN%"=="1" (
     echo Would run: docker compose --env-file deploy\.env -f deploy\docker-compose.yml up -d sqlserver redis rabbitmq qdrant minio postgres metabase
     echo Would stop old app processes listening on ports 15873, 15874, 15875, 15876
     echo Would apply deploy\seed\*.sql for tenant %SEED_TENANT_SLUG% when --seed is passed.
+    echo Would apply one-shot data patches from deploy\fix_contact_overwrite.sql, guarded by dbo.data_patches.
     echo Would run: dotnet restore Clawbot.sln
     echo Would run: dotnet build Clawbot.sln --no-restore
     echo Would run: npm ci in src\frontend\clawbot-web when node_modules is missing
@@ -101,6 +102,9 @@ call :ensure_database
 if errorlevel 1 exit /b 1
 
 call :apply_migrations_if_needed
+if errorlevel 1 exit /b 1
+
+call :apply_data_patches
 if errorlevel 1 exit /b 1
 
 call :ensure_seed_tenant
@@ -290,6 +294,15 @@ exit /b %errorlevel%
         echo docker compose --env-file deploy\.env -f deploy\docker-compose.yml down -v
         echo Then run run-all.bat again.
         exit /b 1
+
+:apply_data_patches
+echo [INFO] Applying one-shot data patches, guarded by dbo.data_patches...
+type "%ROOT%deploy\fix_contact_overwrite.sql" | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
+if errorlevel 1 (
+    echo [ERROR] Data patch failed: deploy\fix_contact_overwrite.sql
+    exit /b 1
+)
+exit /b 0
 
 :ensure_seed_tenant
 if not "%RUN_SEEDS%"=="1" exit /b 0
