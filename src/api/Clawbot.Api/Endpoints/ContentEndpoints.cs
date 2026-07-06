@@ -545,16 +545,23 @@ public static class ContentEndpoints
         CancellationToken ct)
     {
         var tenant = tenants.Require();
+        var weekOf = ContentTrendBriefFormatter.CurrentWeekOf(clock.UtcNow);
+        if (!string.IsNullOrWhiteSpace(week))
+        {
+            if (!ContentTrendBriefFormatter.TryNormalizeWeekOf(week, out weekOf))
+                return Error(http, StatusCodes.Status400BadRequest, "content.week_invalid", "week must use ISO format yyyy-Www.");
+        }
+
         try
         {
             var response = await grpc.WeeklyTrendsAsync(
                 new TrendRequest
                 {
                     TenantId = tenant.TenantId.ToString(),
-                    WeekOf = week ?? string.Empty,
+                    WeekOf = weekOf,
                 },
                 cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
-            var trends = response.Trends.Select(ToTrendDto).ToList();
+            var trends = response.Trends.Select(t => ToTrendDto(t, weekOf)).ToList();
             await notifier.NotifyTrendScanAsync(
                 tenant.TenantId,
                 new ContentTrendScanEvent(tenant.TenantId, trends.Count, clock.UtcNow),
@@ -786,8 +793,8 @@ public static class ContentEndpoints
         };
     }
 
-    private static TrendDto ToTrendDto(TrendItem trend) =>
-        new(trend.Topic, trend.Source, trend.Metric, trend.RelevanceScore, trend.ContentIdeas.ToList());
+    private static TrendDto ToTrendDto(TrendItem trend, string weekOf) =>
+        new(trend.Topic, trend.Source, trend.Metric, trend.RelevanceScore, trend.ContentIdeas.ToList(), weekOf);
 
     private static TrendDto? ToTrendDto(string brief)
     {
@@ -799,7 +806,8 @@ public static class ContentEndpoints
             trend.Source,
             trend.Metric,
             trend.RelevanceScore,
-            trend.ContentIdeas);
+            trend.ContentIdeas,
+            trend.WeekOf);
     }
 
     private static Guid? CurrentUserId(ClaimsPrincipal user)
