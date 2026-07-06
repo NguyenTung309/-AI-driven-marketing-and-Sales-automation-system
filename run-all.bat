@@ -101,6 +101,9 @@ if errorlevel 1 exit /b 1
 call :ensure_database
 if errorlevel 1 exit /b 1
 
+call :wait_for_clawbot_db
+if errorlevel 1 exit /b 1
+
 call :apply_migrations_if_needed
 if errorlevel 1 exit /b 1
 
@@ -228,6 +231,16 @@ exit /b 1
 echo [INFO] Ensuring database clawbot exists...
 docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -Q "IF DB_ID(N'clawbot') IS NULL CREATE DATABASE clawbot;" -b
 exit /b %errorlevel%
+
+:wait_for_clawbot_db
+echo [INFO] Waiting for database clawbot to come online...
+for /l %%I in (1,1,60) do (
+    docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -Q "SELECT 1" -b >nul 2>nul
+    if not errorlevel 1 exit /b 0
+    timeout /t 2 /nobreak >nul
+)
+echo [ERROR] Database clawbot did not come online in time.
+exit /b 1
 
 :apply_migrations_if_needed
 set "SCHEMA_CHECK=%TEMP%\clawbot_schema_check.txt"
