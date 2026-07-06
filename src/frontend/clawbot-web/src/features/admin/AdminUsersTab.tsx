@@ -52,6 +52,7 @@ export function AdminUsersTab({
                 <th className="px-4 py-3 font-bold">Người dùng</th>
                 <th className="px-4 py-3 font-bold">Email</th>
                 <th className="px-4 py-3 font-bold">Đăng nhập cuối</th>
+                <th className="px-4 py-3 font-bold">Kênh Pancake</th>
                 <th className="px-4 py-3 font-bold">Trạng thái</th>
                 <th className="px-4 py-3 text-right font-bold">Hành động</th>
               </tr>
@@ -72,6 +73,22 @@ export function AdminUsersTab({
                   </td>
                   <td className="px-4 py-4 text-body-md text-secondary">{user.email}</td>
                   <td className="px-4 py-4 text-body-md text-on-surface-variant">{formatDateTime(user.lastLoginAt)}</td>
+                  <td className="px-4 py-4">
+                    {user.pancakeChannels && user.pancakeChannels.length > 0 ? (
+                      <div className="flex flex-col gap-1">
+                        {user.pancakeChannels.map((channel) => (
+                          <div key={channel.pageId} className="flex items-center gap-2">
+                            <span className="font-mono text-mono-status text-on-surface-variant">{channel.pageId}</span>
+                            <StatusPill tone={channel.hasToken ? "success" : "warning"}>
+                              {channel.hasToken ? "Có token" : "Thiếu token"}
+                            </StatusPill>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <StatusPill tone="warning">Chưa có</StatusPill>
+                    )}
+                  </td>
                   <td className="px-4 py-4">
                     <StatusPill tone={user.isActive ? "success" : "error"}>{user.isActive ? "Hoạt động" : "Đã khóa"}</StatusPill>
                   </td>

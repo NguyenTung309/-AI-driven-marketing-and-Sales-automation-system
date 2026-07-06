@@ -2,8 +2,11 @@ using System.Security.Claims;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Application.Abstractions;
+using Clawbot.Domain.Channels;
 using Clawbot.Infrastructure.Auth;
+using Clawbot.Infrastructure.Channels.Pancake;
 using Clawbot.Infrastructure.Identity;
+using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Security;
 using Clawbot.SharedKernel.Time;
@@ -13,8 +16,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
 
-public sealed record CreateUserRequest(string Email, string DisplayName, string Password, string[]? Roles, string? PancakeAccessToken);
-public sealed record UpdateUserRequest(string? DisplayName, string[]? Roles, bool? IsActive, string? PancakeAccessToken, bool? ClearPancakeAccessToken);
+// PancakePageId + PancakeAccessToken: cau hinh kenh cua sale ngay tren form user - luu ve inbox
+// (page_id + token per kenh, nguon duy nhat cho polling/outbound) va gan user lam member cua kenh.
+public sealed record CreateUserRequest(string Email, string DisplayName, string Password, string[]? Roles, string? PancakeAccessToken, string? PancakePageId, string? PancakePlatform);
+public sealed record UpdateUserRequest(string? DisplayName, string[]? Roles, bool? IsActive, string? PancakeAccessToken, bool? ClearPancakeAccessToken, string? PancakePageId, string? PancakePlatform);
 
 // M23 — admin user management (permission: admin.system). Operates on Identity AppUser (`users` table).
 public static class AdminUsersEndpoints
@@ -46,6 +51,7 @@ public static class AdminUsersEndpoints
     private static async Task<IResult> ListAsync(
         UserManager<AppUser> users,
         ITenantAccessor tenants,
+        AppDbContext db,
         ClaimsPrincipal principal,
         IPermissionResolver permissions,
         [FromQuery] string? q,
@@ -65,7 +71,7 @@ public static class AdminUsersEndpoints
             query = query.Where(u => u.Email!.Contains(q) || u.DisplayName.Contains(q));
 
         var total = await query.CountAsync(ct);
-        var items = await query
+        var rows = await query
             .OrderBy(u => u.DisplayName)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -81,6 +87,31 @@ public static class AdminUsersEndpoints
             })
             .ToListAsync(ct);
 
+        // Kenh Pancake tung sale phu trach (inbox_members -> inboxes): hien thi page_id + trang thai token
+        var userIds = rows.Select(r => r.Id).ToList();
+        var channels = await db.InboxMembers
+            .IgnoreQueryFilters()
+            .Where(m => m.TenantId == tenantId && userIds.Contains(m.AgentId))
+            .Join(db.Inboxes.IgnoreQueryFilters().Where(i => i.DeletedAt == null),
+                m => m.InboxId, i => i.Id,
+                (m, i) => new { m.AgentId, PageId = i.ExternalPageId, i.Name, i.Platform, HasToken = i.EncryptedAccessToken != null })
+            .ToListAsync(ct);
+
+        var items = rows.Select(u => new
+        {
+            u.Id,
+            u.Email,
+            u.DisplayName,
+            u.Phone,
+            u.IsActive,
+            u.LastLoginAt,
+            u.HasPancakeAccessToken,
+            PancakeChannels = channels
+                .Where(c => c.AgentId == u.Id)
+                .Select(c => new { c.PageId, c.Name, c.Platform, c.HasToken })
+                .ToList(),
+        }).ToList();
+
         return Results.Ok(new { total, page, pageSize, items });
     }
 
@@ -88,6 +119,8 @@ public static class AdminUsersEndpoints
         CreateUserRequest req,
         UserManager<AppUser> users,
         ITenantAccessor tenants,
+        AppDbContext db,
+        IPancakePageTokenService pageTokens,
         IEncryptor encryptor,
         IClock clock,
         ClaimsPrincipal principal,
@@ -99,7 +132,7 @@ public static class AdminUsersEndpoints
 
         var tenantId = tenants.Require().TenantId;
         var canManageToken = await HasPermissionAsync(principal, permissions, "users:pancake-token:manage", ct);
-        if (!string.IsNullOrWhiteSpace(req.PancakeAccessToken) && !canManageToken)
+        if ((!string.IsNullOrWhiteSpace(req.PancakeAccessToken) || !string.IsNullOrWhiteSpace(req.PancakePageId)) && !canManageToken)
             return Results.Forbid();
 
         var user = new AppUser
@@ -112,7 +145,8 @@ public static class AdminUsersEndpoints
             IsActive = true,
         };
 
-        if (!string.IsNullOrWhiteSpace(req.PancakeAccessToken))
+        // Token + page_id di theo kenh (inbox); chi con token khong kem page_id thi giu duong cu (cot user)
+        if (!string.IsNullOrWhiteSpace(req.PancakeAccessToken) && string.IsNullOrWhiteSpace(req.PancakePageId))
         {
             user.PancakeAccessTokenEncrypted = encryptor.Encrypt(req.PancakeAccessToken.Trim());
             user.PancakeAccessTokenUpdatedAt = clock.UtcNow;
@@ -124,7 +158,52 @@ public static class AdminUsersEndpoints
         if (req.Roles is { Length: > 0 })
             await users.AddToRolesAsync(user, req.Roles);
 
+        if (!string.IsNullOrWhiteSpace(req.PancakePageId))
+        {
+            var err = await ConnectPancakePageAsync(db, pageTokens, tenantId, user.Id, req.PancakePageId, req.PancakePlatform, req.PancakeAccessToken, ct);
+            if (err is not null) return err;
+        }
+
         return Results.Created($"/api/admin/users/{user.Id}", new { user.Id, user.Email, user.DisplayName });
+    }
+
+    // Cau hinh kenh tu form user: upsert inbox (page_id + token encrypted) roi gan user lam member.
+    // Polling inbound + gui outbound deu doc token tu inbox nay.
+    private static async Task<IResult?> ConnectPancakePageAsync(
+        AppDbContext db,
+        IPancakePageTokenService pageTokens,
+        Guid tenantId,
+        Guid userId,
+        string pageId,
+        string? platform,
+        string? pageAccessToken,
+        CancellationToken ct)
+    {
+        pageId = pageId.Trim();
+        var plat = string.IsNullOrWhiteSpace(platform) ? "zalo" : platform.Trim();
+
+        if (!string.IsNullOrWhiteSpace(pageAccessToken))
+        {
+            // name rong: giu ten inbox hien co, inbox moi fallback ve pageId
+            await pageTokens.StorePageTokenDirectAsync(tenantId, pageId, name: string.Empty, plat, pageAccessToken.Trim(), ct);
+        }
+
+        var inbox = await db.Inboxes
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.ExternalPageId == pageId && i.DeletedAt == null, ct);
+        if (inbox is null)
+            return Results.BadRequest(new { error = "inbox_not_found", message = "Kênh chưa tồn tại - nhập kèm Page Access Token để tạo kênh." });
+
+        var isMember = await db.InboxMembers
+            .IgnoreQueryFilters()
+            .AnyAsync(m => m.InboxId == inbox.Id && m.AgentId == userId, ct);
+        if (!isMember)
+        {
+            db.InboxMembers.Add(InboxMember.Create(tenantId, inbox.Id, userId));
+            await db.SaveChangesAsync(ct);
+        }
+
+        return null;
     }
 
     private static async Task<IResult> UpdateAsync(
@@ -132,6 +211,8 @@ public static class AdminUsersEndpoints
         UpdateUserRequest req,
         UserManager<AppUser> users,
         ITenantAccessor tenants,
+        AppDbContext db,
+        IPancakePageTokenService pageTokens,
         IEncryptor encryptor,
         IClock clock,
         ClaimsPrincipal principal,
@@ -145,7 +226,9 @@ public static class AdminUsersEndpoints
         if (hasUserChange && !await HasPermissionAsync(principal, permissions, "admin.system", ct))
             return Results.Forbid();
 
-        var hasTokenChange = !string.IsNullOrWhiteSpace(req.PancakeAccessToken) || req.ClearPancakeAccessToken == true;
+        var hasTokenChange = !string.IsNullOrWhiteSpace(req.PancakeAccessToken)
+            || !string.IsNullOrWhiteSpace(req.PancakePageId)
+            || req.ClearPancakeAccessToken == true;
         if (hasTokenChange && !await HasPermissionAsync(principal, permissions, "users:pancake-token:manage", ct))
             return Results.Forbid();
 
@@ -170,14 +253,23 @@ public static class AdminUsersEndpoints
             user.PancakeAccessTokenEncrypted = null;
             user.PancakeAccessTokenUpdatedAt = null;
         }
-        else if (!string.IsNullOrWhiteSpace(req.PancakeAccessToken))
+        else if (!string.IsNullOrWhiteSpace(req.PancakeAccessToken) && string.IsNullOrWhiteSpace(req.PancakePageId))
         {
+            // Token khong kem page_id: giu duong cu (cot user)
             user.PancakeAccessTokenEncrypted = encryptor.Encrypt(req.PancakeAccessToken.Trim());
             user.PancakeAccessTokenUpdatedAt = clock.UtcNow;
         }
 
         var result = await users.UpdateAsync(user);
-        return result.Succeeded ? Results.NoContent() : Results.BadRequest(result.Errors.Select(e => e.Description));
+        if (!result.Succeeded) return Results.BadRequest(result.Errors.Select(e => e.Description));
+
+        if (!string.IsNullOrWhiteSpace(req.PancakePageId))
+        {
+            var err = await ConnectPancakePageAsync(db, pageTokens, tenants.Require().TenantId, user.Id, req.PancakePageId, req.PancakePlatform, req.PancakeAccessToken, ct);
+            if (err is not null) return err;
+        }
+
+        return Results.NoContent();
     }
 
     private static Task<IResult> DisableAsync(Guid id, UserManager<AppUser> users, ITenantAccessor tenants) => SetActiveAsync(id, false, users, tenants);

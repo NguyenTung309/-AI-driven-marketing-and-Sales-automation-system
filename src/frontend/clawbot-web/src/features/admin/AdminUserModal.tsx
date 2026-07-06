@@ -1,4 +1,4 @@
-import { Alert, Button, Modal } from "@/shared/ui";
+import { Alert, Button, Modal, StatusPill } from "@/shared/ui";
 import { adminFormErrorMessage, Field, inputClass, tempPasswordHint, tempPasswordPattern, type AdminUserFormState } from "./adminHelpers";
 import type { AdminUser, Role } from "@/shared/api/admin";
 
@@ -9,6 +9,7 @@ interface AdminUserModalProps {
   readonly userForm: AdminUserFormState;
   readonly onChange: (patch: Partial<AdminUserFormState>) => void;
   readonly canManageUsers: boolean;
+  readonly canManagePancakeToken: boolean;
   readonly editingUser: AdminUser | null;
   readonly roles: readonly Role[];
   readonly onToggleRoleName: (name: string) => void;
@@ -23,6 +24,8 @@ export function AdminUserModal({
   userForm,
   onChange,
   canManageUsers,
+  canManagePancakeToken,
+  editingUser,
   roles,
   onToggleRoleName,
   pending,
@@ -30,6 +33,7 @@ export function AdminUserModal({
   onClose,
   onSubmit,
 }: AdminUserModalProps) {
+  const connectedChannel = editingUser?.pancakeChannels?.[0] ?? null;
   return (
     <Modal
       open={mode !== null}
@@ -99,7 +103,56 @@ export function AdminUserModal({
             Người dùng đang hoạt động
           </label>
         ) : null}
-        {/* Token Pancake cau hinh theo kenh (trang "Kenh giao tiep"), khong theo tung sale */}
+        {canManagePancakeToken ? (
+          <div className="space-y-3 rounded-lg border border-outline bg-surface p-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-label-sm font-semibold text-secondary">Kênh Pancake của nhân viên sale</p>
+              {editingUser ? (
+                <StatusPill tone={connectedChannel?.hasToken ? "success" : "warning"}>
+                  {connectedChannel
+                    ? connectedChannel.hasToken ? "Đã cấu hình" : "Thiếu token"
+                    : "Chưa có"}
+                </StatusPill>
+              ) : null}
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_140px]">
+              <label className="block">
+                <span className="mb-1 block text-label-sm text-on-surface-variant">Page ID</span>
+                <input
+                  className={inputClass}
+                  value={userForm.pancakePageId}
+                  onChange={(event) => onChange({ pancakePageId: event.target.value })}
+                  placeholder={connectedChannel?.pageId || "VD: 134970094277281958"}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-label-sm text-on-surface-variant">Nền tảng</span>
+                <select
+                  className={inputClass}
+                  value={userForm.pancakePlatform}
+                  onChange={(event) => onChange({ pancakePlatform: event.target.value })}
+                >
+                  <option value="zalo">Zalo OA</option>
+                  <option value="facebook">Facebook</option>
+                </select>
+              </label>
+            </div>
+            <label className="block">
+              <span className="mb-1 block text-label-sm text-on-surface-variant">Page Access Token</span>
+              <input
+                className={inputClass}
+                type="password"
+                value={userForm.pancakeAccessToken}
+                onChange={(event) => onChange({ pancakeAccessToken: event.target.value })}
+                placeholder={connectedChannel?.hasToken ? "Đã lưu token, nhập để thay thế" : "Nhập page access token Pancake"}
+              />
+            </label>
+            <p className="text-label-sm text-on-surface-variant">
+              Mỗi kênh gồm 1 Page ID + 1 access token; token được mã hóa khi lưu và dùng chung cho nhận/gửi tin.
+              Sale này được gán phụ trách kênh, xem thêm ở trang Kênh giao tiếp.
+            </p>
+          </div>
+        ) : null}
       </form>
     </Modal>
   );

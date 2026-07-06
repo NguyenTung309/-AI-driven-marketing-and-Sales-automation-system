@@ -104,6 +104,15 @@ public static partial class DevDataSeeder
             IF OBJECT_ID(N'dbo.conversation_read_state', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_convread_conv' AND object_id = OBJECT_ID(N'dbo.conversation_read_state'))
                 CREATE INDEX ix_convread_conv ON dbo.conversation_read_state (conversation_id);
 
+            IF OBJECT_ID(N'dbo.contacts', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.contacts', N'avatar_url') IS NULL
+                ALTER TABLE dbo.contacts ADD avatar_url NVARCHAR(512) NULL;
+
+            IF OBJECT_ID(N'dbo.messages', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.messages', N'sender_display_name') IS NULL
+                ALTER TABLE dbo.messages ADD sender_display_name NVARCHAR(256) NULL;
+
+            IF OBJECT_ID(N'dbo.messages', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.messages', N'sender_avatar_url') IS NULL
+                ALTER TABLE dbo.messages ADD sender_avatar_url NVARCHAR(512) NULL;
+
             IF OBJECT_ID(N'dbo.messages', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.messages', N'attachment_url') IS NULL
                 ALTER TABLE dbo.messages ADD attachment_url NVARCHAR(2048) NULL;
 

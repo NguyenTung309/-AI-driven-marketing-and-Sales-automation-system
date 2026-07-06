@@ -9,6 +9,13 @@ export interface PagedResponse<T> {
   readonly items: readonly T[];
 }
 
+export interface PancakeChannelInfo {
+  readonly pageId: string;
+  readonly name: string;
+  readonly platform: string;
+  readonly hasToken: boolean;
+}
+
 export interface AdminUser {
   readonly id: string;
   readonly email: string;
@@ -16,6 +23,7 @@ export interface AdminUser {
   readonly phone: string | null;
   readonly isActive: boolean;
   readonly lastLoginAt: string | null;
+  readonly pancakeChannels: readonly PancakeChannelInfo[];
 }
 
 export interface Role {
@@ -102,6 +110,9 @@ export async function createAdminUser(body: {
   readonly displayName: string;
   readonly password: string;
   readonly roles?: readonly string[];
+  readonly pancakePageId?: string;
+  readonly pancakePlatform?: string;
+  readonly pancakeAccessToken?: string;
 }): Promise<Pick<AdminUser, "id" | "email" | "displayName">> {
   const res = await apiClient.post<Pick<AdminUser, "id" | "email" | "displayName">>("/api/admin/users", body);
   return res.data;
@@ -113,6 +124,9 @@ export async function updateAdminUser(
     readonly displayName?: string;
     readonly isActive?: boolean;
     readonly roles?: readonly string[];
+    readonly pancakePageId?: string;
+    readonly pancakePlatform?: string;
+    readonly pancakeAccessToken?: string;
   }
 ): Promise<void> {
   await apiClient.put(`/api/admin/users/${id}`, body);
