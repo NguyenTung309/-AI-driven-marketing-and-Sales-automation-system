@@ -11,6 +11,8 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
     public string Platform { get; private set; } = string.Empty;
     public string ExternalThreadId { get; private set; } = string.Empty;
     public string Status { get; private set; } = "open";
+    // Co "AI dang chat": bat -> tin inbound duoc AI auto-reply. Tat khi sale nhay vao (gui tay/escalate).
+    public bool AiAutoReplyEnabled { get; private set; } = true;
     public Guid? AssignedTo { get; private set; }
     public DateTimeOffset? SnoozedUntil { get; private set; }
     public DateTimeOffset? LastMessageAt { get; private set; }
@@ -50,8 +52,11 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
     public void Escalate()
     {
         Status = "escalated";
+        AiAutoReplyEnabled = false;
         Raise(new Events.ConversationEscalated(TenantId, Id, DateTimeOffset.UtcNow));
     }
+
+    public void SetAiAutoReply(bool enabled) => AiAutoReplyEnabled = enabled;
 
     public Message AppendMessage(string direction, string senderType, string content, string contentType, DateTimeOffset sentAt, Guid? senderUserId = null, string? externalMessageId = null, string? originalContent = null, string? redactedContent = null, string messageType = "text", string? parentPostId = null, string? senderDisplayName = null, string? senderAvatarUrl = null, string? attachmentUrl = null)
     {

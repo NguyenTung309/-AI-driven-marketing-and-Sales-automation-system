@@ -31,6 +31,7 @@ public static class InboxEndpoints
         grp.MapPost("/conversations/{id:guid}/assign", AssignAsync).RequirePermission("conversations:write");
         grp.MapPost("/conversations/{id:guid}/resolve", ResolveAsync).RequirePermission("conversations:write");
         grp.MapPost("/conversations/{id:guid}/escalate", EscalateAsync).RequirePermission("conversations:write");
+        grp.MapPost("/conversations/{id:guid}/ai", SetAiAutoReplyAsync).RequirePermission("conversations:write");
         grp.MapPost("/conversations/{id:guid}/messages", SendOutboundAsync).RequirePermission("conversations:write");
         grp.MapGet("/channels", ListChannelsAsync).RequirePermission("conversations:read");
         grp.MapGet("/daily-summary", DailySummaryAsync).RequirePermission("conversations:read");
@@ -81,6 +82,7 @@ public static class InboxEndpoints
                 c.AssignedTo,
                 c.LastMessageAt,
                 c.InboxId,
+                c.AiAutoReplyEnabled,
                 RowVersion = c.RowVersion ?? Array.Empty<byte>(),
                 LastMessage = c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault(),
             })
@@ -103,7 +105,8 @@ public static class InboxEndpoints
             r.AssignedTo, r.LastMessageAt,
             r.LastMessage is null ? null : Preview(r.LastMessage),
             r.RowVersion,
-            UnreadCount: 0)).ToList();
+            UnreadCount: 0,
+            AiAutoReplyEnabled: r.AiAutoReplyEnabled)).ToList();
 
         return Results.Ok(new ConversationListResponse(items, total, page, pageSize));
     }
@@ -151,7 +154,7 @@ public static class InboxEndpoints
             conv.Id, conv.Platform, conv.ExternalThreadId, conv.Status, conv.ContactId,
             contact?.DisplayName, contact?.AvatarUrl, conv.InboxId, inboxName, inboxAvatarUrl,
             conv.AssignedTo, conv.LastMessageAt, conv.CreatedAt,
-            conv.RowVersion, messages));
+            conv.RowVersion, messages, conv.AiAutoReplyEnabled));
     }
 
     private static async Task<IResult> SearchAsync(
@@ -266,6 +269,27 @@ public static class InboxEndpoints
         return Results.NoContent();
     }
 
+    private static async Task<IResult> SetAiAutoReplyAsync(
+        Guid id, SetAiAutoReplyRequest body,
+        AppDbContext db, ITenantAccessor tenants, IInboxNotifier notifier,
+        ClaimsPrincipal user, IUserInboxResolver resolver,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id, ct).ConfigureAwait(false);
+        if (conv is null) return Results.NotFound();
+
+        var inboxIds = await resolver.GetInboxIdsAsync(user, ct);
+        if (inboxIds.Count > 0 && conv.InboxId.HasValue && !inboxIds.Contains(conv.InboxId.Value))
+            return Results.Forbid();
+
+        conv.SetAiAutoReply(body.Enabled);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        await notifier.NotifyConversationUpdatedAsync(tenant.TenantId,
+            new InboxConversationEvent(conv.Id, conv.Status, conv.AssignedTo, conv.LastMessageAt), ct).ConfigureAwait(false);
+        return Results.NoContent();
+    }
+
     private static async Task<IResult> SendOutboundAsync(
         Guid id, SendMessageRequest body,
         AppDbContext db, ITenantAccessor tenants, IInboxNotifier notifier,
@@ -299,6 +323,8 @@ public static class InboxEndpoints
             return Results.BadRequest(new { error = "channel_send_failed", message = "Không thể gửi tin nhắn qua kênh kết nối: " + ex.Message });
         }
         var msg = conv.AppendMessage("out", "user", body.Content, body.ContentType, clock.UtcNow, senderUserId: senderUserId);
+        // Handover: sale gui tay -> tat AI auto-reply cho hoi thoai nay
+        conv.SetAiAutoReply(false);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await notifier.NotifyMessageAsync(tenant.TenantId,

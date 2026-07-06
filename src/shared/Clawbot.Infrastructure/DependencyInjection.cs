@@ -111,6 +111,15 @@ public static class DependencyInjection
             });
         });
 
+        // AI auto-reply: consumer goi ChatAgent gRPC (AgentService) khi hoi thoai bat co "AI dang chat".
+        // Dang ky o shared DI vi consumer chay o ca API lan AgentService host (AgentService tu goi chinh no).
+        var chatAgentUrl = cfg["AgentService:Url"] ?? "http://localhost:15875";
+        services.AddGrpcClient<Clawbot.Agents.Contracts.Chat.ChatAgent.ChatAgentClient>(o =>
+        {
+            o.Address = new Uri(chatAgentUrl);
+        });
+        services.AddScoped<Messaging.IChatAutoReplyGateway, Messaging.GrpcChatAutoReplyGateway>();
+
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IIntentClassifier, KeywordIntentClassifier>();
         services.AddScoped<ITenantAccessor, HttpTenantAccessor>();

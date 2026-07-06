@@ -14,6 +14,7 @@ import {
   listChannels,
   resolveConversation,
   sendConversationMessage,
+  setConversationAi,
   type ConversationDetail,
   type ConversationListItem,
   type ConversationStatus,
@@ -52,6 +53,17 @@ function statusLabel(status: ConversationStatus): string {
   if (status === "escalated") return "Cần người hỗ trợ";
   if (status === "open") return "AI đang chat";
   return status;
+}
+
+// Badge theo cờ AI thật của hội thoại: open + AI bật -> "AI đang chat"; open + AI tắt -> sale đang cầm
+function conversationBadge(conversation: { status: ConversationStatus; aiAutoReplyEnabled: boolean }): {
+  tone: ReturnType<typeof toStatusTone>;
+  label: string;
+} {
+  if (conversation.status === "open" && !conversation.aiAutoReplyEnabled) {
+    return { tone: "neutral", label: "Sale phụ trách" };
+  }
+  return { tone: toStatusTone(conversation.status), label: statusLabel(conversation.status) };
 }
 
 function platformLabel(platform: string): string {
@@ -190,7 +202,7 @@ function ConversationRow({ conversation, selected, onSelect }: ConversationRowPr
             {conversation.lastMessagePreview || "Chưa có tin nhắn mới"}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <StatusPill tone={toStatusTone(conversation.status)}>{statusLabel(conversation.status)}</StatusPill>
+            <StatusPill tone={conversationBadge(conversation).tone}>{conversationBadge(conversation).label}</StatusPill>
             <span className="rounded bg-surface-container px-2 py-0.5 text-label-sm font-semibold text-secondary">
               {platformLabel(conversation.platform)}
             </span>
@@ -307,9 +319,11 @@ interface ChatPanelProps {
   readonly onDraftChange: (value: string) => void;
   readonly onSubmit: () => void;
   readonly sending: boolean;
+  readonly onToggleAi: (enabled: boolean) => void;
+  readonly aiToggling: boolean;
 }
 
-function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSubmit, sending }: ChatPanelProps) {
+function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSubmit, sending, onToggleAi, aiToggling }: ChatPanelProps) {
   if (isLoading) {
     return (
       <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-[720px]">
@@ -371,11 +385,37 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
               </span>
             </h2>
             <p className="text-label-sm text-on-surface-variant">
-              Mã hội thoại: {conversation.externalThreadId || "chưa có"} · {statusLabel(conversation.status)}
+              Mã hội thoại: {conversation.externalThreadId || "chưa có"} · {conversationBadge(conversation).label}
             </p>
           </div>
         </div>
-        <StatusPill tone={toStatusTone(conversation.status)}>{statusLabel(conversation.status)}</StatusPill>
+        <div className="flex items-center gap-3">
+          {/* Cong tac "AI dang chat": bat/tat auto-reply cho rieng hoi thoai nay */}
+          <label className="flex cursor-pointer select-none items-center gap-2 text-label-sm font-semibold text-secondary">
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">smart_toy</span>
+            AI đang chat
+            <button
+              type="button"
+              role="switch"
+              aria-checked={conversation.aiAutoReplyEnabled}
+              disabled={aiToggling}
+              onClick={() => onToggleAi(!conversation.aiAutoReplyEnabled)}
+              className={[
+                "relative h-6 w-11 rounded-full transition-colors",
+                conversation.aiAutoReplyEnabled ? "bg-primary" : "bg-surface-variant",
+                aiToggling ? "opacity-60" : "",
+              ].join(" ")}
+            >
+              <span
+                className={[
+                  "absolute top-0.5 size-5 rounded-full bg-white shadow transition-all",
+                  conversation.aiAutoReplyEnabled ? "left-[22px]" : "left-0.5",
+                ].join(" ")}
+              />
+            </button>
+          </label>
+          <StatusPill tone={conversationBadge(conversation).tone}>{conversationBadge(conversation).label}</StatusPill>
+        </div>
       </header>
 
       <div className="flex-1 space-y-4 overflow-y-auto bg-surface p-gutter">
@@ -621,7 +661,8 @@ export default function ConversationsPage() {
       showNotice("Tin nhắn đã được gửi.", "success");
       queryClient.setQueryData<ConversationDetail>(["inbox", "conversation", activeConversationId], (old) => {
         if (!old || old.messages.some((item) => item.id === message.id)) return old;
-        return { ...old, lastMessageAt: message.sentAt, messages: [...old.messages, message] };
+        // BE tu tat AI khi sale gui tay (handover) - dong bo cache ngay
+        return { ...old, lastMessageAt: message.sentAt, messages: [...old.messages, message], aiAutoReplyEnabled: false };
       });
       await invalidateActive(false);
     },
@@ -644,6 +685,14 @@ export default function ConversationsPage() {
   const resolveMutation = useMutation({
     mutationFn: () => resolveConversation(activeConversationId ?? "", selectedConversation?.rowVersion),
     onSuccess: () => {
+      void invalidateActive();
+    },
+  });
+
+  const aiToggleMutation = useMutation({
+    mutationFn: (enabled: boolean) => setConversationAi(activeConversationId ?? "", enabled),
+    onSuccess: (_, enabled) => {
+      showNotice(enabled ? "Đã bật AI trả lời tự động cho hội thoại này." : "Đã tắt AI — sale phụ trách hội thoại.", "success");
       void invalidateActive();
     },
   });
@@ -782,6 +831,11 @@ export default function ConversationsPage() {
           onSubmit={() => {
             if (!activeConversationId || !draft.trim() || sendMutation.isPending) return;
             sendMutation.mutate();
+          }}
+          aiToggling={aiToggleMutation.isPending}
+          onToggleAi={(enabled) => {
+            if (!activeConversationId || aiToggleMutation.isPending) return;
+            aiToggleMutation.mutate(enabled);
           }}
         />
 

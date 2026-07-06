@@ -235,6 +235,34 @@ public sealed class ChannelMessageIngestorTests
     }
 
     [Fact]
+    public async Task Owner_echo_of_locally_persisted_reply_is_deduplicated()
+    {
+        using var fx = new TestAppDb();
+        var (sut, _) = Build(fx);
+
+        // Customer message creates the conversation
+        await sut.IngestAsync(fx.TenantId, Msg("hi", thread: "page1:pzl_u_e1", user: "pzl_u_e1",
+            meta: new Dictionary<string, string> { ["external_message_id"] = "in1" }));
+
+        // Reply persisted locally (sale manual send / AI auto-reply) - no external id
+        var conv = await fx.Db.Conversations.IgnoreQueryFilters().SingleAsync();
+        conv.AppendMessage("out", "agent", "chao ban", "text", Now.AddSeconds(30));
+        await fx.Db.SaveChangesAsync();
+
+        // Pancake echoes the same reply back with a fresh external id
+        var echo = await sut.IngestAsync(fx.TenantId, Msg("chao ban", thread: "page1:pzl_u_e1", user: "page1",
+            meta: new Dictionary<string, string>
+            {
+                ["external_message_id"] = "echo1",
+                ["sender_id"] = "page1",
+                ["page_id"] = "page1",
+            }));
+
+        echo.Deduplicated.Should().BeTrue();
+        (await fx.Db.Messages.IgnoreQueryFilters().CountAsync(m => m.Direction == "out")).Should().Be(1);
+    }
+
+    [Fact]
     public async Task Conversation_name_heals_contact_stuck_with_wrong_name()
     {
         using var fx = new TestAppDb();

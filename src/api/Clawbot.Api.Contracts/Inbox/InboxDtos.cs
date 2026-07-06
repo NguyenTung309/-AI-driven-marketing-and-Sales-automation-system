@@ -15,7 +15,8 @@ public sealed record ConversationListItemDto(
     DateTimeOffset? LastMessageAt,
     string? LastMessagePreview,
     byte[]? RowVersion,
-    int UnreadCount);
+    int UnreadCount,
+    bool AiAutoReplyEnabled = true);
 
 public sealed record ConversationDetailDto(
     Guid Id,
@@ -32,7 +33,8 @@ public sealed record ConversationDetailDto(
     DateTimeOffset? LastMessageAt,
     DateTimeOffset CreatedAt,
     byte[]? RowVersion,
-    IReadOnlyList<MessageDto> Messages);
+    IReadOnlyList<MessageDto> Messages,
+    bool AiAutoReplyEnabled = true);
 
 public sealed record MessageDto(
     Guid Id,
@@ -47,6 +49,8 @@ public sealed record MessageDto(
     string? AttachmentUrl = null);
 
 public sealed record AssignConversationRequest(Guid UserId);
+
+public sealed record SetAiAutoReplyRequest(bool Enabled);
 
 public sealed record SendMessageRequest(string Content, string ContentType = "text");
 

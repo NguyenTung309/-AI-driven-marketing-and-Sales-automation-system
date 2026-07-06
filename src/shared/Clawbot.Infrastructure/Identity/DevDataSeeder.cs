@@ -106,6 +106,9 @@ public static partial class DevDataSeeder
 
             IF OBJECT_ID(N'dbo.messages', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.messages', N'attachment_url') IS NULL
                 ALTER TABLE dbo.messages ADD attachment_url NVARCHAR(2048) NULL;
+
+            IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'ai_auto_reply_enabled') IS NULL
+                ALTER TABLE dbo.conversations ADD ai_auto_reply_enabled BIT NOT NULL CONSTRAINT DF_conversations_ai_auto_reply_enabled DEFAULT 1;
             """, ct);
 
     // EnsureCreated only builds the model (the tenant query filter is an unexecuted

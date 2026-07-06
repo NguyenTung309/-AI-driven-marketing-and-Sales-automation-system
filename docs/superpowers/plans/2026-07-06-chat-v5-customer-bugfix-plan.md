@@ -1,7 +1,7 @@
 # Kế hoạch fix bug khách báo — chat_v5 (2026-07-06)
 
-**Trạng thái:** ✅ Phase 1 (`6606e55`) · ✅ Phase 2 (`a8ea0e3`) · ✅ Phase 3 (`50dae78`) · Phase 4 (agent) chưa làm — plan riêng.
-**Quyết định đã chốt:** Q1 bỏ token per-sale · Q2 mint flow retarget vào `inboxes` · Q3 chưa re-host media · Q4 để sau.
+**Trạng thái:** ✅ Phase 1 (`6606e55`) · ✅ Phase 2 (`a8ea0e3`) · ✅ Phase 3 (`50dae78`) · ✅ Phase 4 — auto-reply theo cờ "AI đang chat" per-conversation.
+**Quyết định đã chốt:** Q1 bỏ token per-sale · Q2 mint flow retarget vào `inboxes` · Q3 chưa re-host media · Q4 auto-reply theo cờ per-conversation (default BẬT; tự tắt khi sale gửi tay hoặc escalate).
 **Sau deploy:** chạy tay `deploy/fix_contact_overwrite.sql` (một lần) để sửa contact đã hỏng; token plaintext cũ tự re-encrypt lúc API khởi động.
 
 **Nhánh làm việc:** `thang/chat_v5` (đã chứa toàn bộ commit của `thang/chat_v4` — hai nhánh cùng trỏ `60c305e`, không cần làm riêng trên v4).

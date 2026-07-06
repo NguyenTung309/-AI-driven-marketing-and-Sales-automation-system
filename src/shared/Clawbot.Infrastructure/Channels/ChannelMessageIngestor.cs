@@ -68,7 +68,7 @@ public sealed partial class ChannelMessageIngestor(
         // Section 9: Auto-reopen resolved/snoozed on inbound message
         conversation.ReopenIfNeeded();
 
-        if (await IsDuplicateAsync(conversation.Id, message, ct).ConfigureAwait(false))
+        if (await IsDuplicateAsync(conversation.Id, message, isOwner, ct).ConfigureAwait(false))
         {
             LogDuplicate(_logger, conversation.Id, message.ExternalThreadId);
             return new IngestResult(conversation.Id, null, true);
@@ -301,15 +301,24 @@ public sealed partial class ChannelMessageIngestor(
         return contact;
     }
 
-    private async Task<bool> IsDuplicateAsync(Guid conversationId, ChannelMessage message, CancellationToken ct)
+    private async Task<bool> IsDuplicateAsync(Guid conversationId, ChannelMessage message, bool isOwner, CancellationToken ct)
     {
         // Strict dedup: use external_message_id if available
         if (message.Metadata.TryGetValue("external_message_id", out var externalId) && !string.IsNullOrEmpty(externalId))
         {
-            return await _db.Messages
+            var exists = await _db.Messages
                 .IgnoreQueryFilters()
                 .AnyAsync(m => m.ExternalMessageId == externalId, ct).ConfigureAwait(false);
+            if (exists) return true;
+            if (!isOwner) return false;
+            // Owner message with a fresh external id can still be the channel echo of a reply we
+            // already persisted locally (sale manual send / AI auto-reply) - those rows have no
+            // external id, so match on content within a short window instead.
+            return await IsLocalOutboundEchoAsync(conversationId, message, ct).ConfigureAwait(false);
         }
+
+        if (isOwner)
+            return await IsLocalOutboundEchoAsync(conversationId, message, ct).ConfigureAwait(false);
 
         // Fallback: heuristic dedup
         return await _db.Messages
@@ -318,6 +327,19 @@ public sealed partial class ChannelMessageIngestor(
                 && m.SentAt == message.SentAt
                 && m.Content == message.Text
                 && m.Direction == "in", ct).ConfigureAwait(false);
+    }
+
+    private async Task<bool> IsLocalOutboundEchoAsync(Guid conversationId, ChannelMessage message, CancellationToken ct)
+    {
+        var from = message.SentAt.AddMinutes(-10);
+        var to = message.SentAt.AddMinutes(10);
+        return await _db.Messages
+            .IgnoreQueryFilters()
+            .AnyAsync(m => m.ConversationId == conversationId
+                && m.Direction == "out"
+                && m.ExternalMessageId == null
+                && m.Content == message.Text
+                && m.SentAt >= from && m.SentAt <= to, ct).ConfigureAwait(false);
     }
 
     [LoggerMessage(EventId = 3001, Level = LogLevel.Information, Message = "Duplicate inbound message ignored for conv {ConversationId} thread {ThreadId}")]
