@@ -43,6 +43,24 @@ public sealed record KbUploadResult(
     int CharCount,
     string ContentMd);
 
+// Per-file outcome of the auto-classify upload. Success=false → Error explains why
+// (extraction_failed | llm_not_configured | classification_failed). Deployed=false with
+// Error="deploy_failed" means the draft version was created but embedding failed.
+public sealed record KbClassifiedFileDto(
+    string FileName,
+    bool Success,
+    string? Error,
+    Guid? ModuleId,
+    string? ModuleCode,
+    string? ModuleName,
+    bool IsNewModule,
+    double Confidence,
+    string? Reason,
+    KbVersionDto? Version,
+    bool Deployed);
+
+public sealed record KbClassifyUploadResponse(IReadOnlyList<KbClassifiedFileDto> Results);
+
 public sealed record KbTestCaseDto(Guid Id, string Question, string ExpectedAnswer, bool IsActive);
 
 public sealed record CreateKbTestCaseRequest(string Question, string ExpectedAnswer);
