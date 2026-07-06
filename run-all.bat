@@ -136,10 +136,10 @@ if not exist "%FRONTEND_DIR%\node_modules" (
 )
 
 echo [INFO] Opening service windows...
-start "ClawBot AgentService :15875" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15875&& set Encryption__Base64Key=%ENCRYPTION_BASE64_KEY%&& dotnet run --project ""%ROOT%src\agents\Clawbot.AgentService\Clawbot.AgentService.csproj"" --no-launch-profile"
+start "ClawBot AgentService :15875" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15875&& set ConnectionStrings__SqlServer=Server=localhost,11433;Database=clawbot;User Id=sa;Password=%MSSQL_SA_PASSWORD%;TrustServerCertificate=True;MultipleActiveResultSets=true&& set Encryption__Base64Key=%ENCRYPTION_BASE64_KEY%&& dotnet run --project ""%ROOT%src\agents\Clawbot.AgentService\Clawbot.AgentService.csproj"" --no-launch-profile"
 timeout /t 2 /nobreak >nul
 
-start "ClawBot API :15874" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15874&& set AgentService__Url=http://localhost:15875&& set Jwt__SigningKey=%JWT_SIGNING_KEY%&& set Encryption__Base64Key=%ENCRYPTION_BASE64_KEY%&& dotnet run --project ""%ROOT%src\api\Clawbot.Api\Clawbot.Api.csproj"" --no-launch-profile"
+start "ClawBot API :15874" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15874&& set AgentService__Url=http://localhost:15875&& set ConnectionStrings__SqlServer=Server=localhost,11433;Database=clawbot;User Id=sa;Password=%MSSQL_SA_PASSWORD%;TrustServerCertificate=True;MultipleActiveResultSets=true&& set Jwt__SigningKey=%JWT_SIGNING_KEY%&& set Encryption__Base64Key=%ENCRYPTION_BASE64_KEY%&& dotnet run --project ""%ROOT%src\api\Clawbot.Api\Clawbot.Api.csproj"" --no-launch-profile"
 timeout /t 2 /nobreak >nul
 
 start "ClawBot Gateway :15873" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15873&& set Jwt__SigningKey=%JWT_SIGNING_KEY%&& dotnet run --project ""%ROOT%src\gateway\Clawbot.Gateway\Clawbot.Gateway.csproj"" --no-launch-profile"
