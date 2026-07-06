@@ -32,8 +32,9 @@ public sealed class GoogleTrendsOptions : TrendSourceOptions
 {
     public const string SectionName = "Content:Trends:GoogleTrends";
 
+    // Google tat endpoint cu /trends/trendingsearches/daily/rss (404 tu 2025) - RSS moi o /trending/rss
     public string UrlTemplate { get; set; } =
-        "https://trends.google.com/trends/trendingsearches/daily/rss?geo={geo}";
+        "https://trends.google.com/trending/rss?geo={geo}";
 }
 
 public sealed class YouTubeTrendOptions : TrendSourceOptions
@@ -111,12 +112,15 @@ internal sealed class GoogleTrendsRssSource(HttpClient http, IOptions<GoogleTren
             return [];
 
         var doc = XDocument.Parse(xml);
-        XNamespace ht = "https://trends.google.com/trends/trendingsearches/daily";
+        // Feed moi dung namespace /trending/rss; feed cu /trends/trendingsearches/daily - doc ca hai
+        XNamespace htNew = "https://trends.google.com/trending/rss";
+        XNamespace htOld = "https://trends.google.com/trends/trendingsearches/daily";
         return doc.Descendants("item")
             .Select(item =>
             {
                 var title = (string?)item.Element("title") ?? string.Empty;
-                var metric = (string?)item.Element(ht + "approx_traffic")
+                var metric = (string?)item.Element(htNew + "approx_traffic")
+                    ?? (string?)item.Element(htOld + "approx_traffic")
                     ?? (string?)item.Element("description")
                     ?? string.Empty;
                 return ToTrend(title, "google_trends", metric);
