@@ -91,6 +91,8 @@ public static class DependencyInjection
             bus.AddConsumer<Messaging.ConversationEscalatedConsumer>();
             bus.AddConsumer<Messaging.LeadBecameHotConsumer>();
             bus.AddConsumer<Messaging.LeadBecameWarmConsumer>();
+            // Chat inbound pipeline: polling publishes, this consumer ingests (ordered, retried)
+            bus.AddConsumer<Messaging.ChannelInboundMessageConsumer, Messaging.ChannelInboundMessageConsumerDefinition>();
 
             // WS1: transactional outbox - domain events published during SaveChanges enlist into
             // OutboxMessage within the same transaction, then relay to RabbitMQ (exactly-once,

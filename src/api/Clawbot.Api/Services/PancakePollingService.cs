@@ -61,7 +61,7 @@ public sealed partial class PancakePollingService : BackgroundService
     [LoggerMessage(EventId = 5008, Level = LogLevel.Information, Message = "Ingested new message {MsgId} from conv {ConvId}")]
     private static partial void LogProcessedNew(ILogger logger, string msgId, string convId);
 
-    [LoggerMessage(EventId = 5009, Level = LogLevel.Warning, Message = "IngestAsync failed for message {MsgId}: {Ex}")]
+    [LoggerMessage(EventId = 5009, Level = LogLevel.Warning, Message = "Publish inbound message failed for {MsgId}: {Ex}")]
     private static partial void LogIngestFailed(ILogger logger, string msgId, string ex);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -157,7 +157,9 @@ public sealed partial class PancakePollingService : BackgroundService
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<Clawbot.Infrastructure.Persistence.AppDbContext>();
             var resolver = scope.ServiceProvider.GetRequiredService<Clawbot.SharedKernel.Multitenancy.ITenantResolver>();
-            var ingestor = scope.ServiceProvider.GetRequiredService<Clawbot.Infrastructure.Channels.IChannelMessageIngestor>();
+            // Publish qua RabbitMQ (EF bus outbox): SaveChanges ghi ProcessedMessages + outbox atomically,
+            // ChannelInboundMessageConsumer lo phan ingest (ordered, co retry)
+            var publisher = scope.ServiceProvider.GetRequiredService<MassTransit.IPublishEndpoint>();
             var tenantId = await resolver.ResolveTenantIdAsync(ct);
 
             // Batch-load already processed message IDs for this conversation
@@ -267,10 +269,13 @@ public sealed partial class PancakePollingService : BackgroundService
                     ExternalUserId: msg.From?.Id ?? conv.From?.Id ?? "unknown", Text: text,
                     SentAt: msg.InsertedAt.HasValue ? new DateTimeOffset(msg.InsertedAt.Value, TimeSpan.Zero) : (conv.UpdatedAt.HasValue ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow),
                     Metadata: metadata);
-                await ingestor.IngestAsync(tenantId, channelMsg, ct);
+                await publisher.Publish(new Clawbot.SharedKernel.Channels.ChannelInboundMessageReceived(tenantId, channelMsg), ct);
             }
             catch (Exception ex) { LogIngestFailed(_log, msg.Id, ex.Message); }
             }
+
+            // Flush: ProcessedMessages marks + outbox messages in one transaction
+            await db.SaveChangesAsync(ct);
 
             var traceId = await _traces.CreateTraceAsync();
             await _traces.AppendStepAsync(traceId, new DemoTraceStep
