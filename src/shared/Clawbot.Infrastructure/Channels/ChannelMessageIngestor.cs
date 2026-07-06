@@ -41,11 +41,29 @@ public sealed partial class ChannelMessageIngestor(
         if (tenantId == Guid.Empty) throw new ArgumentException("tenantId required", nameof(tenantId));
         ArgumentNullException.ThrowIfNull(message);
 
-        var conversation = await UpsertConversationAsync(tenantId, message, ct).ConfigureAwait(false);
+        // Xac dinh direction som: so sanh sender_id vs page_id, hoac flag tu channel adapter.
+        // Phai biet truoc khi upsert contact de tin outbound (admin/AI) khong ghi de contact.
+        var senderId = message.Metadata.TryGetValue("sender_id", out var sid) ? sid : "";
+        var pageId = message.Metadata.TryGetValue("page_id", out var pid) ? pid : "";
+        var isOwner = !string.IsNullOrEmpty(senderId) && !string.IsNullOrEmpty(pageId)
+            && string.Equals(senderId, pageId, StringComparison.Ordinal);
+        if (!isOwner && message.Metadata.TryGetValue("is_owner", out var ownerFlag))
+            isOwner = string.Equals(ownerFlag, "true", StringComparison.OrdinalIgnoreCase);
 
-        // Update contact display name / avatar only for the sender contact (not the whole conversation contact)
-        var senderContact = await UpsertContactAsync(tenantId, message, ct).ConfigureAwait(false);
-        await UpdateContactMetadataAsync(tenantId, senderContact, message, ct).ConfigureAwait(false);
+        var conversation = await UpsertConversationAsync(tenantId, message, isOwner, ct).ConfigureAwait(false);
+
+        // Update display name / avatar only for the sender contact (never for owner/AI echo messages)
+        Contact? senderContact = null;
+        if (!isOwner)
+        {
+            var senderMeta = new Dictionary<string, string>(message.Metadata, StringComparer.Ordinal);
+            senderMeta.Remove("avatar_url");
+            if (message.Metadata.TryGetValue("sender_name", out var senderName) && !string.IsNullOrWhiteSpace(senderName))
+                senderMeta["display_name"] = senderName;
+            var senderMessage = message with { Metadata = senderMeta };
+            senderContact = await UpsertContactAsync(tenantId, senderMessage, ct).ConfigureAwait(false);
+            await UpdateContactMetadataAsync(tenantId, senderContact, senderMessage, ct).ConfigureAwait(false);
+        }
 
         // Section 9: Auto-reopen resolved/snoozed on inbound message
         conversation.ReopenIfNeeded();
@@ -63,14 +81,6 @@ public sealed partial class ChannelMessageIngestor(
         // PII redaction: store original + redacted versions
         var redacted = await _pii.RedactAsync(cleanText, ct).ConfigureAwait(false);
 
-        // Xac dinh direction: so sanh sender_id vs page_id
-        var senderId = message.Metadata.TryGetValue("sender_id", out var sid) ? sid : "";
-        var pageId = message.Metadata.TryGetValue("page_id", out var pid) ? pid : "";
-        var isOwner = !string.IsNullOrEmpty(senderId) && !string.IsNullOrEmpty(pageId)
-            && string.Equals(senderId, pageId, StringComparison.Ordinal);
-        // Fallback: channel adapter override (Pancake admin id != page id)
-        if (!isOwner && message.Metadata.TryGetValue("is_owner", out var ownerFlag))
-            isOwner = string.Equals(ownerFlag, "true", StringComparison.OrdinalIgnoreCase);
         var direction = isOwner ? "out" : "in";
         var senderType = isOwner ? "user" : "contact";
         var senderDisplayName = message.Metadata.TryGetValue("sender_name", out var sn) ? sn : null;
@@ -113,7 +123,7 @@ public sealed partial class ChannelMessageIngestor(
         return new IngestResult(conversation.Id, msg.Id, false);
     }
 
-    private async Task<Conversation> UpsertConversationAsync(Guid tenantId, ChannelMessage message, CancellationToken ct)
+    private async Task<Conversation> UpsertConversationAsync(Guid tenantId, ChannelMessage message, bool isOwner, CancellationToken ct)
     {
         var normalizedThread = ExtractCustomerExternalId(message.Channel, message.ExternalThreadId);
         var existing = await _db.Conversations
@@ -127,16 +137,31 @@ public sealed partial class ChannelMessageIngestor(
         var customerExternalId = message.Metadata.TryGetValue("customer_id", out var cid) && !string.IsNullOrWhiteSpace(cid)
             ? cid
             : ExtractCustomerExternalId(message.Channel, message.ExternalThreadId);
-        // Strip sender metadata only for outbound (owner) messages to avoid overwriting customer contact
+
+        // Contact cua hoi thoai (list ben trai) chi nhan name/avatar tu conversation_* (doi tac hoi thoai:
+        // nhom hoac khach) — khong bao gio tu sender cua tung tin nhan, tranh ghi de boi admin/AI/thanh vien nhom.
+        var hasConversationName = message.Metadata.TryGetValue("conversation_name", out var convName) && !string.IsNullOrWhiteSpace(convName);
+        var hasConversationAvatar = message.Metadata.TryGetValue("conversation_avatar_url", out var convAvatar) && !string.IsNullOrWhiteSpace(convAvatar);
         var custMeta = message.Metadata;
-        if (message.Metadata.TryGetValue("is_owner", out var ownerFlag) && string.Equals(ownerFlag, "true", StringComparison.OrdinalIgnoreCase))
+        if (hasConversationName || hasConversationAvatar)
         {
+            var rebuilt = message.Metadata
+                .Where(kv => kv.Key is not ("display_name" or "sender_name" or "sender_avatar_url" or "avatar_url"))
+                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+            if (hasConversationName) rebuilt["display_name"] = convName!;
+            if (hasConversationAvatar) rebuilt["avatar_url"] = convAvatar!;
+            custMeta = rebuilt;
+        }
+        else if (isOwner)
+        {
+            // Legacy adapters (webhook) khong co conversation_*: strip sender metadata cho tin outbound
             custMeta = message.Metadata
                 .Where(kv => kv.Key is not ("display_name" or "sender_name" or "sender_avatar_url" or "avatar_url"))
                 .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
         }
         var customerMessage = message with { ExternalUserId = customerExternalId, Metadata = custMeta };
-        var contact = await UpsertContactAsync(tenantId, customerMessage, ct).ConfigureAwait(false);
+        // conversation_name la nguon chinh thuc tu Pancake -> duoc phep sua ten contact da co (self-heal contact hong)
+        var contact = await UpsertContactAsync(tenantId, customerMessage, ct, authoritativeName: hasConversationName).ConfigureAwait(false);
         var inboxId = await ResolveInboxIdAsync(tenantId, message, ct).ConfigureAwait(false);
         if (existing is not null)
             return existing;
@@ -220,7 +245,7 @@ public sealed partial class ChannelMessageIngestor(
         return string.Equals(prefix, externalPageId, StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<Contact?> UpsertContactAsync(Guid tenantId, ChannelMessage message, CancellationToken ct)
+    private async Task<Contact?> UpsertContactAsync(Guid tenantId, ChannelMessage message, CancellationToken ct, bool authoritativeName = false)
     {
         if (string.IsNullOrWhiteSpace(message.ExternalUserId)) return null;
 
@@ -231,13 +256,18 @@ public sealed partial class ChannelMessageIngestor(
             .Where(c => c.TenantId == tenantId)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
-        var avatarUrl = message.Metadata.TryGetValue("avatar_url", out var av) && !string.IsNullOrWhiteSpace(av) ? av 
+        var avatarUrl = message.Metadata.TryGetValue("avatar_url", out var av) && !string.IsNullOrWhiteSpace(av) ? av
             : (message.Metadata.TryGetValue("sender_avatar_url", out var sav) && !string.IsNullOrWhiteSpace(sav) ? sav : null);
 
         if (existing is not null)
         {
             var newName = message.Metadata.TryGetValue("display_name", out var dn) && !string.IsNullOrWhiteSpace(dn) ? dn : null;
-            if (newName != null && (existing.DisplayName == message.ExternalUserId || existing.DisplayName.StartsWith("pzl_", StringComparison.Ordinal)))
+            // authoritativeName (conversation_name tu Pancake): duoc sua ca ten sai da luu (self-heal);
+            // nguoc lai chi dien ten khi contact van con placeholder (external id / pzl_*)
+            var canRename = authoritativeName
+                || existing.DisplayName == message.ExternalUserId
+                || existing.DisplayName.StartsWith("pzl_", StringComparison.Ordinal);
+            if (newName != null && canRename && existing.DisplayName != newName)
             {
                 existing.UpdateDisplayName(newName);
             }

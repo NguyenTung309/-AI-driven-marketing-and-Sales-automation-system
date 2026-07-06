@@ -168,6 +168,99 @@ public sealed class ChannelMessageIngestorTests
         contact.AvatarUrl.Should().Be("https://cdn.example.com/avatar.jpg");
     }
 
+    [Fact]
+    public async Task Owner_echo_does_not_overwrite_conversation_contact_or_create_sender_contact()
+    {
+        using var fx = new TestAppDb();
+        var (sut, _) = Build(fx);
+
+        // Customer message creates the conversation contact with the real name
+        await sut.IngestAsync(fx.TenantId, Msg("hi", thread: "page1:pzl_u_c1", user: "pzl_u_c1",
+            meta: new Dictionary<string, string>
+            {
+                ["conversation_name"] = "Khach Hang A",
+                ["conversation_avatar_url"] = "https://cdn.example.com/khach.jpg",
+                ["sender_id"] = "pzl_u_c1",
+                ["page_id"] = "page1",
+            }));
+
+        // AI/admin echo: sender = page itself, carries the owner's name/avatar
+        await sut.IngestAsync(fx.TenantId, Msg("auto reply", thread: "page1:pzl_u_c1", user: "page1",
+            meta: new Dictionary<string, string>
+            {
+                ["sender_id"] = "page1",
+                ["page_id"] = "page1",
+                ["sender_name"] = "Le Minh Thang",
+                ["sender_avatar_url"] = "https://cdn.example.com/owner.jpg",
+                ["is_owner"] = "true",
+            }));
+
+        var contact = await fx.Db.Contacts.IgnoreQueryFilters().SingleAsync();
+        contact.DisplayName.Should().Be("Khach Hang A");
+        contact.AvatarUrl.Should().Be("https://cdn.example.com/khach.jpg");
+        var outMsg = await fx.Db.Messages.IgnoreQueryFilters().Where(m => m.Direction == "out").SingleAsync();
+        outMsg.SenderDisplayName.Should().Be("Le Minh Thang");
+    }
+
+    [Fact]
+    public async Task Group_member_message_keeps_group_name_and_avatar_on_conversation_contact()
+    {
+        using var fx = new TestAppDb();
+        var (sut, _) = Build(fx);
+
+        await sut.IngestAsync(fx.TenantId, Msg("member msg", thread: "page1:pzl_g_grp1", user: "pzl_u_member1",
+            meta: new Dictionary<string, string>
+            {
+                ["conversation_name"] = "Nhom Hoc Ba",
+                ["conversation_avatar_url"] = "https://cdn.example.com/group.jpg",
+                ["sender_id"] = "pzl_u_member1",
+                ["sender_name"] = "Thanh Vien 1",
+                ["sender_avatar_url"] = "https://cdn.example.com/member1.jpg",
+                ["page_id"] = "page1",
+                ["is_group"] = "true",
+            }));
+
+        var conv = await fx.Db.Conversations.IgnoreQueryFilters().SingleAsync();
+        var groupContact = await fx.Db.Contacts.IgnoreQueryFilters().SingleAsync(c => c.Id == conv.ContactId);
+        groupContact.DisplayName.Should().Be("Nhom Hoc Ba");
+        groupContact.AvatarUrl.Should().Be("https://cdn.example.com/group.jpg");
+
+        // Member still gets their own sender contact with their own name/avatar
+        var memberContact = await fx.Db.ContactExternalIds.IgnoreQueryFilters()
+            .Where(x => x.ExternalId == "pzl_u_member1")
+            .Join(fx.Db.Contacts.IgnoreQueryFilters(), x => x.ContactId, c => c.Id, (x, c) => c)
+            .SingleAsync();
+        memberContact.DisplayName.Should().Be("Thanh Vien 1");
+        memberContact.AvatarUrl.Should().Be("https://cdn.example.com/member1.jpg");
+    }
+
+    [Fact]
+    public async Task Conversation_name_heals_contact_stuck_with_wrong_name()
+    {
+        using var fx = new TestAppDb();
+        var (sut, _) = Build(fx);
+
+        // Contact created with the owner's name by the old buggy path (non-placeholder, so
+        // the placeholder-only rename rule can never fix it)
+        await sut.IngestAsync(fx.TenantId, Msg("old buggy msg", thread: "page1:pzl_g_grp2", user: "pzl_g_grp2",
+            meta: new Dictionary<string, string> { ["display_name"] = "Le Minh Thang" }));
+
+        var contact = await fx.Db.Contacts.IgnoreQueryFilters().SingleAsync();
+        contact.DisplayName.Should().Be("Le Minh Thang");
+
+        // Next poll carries the authoritative conversation_name -> self-heal
+        await sut.IngestAsync(fx.TenantId, Msg("new msg", thread: "page1:pzl_g_grp2", user: "pzl_g_grp2",
+            meta: new Dictionary<string, string>
+            {
+                ["conversation_name"] = "Nhom Hoc Ba",
+                ["sender_id"] = "pzl_u_member2",
+                ["page_id"] = "page1",
+            }));
+
+        contact = await fx.Db.Contacts.IgnoreQueryFilters().SingleAsync(c => c.Id == contact.Id);
+        contact.DisplayName.Should().Be("Nhom Hoc Ba");
+    }
+
    [Fact]
     public async Task Contact_display_name_updated_from_pzl_to_real_name()
     {

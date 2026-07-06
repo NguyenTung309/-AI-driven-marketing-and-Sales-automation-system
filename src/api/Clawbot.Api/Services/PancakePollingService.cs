@@ -180,47 +180,44 @@ public sealed partial class PancakePollingService : BackgroundService
                     ["content_type"] = "text",
                 };
 
-                // Per-message sender info
+                // Per-message sender info: render-only, never used for the conversation contact
                 if (msg.From != null)
                 {
-                    if (!string.IsNullOrEmpty(msg.From.Name))
-                    {
-                        metadata["sender_name"] = msg.From.Name;
-                        metadata["display_name"] = msg.From.Name;
-                    }
-                    
-                // Detect admin/automated outbound message
-                if (!string.IsNullOrEmpty(msg.From.AvatarUrl)) metadata["sender_avatar_url"] = msg.From.AvatarUrl;
+                    if (!string.IsNullOrEmpty(msg.From.Name)) metadata["sender_name"] = msg.From.Name;
+                    if (!string.IsNullOrEmpty(msg.From.AvatarUrl)) metadata["sender_avatar_url"] = msg.From.AvatarUrl;
                     metadata["sender_id"] = msg.From.Id ?? "";
                 }
-
-                if (conv.From != null)
-                {
-                    if (!string.IsNullOrEmpty(conv.From.Name))
-                    {
-                        if (!metadata.ContainsKey("sender_name")) metadata["sender_name"] = conv.From.Name;
-                        if (!metadata.ContainsKey("display_name")) metadata["display_name"] = conv.From.Name;
-                    }
-                    if (!string.IsNullOrEmpty(conv.From.AvatarUrl) && !metadata.ContainsKey("sender_avatar_url")) metadata["sender_avatar_url"] = conv.From.AvatarUrl;
-                    if (conv.From.IsGroup == true) metadata["is_group"] = "true";
-                    metadata["from_id"] = conv.From.Id ?? "";
-                }
-                // Fallback: use conv.LastSentBy only when per-message sender (msg.From) is absent
-                if (msg.From == null && conv.LastSentBy != null)
+                else if (conv.LastSentBy != null)
                 {
                     metadata["sender_id"] = conv.LastSentBy.Id ?? "";
-                    if (!string.IsNullOrEmpty(conv.LastSentBy.Name))
-                    {
-                        if (!metadata.ContainsKey("sender_name")) metadata["sender_name"] = conv.LastSentBy.Name;
-                        if (!metadata.ContainsKey("display_name")) metadata["display_name"] = conv.LastSentBy.Name;
-                    }
-                    if (!metadata.ContainsKey("sender_avatar_url") && !string.IsNullOrEmpty(conv.LastSentBy.AvatarUrl))
-                        metadata["sender_avatar_url"] = conv.LastSentBy.AvatarUrl;
+                    if (!string.IsNullOrEmpty(conv.LastSentBy.Name)) metadata["sender_name"] = conv.LastSentBy.Name;
+                    if (!string.IsNullOrEmpty(conv.LastSentBy.AvatarUrl)) metadata["sender_avatar_url"] = conv.LastSentBy.AvatarUrl;
                 }
-                // Detect outbound message: admin (AdminId) or automated system
-                if (msg.From?.AdminId != null || msg.From?.IsAutomated == true)
+
+                // Conversation counterpart (group or 1-1 customer): authoritative for the left-list contact
+                var counterpartName = conv.From?.Name;
+                var counterpartAvatar = conv.From?.AvatarUrl;
+                if (conv.From?.IsGroup != true && conv.Customers is { Count: > 0 })
+                {
+                    var customer = conv.Customers[0];
+                    if (!string.IsNullOrEmpty(customer.Name)) counterpartName = customer.Name;
+                    if (!string.IsNullOrEmpty(customer.AvatarUrl)) counterpartAvatar = customer.AvatarUrl;
+                }
+                if (!string.IsNullOrEmpty(counterpartName)) metadata["conversation_name"] = counterpartName;
+                if (!string.IsNullOrEmpty(counterpartAvatar)) metadata["conversation_avatar_url"] = counterpartAvatar;
+                if (conv.From?.IsGroup == true) metadata["is_group"] = "true";
+                if (conv.From?.Id is { Length: > 0 } fromId) metadata["from_id"] = fromId;
+
+                // Outbound detection: page itself, admin reply, or automated (AI) message
+                var senderExternalId = msg.From?.Id;
+                if (msg.From?.AdminId != null
+                    || msg.From?.IsAutomated == true
+                    || (!string.IsNullOrEmpty(senderExternalId)
+                        && (senderExternalId == pageId || senderExternalId == conv.PageId)))
+                {
                     metadata["is_owner"] = "true";
-                if (!string.IsNullOrEmpty(conv.PageId)) metadata["page_id"] = conv.PageId;
+                }
+                metadata["page_id"] = string.IsNullOrEmpty(conv.PageId) ? pageId : conv.PageId;
 
                 // Parse attachments for rich content
                 // Use per-message text; fallback to conv.Snippet when msg.Message is empty
