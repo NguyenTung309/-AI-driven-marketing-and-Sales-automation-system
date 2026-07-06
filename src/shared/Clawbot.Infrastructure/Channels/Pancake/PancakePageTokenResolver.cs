@@ -34,7 +34,7 @@ public sealed partial class PancakePageTokenResolver(
             .AsNoTracking()
             .Where(i => i.TenantId == tenantId && i.ExternalPageId == pageId && i.DeletedAt == null && i.IsActive)
             .OrderBy(i => i.Id)
-            .Select(i => new { i.EncryptedAccessToken, i.Name, i.Platform })
+            .Select(i => new { i.EncryptedAccessToken, i.Name, i.Platform, i.SenderId })
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
         if (row is null || string.IsNullOrEmpty(row.EncryptedAccessToken))
@@ -44,7 +44,7 @@ public sealed partial class PancakePageTokenResolver(
         if (string.IsNullOrEmpty(token))
             return null;
 
-        return new PancakePageToken(token, pageId, row.Name, row.Platform);
+        return new PancakePageToken(token, pageId, row.Name, row.Platform, row.SenderId);
     }
 
     [LoggerMessage(EventId = 6002, Level = LogLevel.Warning, Message = "PancakePageTokenResolver: requested tenant {requested} does not match ambient tenant {ambient}")]

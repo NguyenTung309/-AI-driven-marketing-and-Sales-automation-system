@@ -1,4 +1,4 @@
-﻿﻿using System.Text.Json;
+using System.Text.Json;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -197,7 +197,7 @@ public static partial class DemoEndpoints
                             messageId ??= msg.TryGetProperty("msg_id", out var mid) ? mid.GetString() : null;
                         }
                     }
-                    // Extract conversation/thread ID � chung cho ca 2 format
+                    // Extract conversation/thread ID ? chung cho ca 2 format
                     conversationId ??= dict.TryGetValue("thread_id", out var tid) && tid is JsonElement te
                         ? te.GetString() : null;
                     conversationId ??= dict.TryGetValue("conversation_id", out var cid) && cid is JsonElement ci
@@ -210,7 +210,7 @@ public static partial class DemoEndpoints
             {
                 conversationId = "demo_conv_" + Guid.NewGuid().ToString("N")[..20];
                 platform ??= "demo";
-                text ??= "Xin chào, tôi muốn tư vấn khóa học";
+                text ??= "Xin ch?o, t?i mu?n tu v?n kh?a h?c";
                 messageId ??= "demo_msg_" + Guid.NewGuid().ToString("N")[..16];
                 rawBody = System.Text.Json.JsonSerializer.Serialize(new
                 {
@@ -231,11 +231,11 @@ public static partial class DemoEndpoints
                     .AsNoTracking()
                     .Where(q => q.Code == "auto_reply")
                     .FirstOrDefaultAsync();
-                draft = qrt?.Body ?? "Cảm ơn bạn đã liên hệ, chúng tôi sẽ phản hồi sớm";
+                draft = qrt?.Body ?? "C?m on b?n d? li?n h?, ch?ng t?i s? ph?n h?i s?m";
             }
             catch
             {
-                draft = "Cảm ơn bạn đã liên hệ, chúng tôi sẽ phản hồi sớm";
+                draft = "C?m on b?n d? li?n h?, ch?ng t?i s? ph?n h?i s?m";
             }
 
             // Create trace
@@ -330,9 +330,15 @@ public static partial class DemoEndpoints
                     }
                     else
                     {
-                        var sendBaseUrl = string.IsNullOrEmpty(config.PancakeBaseUrl) ?
-                            "https://pages.fm/api/public_api/v2" : config.PancakeBaseUrl;
-                        var apiUrl = $"{sendBaseUrl}/pages/{config.PancakePageId}/conversations/{conversationId}/messages?page_access_token={config.PancakePageAccessToken}";
+                        var sendBaseUrl = (string.IsNullOrEmpty(config.PancakeBaseUrl) ?
+                            "https://pages.fm/api/public_api/v1" : config.PancakeBaseUrl)
+                            .Replace("/v2/", "/v1/")
+                            .Replace("/v2", "/v1");
+                        // Thread ID c? th? ? d?ng composite page_id:thread_id -> c?n t?ch
+                        var threadId = conversationId;
+                        var colonIdx = threadId?.IndexOf(':', StringComparison.Ordinal) ?? -1;
+                        if (colonIdx > 0 && threadId != null) threadId = threadId.Substring(colonIdx + 1);
+                        var apiUrl = $"{sendBaseUrl}/pages/{config.PancakePageId}/conversations/{threadId}/messages?page_access_token={config.PancakePageAccessToken}";
 
                     try
                     {
