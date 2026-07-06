@@ -9,13 +9,12 @@ public sealed class ResearchAgentTests
     [Fact]
     public void WeightedTrendScorer_ranks_keyword_matches_above_generic_trends()
     {
-        var scorer = new WeightedTrendScorer();
         var keywords = new[] { "HSK", "tiếng Trung", "Mandarin" };
 
-        var relevant = scorer.Score(
+        var relevant = WeightedTrendScorer.Score(
             new RawTrend("HSK speaking tips", "youtube", "100 views", 100d, ["mandarin"]),
             keywords);
-        var generic = scorer.Score(
+        var generic = WeightedTrendScorer.Score(
             new RawTrend("celebrity gossip", "youtube", "10000 views", 10_000d, []),
             keywords);
 

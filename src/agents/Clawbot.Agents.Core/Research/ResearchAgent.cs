@@ -13,7 +13,11 @@ public sealed record ResearchScanRequest(Guid TenantId, string Geo, IReadOnlyLis
 
 public interface ITrendRelevanceScorer
 {
-    ScoredTrend Score(RawTrend trend, IReadOnlyList<string> keywords);
+    Task<IReadOnlyList<ScoredTrend>> ScoreAsync(
+        Guid tenantId,
+        IReadOnlyList<RawTrend> trends,
+        IReadOnlyList<string> keywords,
+        CancellationToken ct = default);
 }
 
 public interface IResearchAgent
@@ -21,8 +25,21 @@ public interface IResearchAgent
     Task<IReadOnlyList<ScoredTrend>> ScanAsync(ResearchScanRequest request, CancellationToken ct = default);
 }
 
+// Heuristic keyword scorer: fallback khi tenant/host chua cau hinh LLM + embedding
+// (SemanticLlmTrendScorer la duong chinh).
 internal sealed class WeightedTrendScorer : ITrendRelevanceScorer
 {
+    public Task<IReadOnlyList<ScoredTrend>> ScoreAsync(
+        Guid tenantId,
+        IReadOnlyList<RawTrend> trends,
+        IReadOnlyList<string> keywords,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(trends);
+        IReadOnlyList<ScoredTrend> scored = trends.Select(t => Score(t, keywords)).ToList();
+        return Task.FromResult(scored);
+    }
+
     private static readonly string[] DefaultKeywords =
     [
         "hsk",
@@ -34,7 +51,7 @@ internal sealed class WeightedTrendScorer : ITrendRelevanceScorer
         "汉语",
     ];
 
-    public ScoredTrend Score(RawTrend trend, IReadOnlyList<string> keywords)
+    public static ScoredTrend Score(RawTrend trend, IReadOnlyList<string> keywords)
     {
         ArgumentNullException.ThrowIfNull(trend);
         ArgumentNullException.ThrowIfNull(keywords);
@@ -74,11 +91,14 @@ internal sealed class ResearchAgent(IEnumerable<ITrendSource> sources, ITrendRel
 
         var tasks = enabled.Select(source => FetchSourceAsync(source, request.Geo, ct)).ToList();
         var results = await Task.WhenAll(tasks).ConfigureAwait(false);
-        return results
+        var deduped = results
             .SelectMany(r => r)
             .GroupBy(t => t.Topic, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.OrderByDescending(t => t.SourceScore).First())
-            .Select(t => _scorer.Score(t, request.Keywords))
+            .ToList();
+
+        var scored = await _scorer.ScoreAsync(request.TenantId, deduped, request.Keywords, ct).ConfigureAwait(false);
+        return scored
             .Where(t => t.RelevanceScore > 0d)
             .OrderByDescending(t => t.RelevanceScore)
             .ThenBy(t => t.Topic)

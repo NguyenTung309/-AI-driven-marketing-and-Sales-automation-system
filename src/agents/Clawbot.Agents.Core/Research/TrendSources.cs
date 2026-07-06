@@ -345,7 +345,12 @@ public static class ResearchModule
         services.AddScoped<ITrendSource>(sp => sp.GetRequiredService<YouTubeDataApiSource>());
         services.AddScoped<ITrendSource>(sp => sp.GetRequiredService<TikTokScrapeSource>());
         services.AddScoped<ITrendSource>(sp => sp.GetRequiredService<BaiduScrapeSource>());
-        services.AddSingleton<ITrendRelevanceScorer, WeightedTrendScorer>();
+        // Semantic scorer (Qdrant KB + LLM); tu fallback ve keyword heuristic khi host/tenant
+        // chua co IRagRetriever/IClaudeChatClient hoac LLM chua duoc bind
+        services.AddScoped<ITrendRelevanceScorer>(sp => new SemanticLlmTrendScorer(
+            sp.GetService<Clawbot.Agents.Core.Rag.IRagRetriever>(),
+            sp.GetService<Clawbot.Agents.Core.Chat.IClaudeChatClient>(),
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<SemanticLlmTrendScorer>>()));
         services.AddScoped<IResearchAgent, ResearchAgent>();
         return services;
     }
