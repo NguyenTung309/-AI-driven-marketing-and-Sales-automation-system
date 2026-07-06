@@ -17,6 +17,7 @@ public sealed partial class PancakePollingService : BackgroundService
     private readonly DemoRuntimeConfigStore _config;
     private readonly IHttpClientFactory _httpFactory;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly Clawbot.SharedKernel.Security.IEncryptor _encryptor;
     private readonly ILogger<PancakePollingService> _log;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -34,12 +35,14 @@ public sealed partial class PancakePollingService : BackgroundService
         DemoRuntimeConfigStore config,
         IHttpClientFactory httpFactory,
         ILogger<PancakePollingService> log,
-        IServiceScopeFactory scopeFactory)
+        IServiceScopeFactory scopeFactory,
+        Clawbot.SharedKernel.Security.IEncryptor encryptor)
     {
         _traces = traces;
         _config = config;
         _httpFactory = httpFactory;
         _scopeFactory = scopeFactory;
+        _encryptor = encryptor;
         _log = log;
     }
 
@@ -106,7 +109,9 @@ public sealed partial class PancakePollingService : BackgroundService
 
             foreach (var inbox in inboxes)
             {
-                var token = inbox.EncryptedAccessToken;
+                if (string.IsNullOrEmpty(inbox.EncryptedAccessToken)) continue;
+                // Legacy rows may still hold a raw JWT until the startup migrator re-encrypts them
+                var token = Clawbot.Infrastructure.Channels.Pancake.PancakeTokenCipher.DecryptOrRaw(_encryptor, inbox.EncryptedAccessToken);
                 if (string.IsNullOrEmpty(token)) continue;
 
                 await PollPageAsync(client, baseUrl, inbox.ExternalPageId, token, ct);

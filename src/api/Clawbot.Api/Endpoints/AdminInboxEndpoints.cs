@@ -6,6 +6,7 @@ using Clawbot.Infrastructure.Auth;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Inbox;
 using Clawbot.SharedKernel.Multitenancy;
+using Clawbot.SharedKernel.Security;
 using Clawbot.SharedKernel.Time;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,6 +17,7 @@ namespace Clawbot.Api.Endpoints;
 public sealed record UpdateMemberRequest(Guid? AgentId);
 public sealed record ReassignRequest(Guid NewAgentId);
 public sealed record CreateInboxRequest(string Platform, string ExternalPageId, string? PageAccessToken, Guid? AgentId);
+public sealed record UpdateInboxRequest(string? PageAccessToken);
 
 public static class AdminInboxEndpoints
 {
@@ -31,6 +33,7 @@ public static class AdminInboxEndpoints
         grp.MapGet("/inboxes/{id:guid}/assignable-agents", ListAssignableAgentsAsync);
         grp.MapGet("/inboxes", ListInboxesAsync);
         grp.MapPost("/inboxes", CreateInboxAsync);
+        grp.MapPut("/inboxes/{id:guid}", UpdateInboxAsync);
         return app;
     }
 
@@ -192,11 +195,34 @@ public static class AdminInboxEndpoints
         return Results.Ok(inboxes);
     }
 
+    private static async Task<IResult> UpdateInboxAsync(
+        Guid id,
+        UpdateInboxRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IEncryptor encryptor,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var inbox = await db.Inboxes.FirstOrDefaultAsync(i => i.Id == id && i.TenantId == tenant.TenantId && i.DeletedAt == null, ct);
+        if (inbox is null) return Results.NotFound();
+
+        if (!string.IsNullOrWhiteSpace(body.PageAccessToken))
+        {
+            inbox.SetAccessToken(encryptor.Encrypt(body.PageAccessToken.Trim()), clock.UtcNow);
+            await db.SaveChangesAsync(ct);
+        }
+
+        return Results.NoContent();
+    }
+
     private static async Task<IResult> CreateInboxAsync(
         HttpContext ctx, // for logger
         CreateInboxRequest body,
         AppDbContext db,
         ITenantAccessor tenants,
+        IEncryptor encryptor,
         IClock clock,
         CancellationToken ct)
     {
@@ -212,7 +238,7 @@ public static class AdminInboxEndpoints
         var inbox = Inbox.Create(tenant.TenantId, pageName, body.Platform, body.ExternalPageId);
 
         if (!string.IsNullOrEmpty(body.PageAccessToken))
-            inbox.SetAccessToken(body.PageAccessToken, clock.UtcNow);
+            inbox.SetAccessToken(encryptor.Encrypt(body.PageAccessToken.Trim()), clock.UtcNow);
 
         db.Inboxes.Add(inbox);
 

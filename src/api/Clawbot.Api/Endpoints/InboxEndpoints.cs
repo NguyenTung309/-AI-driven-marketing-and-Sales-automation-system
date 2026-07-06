@@ -10,7 +10,6 @@ using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Inbox;
 using Clawbot.SharedKernel.Multitenancy;
-using Clawbot.SharedKernel.Security;
 using Clawbot.SharedKernel.Time;
 using Hangfire;
 using Microsoft.AspNetCore.Mvc;
@@ -271,7 +270,7 @@ public static class InboxEndpoints
         Guid id, SendMessageRequest body,
         AppDbContext db, ITenantAccessor tenants, IInboxNotifier notifier,
         IChannelAdapter adapter, OutboundMessageSafetyService safety, IClock clock,
-        IEncryptor encryptor, ClaimsPrincipal user,
+        ClaimsPrincipal user,
         IUserInboxResolver resolver,
         CancellationToken ct)
     {
@@ -289,16 +288,11 @@ public static class InboxEndpoints
         catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
         var senderUserId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        var userToken = await db.Users.AsNoTracking()
-            .Where(u => u.Id == senderUserId && u.TenantId == tenant.TenantId)
-            .Select(u => u.PancakeAccessTokenEncrypted)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
-        var accessToken = string.IsNullOrEmpty(userToken) ? null : encryptor.Decrypt(userToken);
 
         try
         {
-            await adapter.SendAsync(conv.ExternalThreadId, body.Content, accessToken, ct).ConfigureAwait(false);
+            // Token per-kenh: adapter tu resolve page access token cua inbox (PancakePageTokenResolver)
+            await adapter.SendAsync(conv.ExternalThreadId, body.Content, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

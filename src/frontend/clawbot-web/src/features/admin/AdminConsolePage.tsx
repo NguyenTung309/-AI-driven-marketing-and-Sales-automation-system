@@ -68,7 +68,6 @@ export default function AdminConsolePage() {
   const queryClient = useQueryClient();
   const authPermissions = useAuthStore((s) => s.permissions);
   const canManageUsers = authPermissions.includes("admin.system");
-  const canManagePancakeToken = canManageUsers || authPermissions.includes("users:pancake-token:manage");
   const [tab, setTab] = useState<AdminTab>("users");
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -80,8 +79,6 @@ export default function AdminConsolePage() {
     password: "",
     isActive: true,
     roles: [],
-    pancakeAccessToken: "",
-    clearPancakeAccessToken: false,
   });
   const [roleModal, setRoleModal] = useState<RoleModalMode>(null);
   const [editingRole, setEditingRole] = useState<Role | null>(null);
@@ -228,18 +225,11 @@ export default function AdminConsolePage() {
           displayName: userForm.displayName.trim(),
           password: userForm.password,
           roles: userForm.roles,
-          ...(canManagePancakeToken && userForm.pancakeAccessToken.trim()
-            ? { pancakeAccessToken: userForm.pancakeAccessToken.trim() }
-            : {}),
         });
       }
       if (!editingUser) return undefined;
       await updateAdminUser(editingUser.id, {
         ...(canManageUsers ? { displayName: userForm.displayName.trim(), isActive: userForm.isActive } : {}),
-        ...(canManagePancakeToken && userForm.pancakeAccessToken.trim()
-          ? { pancakeAccessToken: userForm.pancakeAccessToken.trim() }
-          : {}),
-        ...(canManagePancakeToken && userForm.clearPancakeAccessToken ? { clearPancakeAccessToken: true } : {}),
       });
       return undefined;
     },
@@ -402,8 +392,6 @@ export default function AdminConsolePage() {
       password: "",
       isActive: true,
       roles: [],
-      pancakeAccessToken: "",
-      clearPancakeAccessToken: false,
     });
     setUserModal("create");
   }
@@ -416,8 +404,6 @@ export default function AdminConsolePage() {
       password: "",
       isActive: user.isActive,
       roles: [],
-      pancakeAccessToken: "",
-      clearPancakeAccessToken: false,
     });
     setUserModal("edit");
   }
@@ -587,7 +573,6 @@ export default function AdminConsolePage() {
         userForm={userForm}
         onChange={(patch) => setUserForm({ ...userForm, ...patch })}
         canManageUsers={canManageUsers}
-        canManagePancakeToken={canManagePancakeToken}
         editingUser={editingUser}
         roles={roles}
         onToggleRoleName={toggleRoleName}

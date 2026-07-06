@@ -16,7 +16,6 @@ export interface AdminUser {
   readonly phone: string | null;
   readonly isActive: boolean;
   readonly lastLoginAt: string | null;
-  readonly hasPancakeAccessToken: boolean;
 }
 
 export interface Role {
@@ -103,7 +102,6 @@ export async function createAdminUser(body: {
   readonly displayName: string;
   readonly password: string;
   readonly roles?: readonly string[];
-  readonly pancakeAccessToken?: string;
 }): Promise<Pick<AdminUser, "id" | "email" | "displayName">> {
   const res = await apiClient.post<Pick<AdminUser, "id" | "email" | "displayName">>("/api/admin/users", body);
   return res.data;
@@ -115,8 +113,6 @@ export async function updateAdminUser(
     readonly displayName?: string;
     readonly isActive?: boolean;
     readonly roles?: readonly string[];
-    readonly pancakeAccessToken?: string;
-    readonly clearPancakeAccessToken?: boolean;
   }
 ): Promise<void> {
   await apiClient.put(`/api/admin/users/${id}`, body);
@@ -286,6 +282,10 @@ export async function getInboxMembers(inboxId: string): Promise<readonly string[
 
 export async function updateInboxMember(inboxId: string, agentId: string | null): Promise<void> {
   await apiClient.put(`/api/admin/inboxes/${inboxId}/members`, { agentId });
+}
+
+export async function updateInbox(inboxId: string, pageAccessToken: string): Promise<void> {
+  await apiClient.put(`/api/admin/inboxes/${inboxId}`, { pageAccessToken });
 }
 
 export interface CreateInboxRequest {

@@ -309,6 +309,9 @@ HangfireModule.ScheduleClawbotJobs(app.Services);
 
 await RbacSeeder.SeedAsync(app.Services).ConfigureAwait(false);
 
+// One-off: re-encrypt legacy plaintext inbox tokens (rows written before encrypt-at-write)
+await Clawbot.Infrastructure.Channels.Pancake.InboxTokenEncryptionMigrator.EncryptLegacyTokensAsync(app.Services).ConfigureAwait(false);
+
 if (app.Environment.IsDevelopment())
 {
     await DevDataSeeder.SeedAdminAsync(app.Services).ConfigureAwait(false);

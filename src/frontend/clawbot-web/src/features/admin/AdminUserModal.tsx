@@ -1,4 +1,4 @@
-import { Alert, Button, Modal, StatusPill } from "@/shared/ui";
+import { Alert, Button, Modal } from "@/shared/ui";
 import { adminFormErrorMessage, Field, inputClass, tempPasswordHint, tempPasswordPattern, type AdminUserFormState } from "./adminHelpers";
 import type { AdminUser, Role } from "@/shared/api/admin";
 
@@ -9,7 +9,6 @@ interface AdminUserModalProps {
   readonly userForm: AdminUserFormState;
   readonly onChange: (patch: Partial<AdminUserFormState>) => void;
   readonly canManageUsers: boolean;
-  readonly canManagePancakeToken: boolean;
   readonly editingUser: AdminUser | null;
   readonly roles: readonly Role[];
   readonly onToggleRoleName: (name: string) => void;
@@ -24,8 +23,6 @@ export function AdminUserModal({
   userForm,
   onChange,
   canManageUsers,
-  canManagePancakeToken,
-  editingUser,
   roles,
   onToggleRoleName,
   pending,
@@ -102,37 +99,7 @@ export function AdminUserModal({
             Người dùng đang hoạt động
           </label>
         ) : null}
-        {canManagePancakeToken ? (
-          <div className="space-y-3 rounded-lg border border-outline bg-surface p-3">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-label-sm font-semibold text-secondary">Access token Pancake của nhân viên sale</p>
-              {editingUser ? (
-                <StatusPill tone={editingUser.hasPancakeAccessToken ? "success" : "warning"}>
-                  {editingUser.hasPancakeAccessToken ? "Đã cấu hình" : "Chưa có"}
-                </StatusPill>
-              ) : null}
-            </div>
-            <input
-              className={inputClass}
-              type="password"
-              value={userForm.pancakeAccessToken}
-              onChange={(event) => onChange({ pancakeAccessToken: event.target.value, clearPancakeAccessToken: false })}
-              placeholder={editingUser?.hasPancakeAccessToken ? "Đã lưu token, nhập để thay thế" : "Nhập access token Pancake"}
-            />
-            {editingUser?.hasPancakeAccessToken ? (
-              <label className="inline-flex items-center gap-2 text-body-md text-secondary">
-                <input
-                  type="checkbox"
-                  className="size-4 accent-primary"
-                  checked={userForm.clearPancakeAccessToken}
-                  onChange={(event) => onChange({ clearPancakeAccessToken: event.target.checked, pancakeAccessToken: "" })}
-                />
-                Xóa token hiện tại
-              </label>
-            ) : null}
-            <p className="text-label-sm text-on-surface-variant">Token được mã hóa khi lưu; giao diện không hiển thị lại token đã lưu.</p>
-          </div>
-        ) : null}
+        {/* Token Pancake cau hinh theo kenh (trang "Kenh giao tiep"), khong theo tung sale */}
       </form>
     </Modal>
   );

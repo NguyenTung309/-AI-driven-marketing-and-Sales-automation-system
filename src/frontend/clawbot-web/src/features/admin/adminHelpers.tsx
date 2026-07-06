@@ -183,8 +183,6 @@ export interface AdminUserFormState {
   readonly password: string;
   readonly isActive: boolean;
   readonly roles: string[];
-  readonly pancakeAccessToken: string;
-  readonly clearPancakeAccessToken: boolean;
 }
 
 export interface AdminRoleFormState {

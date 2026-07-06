@@ -9,7 +9,7 @@ namespace Clawbot.Api.Endpoints;
 
 // SPEC-16 Module M-3/M-4: admin channel configuration — Pancake connect (list pages) + mint/store page tokens.
 // Permissions: channels:manage (RbacSeeder). The admin pastes the Pancake user access token; the system lists
-// pages, then mints + stores a per-page token (pancake_pages) for each selected page.
+// pages, then mints + stores a per-page token on the inbox row (inboxes.encrypted_access_token) per selected page.
 public sealed record ConnectPancakeRequest(string UserAccessToken);
 public sealed record MintPancakePagesRequest(string UserAccessToken, IReadOnlyList<MintPancakePage> Pages);
 public sealed record MintPancakePage(string PageId, string Name, string Platform);
@@ -79,16 +79,17 @@ public static class AdminChannelsEndpoints
         var tenantId = tenants.Require().TenantId;
         // EARS[WHEN listing connected pages THE SYSTEM SHALL return each stored page with a connected status,
         // never exposing the token (audit-read only)]
-        var pages = await db.PancakePages.IgnoreQueryFilters().AsNoTracking()
-            .Where(p => p.TenantId == tenantId && p.DeletedAt == null && p.IsActive)
-            .OrderBy(p => p.Name)
-            .Select(p => new
+        // Tokens live on the inbox row (single per-channel store for inbound + outbound).
+        var pages = await db.Inboxes.IgnoreQueryFilters().AsNoTracking()
+            .Where(i => i.TenantId == tenantId && i.DeletedAt == null && i.IsActive)
+            .OrderBy(i => i.Name)
+            .Select(i => new
             {
-                p.PageId,
-                p.Name,
-                p.Platform,
-                status = p.PageAccessTokenEncrypted.Length > 0 ? "connected" : "not_configured",
-                mintedAt = p.PageTokenMintedAt,
+                PageId = i.ExternalPageId,
+                i.Name,
+                i.Platform,
+                status = i.EncryptedAccessToken != null ? "connected" : "not_configured",
+                mintedAt = (DateTimeOffset?)i.UpdatedAt,
             })
             .ToListAsync(ct).ConfigureAwait(false);
         return Results.Ok(new { items = pages });

@@ -40,24 +40,11 @@ public sealed partial class PancakePageTokenResolver(
         if (row is null || string.IsNullOrEmpty(row.EncryptedAccessToken))
             return null;
 
-        var token = SafeDecrypt(row.EncryptedAccessToken);
-        // Decryption fail ? raw JWT (plaintext) from admin UI. Use as-is.
-        // ponytail: remove once all inbox tokens are properly encrypted.
-        if (string.IsNullOrEmpty(token))
-            token = row.EncryptedAccessToken;
-
+        var token = PancakeTokenCipher.DecryptOrRaw(_encryptor, row.EncryptedAccessToken);
         if (string.IsNullOrEmpty(token))
             return null;
 
         return new PancakePageToken(token, pageId, row.Name, row.Platform);
-    }
-
-    private string SafeDecrypt(string cipher)
-    {
-        if (string.IsNullOrEmpty(cipher)) return string.Empty;
-        try { return _encryptor.Decrypt(cipher); }
-        catch (FormatException) { return string.Empty; }
-        catch (System.Security.Cryptography.CryptographicException) { return string.Empty; }
     }
 
     [LoggerMessage(EventId = 6002, Level = LogLevel.Warning, Message = "PancakePageTokenResolver: requested tenant {requested} does not match ambient tenant {ambient}")]
