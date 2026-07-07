@@ -12,6 +12,8 @@ export interface OrchestrationV2Agent {
   // SPEC-16 P1-7: tool allow-list + input schema for the ReAct worker.
   readonly allowedToolsJson?: string;
   readonly inputSchemaJson?: string;
+  // Bound LLM config; null/undefined = unbound (orchestrator planner skips unbound agents).
+  readonly llmConfigId?: string | null;
 }
 
 export interface OrchestrationV2Schedule {
@@ -24,6 +26,9 @@ export interface OrchestrationV2Schedule {
   readonly lastRunAt: string | null;
   readonly isActive: boolean;
   readonly requiresApproval: boolean;
+  /** "cadence" (mặc định) hoặc "event" — lịch sự kiện ngủ tới khi hệ thống phát event tương ứng. */
+  readonly triggerType?: string;
+  readonly eventKey?: string | null;
 }
 
 export interface OrchestrationV2RunNowResponse {
@@ -103,6 +108,8 @@ export interface OrchestrationV2RunDetail extends OrchestrationV2Plan {
   readonly archivedAt: string | null;
   readonly traces: readonly OrchestrationV2Trace[];
   readonly messages: readonly OrchestrationV2Message[];
+  /** Chi phí LLM thực của phiên (USD), tổng từ ledger gắn sessionId. */
+  readonly actualCostUsd: number;
 }
 
 interface ListResponse<T> {
@@ -124,6 +131,8 @@ export async function upsertOrchestrationV2Agent(payload: {
   readonly kbModuleCode?: string | null;
   readonly allowedToolsJson?: string;
   readonly inputSchemaJson?: string;
+  /** null/omit = giữ binding hiện tại; Guid rỗng = gỡ bind; giá trị = bind LLM config. */
+  readonly llmConfigId?: string | null;
 }): Promise<OrchestrationV2Agent> {
   const res = await apiClient.post<OrchestrationV2Agent>("/api/orchestration/v2/agents", payload);
   return res.data;
@@ -140,6 +149,8 @@ export async function createOrchestrationV2Schedule(payload: {
   readonly cadence: string;
   readonly timezoneId: string;
   readonly requiresApproval: boolean;
+  readonly triggerType?: string;
+  readonly eventKey?: string | null;
 }): Promise<OrchestrationV2Schedule> {
   const res = await apiClient.post<OrchestrationV2Schedule>("/api/orchestration/v2/schedules", payload);
   return res.data;
@@ -160,8 +171,37 @@ export async function listOrchestrationV2Runs(mine = false, archived = false): P
   return res.data.items;
 }
 
-export async function createOrchestrationV2Run(goal: string): Promise<{ readonly sessionId: string; readonly status: string }> {
-  const res = await apiClient.post<{ readonly sessionId: string; readonly status: string }>("/api/orchestration/v2/runs", { goal });
+export async function createOrchestrationV2Run(goal: string, dryRun = false): Promise<{ readonly sessionId: string; readonly status: string }> {
+  const res = await apiClient.post<{ readonly sessionId: string; readonly status: string }>("/api/orchestration/v2/runs", { goal, dryRun });
+  return res.data;
+}
+
+export async function unarchiveOrchestrationV2Run(
+  sessionId: string,
+): Promise<{ readonly sessionId: string; readonly status: string; readonly archivedAt: string | null }> {
+  const res = await apiClient.post<{ readonly sessionId: string; readonly status: string; readonly archivedAt: string | null }>(
+    `/api/orchestration/v2/runs/${encodeURIComponent(sessionId)}/unarchive`,
+  );
+  return res.data;
+}
+
+export async function pauseOrchestrationV2Schedule(id: string): Promise<OrchestrationV2Schedule> {
+  const res = await apiClient.post<OrchestrationV2Schedule>(`/api/orchestration/v2/schedules/${encodeURIComponent(id)}/pause`);
+  return res.data;
+}
+
+export async function activateOrchestrationV2Schedule(id: string): Promise<OrchestrationV2Schedule> {
+  const res = await apiClient.post<OrchestrationV2Schedule>(`/api/orchestration/v2/schedules/${encodeURIComponent(id)}/activate`);
+  return res.data;
+}
+
+export interface OrchestrationCostSummary {
+  readonly monthToDateUsd: number;
+  readonly capUsd: number;
+}
+
+export async function getOrchestrationV2CostSummary(): Promise<OrchestrationCostSummary> {
+  const res = await apiClient.get<OrchestrationCostSummary>("/api/orchestration/v2/cost-summary");
   return res.data;
 }
 

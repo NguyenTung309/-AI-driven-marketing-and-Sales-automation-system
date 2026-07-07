@@ -14,7 +14,7 @@ import {
   LlmProvidersPage,
   LoginPage,
   NotificationsPage,
-  OrchestrationV2Page,
+  AgentRunsPage,
   PixelAgentsOfficePage,
   ProfilePage,
   PromptConfigurationPage,
@@ -107,6 +107,14 @@ export const router = createBrowserRouter([
     ),
   },
   {
+    path: "/agents/runs",
+    element: (
+      <RequireAuth>
+        <AgentRunsPage />
+      </RequireAuth>
+    ),
+  },
+  {
     path: "/agents/runs/:sessionId",
     element: (
       <RequireAuth>
@@ -123,10 +131,11 @@ export const router = createBrowserRouter([
     ),
   },
   {
+    // Trang /orchestration cũ đã gộp vào /agents (điều phối + lịch tự động) — giữ redirect cho link cũ.
     path: "/orchestration",
     element: (
       <RequireAuth>
-        <OrchestrationV2Page />
+        <Navigate replace to="/agents" />
       </RequireAuth>
     ),
   },

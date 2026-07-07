@@ -15,11 +15,19 @@ public sealed record RawTrend(
     double SourceScore,
     IReadOnlyList<string> ContentIdeas);
 
+// Per-tenant override for one source; null members fall back to the appsettings-bound options.
+public sealed record TrendSourceOverride(bool? Enabled = null, string? ApiKey = null, string? Url = null);
+
+public sealed record TrendOverrides(
+    TrendSourceOverride? GoogleTrends = null,
+    TrendSourceOverride? YouTube = null,
+    TrendSourceOverride? TikTok = null);
+
 public interface ITrendSource
 {
     string Source { get; }
     bool Enabled { get; }
-    Task<IReadOnlyList<RawTrend>> FetchAsync(string geo, CancellationToken ct = default);
+    Task<IReadOnlyList<RawTrend>> FetchAsync(string geo, TrendSourceOverride? tenantOverride = null, CancellationToken ct = default);
 }
 
 public abstract class TrendSourceOptions
@@ -75,9 +83,9 @@ internal sealed class GoogleTrendsRssSource(HttpClient http, IOptions<GoogleTren
     public string Source => "google_trends";
     public bool Enabled => _options.Enabled;
 
-    public async Task<IReadOnlyList<RawTrend>> FetchAsync(string geo, CancellationToken ct = default)
+    public async Task<IReadOnlyList<RawTrend>> FetchAsync(string geo, TrendSourceOverride? tenantOverride = null, CancellationToken ct = default)
     {
-        if (!Enabled)
+        if (!(tenantOverride?.Enabled ?? _options.Enabled))
             return [];
 
         try
@@ -112,7 +120,8 @@ internal sealed class GoogleTrendsRssSource(HttpClient http, IOptions<GoogleTren
             return [];
 
         var doc = XDocument.Parse(xml);
-        // Feed moi dung namespace /trending/rss; feed cu /trends/trendingsearches/daily - doc ca hai
+        // Google retired /trends/trendingsearches/daily/rss (404 since Feb 2025); the replacement
+        // /trending/rss feed uses a different ht namespace, so probe both.
         XNamespace htNew = "https://trends.google.com/trending/rss";
         XNamespace htOld = "https://trends.google.com/trends/trendingsearches/daily";
         return doc.Descendants("item")
@@ -130,8 +139,10 @@ internal sealed class GoogleTrendsRssSource(HttpClient http, IOptions<GoogleTren
             .ToList();
     }
 
+    // Không auto-gán ContentIdeas nữa: template "Explain X for Vietnamese Chinese learners" chứa "Chinese"
+    // khiến MỌI chủ đề khớp keyword và lọt qua bộ lọc. Ý tưởng nội dung do AI curator / scorer sinh sau.
     private static RawTrend ToTrend(string topic, string source, string metric) =>
-        new(topic.Trim(), source, metric.Trim(), ParseMetricScore(metric), ContentIdeas(topic));
+        new(topic.Trim(), source, metric.Trim(), ParseMetricScore(metric), []);
 
     internal static double ParseMetricScore(string metric)
     {
@@ -151,10 +162,6 @@ internal sealed class GoogleTrendsRssSource(HttpClient http, IOptions<GoogleTren
             : 0d;
     }
 
-    private static IReadOnlyList<string> ContentIdeas(string topic) =>
-        string.IsNullOrWhiteSpace(topic)
-            ? []
-            : [$"Explain {topic.Trim()} for Vietnamese Chinese learners"];
 }
 
 internal sealed class YouTubeDataApiSource(HttpClient http, IOptions<YouTubeTrendOptions> options)
@@ -163,11 +170,16 @@ internal sealed class YouTubeDataApiSource(HttpClient http, IOptions<YouTubeTren
     private readonly YouTubeTrendOptions _options = options.Value;
 
     public string Source => "youtube";
-    public bool Enabled => _options.Enabled && !string.IsNullOrWhiteSpace(_options.ApiKey);
 
-    public async Task<IReadOnlyList<RawTrend>> FetchAsync(string geo, CancellationToken ct = default)
+    // Key may arrive per-tenant at fetch time, so a missing global key no longer disables the source here.
+    public bool Enabled => _options.Enabled;
+
+    public async Task<IReadOnlyList<RawTrend>> FetchAsync(string geo, TrendSourceOverride? tenantOverride = null, CancellationToken ct = default)
     {
-        if (!Enabled)
+        var apiKey = tenantOverride?.ApiKey;
+        if (string.IsNullOrWhiteSpace(apiKey))
+            apiKey = _options.ApiKey;
+        if (!(tenantOverride?.Enabled ?? _options.Enabled) || string.IsNullOrWhiteSpace(apiKey))
             return [];
 
         try
@@ -177,7 +189,7 @@ internal sealed class YouTubeDataApiSource(HttpClient http, IOptions<YouTubeTren
             var url = _options.UrlTemplate
                 .Replace("{geo}", Uri.EscapeDataString(geo), StringComparison.Ordinal)
                 .Replace("{maxResults}", _options.MaxResults.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
-                .Replace("{apiKey}", Uri.EscapeDataString(_options.ApiKey), StringComparison.Ordinal);
+                .Replace("{apiKey}", Uri.EscapeDataString(apiKey), StringComparison.Ordinal);
             var json = await http.GetStringAsync(new Uri(url, UriKind.Absolute), timeout.Token).ConfigureAwait(false);
             return ParseVideoList(json);
         }
@@ -266,17 +278,27 @@ internal abstract class HtmlTrendSource<TOptions>(
     public string Source => sourceName;
     public bool Enabled => _options.Enabled && !string.IsNullOrWhiteSpace(_options.Url);
 
-    public async Task<IReadOnlyList<RawTrend>> FetchAsync(string geo, CancellationToken ct = default)
+    public async Task<IReadOnlyList<RawTrend>> FetchAsync(string geo, TrendSourceOverride? tenantOverride = null, CancellationToken ct = default)
     {
         _ = geo;
-        if (!Enabled)
+        var url = tenantOverride?.Url;
+        if (string.IsNullOrWhiteSpace(url))
+            url = _options.Url;
+        if (!(tenantOverride?.Enabled ?? _options.Enabled) || string.IsNullOrWhiteSpace(url))
             return [];
+
+        // Tenant-supplied URLs must pass the SSRF guard (public https hosts only); appsettings URLs are operator-owned.
+        if (!string.Equals(url, _options.Url, StringComparison.OrdinalIgnoreCase)
+            && !Chat.LlmBaseUrlGuard.IsAllowedBaseUrl(url))
+        {
+            return [];
+        }
 
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, _options.TimeoutSeconds)));
-            var html = await http.GetStringAsync(new Uri(_options.Url, UriKind.Absolute), timeout.Token).ConfigureAwait(false);
+            var html = await http.GetStringAsync(new Uri(url, UriKind.Absolute), timeout.Token).ConfigureAwait(false);
             return await HtmlTrendParser.ParseAsync(html, sourceName, timeout.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -346,7 +368,8 @@ public static class ResearchModule
         services.AddScoped<ITrendSource>(sp => sp.GetRequiredService<TikTokScrapeSource>());
         services.AddScoped<ITrendSource>(sp => sp.GetRequiredService<BaiduScrapeSource>());
         // Semantic scorer (Qdrant KB + LLM); tu fallback ve keyword heuristic khi host/tenant
-        // chua co IRagRetriever/IClaudeChatClient hoac LLM chua duoc bind
+        // chua co IRagRetriever/IClaudeChatClient hoac LLM chua duoc bind. Thay the cap
+        // WeightedTrendScorer + AiTrendCurator cua nhanh llm-agent (cung muc dich, mot duong di).
         services.AddScoped<ITrendRelevanceScorer>(sp => new SemanticLlmTrendScorer(
             sp.GetService<Clawbot.Agents.Core.Rag.IRagRetriever>(),
             sp.GetService<Clawbot.Agents.Core.Chat.IClaudeChatClient>(),

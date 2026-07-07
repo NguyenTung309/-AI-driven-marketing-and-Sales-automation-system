@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
 
-public sealed record TenantOrchestrationSettingsRequest(bool RequireApproval);
+public sealed record TenantOrchestrationSettingsRequest(bool RequireApproval, decimal? MonthlyCostCapUsd = null);
 
 public static class AdminEndpoints
 {
@@ -29,11 +29,11 @@ public static class AdminEndpoints
         CancellationToken ct = default)
     {
         var tenantId = tenants.Require().TenantId;
-        var requireApproval = await db.Tenants
+        var settings = await db.Tenants
             .Where(t => t.Id == tenantId)
-            .Select(t => t.RequireOrchestrationApproval)
+            .Select(t => new { t.RequireOrchestrationApproval, t.MonthlyCostCapUsd })
             .FirstOrDefaultAsync(ct);
-        return Results.Ok(new { requireApproval });
+        return Results.Ok(new { requireApproval = settings?.RequireOrchestrationApproval ?? false, monthlyCostCapUsd = settings?.MonthlyCostCapUsd });
     }
 
     private static async Task<IResult> UpdateTenantOrchestrationAsync(
@@ -47,8 +47,9 @@ public static class AdminEndpoints
         if (tenant is null) return Results.NotFound(new { error = "tenant_not_found" });
 
         tenant.SetRequireOrchestrationApproval(body.RequireApproval);
+        tenant.SetMonthlyCostCapUsd(body.MonthlyCostCapUsd);
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new { tenant.RequireOrchestrationApproval });
+        return Results.Ok(new { tenant.RequireOrchestrationApproval, tenant.MonthlyCostCapUsd });
     }
 
     private static async Task<IResult> ListAuditLogsAsync(

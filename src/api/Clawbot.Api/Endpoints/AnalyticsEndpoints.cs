@@ -45,11 +45,11 @@ public static class AnalyticsEndpoints
         var fromDate = DateTimeOffset.TryParse(from, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedFrom)
             ? parsedFrom : toDate.AddDays(-30);
 
-        var items = await db.ClaudeCostLedger
+        var items = await db.LlmCostLedger
             .IgnoreQueryFilters()
             .Where(c =>
                 c.TenantId == tenantId &&
-                c.AgentCode != Clawbot.Domain.Agents.ClaudeCostEntry.ReservationAgentCode &&
+                c.AgentCode != Clawbot.Domain.Agents.LlmCostEntry.ReservationAgentCode &&
                 c.CreatedAt >= fromDate &&
                 c.CreatedAt <= toDate)
             .GroupBy(c => c.AgentCode)

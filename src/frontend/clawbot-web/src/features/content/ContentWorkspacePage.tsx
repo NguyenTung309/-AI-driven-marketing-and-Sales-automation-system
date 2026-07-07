@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, Modal, StatusPill, type StatusTone } from "@/shared/ui";
+import { TrendSettingsDialog } from "./TrendSettingsDialog";
 import { platformClasses } from "@/shared/theme/colors";
 import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
@@ -388,6 +389,7 @@ function TrendPanel({
   weekOptions,
   onWeekChange,
   onScan,
+  onOpenSettings,
   onUseIdea,
 }: {
   readonly trends: readonly Trend[];
@@ -398,6 +400,7 @@ function TrendPanel({
   readonly weekOptions: readonly { value: string; label: string }[];
   readonly onWeekChange: (week: string) => void;
   readonly onScan: () => void;
+  readonly onOpenSettings: () => void;
   readonly onUseIdea: (idea: string) => void;
 }) {
   return (
@@ -418,6 +421,9 @@ function TrendPanel({
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
+          <Button type="button" variant="outline" size="sm" onClick={onOpenSettings} aria-label="Cấu hình quét xu hướng">
+            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">settings</span>
+          </Button>
           <Button type="button" variant="outline" size="sm" onClick={onScan} disabled={scanning}>
             <span aria-hidden="true" className="material-symbols-outlined text-[16px]">travel_explore</span>
             {scanning ? "Đang quét" : "Quét"}
@@ -440,7 +446,7 @@ function TrendPanel({
                   </p>
                 </div>
                 <span className="rounded bg-primary/10 px-2 py-1 font-mono text-mono-status text-primary">
-                  {Math.round(trend.relevanceScore * 100)}%
+                  {trend.relevanceScore.toFixed(1)} điểm
                 </span>
               </div>
               <div className="space-y-2">
@@ -1072,6 +1078,8 @@ export default function ContentWorkspacePage() {
     },
   });
 
+  const [trendSettingsOpen, setTrendSettingsOpen] = useState(false);
+
   function selectBrief(brief: ContentBrief) {
     setSelectedBriefId(brief.id);
     setBriefPlatform(coercePlatform(brief.platform));
@@ -1171,8 +1179,10 @@ export default function ContentWorkspacePage() {
             ]}
             onWeekChange={setTrendWeek}
             onScan={() => scanMutation.mutate()}
+            onOpenSettings={() => setTrendSettingsOpen(true)}
             onUseIdea={applyTrendIdea}
           />
+          <TrendSettingsDialog open={trendSettingsOpen} onClose={() => setTrendSettingsOpen(false)} />
         </div>
 
         <div className="space-y-gutter">

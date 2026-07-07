@@ -58,8 +58,8 @@ public sealed class HeuristicPromptInjectionDefenderTests
     }
 }
 
-// M11 — InMemoryClaudeCostTracker (per-tenant per-month observed-spend ledger).
-public sealed class InMemoryClaudeCostTrackerTests
+// M11 — InMemoryLlmCostTracker (per-tenant per-month observed-spend ledger).
+public sealed class InMemoryLlmCostTrackerTests
 {
     private static CostEntry Entry(Guid tenant, decimal usd, DateTimeOffset at) =>
         new(tenant, "chat", "claude", 100, 50, usd, at);
@@ -67,7 +67,7 @@ public sealed class InMemoryClaudeCostTrackerTests
     [Fact]
     public async Task Accumulates_costs_within_same_month()
     {
-        var sut = new InMemoryClaudeCostTracker();
+        var sut = new InMemoryLlmCostTracker();
         var tenant = Guid.NewGuid();
         var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
 
@@ -83,7 +83,7 @@ public sealed class InMemoryClaudeCostTrackerTests
     [Fact]
     public async Task Separates_tenants_and_months()
     {
-        var sut = new InMemoryClaudeCostTracker();
+        var sut = new InMemoryLlmCostTracker();
         var t1 = Guid.NewGuid();
         var t2 = Guid.NewGuid();
         var june = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
@@ -101,7 +101,7 @@ public sealed class InMemoryClaudeCostTrackerTests
     [Fact]
     public async Task Unknown_month_returns_zero()
     {
-        var sut = new InMemoryClaudeCostTracker();
+        var sut = new InMemoryLlmCostTracker();
 
         var summary = await sut.SummaryAsync(Guid.NewGuid(), DateTimeOffset.UtcNow, CancellationToken.None);
 
@@ -112,7 +112,7 @@ public sealed class InMemoryClaudeCostTrackerTests
     [Fact]
     public async Task Records_actual_spend_even_when_monthly_cap_is_exceeded()
     {
-        var sut = new InMemoryClaudeCostTracker();
+        var sut = new InMemoryLlmCostTracker();
         var tenant = Guid.NewGuid();
         var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
 
@@ -127,7 +127,7 @@ public sealed class InMemoryClaudeCostTrackerTests
     [Fact]
     public async Task Ignores_non_positive_entries()
     {
-        var sut = new InMemoryClaudeCostTracker();
+        var sut = new InMemoryLlmCostTracker();
         var tenant = Guid.NewGuid();
         var month = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
 
@@ -141,7 +141,7 @@ public sealed class InMemoryClaudeCostTrackerTests
     [Fact]
     public async Task Record_null_throws()
     {
-        var sut = new InMemoryClaudeCostTracker();
+        var sut = new InMemoryLlmCostTracker();
 
         var act = async () => await sut.RecordAsync(null!, CancellationToken.None);
 

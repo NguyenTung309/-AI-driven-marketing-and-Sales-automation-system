@@ -56,6 +56,11 @@ export function toSafeOperationalText(value: string | null | undefined, fallback
 export function operationalPhaseLabel(value: string | null | undefined): string {
   const normalized = (value ?? "").trim().toLowerCase();
   if (!normalized) return "Thông tin";
+  // Phase máy của orchestrator — đặt trước heuristic để phân biệt "đang tự thử lại" với lỗi hẳn.
+  if (normalized === "transient_retry") return "Tự thử lại";
+  if (normalized === "dependency_blocked") return "Chờ phụ thuộc";
+  if (normalized === "planning_failed") return "Lập kế hoạch thất bại";
+  if (normalized === "replan") return "Lập lại kế hoạch";
   if (normalized.includes("error") || normalized.includes("fail")) return "Lỗi";
   if (normalized.includes("warn")) return "Cảnh báo";
   if (normalized === "input") return "Đầu vào";

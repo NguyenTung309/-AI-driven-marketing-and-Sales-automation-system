@@ -47,6 +47,8 @@ export function Topbar({ title }: TopbarProps) {
     queryFn: getUnreadNotificationCount,
     retry: false,
     staleTime: 30_000,
+    // Dự phòng khi hub SignalR rớt: poll 30s để run failed / chờ duyệt vẫn nổi lên chuông.
+    refetchInterval: 30_000,
   });
   const unreadCount = data?.count ?? 0;
 

@@ -99,6 +99,10 @@ builder.Services.AddClawbotRateLimiting();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IInboxNotifier, SignalRInboxNotifier>();
 builder.Services.AddScoped<INotificationPublisher, Clawbot.Api.Hubs.DbNotificationPublisher>();
+// Relay notifications published on Redis by AgentService (run failed / pending approval) into NotificationHub.
+builder.Services.AddHostedService<Clawbot.Api.Hubs.RedisNotificationRelay>();
+// B5: cost summary cho điểm phê duyệt — cùng ledger với cost guard của orchestrator.
+builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Ops.ILlmCostTracker, Clawbot.Infrastructure.Agents.DbLlmCostTracker>();
 builder.Services.AddScoped<SignalRContentNotifier>();
 builder.Services.AddScoped<IContentNotifier>(sp => new PublishingContentNotifier(
     sp.GetRequiredService<SignalRContentNotifier>(),
@@ -285,6 +289,8 @@ app.MapChannels();
 app.MapWebhooks();
 app.MapContacts();
 app.MapAdmin();
+app.MapAdminJobs();
+app.MapAdminSocialCredentials();
 app.MapAdminInboxEndpoints();
 app.MapAdminChannelsEndpoints();
 app.MapTenantBranding();

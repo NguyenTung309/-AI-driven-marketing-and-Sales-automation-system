@@ -215,7 +215,7 @@ internal sealed class GenericLlmAgentWorker(
     {
         var current = llmScope.Current;
         if (current is not null)
-            await costGuard.RecordAsync(current.Value.TenantId, current.Value.AgentCode, reply, current.Value.CostAt ?? DateTimeOffset.UtcNow, current.Value.ReservationId).ConfigureAwait(false);
+            await costGuard.RecordAsync(current.Value.TenantId, current.Value.AgentCode, reply, current.Value.CostAt ?? DateTimeOffset.UtcNow, current.Value.ReservationId, current.Value.SessionId).ConfigureAwait(false);
     }
 
     private static string[] ParseAllowedToolNames(string allowedToolsJson)

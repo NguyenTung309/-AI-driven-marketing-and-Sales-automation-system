@@ -29,7 +29,7 @@ public sealed class ContentAgent(
     IPromptTemplateProvider templates,
     IClaudeChatClient claude,
     ILlmCallScope llmScope,
-    IClaudeCostTracker? costTracker = null)
+    ILlmCostTracker? costTracker = null)
 {
     private const string AgentCode = "content-agent";
 
@@ -37,7 +37,7 @@ public sealed class ContentAgent(
     private readonly IPromptTemplateProvider _templates = templates;
     private readonly IClaudeChatClient _claude = claude;
     private readonly ILlmCallScope _llmScope = llmScope;
-    private readonly IClaudeCostTracker? _costTracker = costTracker;
+    private readonly ILlmCostTracker? _costTracker = costTracker;
 
     public async Task<ContentDraftResult> GenerateAsync(ContentGenerateRequest request, CancellationToken ct = default)
     {

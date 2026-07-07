@@ -334,7 +334,7 @@ public sealed class AutonomousOrchestratorTests
         IAutonomousPlanner planner,
         AgentRegistry registry,
         AutonomousOrchestratorOptions? options = null,
-        IClaudeCostTracker? tracker = null,
+        ILlmCostTracker? tracker = null,
         IAgentDefinitionCatalog? catalog = null,
         IRagRetriever? rag = null,
         IClaudeChatClient? chat = null,
@@ -480,17 +480,17 @@ public sealed class AutonomousOrchestratorTests
         }
     }
 
-    private static IClaudeCostTracker AllowedTracker()
+    private static ILlmCostTracker AllowedTracker()
     {
-        var t = Substitute.For<IClaudeCostTracker>();
+        var t = Substitute.For<ILlmCostTracker>();
         t.SummaryAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(new CostSummary(Tenant, 0m, 1000m, 0));
         return t;
     }
 
-    private static IClaudeCostTracker DeniedTracker()
+    private static ILlmCostTracker DeniedTracker()
     {
-        var t = Substitute.For<IClaudeCostTracker>();
+        var t = Substitute.For<ILlmCostTracker>();
         t.SummaryAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(new CostSummary(Tenant, 1000m, 1m, 100));
         return t;

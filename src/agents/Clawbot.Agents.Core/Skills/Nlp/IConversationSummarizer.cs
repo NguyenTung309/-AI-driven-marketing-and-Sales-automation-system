@@ -30,13 +30,13 @@ internal sealed partial class ClaudeConversationSummarizer : IConversationSummar
 {
     private readonly IClaudeChatClient _claude;
     private readonly SummarizerOptions _options;
-    private readonly IClaudeCostTracker? _costTracker;
+    private readonly ILlmCostTracker? _costTracker;
     private readonly ILlmCallScope? _llmScope;
 
     public ClaudeConversationSummarizer(
         IClaudeChatClient claude,
         IOptions<SummarizerOptions> options,
-        IClaudeCostTracker? costTracker = null,
+        ILlmCostTracker? costTracker = null,
         ILlmCallScope? llmScope = null)
     {
         _claude = claude;

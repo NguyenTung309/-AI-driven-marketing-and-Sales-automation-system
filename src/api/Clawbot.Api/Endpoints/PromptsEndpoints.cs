@@ -97,12 +97,12 @@ public static class PromptsEndpoints
             .ToListAsync(ct);
 
         var since = clock.UtcNow.AddDays(-7);
-        var costs = await db.ClaudeCostLedger
+        var costs = await db.LlmCostLedger
             .IgnoreQueryFilters()
             .AsNoTracking()
             .Where(cost =>
                 cost.TenantId == tenantId &&
-                cost.AgentCode != ClaudeCostEntry.ReservationAgentCode &&
+                cost.AgentCode != LlmCostEntry.ReservationAgentCode &&
                 cost.CreatedAt >= since &&
                 cost.CreatedAt <= clock.UtcNow)
             .ToListAsync(ct);
@@ -140,13 +140,13 @@ public static class PromptsEndpoints
         if (agent is null) return Results.NotFound();
 
         var since = clock.UtcNow.AddDays(-7);
-        var costs = await db.ClaudeCostLedger
+        var costs = await db.LlmCostLedger
             .IgnoreQueryFilters()
             .AsNoTracking()
             .Where(cost =>
                 cost.TenantId == tenantId &&
                 cost.AgentCode == agent.Code &&
-                cost.AgentCode != ClaudeCostEntry.ReservationAgentCode &&
+                cost.AgentCode != LlmCostEntry.ReservationAgentCode &&
                 cost.CreatedAt >= since &&
                 cost.CreatedAt <= clock.UtcNow)
             .OrderByDescending(cost => cost.CreatedAt)
@@ -237,7 +237,7 @@ public static class PromptsEndpoints
 
     private static PromptConfigResponse BuildConfigResponse(
         AgentConfig agent,
-        IReadOnlyList<ClaudeCostEntry> costs,
+        IReadOnlyList<LlmCostEntry> costs,
         DateTimeOffset? lastRunAt,
         bool includeRecentUsage)
     {

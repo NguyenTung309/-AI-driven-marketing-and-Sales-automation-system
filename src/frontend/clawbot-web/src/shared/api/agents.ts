@@ -10,6 +10,8 @@ export interface AgentListItem {
   readonly status: AgentStatus;
   readonly updatedAt: string;
   readonly lastRunAt: string | null;
+  /** LLM config đã gắn; null = chưa gắn (planner sẽ bỏ qua agent này). */
+  readonly llmConfigId?: string | null;
 }
 
 export interface AgentListResponse {

@@ -40,10 +40,11 @@ public sealed class StitchDesignSystemFrontendTests
     public void Admin_branding_form_defaults_to_the_stitch_primary_red()
     {
         var root = FindRepositoryRoot();
-        var adminPage = File.ReadAllText(Path.Combine(root, "src", "frontend", "clawbot-web", "src", "features", "admin", "AdminConsolePage.tsx"));
+        // Branding-form defaults moved into adminHelpers.tsx when AdminConsolePage was split into tab components (b931614).
+        var adminHelpers = File.ReadAllText(Path.Combine(root, "src", "frontend", "clawbot-web", "src", "features", "admin", "adminHelpers.tsx"));
 
-        adminPage.Should().Contain("primaryColor: \"#d32f2f\"");
-        adminPage.Should().NotContain("primaryColor: \"#b91c1c\"");
+        adminHelpers.Should().Contain("primaryColor: \"#d32f2f\"");
+        adminHelpers.Should().NotContain("primaryColor: \"#b91c1c\"");
     }
 
     [Fact]

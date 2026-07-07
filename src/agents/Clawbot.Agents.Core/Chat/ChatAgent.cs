@@ -42,7 +42,7 @@ public sealed class ChatAgent(
     IIntentClassifier intent,
     IPiiRedactor pii,
     IPromptInjectionDefender injection,
-    IClaudeCostTracker cost,
+    ILlmCostTracker cost,
     ILanguageDetector language,
     IToxicityFilter toxicity,
     ISpamDetector spam,
@@ -62,7 +62,7 @@ public sealed class ChatAgent(
     private readonly IIntentClassifier _intent = intent;
     private readonly IPiiRedactor _pii = pii;
     private readonly IPromptInjectionDefender _injection = injection;
-    private readonly IClaudeCostTracker _cost = cost;
+    private readonly ILlmCostTracker _cost = cost;
     private readonly ILanguageDetector _language = language;
     private readonly IToxicityFilter _toxicity = toxicity;
     private readonly ISpamDetector _spam = spam;

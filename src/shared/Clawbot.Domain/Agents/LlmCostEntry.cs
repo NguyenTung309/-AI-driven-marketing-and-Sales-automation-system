@@ -3,7 +3,7 @@ using Clawbot.Domain.Common;
 namespace Clawbot.Domain.Agents;
 
 /// <summary>One persisted LLM-call cost row (claude_cost_ledger). Feeds the agent-cost report.</summary>
-public sealed class ClaudeCostEntry : Entity<Guid>, ITenantOwned
+public sealed class LlmCostEntry : Entity<Guid>, ITenantOwned
 {
     public const string ReservationAgentCode = "__cost_reservation__";
     public const string ReservationModel = "reserved-budget";
@@ -14,18 +14,21 @@ public sealed class ClaudeCostEntry : Entity<Guid>, ITenantOwned
     public int InputTokens { get; private set; }
     public int OutputTokens { get; private set; }
     public decimal Usd { get; private set; }
+    // Phiên điều phối sinh ra chi phí này (null cho gọi LLM ngoài run: chat, content thủ công...).
+    public Guid? SessionId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
-    private ClaudeCostEntry() { }
+    private LlmCostEntry() { }
 
-    public static ClaudeCostEntry Create(
+    public static LlmCostEntry Create(
         Guid tenantId,
         string agentCode,
         string model,
         int inputTokens,
         int outputTokens,
         decimal usd,
-        DateTimeOffset createdAt) =>
+        DateTimeOffset createdAt,
+        Guid? sessionId = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -35,10 +38,11 @@ public sealed class ClaudeCostEntry : Entity<Guid>, ITenantOwned
             InputTokens = inputTokens,
             OutputTokens = outputTokens,
             Usd = usd,
+            SessionId = sessionId,
             CreatedAt = createdAt,
         };
 
-    public static ClaudeCostEntry CreateReservation(Guid tenantId, Guid reservationId, decimal usd, DateTimeOffset createdAt) =>
+    public static LlmCostEntry CreateReservation(Guid tenantId, Guid reservationId, decimal usd, DateTimeOffset createdAt) =>
         new()
         {
             Id = reservationId,
@@ -59,7 +63,7 @@ public sealed class ClaudeCostEntry : Entity<Guid>, ITenantOwned
         Usd = 0m;
     }
 
-    public void ApplyReservation(string agentCode, string model, int inputTokens, int outputTokens, decimal usd)
+    public void ApplyReservation(string agentCode, string model, int inputTokens, int outputTokens, decimal usd, Guid? sessionId = null)
     {
         if (!string.Equals(AgentCode, ReservationAgentCode, StringComparison.Ordinal))
             throw new InvalidOperationException("Only cost reservation rows can be applied.");
@@ -69,5 +73,6 @@ public sealed class ClaudeCostEntry : Entity<Guid>, ITenantOwned
         InputTokens = inputTokens;
         OutputTokens = outputTokens;
         Usd = Math.Max(0m, usd);
+        SessionId = sessionId;
     }
 }

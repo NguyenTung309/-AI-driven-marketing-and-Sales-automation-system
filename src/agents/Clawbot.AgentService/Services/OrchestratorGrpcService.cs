@@ -67,6 +67,8 @@ public sealed partial class OrchestratorGrpcService(
         // SPEC-16 P3-3: attribute the session to the initiating user so terminal notifications target them.
         var session = AgentSession.Start(tenantId, orchestratorAgentId, conversationId: null, redactedGoal, now, userId: userId);
         session.AppendTrace(string.Empty, OrchestratorAgentCode, "planning_started", "Đang lập kế hoạch cho mục tiêu.", now);
+        if (request.DryRun)
+            session.AppendTrace(string.Empty, OrchestratorAgentCode, "dry_run", "Bản chạy thử — công cụ chỉ mô phỏng hành động, không thực thi thật.", now);
         _db.AgentSessions.Add(session);
         await SaveAsync(ct).ConfigureAwait(false);
 
@@ -75,13 +77,14 @@ public sealed partial class OrchestratorGrpcService(
         {
             var sessionId = session.Id;
             var goal = request.Goal;
+            var dryRun = request.DryRun;
             _ = Task.Run(async () =>
             {
                 try
                 {
                     using var scope = _scopeFactory.CreateScope();
                     var service = ActivatorUtilities.CreateInstance<OrchestratorGrpcService>(scope.ServiceProvider);
-                    await service.PlanAndRunPersistedAsync(sessionId, goal, CancellationToken.None).ConfigureAwait(false);
+                    await service.PlanAndRunPersistedAsync(sessionId, goal, dryRun, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -93,11 +96,11 @@ public sealed partial class OrchestratorGrpcService(
         }
 
         // No scope factory (tests / inline host): plan + execute synchronously within the request.
-        var (costBlocked, costReason) = await PlanAndExecuteAsync(session, request.Goal, ct).ConfigureAwait(false);
+        var (costBlocked, costReason) = await PlanAndExecuteAsync(session, request.Goal, request.DryRun, ct).ConfigureAwait(false);
         return ToResponse(session, costBlocked, costReason);
     }
 
-    private async Task PlanAndRunPersistedAsync(Guid sessionId, string goal, CancellationToken ct)
+    private async Task PlanAndRunPersistedAsync(Guid sessionId, string goal, bool dryRun, CancellationToken ct)
     {
         var session = await _db.AgentSessions
             .IgnoreQueryFilters()
@@ -106,11 +109,11 @@ public sealed partial class OrchestratorGrpcService(
         if (session is null)
             return;
 
-        await PlanAndExecuteAsync(session, goal, ct).ConfigureAwait(false);
+        await PlanAndExecuteAsync(session, goal, dryRun, ct).ConfigureAwait(false);
     }
 
     // Generate and execute through V2. The session placeholder already exists, so progress survives F5.
-    private async Task<(bool CostBlocked, string? CostReason)> PlanAndExecuteAsync(AgentSession session, string goal, CancellationToken ct)
+    private async Task<(bool CostBlocked, string? CostReason)> PlanAndExecuteAsync(AgentSession session, string goal, bool dryRun, CancellationToken ct)
     {
         var requireApproval = await _db.Tenants
             .IgnoreQueryFilters()
@@ -120,8 +123,8 @@ public sealed partial class OrchestratorGrpcService(
 
         var existingPlan = OrchestrationPlanJson.TryParse(session.PlanJson);
         var result = existingPlan?.Tasks is { Count: > 0 } && session.Status == AgentSessionStatuses.Running
-            ? await _autonomous.RunExistingPlanAsync(new AutonomousRunRequest(session.TenantId, session.Id, goal, "manual", RequiresApproval: false), existingPlan, ct).ConfigureAwait(false)
-            : await _autonomous.RunAsync(new AutonomousRunRequest(session.TenantId, session.Id, goal, "manual", requireApproval), ct).ConfigureAwait(false);
+            ? await _autonomous.RunExistingPlanAsync(new AutonomousRunRequest(session.TenantId, session.Id, goal, "manual", RequiresApproval: false, DryRun: dryRun), existingPlan, ct).ConfigureAwait(false)
+            : await _autonomous.RunAsync(new AutonomousRunRequest(session.TenantId, session.Id, goal, "manual", requireApproval, DryRun: dryRun), ct).ConfigureAwait(false);
 
         return (result.Reason == "cost_cap_preflight", result.Reason);
     }
@@ -225,7 +228,8 @@ public sealed partial class OrchestratorGrpcService(
                 .IgnoreQueryFilters()
                 .FirstAsync(s => s.Id == sessionId, requestCt)
                 .ConfigureAwait(false);
-            await PlanAndExecuteAsync(session, goal, requestCt).ConfigureAwait(false);
+            // Approval/resume path always executes for real — dry-run stops at the preview stage.
+            await PlanAndExecuteAsync(session, goal, dryRun: false, requestCt).ConfigureAwait(false);
             return;
         }
 
@@ -235,7 +239,7 @@ public sealed partial class OrchestratorGrpcService(
             {
                 using var scope = _scopeFactory.CreateScope();
                 var service = ActivatorUtilities.CreateInstance<OrchestratorGrpcService>(scope.ServiceProvider);
-                await service.PlanAndRunPersistedAsync(sessionId, goal, CancellationToken.None).ConfigureAwait(false);
+                await service.PlanAndRunPersistedAsync(sessionId, goal, dryRun: false, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

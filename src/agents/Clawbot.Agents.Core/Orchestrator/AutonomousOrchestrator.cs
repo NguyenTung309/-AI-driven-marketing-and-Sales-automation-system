@@ -209,7 +209,7 @@ public sealed class AutonomousOrchestrator
         AgentResult result;
         try
         {
-            using var _costScope = _llmScope.Begin(request.TenantId, task.Agent, _clock.UtcNow, reservation.ReservationId);
+            using var _costScope = _llmScope.Begin(request.TenantId, task.Agent, _clock.UtcNow, reservation.ReservationId, request.SessionId);
             var agent = ResolveAgent(task.Agent, definition, request, task);
             // EARS[WHEN a delegated task suffers a transient LLM/HTTP failure THE SYSTEM SHALL retry the same task
             // with backoff (up to MaxTransientRetries) without burning a replan round, so a slow completion no longer

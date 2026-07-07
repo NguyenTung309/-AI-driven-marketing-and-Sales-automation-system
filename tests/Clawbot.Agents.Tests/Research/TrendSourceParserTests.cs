@@ -1,5 +1,6 @@
 using Clawbot.Agents.Core.Research;
 using FluentAssertions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Clawbot.Agents.Tests.Research;
@@ -80,6 +81,31 @@ public sealed class TrendSourceParserTests
         trends[0].Metric.Should().Be("12345 views");
         trends[0].SourceScore.Should().Be(12_345d);
         trends[0].ContentIdeas.Should().Contain("mandarin");
+    }
+
+    [Fact]
+    public async Task Html_source_returns_empty_when_tenant_override_disables_it()
+    {
+        using var http = new HttpClient();
+        var source = new TikTokScrapeSource(http, Options.Create(new TikTokScrapeOptions { Url = "https://example.com/trends" }));
+
+        var trends = await source.FetchAsync("VN", new TrendSourceOverride(Enabled: false), CancellationToken.None);
+
+        trends.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Html_source_blocks_private_tenant_url()
+    {
+        using var http = new HttpClient();
+        var source = new TikTokScrapeSource(http, Options.Create(new TikTokScrapeOptions()));
+
+        var trends = await source.FetchAsync(
+            "VN",
+            new TrendSourceOverride(Enabled: true, Url: "https://localhost/internal"),
+            CancellationToken.None);
+
+        trends.Should().BeEmpty();
     }
 
     [Fact]

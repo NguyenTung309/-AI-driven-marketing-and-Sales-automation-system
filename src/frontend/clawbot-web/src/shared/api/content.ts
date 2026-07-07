@@ -156,6 +156,51 @@ export async function scanContentTrends(week?: string): Promise<TrendScanRespons
   return res.data;
 }
 
+export interface TrendSourceSetting {
+  readonly enabled: boolean;
+  readonly hasApiKey: boolean;
+  readonly url?: string | null;
+}
+
+export interface TrendScheduleInfo {
+  readonly cadence: string;
+  readonly nextRunAt?: string | null;
+  readonly lastRunAt?: string | null;
+}
+
+export interface TrendSettings {
+  readonly geo: string;
+  readonly google: TrendSourceSetting;
+  readonly youTube: TrendSourceSetting;
+  readonly tikTok: TrendSourceSetting;
+  readonly schedule: TrendScheduleInfo;
+}
+
+/** apiKey/url: null = giữ giá trị đã lưu, chuỗi rỗng = xoá. */
+export interface UpdateTrendSourcePayload {
+  readonly enabled?: boolean | null;
+  readonly apiKey?: string | null;
+  readonly url?: string | null;
+}
+
+export interface UpdateTrendSettingsPayload {
+  readonly geo?: string | null;
+  readonly google?: UpdateTrendSourcePayload | null;
+  readonly youTube?: UpdateTrendSourcePayload | null;
+  readonly tikTok?: UpdateTrendSourcePayload | null;
+  readonly scheduleCadence?: string | null;
+}
+
+export async function getTrendSettings(): Promise<TrendSettings> {
+  const res = await apiClient.get<TrendSettings>("/api/content/trends/settings");
+  return res.data;
+}
+
+export async function updateTrendSettings(payload: UpdateTrendSettingsPayload): Promise<TrendSettings> {
+  const res = await apiClient.put<TrendSettings>("/api/content/trends/settings", payload);
+  return res.data;
+}
+
 export async function generateContentItems(payload: GenerateContentItemPayload): Promise<{ readonly items: readonly ContentItem[] }> {
   const res = await apiClient.post<{ readonly items: readonly ContentItem[] }>("/api/content/items/generate", payload);
   return res.data;
