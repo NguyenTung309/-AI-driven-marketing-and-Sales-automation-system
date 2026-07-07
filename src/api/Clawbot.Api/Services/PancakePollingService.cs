@@ -73,12 +73,11 @@ public sealed partial class PancakePollingService : BackgroundService
         {
             try
             {
-                var cfg = _config.Get();
-                if (cfg.IsTokenConfigured && cfg.PancakePageId is not null)
-                {
-                    await PollConversationsAsync(cfg, stoppingToken);
-                }
-                _lastPollUtc = DateTime.UtcNow;
+                // DB inboxes must poll regardless of demo env vars; env-var page is a fallback inside
+                var pollStart = DateTime.UtcNow;
+                var ok = await PollConversationsAsync(_config.Get(), stoppingToken);
+                // Watermark advances only on a clean pass, and to the pass START so nothing lands in a gap
+                if (ok) _lastPollUtc = pollStart;
                 await Task.Delay(PollInterval, stoppingToken);
             }
             catch (OperationCanceledException) { break; }
@@ -90,10 +89,11 @@ public sealed partial class PancakePollingService : BackgroundService
         }
     }
 
-    private async Task PollConversationsAsync(DemoRuntimeConfig cfg, CancellationToken ct)
+    private async Task<bool> PollConversationsAsync(DemoRuntimeConfig cfg, CancellationToken ct)
     {
         var baseUrl = string.IsNullOrEmpty(cfg.PancakeBaseUrl) ? DefaultBaseUrl : cfg.PancakeBaseUrl;
         var client = _httpFactory.CreateClient("Pancake");
+        var ok = true;
 
         // 1. Poll all inboxes with tokens from DB
         try
@@ -121,6 +121,7 @@ public sealed partial class PancakePollingService : BackgroundService
         {
             #pragma warning disable CA1848
             _log.LogWarning(ex, "Failed to poll inboxes from DB, falling back to env-var page");
+            ok = false;
         }
 
         // 2. Fallback: poll the env-var page (demo mode)
@@ -128,6 +129,8 @@ public sealed partial class PancakePollingService : BackgroundService
         {
             await PollPageAsync(client, baseUrl, cfg.PancakePageId, cfg.PancakePageAccessToken, ct);
         }
+
+        return ok;
     }
 
     private async Task PollPageAsync(HttpClient client, string baseUrl, string pageId, string token, CancellationToken ct)

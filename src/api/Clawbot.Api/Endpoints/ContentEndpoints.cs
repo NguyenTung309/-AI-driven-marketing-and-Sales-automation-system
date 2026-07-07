@@ -589,7 +589,10 @@ public static class ContentEndpoints
                 return new GenerateInput(null, string.Empty, string.Empty,
                     Error(http, StatusCodes.Status404NotFound, "content.brief_not_found", "Content brief not found."));
 
-            return new GenerateInput(brief.Id, brief.Platform, brief.Brief, null);
+            // Trend-scan briefs carry the trend source (e.g. "google_trends") in Platform, which has no
+            // prompt template — let the request pick the target platform, brief only provides the default.
+            var platform = string.IsNullOrWhiteSpace(body.Platform) ? brief.Platform : body.Platform.Trim();
+            return new GenerateInput(brief.Id, platform, brief.Brief, null);
         }
 
         if (string.IsNullOrWhiteSpace(body.Platform) || string.IsNullOrWhiteSpace(body.BriefText))

@@ -82,6 +82,13 @@ function normalize(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
 }
 
+// Trend-scan briefs carry the trend source (e.g. "google_trends") as platform — coerce to a
+// selectable platform so the picker and generate calls never send a value without a prompt template.
+function coercePlatform(platform: string): string {
+  const value = normalize(platform);
+  return PLATFORMS.some((item) => item.value === value) ? value : PLATFORMS[0].value;
+}
+
 function platformConfig(platform: string): PlatformConfig {
   const value = normalize(platform);
   return PLATFORMS.find((item) => item.value === value || value.includes(item.value)) ?? {
@@ -945,7 +952,7 @@ export default function ContentWorkspacePage() {
         : createContentBrief({ platform: briefPlatform, brief: briefText.trim() }),
     onSuccess: async (brief) => {
       setSelectedBriefId(brief.id);
-      setBriefPlatform(brief.platform);
+      setBriefPlatform(coercePlatform(brief.platform));
       setBriefText(brief.brief);
       setNotice({ tone: "success", message: "Đã lưu yêu cầu nội dung." });
       await queryClient.invalidateQueries({ queryKey: ["content", "briefs"] });
@@ -965,7 +972,7 @@ export default function ContentWorkspacePage() {
   const generateMutation = useMutation({
     mutationFn: () =>
       selectedBriefId
-        ? generateContentItems({ briefId: selectedBriefId })
+        ? generateContentItems({ briefId: selectedBriefId, platform: briefPlatform })
         : generateContentItems({ platform: briefPlatform, briefText: briefText.trim() }),
     onSuccess: async (response) => {
       const first = response.items[0];
@@ -1067,7 +1074,7 @@ export default function ContentWorkspacePage() {
 
   function selectBrief(brief: ContentBrief) {
     setSelectedBriefId(brief.id);
-    setBriefPlatform(brief.platform);
+    setBriefPlatform(coercePlatform(brief.platform));
     setBriefText(brief.brief);
   }
 
