@@ -11,6 +11,7 @@ import {
   mintPancakePages,
   getInboxMembers,
   updateInboxMember,
+  updateInbox,
   createInbox,
   type InboxItem,
   type PancakePageSummary,
@@ -65,8 +66,11 @@ export default function ChannelManagementPage() {
   }, [membersQuery.data]);
 
   const saveMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (!editInboxId) throw new Error("No inbox selected");
+      if (tokenInput.trim()) {
+        await updateInbox(editInboxId, tokenInput.trim());
+      }
       return updateInboxMember(editInboxId, selectedAgentId);
     },
     onSuccess: () => {

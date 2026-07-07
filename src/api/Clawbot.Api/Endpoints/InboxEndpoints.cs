@@ -10,7 +10,6 @@ using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Inbox;
 using Clawbot.SharedKernel.Multitenancy;
-using Clawbot.SharedKernel.Security;
 using Clawbot.SharedKernel.Time;
 using Hangfire;
 using Microsoft.AspNetCore.Mvc;
@@ -32,6 +31,7 @@ public static class InboxEndpoints
         grp.MapPost("/conversations/{id:guid}/assign", AssignAsync).RequirePermission("conversations:write");
         grp.MapPost("/conversations/{id:guid}/resolve", ResolveAsync).RequirePermission("conversations:write");
         grp.MapPost("/conversations/{id:guid}/escalate", EscalateAsync).RequirePermission("conversations:write");
+        grp.MapPost("/conversations/{id:guid}/ai", SetAiAutoReplyAsync).RequirePermission("conversations:write");
         grp.MapPost("/conversations/{id:guid}/messages", SendOutboundAsync).RequirePermission("conversations:write");
         grp.MapGet("/channels", ListChannelsAsync).RequirePermission("conversations:read");
         grp.MapGet("/daily-summary", DailySummaryAsync).RequirePermission("conversations:read");
@@ -82,6 +82,7 @@ public static class InboxEndpoints
                 c.AssignedTo,
                 c.LastMessageAt,
                 c.InboxId,
+                c.AiAutoReplyEnabled,
                 RowVersion = c.RowVersion ?? Array.Empty<byte>(),
                 LastMessage = c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault(),
             })
@@ -104,7 +105,8 @@ public static class InboxEndpoints
             r.AssignedTo, r.LastMessageAt,
             r.LastMessage is null ? null : Preview(r.LastMessage),
             r.RowVersion,
-            UnreadCount: 0)).ToList();
+            UnreadCount: 0,
+            AiAutoReplyEnabled: r.AiAutoReplyEnabled)).ToList();
 
         return Results.Ok(new ConversationListResponse(items, total, page, pageSize));
     }
@@ -130,7 +132,7 @@ public static class InboxEndpoints
                 .Select(c => new { c.DisplayName, c.AvatarUrl }).FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
         var messages = conv.Messages.OrderBy(m => m.SentAt)
-            .Select(m => new MessageDto(m.Id, m.Direction, m.SenderType, m.SenderUserId, m.Content, m.ContentType, m.SentAt, m.SenderDisplayName))
+            .Select(m => new MessageDto(m.Id, m.Direction, m.SenderType, m.SenderUserId, m.Content, m.ContentType, m.SentAt, m.SenderDisplayName, m.SenderAvatarUrl, m.AttachmentUrl))
             .ToList();
 
         string? inboxName = null;
@@ -152,7 +154,7 @@ public static class InboxEndpoints
             conv.Id, conv.Platform, conv.ExternalThreadId, conv.Status, conv.ContactId,
             contact?.DisplayName, contact?.AvatarUrl, conv.InboxId, inboxName, inboxAvatarUrl,
             conv.AssignedTo, conv.LastMessageAt, conv.CreatedAt,
-            conv.RowVersion, messages));
+            conv.RowVersion, messages, conv.AiAutoReplyEnabled));
     }
 
     private static async Task<IResult> SearchAsync(
@@ -267,11 +269,32 @@ public static class InboxEndpoints
         return Results.NoContent();
     }
 
+    private static async Task<IResult> SetAiAutoReplyAsync(
+        Guid id, SetAiAutoReplyRequest body,
+        AppDbContext db, ITenantAccessor tenants, IInboxNotifier notifier,
+        ClaimsPrincipal user, IUserInboxResolver resolver,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id, ct).ConfigureAwait(false);
+        if (conv is null) return Results.NotFound();
+
+        var inboxIds = await resolver.GetInboxIdsAsync(user, ct);
+        if (inboxIds.Count > 0 && conv.InboxId.HasValue && !inboxIds.Contains(conv.InboxId.Value))
+            return Results.Forbid();
+
+        conv.SetAiAutoReply(body.Enabled);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        await notifier.NotifyConversationUpdatedAsync(tenant.TenantId,
+            new InboxConversationEvent(conv.Id, conv.Status, conv.AssignedTo, conv.LastMessageAt), ct).ConfigureAwait(false);
+        return Results.NoContent();
+    }
+
     private static async Task<IResult> SendOutboundAsync(
         Guid id, SendMessageRequest body,
         AppDbContext db, ITenantAccessor tenants, IInboxNotifier notifier,
         IChannelAdapter adapter, OutboundMessageSafetyService safety, IClock clock,
-        IEncryptor encryptor, ClaimsPrincipal user, IPermissionResolver permResolver,
+        ClaimsPrincipal user,
         IUserInboxResolver resolver,
         CancellationToken ct)
     {
@@ -285,39 +308,29 @@ public static class InboxEndpoints
         if (inboxIds.Count > 0 && conv.InboxId.HasValue && !inboxIds.Contains(conv.InboxId.Value))
             return Results.Forbid();
 
-        var roleIdStr = user.FindFirstValue("role_id");
-        if (Guid.TryParse(roleIdStr, out var adminRoleId))
-        {
-            var adminPerms = await permResolver.GetPermissionsAsync(adminRoleId, ct);
-            if (adminPerms.Contains("admin:inboxes"))
-            {
-                var adminUid = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
-                var isMember = await db.InboxMembers
-                    .AnyAsync(m => m.AgentId == adminUid && m.InboxId == conv.InboxId, ct);
-                if (!isMember)
-                    return Results.Forbid();
-            }
-        }
-
         try { await safety.EnsureAllowedAsync(body.Content, ct).ConfigureAwait(false); }
         catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
         var senderUserId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        var userToken = await db.Users.AsNoTracking()
-            .Where(u => u.Id == senderUserId && u.TenantId == tenant.TenantId)
-            .Select(u => u.PancakeAccessTokenEncrypted)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
-        var accessToken = string.IsNullOrEmpty(userToken) ? null : encryptor.Decrypt(userToken);
 
-        await adapter.SendAsync(conv.ExternalThreadId, body.Content, accessToken, ct).ConfigureAwait(false);
+        try
+        {
+            // Token per-kenh: adapter tu resolve page access token cua inbox (PancakePageTokenResolver)
+            await adapter.SendAsync(conv.ExternalThreadId, body.Content, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { error = "channel_send_failed", message = "Không thể gửi tin nhắn qua kênh kết nối: " + ex.Message });
+        }
         var msg = conv.AppendMessage("out", "user", body.Content, body.ContentType, clock.UtcNow, senderUserId: senderUserId);
+        // Handover: sale gui tay -> tat AI auto-reply cho hoi thoai nay
+        conv.SetAiAutoReply(false);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await notifier.NotifyMessageAsync(tenant.TenantId,
-            new InboxMessageEvent(conv.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt, conv.AssignedTo), ct).ConfigureAwait(false);
+            new InboxMessageEvent(conv.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt, conv.AssignedTo, msg.SenderDisplayName, msg.SenderAvatarUrl), ct).ConfigureAwait(false);
 
-        return Results.Ok(new MessageDto(msg.Id, msg.Direction, msg.SenderType, msg.SenderUserId, msg.Content, msg.ContentType, msg.SentAt, null));
+        return Results.Ok(new MessageDto(msg.Id, msg.Direction, msg.SenderType, msg.SenderUserId, msg.Content, msg.ContentType, msg.SentAt, msg.SenderDisplayName, msg.SenderAvatarUrl, msg.AttachmentUrl));
     }
 
     private static string Preview(string text) =>

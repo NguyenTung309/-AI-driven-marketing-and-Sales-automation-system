@@ -48,6 +48,7 @@ export interface ConversationListItem {
   readonly lastMessagePreview: string | null;
   readonly rowVersion: string | null;
   readonly unreadCount: number;
+  readonly aiAutoReplyEnabled: boolean;
 }
 
 export interface ConversationListResponse {
@@ -66,6 +67,8 @@ export interface InboxMessage {
   readonly contentType: string;
   readonly sentAt: string;
   readonly senderDisplayName: string | null;
+  readonly senderAvatarUrl: string | null;
+  readonly attachmentUrl: string | null;
 }
 
 export interface ConversationDetail {
@@ -84,6 +87,7 @@ export interface ConversationDetail {
   readonly createdAt: string;
   readonly rowVersion: string | null;
   readonly messages: readonly InboxMessage[];
+  readonly aiAutoReplyEnabled: boolean;
 }
 
 export interface InboxConversationEvent {
@@ -101,6 +105,9 @@ export interface InboxMessageEvent {
   readonly content: string;
   readonly contentType: string;
   readonly sentAt: string;
+  readonly senderDisplayName?: string | null;
+  readonly senderAvatarUrl?: string | null;
+  readonly attachmentUrl?: string | null;
 }
 
 export interface ListConversationsParams {
@@ -144,6 +151,10 @@ export async function resolveConversation(id: string, rowVersion?: string | null
 export async function escalateConversation(id: string, rowVersion?: string | null): Promise<void> {
   const headers = rowVersion ? { "If-Match": rowVersion } : undefined;
   await apiClient.post(`/api/inbox/conversations/${id}/escalate`, null, { headers });
+}
+
+export async function setConversationAi(id: string, enabled: boolean): Promise<void> {
+  await apiClient.post(`/api/inbox/conversations/${id}/ai`, { enabled });
 }
 
 export async function sendConversationMessage(id: string, content: string): Promise<InboxMessage> {

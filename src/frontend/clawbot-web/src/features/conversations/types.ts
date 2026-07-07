@@ -26,6 +26,8 @@ export interface MessageDto {
   content: string;
   contentType: string;
   sentAt: string;
+  senderDisplayName?: string | null;
+  senderAvatarUrl?: string | null;
 }
 
 export interface ConversationDetail {

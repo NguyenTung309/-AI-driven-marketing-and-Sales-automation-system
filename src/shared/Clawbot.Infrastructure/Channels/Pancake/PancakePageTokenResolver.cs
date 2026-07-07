@@ -29,29 +29,22 @@ public sealed partial class PancakePageTokenResolver(
             return null;
         }
 
-        var row = await _db.PancakePages
+        var row = await _db.Inboxes
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(p => p.TenantId == tenantId && p.PageId == pageId && p.DeletedAt == null && p.IsActive)
-            .Select(p => new { p.PageAccessTokenEncrypted, p.Name, p.Platform })
+            .Where(i => i.TenantId == tenantId && i.ExternalPageId == pageId && i.DeletedAt == null && i.IsActive)
+            .OrderBy(i => i.Id)
+            .Select(i => new { i.EncryptedAccessToken, i.Name, i.Platform, i.SenderId })
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
-        if (row is null || string.IsNullOrEmpty(row.PageAccessTokenEncrypted))
+        if (row is null || string.IsNullOrEmpty(row.EncryptedAccessToken))
             return null;
 
-        var token = SafeDecrypt(row.PageAccessTokenEncrypted);
+        var token = PancakeTokenCipher.DecryptOrRaw(_encryptor, row.EncryptedAccessToken);
         if (string.IsNullOrEmpty(token))
             return null;
 
-        return new PancakePageToken(token, pageId, row.Name, row.Platform);
-    }
-
-    private string SafeDecrypt(string cipher)
-    {
-        if (string.IsNullOrEmpty(cipher)) return string.Empty;
-        try { return _encryptor.Decrypt(cipher); }
-        catch (FormatException) { return string.Empty; }
-        catch (System.Security.Cryptography.CryptographicException) { return string.Empty; }
+        return new PancakePageToken(token, pageId, row.Name, row.Platform, row.SenderId);
     }
 
     [LoggerMessage(EventId = 6002, Level = LogLevel.Warning, Message = "PancakePageTokenResolver: requested tenant {requested} does not match ambient tenant {ambient}")]

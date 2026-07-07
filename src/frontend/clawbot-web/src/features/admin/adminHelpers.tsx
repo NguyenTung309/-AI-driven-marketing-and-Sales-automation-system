@@ -183,8 +183,9 @@ export interface AdminUserFormState {
   readonly password: string;
   readonly isActive: boolean;
   readonly roles: string[];
+  readonly pancakePageId: string;
+  readonly pancakePlatform: string;
   readonly pancakeAccessToken: string;
-  readonly clearPancakeAccessToken: boolean;
 }
 
 export interface AdminRoleFormState {

@@ -270,7 +270,9 @@ public static class PublicWidgetEndpoints
             message.SenderType,
             message.Content,
             message.ContentType,
-            message.SentAt), ct);
+            message.SentAt,
+            SenderDisplayName: message.SenderDisplayName,
+            SenderAvatarUrl: message.SenderAvatarUrl), ct);
 
         await notifier.NotifyConversationUpdatedAsync(tenantId, new InboxConversationEvent(
             conversation.Id,

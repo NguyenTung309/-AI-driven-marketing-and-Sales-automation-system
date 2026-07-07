@@ -14,6 +14,7 @@ import {
   listChannels,
   resolveConversation,
   sendConversationMessage,
+  setConversationAi,
   type ConversationDetail,
   type ConversationListItem,
   type ConversationStatus,
@@ -52,6 +53,17 @@ function statusLabel(status: ConversationStatus): string {
   if (status === "escalated") return "Cần người hỗ trợ";
   if (status === "open") return "AI đang chat";
   return status;
+}
+
+// Badge theo cờ AI thật của hội thoại: open + AI bật -> "AI đang chat"; open + AI tắt -> sale đang cầm
+function conversationBadge(conversation: { status: ConversationStatus; aiAutoReplyEnabled: boolean }): {
+  tone: ReturnType<typeof toStatusTone>;
+  label: string;
+} {
+  if (conversation.status === "open" && !conversation.aiAutoReplyEnabled) {
+    return { tone: "neutral", label: "Sale phụ trách" };
+  }
+  return { tone: toStatusTone(conversation.status), label: statusLabel(conversation.status) };
 }
 
 function platformLabel(platform: string): string {
@@ -190,7 +202,7 @@ function ConversationRow({ conversation, selected, onSelect }: ConversationRowPr
             {conversation.lastMessagePreview || "Chưa có tin nhắn mới"}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <StatusPill tone={toStatusTone(conversation.status)}>{statusLabel(conversation.status)}</StatusPill>
+            <StatusPill tone={conversationBadge(conversation).tone}>{conversationBadge(conversation).label}</StatusPill>
             <span className="rounded bg-surface-container px-2 py-0.5 text-label-sm font-semibold text-secondary">
               {platformLabel(conversation.platform)}
             </span>
@@ -215,19 +227,21 @@ interface MessageBubbleProps {
 function MessageBubble({ message, contactAvatarUrl, contactDisplayName }: MessageBubbleProps) {
   const outbound = isOutbound(message);
   const byAi = message.senderType === "ai" || message.senderType === "bot";
+  const avatarUrl = message.senderAvatarUrl || contactAvatarUrl;
+  const displayName = message.senderDisplayName || contactDisplayName;
   return (
     <div className={`flex gap-3 ${outbound ? "justify-end" : "justify-start"}`}>
       {!outbound ? (
-        contactAvatarUrl ? (
+        avatarUrl ? (
           <img
-            src={contactAvatarUrl}
+            src={avatarUrl}
             alt=""
             className="size-8 rounded-full object-cover shrink-0"
             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
           />
         ) : (
           <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-variant text-label-sm font-bold text-secondary">
-            {(message.senderDisplayName?.charAt(0) || contactDisplayName?.charAt(0) || "K").toUpperCase()}
+            {(displayName?.charAt(0) || "K").toUpperCase()}
           </div>
         )
       ) : null}
@@ -246,7 +260,37 @@ function MessageBubble({ message, contactAvatarUrl, contactDisplayName }: Messag
             ? (message.senderDisplayName ?? (byAi ? "AI Agent" : "Hệ thống"))
             : (message.senderDisplayName ?? contactDisplayName ?? "Khách hàng")}
         </div>
-        <p className="whitespace-pre-wrap text-body-md text-on-surface">{message.content}</p>
+        {message.contentType === "photo" && (message.attachmentUrl || message.content) ? (
+          <img src={message.attachmentUrl || message.content} alt="Anh dinh kem" className="max-h-48 rounded-lg object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+        ) : message.contentType === "sticker" && message.content ? (
+          <img src={message.content} alt="Sticker" className="max-h-24 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+        ) : message.contentType === "document" ? (
+          <div className="flex items-center gap-2 rounded-lg border border-outline bg-surface p-2">
+            <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-secondary">description</span>
+            <span className="text-body-md text-on-surface">{message.content}</span>
+            {message.attachmentUrl && (
+              <a href={message.attachmentUrl} target="_blank" rel="noopener noreferrer" className="text-label-sm text-primary underline ml-1">Tai ve</a>
+            )}
+          </div>
+        ) : message.contentType === "video" && message.attachmentUrl ? (
+          <video controls src={message.attachmentUrl} className="max-h-48 rounded-lg" />
+        ) : message.contentType === "audio" ? (
+          <div className="flex items-center gap-2">
+            <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-secondary">headphones</span>
+            {message.attachmentUrl ? (
+              <audio controls src={message.attachmentUrl} className="max-w-[200px]" />
+            ) : (
+              <span className="text-body-md text-on-surface">Am thanh</span>
+            )}
+          </div>
+        ) : message.contentType === "call_missed" ? (
+          <div className="flex items-center gap-2 text-body-md text-on-surface-variant">
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-error">call_missed</span>
+            {message.content}
+          </div>
+        ) : (
+          <p className="whitespace-pre-wrap text-body-md text-on-surface">{message.content}</p>
+        )}
         <span className={`mt-1 block text-label-sm text-on-surface-variant ${outbound ? "text-right" : ""}`}>
           {formatTime(message.sentAt)}
           {byAi ? " - AI trả lời" : outbound ? " - Đã gửi" : ""}
@@ -275,9 +319,11 @@ interface ChatPanelProps {
   readonly onDraftChange: (value: string) => void;
   readonly onSubmit: () => void;
   readonly sending: boolean;
+  readonly onToggleAi: (enabled: boolean) => void;
+  readonly aiToggling: boolean;
 }
 
-function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSubmit, sending }: ChatPanelProps) {
+function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSubmit, sending, onToggleAi, aiToggling }: ChatPanelProps) {
   if (isLoading) {
     return (
       <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-[720px]">
@@ -339,11 +385,37 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
               </span>
             </h2>
             <p className="text-label-sm text-on-surface-variant">
-              Mã hội thoại: {conversation.externalThreadId || "chưa có"} · {statusLabel(conversation.status)}
+              Mã hội thoại: {conversation.externalThreadId || "chưa có"} · {conversationBadge(conversation).label}
             </p>
           </div>
         </div>
-        <StatusPill tone={toStatusTone(conversation.status)}>{statusLabel(conversation.status)}</StatusPill>
+        <div className="flex items-center gap-3">
+          {/* Cong tac "AI dang chat": bat/tat auto-reply cho rieng hoi thoai nay */}
+          <label className="flex cursor-pointer select-none items-center gap-2 text-label-sm font-semibold text-secondary">
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">smart_toy</span>
+            AI đang chat
+            <button
+              type="button"
+              role="switch"
+              aria-checked={conversation.aiAutoReplyEnabled}
+              disabled={aiToggling}
+              onClick={() => onToggleAi(!conversation.aiAutoReplyEnabled)}
+              className={[
+                "relative h-6 w-11 rounded-full transition-colors",
+                conversation.aiAutoReplyEnabled ? "bg-primary" : "bg-surface-variant",
+                aiToggling ? "opacity-60" : "",
+              ].join(" ")}
+            >
+              <span
+                className={[
+                  "absolute top-0.5 size-5 rounded-full bg-white shadow transition-all",
+                  conversation.aiAutoReplyEnabled ? "left-[22px]" : "left-0.5",
+                ].join(" ")}
+              />
+            </button>
+          </label>
+          <StatusPill tone={conversationBadge(conversation).tone}>{conversationBadge(conversation).label}</StatusPill>
+        </div>
       </header>
 
       <div className="flex-1 space-y-4 overflow-y-auto bg-surface p-gutter">
@@ -589,7 +661,8 @@ export default function ConversationsPage() {
       showNotice("Tin nhắn đã được gửi.", "success");
       queryClient.setQueryData<ConversationDetail>(["inbox", "conversation", activeConversationId], (old) => {
         if (!old || old.messages.some((item) => item.id === message.id)) return old;
-        return { ...old, lastMessageAt: message.sentAt, messages: [...old.messages, message] };
+        // BE tu tat AI khi sale gui tay (handover) - dong bo cache ngay
+        return { ...old, lastMessageAt: message.sentAt, messages: [...old.messages, message], aiAutoReplyEnabled: false };
       });
       await invalidateActive(false);
     },
@@ -612,6 +685,14 @@ export default function ConversationsPage() {
   const resolveMutation = useMutation({
     mutationFn: () => resolveConversation(activeConversationId ?? "", selectedConversation?.rowVersion),
     onSuccess: () => {
+      void invalidateActive();
+    },
+  });
+
+  const aiToggleMutation = useMutation({
+    mutationFn: (enabled: boolean) => setConversationAi(activeConversationId ?? "", enabled),
+    onSuccess: (_, enabled) => {
+      showNotice(enabled ? "Đã bật AI trả lời tự động cho hội thoại này." : "Đã tắt AI — sale phụ trách hội thoại.", "success");
       void invalidateActive();
     },
   });
@@ -750,6 +831,11 @@ export default function ConversationsPage() {
           onSubmit={() => {
             if (!activeConversationId || !draft.trim() || sendMutation.isPending) return;
             sendMutation.mutate();
+          }}
+          aiToggling={aiToggleMutation.isPending}
+          onToggleAi={(enabled) => {
+            if (!activeConversationId || aiToggleMutation.isPending) return;
+            aiToggleMutation.mutate(enabled);
           }}
         />
 

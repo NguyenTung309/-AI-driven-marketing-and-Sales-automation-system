@@ -33,6 +33,7 @@ export function AdminUserModal({
   onClose,
   onSubmit,
 }: AdminUserModalProps) {
+  const connectedChannel = editingUser?.pancakeChannels?.[0] ?? null;
   return (
     <Modal
       open={mode !== null}
@@ -105,32 +106,51 @@ export function AdminUserModal({
         {canManagePancakeToken ? (
           <div className="space-y-3 rounded-lg border border-outline bg-surface p-3">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-label-sm font-semibold text-secondary">Access token Pancake của nhân viên sale</p>
+              <p className="text-label-sm font-semibold text-secondary">Kênh Pancake của nhân viên sale</p>
               {editingUser ? (
-                <StatusPill tone={editingUser.hasPancakeAccessToken ? "success" : "warning"}>
-                  {editingUser.hasPancakeAccessToken ? "Đã cấu hình" : "Chưa có"}
+                <StatusPill tone={connectedChannel?.hasToken ? "success" : "warning"}>
+                  {connectedChannel
+                    ? connectedChannel.hasToken ? "Đã cấu hình" : "Thiếu token"
+                    : "Chưa có"}
                 </StatusPill>
               ) : null}
             </div>
-            <input
-              className={inputClass}
-              type="password"
-              value={userForm.pancakeAccessToken}
-              onChange={(event) => onChange({ pancakeAccessToken: event.target.value, clearPancakeAccessToken: false })}
-              placeholder={editingUser?.hasPancakeAccessToken ? "Đã lưu token, nhập để thay thế" : "Nhập access token Pancake"}
-            />
-            {editingUser?.hasPancakeAccessToken ? (
-              <label className="inline-flex items-center gap-2 text-body-md text-secondary">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_140px]">
+              <label className="block">
+                <span className="mb-1 block text-label-sm text-on-surface-variant">Page ID</span>
                 <input
-                  type="checkbox"
-                  className="size-4 accent-primary"
-                  checked={userForm.clearPancakeAccessToken}
-                  onChange={(event) => onChange({ clearPancakeAccessToken: event.target.checked, pancakeAccessToken: "" })}
+                  className={inputClass}
+                  value={userForm.pancakePageId}
+                  onChange={(event) => onChange({ pancakePageId: event.target.value })}
+                  placeholder={connectedChannel?.pageId || "VD: 134970094277281958"}
                 />
-                Xóa token hiện tại
               </label>
-            ) : null}
-            <p className="text-label-sm text-on-surface-variant">Token được mã hóa khi lưu; giao diện không hiển thị lại token đã lưu.</p>
+              <label className="block">
+                <span className="mb-1 block text-label-sm text-on-surface-variant">Nền tảng</span>
+                <select
+                  className={inputClass}
+                  value={userForm.pancakePlatform}
+                  onChange={(event) => onChange({ pancakePlatform: event.target.value })}
+                >
+                  <option value="zalo">Zalo OA</option>
+                  <option value="facebook">Facebook</option>
+                </select>
+              </label>
+            </div>
+            <label className="block">
+              <span className="mb-1 block text-label-sm text-on-surface-variant">Page Access Token</span>
+              <input
+                className={inputClass}
+                type="password"
+                value={userForm.pancakeAccessToken}
+                onChange={(event) => onChange({ pancakeAccessToken: event.target.value })}
+                placeholder={connectedChannel?.hasToken ? "Đã lưu token, nhập để thay thế" : "Nhập page access token Pancake"}
+              />
+            </label>
+            <p className="text-label-sm text-on-surface-variant">
+              Mỗi kênh gồm 1 Page ID + 1 access token; token được mã hóa khi lưu và dùng chung cho nhận/gửi tin.
+              Sale này được gán phụ trách kênh, xem thêm ở trang Kênh giao tiếp.
+            </p>
           </div>
         ) : null}
       </form>

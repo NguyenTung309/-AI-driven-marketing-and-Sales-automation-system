@@ -64,6 +64,7 @@ export interface Trend {
   readonly metric: string;
   readonly relevanceScore: number;
   readonly contentIdeas: readonly string[];
+  readonly weekOf: string;
 }
 
 export interface TrendScanResponse {

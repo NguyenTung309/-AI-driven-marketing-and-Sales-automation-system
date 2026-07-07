@@ -49,6 +49,11 @@ public static class KbEndpoints
         modules.MapPost("/{id:guid}/test", RunTestAsync).RequirePermission("kb:write");
 
         app.MapGet("/api/kb/accuracy", AccuracyDashboardAsync).RequirePermission("kb:read");
+        // DisableAntiforgery: JWT bearer auth carries no cookie credential, so CSRF doesn't apply.
+        app.MapPost("/api/kb/classify-upload", ClassifyUploadAsync)
+            .RequirePermission("kb:write")
+            .RequireRateLimiting(RateLimitingExtensions.UploadPolicy)
+            .DisableAntiforgery();
         return app;
     }
 
@@ -237,11 +242,12 @@ public static class KbEndpoints
         await stream.CopyToAsync(buffer, ct).ConfigureAwait(false);
         if (buffer.Length == 0) return null;
 
-        var head = buffer.GetBuffer().AsSpan(0, (int)Math.Min(4, buffer.Length));
-        if (head.Length >= 4 && head[0] == 0x25 && head[1] == 0x50 && head[2] == 0x44 && head[3] == 0x46)
+        var head = buffer.GetBuffer();
+        var len = (int)Math.Min(4, buffer.Length);
+        if (len >= 4 && head[0] == 0x25 && head[1] == 0x50 && head[2] == 0x44 && head[3] == 0x46)
             return "upload.pdf";
 
-        if (head.Length >= 2 && head[0] == 0x50 && head[1] == 0x4B)
+        if (len >= 2 && head[0] == 0x50 && head[1] == 0x4B)
             return OfficeFileNameFromZip(buffer);
 
         return LooksLikeText(buffer) ? "upload.txt" : null;
@@ -317,6 +323,168 @@ public static class KbEndpoints
             version.AccuracyScore, version.DeployedAt, version.CreatedAt);
         return Results.Created($"/api/kb/modules/{id}/versions/{version.Id}",
             new KbUploadResult(dto, extracted.SourceFormat, extracted.CharCount, extracted.Markdown));
+    }
+
+    private const int MaxClassifyFiles = 20;
+
+    // Bulk upload: extract each file, let the LLM pick (or create) the KB module, save a version.
+    // autoDeploy=true (default) also deploys + embeds; failures are per-file, one bad file
+    // doesn't block the rest.
+    private static async Task<IResult> ClassifyUploadAsync(
+        IFormFileCollection files,
+        bool? autoDeploy,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        IDocumentTextExtractor extractor,
+        KbAutoClassifyService classifier,
+        KbDeployService deployService,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        if (files is null || files.Count == 0) return Results.BadRequest("file_required");
+        if (files.Count > MaxClassifyFiles) return Results.BadRequest("too_many_files");
+
+        var tenantId = tenants.Require().TenantId;
+        var deploy = autoDeploy ?? true;
+        var modules = await db.KbModules
+            .Where(m => m.TenantId == tenantId && m.DeletedAt == null)
+            .ToListAsync(ct);
+        var logger = loggerFactory.CreateLogger("KbUpload");
+
+        var results = new List<KbClassifiedFileDto>(files.Count);
+        foreach (var file in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            results.Add(await ClassifyOneAsync(file, deploy, tenantId, modules, db, clock, extractor, classifier, deployService, logger, ct));
+        }
+
+        return Results.Ok(new KbClassifyUploadResponse(results));
+    }
+
+    private static async Task<KbClassifiedFileDto> ClassifyOneAsync(
+        IFormFile file,
+        bool deploy,
+        Guid tenantId,
+        List<KbModule> modules,
+        AppDbContext db,
+        IClock clock,
+        IDocumentTextExtractor extractor,
+        KbAutoClassifyService classifier,
+        KbDeployService deployService,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var fileName = string.IsNullOrWhiteSpace(file.FileName) ? "(không tên)" : file.FileName;
+        static KbClassifiedFileDto Fail(string name, string error) =>
+            new(name, false, error, null, null, null, false, 0d, null, null, false);
+
+        if (file.Length == 0) return Fail(fileName, "file_required");
+        if (file.Length > MaxUploadBytes) return Fail(fileName, "file_too_large");
+
+        var uploadFileName = await ResolveUploadFileNameAsync(file, extractor, ct).ConfigureAwait(false);
+        if (uploadFileName is null) return Fail(fileName, "unsupported_format");
+
+        ExtractedDocument extracted;
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            extracted = await extractor.ExtractAsync(stream, uploadFileName, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogUploadFailed(logger, Guid.Empty, ex);
+            return Fail(fileName, "extraction_failed");
+        }
+
+        KbClassificationVerdict? verdict;
+        try
+        {
+            var choices = modules
+                .Select(m => new KbModuleChoice(m.Code, m.Name, m.Description))
+                .ToList();
+            verdict = await classifier.ClassifyAsync(tenantId, fileName, extracted.Markdown, choices, ct).ConfigureAwait(false);
+        }
+        catch (LlmConfigNotConfiguredException)
+        {
+            return Fail(fileName, "llm_not_configured");
+        }
+        if (verdict is null) return Fail(fileName, "classification_failed");
+
+        var (module, isNew) = ResolveTargetModule(verdict, modules, tenantId, clock, db);
+        if (module is null) return Fail(fileName, "classification_failed");
+        if (isNew) modules.Add(module);
+
+        var nextVersion = await db.KbVersions.Where(v => v.KbModuleId == module.Id).MaxAsync(v => (int?)v.Version, ct) ?? 0;
+        var version = KbVersion.Create(module.Id, nextVersion + 1, extracted.Markdown, clock.UtcNow);
+        db.KbVersions.Add(version);
+        await db.SaveChangesAsync(ct);
+
+        var deployed = false;
+        string? error = null;
+        if (deploy)
+        {
+            try
+            {
+                var previous = await db.KbVersions
+                    .Where(v => v.KbModuleId == module.Id && v.Status == "deployed")
+                    .ToListAsync(ct);
+                foreach (var prev in previous) db.Entry(prev).Property("Status").CurrentValue = "archived";
+                version.Deploy(clock.UtcNow);
+                await deployService.EmbedAndUpsertAsync(version, module.Code, tenantId, ct);
+                await db.SaveChangesAsync(ct);
+                deployed = true;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogUploadFailed(logger, module.Id, ex);
+                error = "deploy_failed";
+            }
+        }
+
+        return new KbClassifiedFileDto(
+            fileName, true, error, module.Id, module.Code, module.Name, isNew,
+            verdict.Confidence, verdict.Reason,
+            new KbVersionDto(version.Id, version.KbModuleId, version.Version, version.Status,
+                version.AccuracyScore, version.DeployedAt, version.CreatedAt),
+            deployed);
+    }
+
+    private static (KbModule? Module, bool IsNew) ResolveTargetModule(
+        KbClassificationVerdict verdict,
+        List<KbModule> modules,
+        Guid tenantId,
+        IClock clock,
+        AppDbContext db)
+    {
+        if (verdict.ModuleCode is not null)
+        {
+            var match = modules.FirstOrDefault(m => string.Equals(m.Code, verdict.ModuleCode, StringComparison.OrdinalIgnoreCase));
+            if (match is not null) return (match, false);
+        }
+
+        var name = verdict.NewName ?? verdict.NewCode ?? verdict.ModuleCode;
+        if (name is null) return (null, false);
+
+        var code = SlugifyModuleCode(verdict.NewCode ?? name);
+        var existing = modules.FirstOrDefault(m => string.Equals(m.Code, code, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null) return (existing, false);
+
+        var module = KbModule.Create(tenantId, code, name, clock.UtcNow);
+        if (!string.IsNullOrWhiteSpace(verdict.NewDescription))
+            db.Entry(module).Property("Description").CurrentValue = verdict.NewDescription;
+        db.KbModules.Add(module);
+        return (module, true);
+    }
+
+    internal static string SlugifyModuleCode(string raw)
+    {
+        var slug = new string(raw.Trim().ToLowerInvariant()
+            .Select(c => char.IsAsciiLetterOrDigit(c) ? c : '-')
+            .ToArray()).Trim('-');
+        while (slug.Contains("--", StringComparison.Ordinal))
+            slug = slug.Replace("--", "-", StringComparison.Ordinal);
+        return string.IsNullOrEmpty(slug) ? $"kb-{Guid.NewGuid():N}"[..11] : slug;
     }
 
     private static async Task<IResult> GetVersionDetailAsync(

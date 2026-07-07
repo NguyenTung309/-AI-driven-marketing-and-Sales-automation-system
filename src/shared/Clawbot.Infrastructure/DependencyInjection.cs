@@ -91,6 +91,8 @@ public static class DependencyInjection
             bus.AddConsumer<Messaging.ConversationEscalatedConsumer>();
             bus.AddConsumer<Messaging.LeadBecameHotConsumer>();
             bus.AddConsumer<Messaging.LeadBecameWarmConsumer>();
+            // Chat inbound pipeline: polling publishes, this consumer ingests (ordered, retried)
+            bus.AddConsumer<Messaging.ChannelInboundMessageConsumer, Messaging.ChannelInboundMessageConsumerDefinition>();
 
             // WS1: transactional outbox - domain events published during SaveChanges enlist into
             // OutboxMessage within the same transaction, then relay to RabbitMQ (exactly-once,
@@ -108,6 +110,15 @@ public static class DependencyInjection
                 mq.ConfigureEndpoints(ctx);
             });
         });
+
+        // AI auto-reply: consumer goi ChatAgent gRPC (AgentService) khi hoi thoai bat co "AI dang chat".
+        // Dang ky o shared DI vi consumer chay o ca API lan AgentService host (AgentService tu goi chinh no).
+        var chatAgentUrl = cfg["AgentService:Url"] ?? "http://localhost:15875";
+        services.AddGrpcClient<Clawbot.Agents.Contracts.Chat.ChatAgent.ChatAgentClient>(o =>
+        {
+            o.Address = new Uri(chatAgentUrl);
+        });
+        services.AddScoped<Messaging.IChatAutoReplyGateway, Messaging.GrpcChatAutoReplyGateway>();
 
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IIntentClassifier, KeywordIntentClassifier>();

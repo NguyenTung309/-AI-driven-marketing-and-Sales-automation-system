@@ -18,7 +18,7 @@ public static class RateLimitingExtensions
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-            options.AddPolicy(AuthPolicy, ctx => PartitionForRemoteIp(ctx, permit: 10, window: TimeSpan.FromMinutes(1)));
+            options.AddPolicy(AuthPolicy, ctx => PartitionForRemoteIp(ctx, permit: 30, window: TimeSpan.FromMinutes(1)));
             options.AddPolicy(WebhookPolicy, ctx => PartitionForRemoteIp(ctx, permit: 120, window: TimeSpan.FromMinutes(1)));
             options.AddPolicy(ChatPolicy, ctx => PartitionForUserOrIp(ctx, permit: 60, window: TimeSpan.FromMinutes(1)));
             options.AddPolicy(GeneralPolicy, ctx => PartitionForUserOrIp(ctx, permit: 300, window: TimeSpan.FromMinutes(1)));

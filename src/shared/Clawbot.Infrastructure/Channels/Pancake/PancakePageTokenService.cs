@@ -32,6 +32,8 @@ public sealed partial class PancakePageTokenService(
     // EARS[WHEN no stored page token exists for a (tenant, page) THE SYSTEM SHALL mint one from the user access
     // token, persist it encrypted, and return it; WHEN a row already exists THE SYSTEM SHALL overwrite its token
     // (minting invalidates the prior token) without creating a duplicate]
+    // Tokens land on the inbox row (inboxes.encrypted_access_token) — the single per-channel store that both
+    // polling (inbound) and the channel adapter (outbound) read.
     public async Task<PancakePageToken> MintAndStoreAsync(
         Guid tenantId,
         string pageId,
@@ -44,28 +46,8 @@ public sealed partial class PancakePageTokenService(
         ArgumentException.ThrowIfNullOrWhiteSpace(userAccessToken);
 
         var pageToken = await _mintGateway.MintAsync(userAccessToken, pageId, ct).ConfigureAwait(false);
-        var encrypted = _encryptor.Encrypt(pageToken);
-        var now = _clock.UtcNow;
-
-        var existing = await _db.PancakePages
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(p => p.TenantId == tenantId && p.PageId == pageId, ct).ConfigureAwait(false);
-
-        if (existing is null)
-        {
-            var page = PancakePage.Create(tenantId, pageId, name, platform, now);
-            page.StorePageAccessToken(encrypted, now);
-            _db.PancakePages.Add(page);
-        }
-        else
-        {
-            existing.UpdateProfile(name, platform, now);
-            existing.StorePageAccessToken(encrypted, now);
-            if (!existing.IsActive) existing.Activate(now);
-        }
-
-        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
-        LogMinted(_logger, pageId, existing is not null);
+        var updatedExisting = await UpsertInboxTokenAsync(tenantId, pageId, name, platform, _encryptor.Encrypt(pageToken), ct).ConfigureAwait(false);
+        LogMinted(_logger, pageId, updatedExisting);
         return new PancakePageToken(pageToken, pageId, name?.Trim() ?? string.Empty, platform?.Trim() ?? string.Empty);
     }
 
@@ -77,28 +59,31 @@ public sealed partial class PancakePageTokenService(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pageId);
         ArgumentException.ThrowIfNullOrWhiteSpace(pageAccessToken);
-        var encrypted = _encryptor.Encrypt(pageAccessToken);
-        var now = _clock.UtcNow;
+        var updatedExisting = await UpsertInboxTokenAsync(tenantId, pageId, name, platform, _encryptor.Encrypt(pageAccessToken), ct).ConfigureAwait(false);
+        LogMinted(_logger, pageId, updatedExisting);
+    }
 
-        var existing = await _db.PancakePages
+    private async Task<bool> UpsertInboxTokenAsync(Guid tenantId, string pageId, string name, string platform, string encryptedToken, CancellationToken ct)
+    {
+        var now = _clock.UtcNow;
+        var existing = await _db.Inboxes
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(p => p.TenantId == tenantId && p.PageId == pageId, ct).ConfigureAwait(false);
+            .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.ExternalPageId == pageId && i.DeletedAt == null, ct).ConfigureAwait(false);
 
         if (existing is null)
         {
-            var page = PancakePage.Create(tenantId, pageId, name, platform, now);
-            page.StorePageAccessToken(encrypted, now);
-            _db.PancakePages.Add(page);
+            var inbox = Inbox.Create(tenantId, string.IsNullOrWhiteSpace(name) ? pageId : name.Trim(), platform, pageId);
+            inbox.SetAccessToken(encryptedToken, now);
+            _db.Inboxes.Add(inbox);
         }
         else
         {
-            existing.UpdateProfile(name, platform, now);
-            existing.StorePageAccessToken(encrypted, now);
-            if (!existing.IsActive) existing.Activate(now);
+            if (!string.IsNullOrWhiteSpace(name)) existing.UpdateName(name.Trim(), now);
+            existing.SetAccessToken(encryptedToken, now);
         }
 
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
-        LogMinted(_logger, pageId, existing is not null);
+        return existing is not null;
     }
 }
 

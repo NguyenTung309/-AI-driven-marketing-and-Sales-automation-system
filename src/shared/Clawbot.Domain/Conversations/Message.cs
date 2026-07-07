@@ -19,6 +19,8 @@ public sealed class Message : Entity<Guid>, ITenantOwned
     public string? OriginalContent { get; private set; }
     public string? RedactedContent { get; private set; }
     public string? SenderDisplayName { get; private set; }
+    public string? SenderAvatarUrl { get; private set; }
+    public string? AttachmentUrl { get; private set; }
     public DateTimeOffset SentAt { get; private set; }
 
     private Message() { }
@@ -37,7 +39,9 @@ public sealed class Message : Entity<Guid>, ITenantOwned
         string? redactedContent = null,
         string messageType = "text",
         string? parentPostId = null,
-        string? senderDisplayName = null) =>
+        string? senderDisplayName = null,
+        string? senderAvatarUrl = null,
+        string? attachmentUrl = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -54,6 +58,8 @@ public sealed class Message : Entity<Guid>, ITenantOwned
             MessageType = messageType,
             ParentPostId = parentPostId,
             SenderDisplayName = senderDisplayName,
+            SenderAvatarUrl = senderAvatarUrl,
+            AttachmentUrl = attachmentUrl,
             SentAt = sentAt,
         };
 }

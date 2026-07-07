@@ -30,6 +30,7 @@ import {
   type KbVersion,
   type KbVersionDiff,
 } from "@/shared/api/kb";
+import { KbAutoClassifyModal } from "./KbAutoClassifyModal";
 import { ModuleFormModal, QaModal, type ModuleDialogMode } from "./KnowledgeBaseDialogs";
 import { AccuracyPanel, DiffDrawer, EditorWorkspace, ModuleRail, VersionRail } from "./KnowledgeBaseWorkspace";
 
@@ -64,6 +65,7 @@ export default function KnowledgeBasePage() {
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [moduleDialog, setModuleDialog] = useState<ModuleDialogMode>(null);
   const [qaOpen, setQaOpen] = useState(false);
+  const [autoClassifyOpen, setAutoClassifyOpen] = useState(false);
   const [diff, setDiff] = useState<KbVersionDiff | null>(null);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
 
@@ -243,6 +245,14 @@ export default function KnowledgeBasePage() {
         <div className="flex flex-wrap items-center gap-2">
           <StatusPill tone={errors.length ? "error" : "success"}>{errors.length ? "Mất kết nối" : "Đã kết nối"}</StatusPill>
           <button
+            className="inline-flex items-center gap-2 rounded border border-outline px-4 py-2 text-body-md font-bold text-secondary hover:bg-surface-variant"
+            onClick={() => setAutoClassifyOpen(true)}
+            type="button"
+          >
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">smart_toy</span>
+            Tải lên & tự phân loại
+          </button>
+          <button
             className="inline-flex items-center gap-2 rounded bg-primary px-4 py-2 text-body-md font-bold text-white hover:bg-primary-hover"
             onClick={() => setModuleDialog("create")}
             type="button"
@@ -308,6 +318,12 @@ export default function KnowledgeBasePage() {
 
       <AccuracyPanel items={accuracy} loading={accuracyQuery.isLoading} />
 
+      <KbAutoClassifyModal
+        key={autoClassifyOpen ? "open" : "closed"}
+        onClose={() => setAutoClassifyOpen(false)}
+        onDone={() => queryClient.invalidateQueries({ queryKey: ["kb"] })}
+        open={autoClassifyOpen}
+      />
       <ModuleFormModal
         key={`${moduleDialog ?? "closed"}-${selectedModule?.id ?? "none"}`}
         mode={moduleDialog}

@@ -11,4 +11,5 @@ public sealed record ChannelMessage(
     // comment to its post. Populated by the channel adapter once the Pancake comment-webhook spike
     // confirms the payload; defaults keep DM ingestion unchanged.
     string MessageType = "text",
-    string? ParentPostId = null);
+    string? ParentPostId = null,
+    string? AttachmentUrl = null);

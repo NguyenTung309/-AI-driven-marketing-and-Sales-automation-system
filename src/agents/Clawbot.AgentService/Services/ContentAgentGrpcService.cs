@@ -31,10 +31,19 @@ public sealed partial class ContentAgentGrpcService(
             throw new RpcException(new Status(StatusCode.InvalidArgument, "channel required"));
         var briefId = ParseOptionalGuid(request.BriefId, "brief_id");
 
-        var draft = await _agent.GenerateAsync(
-            new CoreContent.ContentGenerateRequest(
-                tenantId, briefId, request.Channel, request.Brief, KbModuleCode: null),
-            context.CancellationToken).ConfigureAwait(false);
+        CoreContent.ContentDraftResult draft;
+        try
+        {
+            draft = await _agent.GenerateAsync(
+                new CoreContent.ContentGenerateRequest(
+                    tenantId, briefId, request.Channel, request.Brief, KbModuleCode: null),
+                context.CancellationToken).ConfigureAwait(false);
+        }
+        catch (CoreContent.ContentPromptTemplateException ex)
+        {
+            // Surface "no template for platform X" as a client error instead of an opaque handler fault
+            throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+        }
 
         var item = ContentItem.Create(
             tenantId, draft.Platform, draft.Body, createdBy: null, _clock.UtcNow, briefId: draft.BriefId);

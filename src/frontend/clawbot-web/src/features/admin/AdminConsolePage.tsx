@@ -1,3 +1,4 @@
+// Stitch design system branding defaults: primaryColor: "#d32f2f"
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/shared/auth/authStore";
@@ -80,8 +81,9 @@ export default function AdminConsolePage() {
     password: "",
     isActive: true,
     roles: [],
+    pancakePageId: "",
+    pancakePlatform: "zalo",
     pancakeAccessToken: "",
-    clearPancakeAccessToken: false,
   });
   const [roleModal, setRoleModal] = useState<RoleModalMode>(null);
   const [editingRole, setEditingRole] = useState<Role | null>(null);
@@ -228,18 +230,25 @@ export default function AdminConsolePage() {
           displayName: userForm.displayName.trim(),
           password: userForm.password,
           roles: userForm.roles,
-          ...(canManagePancakeToken && userForm.pancakeAccessToken.trim()
-            ? { pancakeAccessToken: userForm.pancakeAccessToken.trim() }
+          ...(canManagePancakeToken && userForm.pancakePageId.trim()
+            ? {
+                pancakePageId: userForm.pancakePageId.trim(),
+                pancakePlatform: userForm.pancakePlatform,
+                ...(userForm.pancakeAccessToken.trim() ? { pancakeAccessToken: userForm.pancakeAccessToken.trim() } : {}),
+              }
             : {}),
         });
       }
       if (!editingUser) return undefined;
       await updateAdminUser(editingUser.id, {
         ...(canManageUsers ? { displayName: userForm.displayName.trim(), isActive: userForm.isActive } : {}),
-        ...(canManagePancakeToken && userForm.pancakeAccessToken.trim()
-          ? { pancakeAccessToken: userForm.pancakeAccessToken.trim() }
+        ...(canManagePancakeToken && userForm.pancakePageId.trim()
+          ? {
+              pancakePageId: userForm.pancakePageId.trim(),
+              pancakePlatform: userForm.pancakePlatform,
+              ...(userForm.pancakeAccessToken.trim() ? { pancakeAccessToken: userForm.pancakeAccessToken.trim() } : {}),
+            }
           : {}),
-        ...(canManagePancakeToken && userForm.clearPancakeAccessToken ? { clearPancakeAccessToken: true } : {}),
       });
       return undefined;
     },
@@ -402,8 +411,9 @@ export default function AdminConsolePage() {
       password: "",
       isActive: true,
       roles: [],
+      pancakePageId: "",
+      pancakePlatform: "zalo",
       pancakeAccessToken: "",
-      clearPancakeAccessToken: false,
     });
     setUserModal("create");
   }
@@ -416,8 +426,9 @@ export default function AdminConsolePage() {
       password: "",
       isActive: user.isActive,
       roles: [],
+      pancakePageId: user.pancakeChannels?.[0]?.pageId ?? "",
+      pancakePlatform: user.pancakeChannels?.[0]?.platform ?? "zalo",
       pancakeAccessToken: "",
-      clearPancakeAccessToken: false,
     });
     setUserModal("edit");
   }

@@ -126,6 +126,7 @@ builder.Services.AddScoped<ConversationExportService>();
 builder.Services.AddScoped<InboxSearchService>();
 builder.Services.AddScoped<IUserInboxResolver, UserInboxResolver>();
 builder.Services.AddScoped<KbTestRunnerService>();
+builder.Services.AddScoped<KbAutoClassifyService>();
 builder.Services.AddScoped<LeadCsvService>();
 builder.Services.AddScoped<Clawbot.Agents.Core.Skills.Content.IImagePromptGenerator, Clawbot.Agents.Core.Skills.Content.ClaudeImagePromptGenerator>();
 builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Nlp.IPiiRedactor, Clawbot.Agents.Core.Skills.Nlp.RegexPiiRedactor>();
@@ -314,6 +315,9 @@ app.MapHangfireDashboard("/hangfire", new DashboardOptions
 HangfireModule.ScheduleClawbotJobs(app.Services);
 
 await RbacSeeder.SeedAsync(app.Services).ConfigureAwait(false);
+
+// One-off: re-encrypt legacy plaintext inbox tokens (rows written before encrypt-at-write)
+await Clawbot.Infrastructure.Channels.Pancake.InboxTokenEncryptionMigrator.EncryptLegacyTokensAsync(app.Services).ConfigureAwait(false);
 
 if (app.Environment.IsDevelopment())
 {

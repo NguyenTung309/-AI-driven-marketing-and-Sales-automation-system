@@ -55,7 +55,7 @@ export default function ChatMessageThread({ messages, loading, contactAvatarUrl,
         return (
           <div key={msg.id} className={`flex gap-2 ${isOwner ? "justify-end" : "justify-start"}`}>
             {!isOwner && (
-              <MessageAvatar url={contactAvatarUrl} name={msg.senderDisplayName ?? contactDisplayName} />
+              <MessageAvatar url={msg.senderAvatarUrl || contactAvatarUrl} name={msg.senderDisplayName ?? contactDisplayName} />
             )}
             <div className="max-w-[70%] flex flex-col">
               {!isOwner && (msg.senderDisplayName ?? contactDisplayName) && (
@@ -69,7 +69,37 @@ export default function ChatMessageThread({ messages, loading, contactAvatarUrl,
                     : "bg-surface-variant text-on-surface-variant"
                   }`}
               >
-                <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                {msg.contentType === "photo" && (msg.attachmentUrl || msg.content) ? (
+                  <img src={msg.attachmentUrl || msg.content} alt="Anh dinh kem" className="max-h-48 rounded-lg object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                ) : msg.contentType === "sticker" && msg.content ? (
+                  <img src={msg.content} alt="Sticker" className="max-h-24 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                ) : msg.contentType === "document" ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-outline bg-white/10 p-2">
+                    <span aria-hidden="true" className="material-symbols-outlined text-[20px]">description</span>
+                    <span className="text-body-md">{msg.content}</span>
+                    {msg.attachmentUrl && (
+                      <a href={msg.attachmentUrl} target="_blank" rel="noopener noreferrer" className="text-label-sm underline">Tai ve</a>
+                    )}
+                  </div>
+                ) : msg.contentType === "video" && msg.attachmentUrl ? (
+                  <video controls src={msg.attachmentUrl} className="max-h-48 rounded-lg" />
+                ) : msg.contentType === "audio" ? (
+                  <div className="flex items-center gap-2">
+                    <span aria-hidden="true" className="material-symbols-outlined text-[20px]">headphones</span>
+                    {msg.attachmentUrl ? (
+                      <audio controls src={msg.attachmentUrl} className="max-w-[200px]" />
+                    ) : (
+                      <span className="text-body-md">Am thanh</span>
+                    )}
+                  </div>
+                ) : msg.contentType === "call_missed" ? (
+                  <div className="flex items-center gap-2 text-body-md">
+                    <span aria-hidden="true" className="material-symbols-outlined text-[18px]">call_missed</span>
+                    {msg.content}
+                  </div>
+                ) : (
+                  <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                )}
                 <p
                   className={`mt-1 text-label-xs ${isOwner ? "text-on-primary/70" : "text-on-surface-variant/70"
                     }`}

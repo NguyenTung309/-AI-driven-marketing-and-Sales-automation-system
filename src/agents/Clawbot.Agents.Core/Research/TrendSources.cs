@@ -40,6 +40,7 @@ public sealed class GoogleTrendsOptions : TrendSourceOptions
 {
     public const string SectionName = "Content:Trends:GoogleTrends";
 
+    // Google tat endpoint cu /trends/trendingsearches/daily/rss (404 tu 2025) - RSS moi o /trending/rss
     public string UrlTemplate { get; set; } =
         "https://trends.google.com/trending/rss?geo={geo}";
 }
@@ -121,14 +122,14 @@ internal sealed class GoogleTrendsRssSource(HttpClient http, IOptions<GoogleTren
         var doc = XDocument.Parse(xml);
         // Google retired /trends/trendingsearches/daily/rss (404 since Feb 2025); the replacement
         // /trending/rss feed uses a different ht namespace, so probe both.
-        XNamespace ht = "https://trends.google.com/trending/rss";
-        XNamespace htLegacy = "https://trends.google.com/trends/trendingsearches/daily";
+        XNamespace htNew = "https://trends.google.com/trending/rss";
+        XNamespace htOld = "https://trends.google.com/trends/trendingsearches/daily";
         return doc.Descendants("item")
             .Select(item =>
             {
                 var title = (string?)item.Element("title") ?? string.Empty;
-                var metric = (string?)item.Element(ht + "approx_traffic")
-                    ?? (string?)item.Element(htLegacy + "approx_traffic")
+                var metric = (string?)item.Element(htNew + "approx_traffic")
+                    ?? (string?)item.Element(htOld + "approx_traffic")
                     ?? (string?)item.Element("description")
                     ?? string.Empty;
                 return ToTrend(title, "google_trends", metric);
@@ -366,10 +367,13 @@ public static class ResearchModule
         services.AddScoped<ITrendSource>(sp => sp.GetRequiredService<YouTubeDataApiSource>());
         services.AddScoped<ITrendSource>(sp => sp.GetRequiredService<TikTokScrapeSource>());
         services.AddScoped<ITrendSource>(sp => sp.GetRequiredService<BaiduScrapeSource>());
-        services.AddSingleton<ITrendRelevanceScorer, WeightedTrendScorer>();
-        // "Quét" gọi research-agent dùng kho tri thức + LLM lọc chủ đề liên quan; cần IClaudeChatClient
-        // (do AddClawbotChat đăng ký). Không gắn LLM → curator tự trả null → ResearchAgent fallback keyword.
-        services.AddScoped<ITrendCurator, AiTrendCurator>();
+        // Semantic scorer (Qdrant KB + LLM); tu fallback ve keyword heuristic khi host/tenant
+        // chua co IRagRetriever/IClaudeChatClient hoac LLM chua duoc bind. Thay the cap
+        // WeightedTrendScorer + AiTrendCurator cua nhanh llm-agent (cung muc dich, mot duong di).
+        services.AddScoped<ITrendRelevanceScorer>(sp => new SemanticLlmTrendScorer(
+            sp.GetService<Clawbot.Agents.Core.Rag.IRagRetriever>(),
+            sp.GetService<Clawbot.Agents.Core.Chat.IClaudeChatClient>(),
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<SemanticLlmTrendScorer>>()));
         services.AddScoped<IResearchAgent, ResearchAgent>();
         return services;
     }

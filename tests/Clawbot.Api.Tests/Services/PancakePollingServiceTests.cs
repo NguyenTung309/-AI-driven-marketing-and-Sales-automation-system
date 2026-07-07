@@ -26,7 +26,7 @@ public sealed class PancakePollingServiceTests
     {
         await using var db = CreateDbContext("dedup_test_" + Guid.NewGuid());
         var msgId = "test-msg-123";
-        db.ProcessedMessages.Add(new ProcessedMessage("zalo", msgId, "conv-1"));
+        db.ProcessedMessages.Add(new ProcessedMessage(Guid.NewGuid(), "zalo", msgId, "conv-1"));
         await db.SaveChangesAsync();
 
         var exists = await db.ProcessedMessages
@@ -59,7 +59,9 @@ public sealed class PancakePollingServiceTests
     [Fact]
     public void ProcessedMessage_ShouldSetProperties()
     {
-        var msg = new ProcessedMessage("zalo", "ext-123", "conv-456");
+        var tenantId = Guid.NewGuid();
+        var msg = new ProcessedMessage(tenantId, "zalo", "ext-123", "conv-456");
+        Assert.Equal(tenantId, msg.TenantId);
         Assert.Equal("zalo", msg.Platform);
         Assert.Equal("ext-123", msg.ExternalMessageId);
         Assert.Equal("conv-456", msg.ConversationExternalId);

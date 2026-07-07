@@ -17,17 +17,9 @@ public sealed record ResearchScanRequest(
 
 public interface ITrendRelevanceScorer
 {
-    ScoredTrend Score(RawTrend trend, IReadOnlyList<string> keywords);
-}
-
-// AI gate: dùng kho tri thức (keywords lấy từ KbModules) làm ngữ cảnh domain để LLM lọc chủ đề
-// LIÊN QUAN + viết ý tưởng nội dung tiếng Việt. Trả null khi không dùng được (chưa gắn LLM) → caller
-// fallback về keyword scorer.
-public interface ITrendCurator
-{
-    Task<IReadOnlyList<ScoredTrend>?> CurateAsync(
+    Task<IReadOnlyList<ScoredTrend>> ScoreAsync(
         Guid tenantId,
-        IReadOnlyList<RawTrend> candidates,
+        IReadOnlyList<RawTrend> trends,
         IReadOnlyList<string> keywords,
         CancellationToken ct = default);
 }
@@ -37,8 +29,21 @@ public interface IResearchAgent
     Task<IReadOnlyList<ScoredTrend>> ScanAsync(ResearchScanRequest request, CancellationToken ct = default);
 }
 
+// Heuristic keyword scorer: fallback khi tenant/host chua cau hinh LLM + embedding
+// (SemanticLlmTrendScorer la duong chinh).
 internal sealed class WeightedTrendScorer : ITrendRelevanceScorer
 {
+    public Task<IReadOnlyList<ScoredTrend>> ScoreAsync(
+        Guid tenantId,
+        IReadOnlyList<RawTrend> trends,
+        IReadOnlyList<string> keywords,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(trends);
+        IReadOnlyList<ScoredTrend> scored = trends.Select(t => Score(t, keywords)).ToList();
+        return Task.FromResult(scored);
+    }
+
     private static readonly string[] DefaultKeywords =
     [
         "hsk",
@@ -50,7 +55,7 @@ internal sealed class WeightedTrendScorer : ITrendRelevanceScorer
         "汉语",
     ];
 
-    public ScoredTrend Score(RawTrend trend, IReadOnlyList<string> keywords)
+    public static ScoredTrend Score(RawTrend trend, IReadOnlyList<string> keywords)
     {
         ArgumentNullException.ThrowIfNull(trend);
         ArgumentNullException.ThrowIfNull(keywords);
@@ -79,13 +84,11 @@ internal sealed class WeightedTrendScorer : ITrendRelevanceScorer
 
 internal sealed class ResearchAgent(
     IEnumerable<ITrendSource> sources,
-    ITrendRelevanceScorer scorer,
-    ITrendCurator? curator = null) : IResearchAgent
+    ITrendRelevanceScorer scorer) : IResearchAgent
 {
     private const int MaxResults = 25;
     private readonly IReadOnlyList<ITrendSource> _sources = sources.ToList();
     private readonly ITrendRelevanceScorer _scorer = scorer;
-    private readonly ITrendCurator? _curator = curator;
 
     public async Task<IReadOnlyList<ScoredTrend>> ScanAsync(ResearchScanRequest request, CancellationToken ct = default)
     {
@@ -96,29 +99,14 @@ internal sealed class ResearchAgent(
             .Select(source => FetchSourceAsync(source, request.Geo, OverrideFor(source.Source, request.Overrides), ct))
             .ToList();
         var results = await Task.WhenAll(tasks).ConfigureAwait(false);
-        var candidates = results
+        var deduped = results
             .SelectMany(r => r)
             .GroupBy(t => t.Topic, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.OrderByDescending(t => t.SourceScore).First())
             .ToList();
-        if (candidates.Count == 0)
-            return [];
 
-        // AI gate dựa trên kho tri thức (keywords từ KbModules): giữ đúng chủ đề liên quan domain.
-        if (_curator is not null)
-        {
-            var curated = await _curator.CurateAsync(request.TenantId, candidates, request.Keywords, ct).ConfigureAwait(false);
-            if (curated is not null)
-                return curated
-                    .OrderByDescending(t => t.RelevanceScore)
-                    .ThenBy(t => t.Topic)
-                    .Take(MaxResults)
-                    .ToList();
-        }
-
-        // Fallback (chưa gắn LLM): keyword scorer — chỉ giữ chủ đề khớp keyword của tenant.
-        return candidates
-            .Select(t => _scorer.Score(t, request.Keywords))
+        var scored = await _scorer.ScoreAsync(request.TenantId, deduped, request.Keywords, ct).ConfigureAwait(false);
+        return scored
             .Where(t => t.RelevanceScore > 0d)
             .OrderByDescending(t => t.RelevanceScore)
             .ThenBy(t => t.Topic)

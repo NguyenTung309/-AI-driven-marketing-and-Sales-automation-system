@@ -31,14 +31,15 @@ public sealed class TrendSourceParserTests
     }
 
     [Fact]
-    public void Google_trends_rss_parser_reads_current_trending_rss_namespace()
+    public void Google_trends_rss_parser_reads_new_trending_rss_namespace()
     {
+        // Feed hien tai cua Google: /trending/rss voi namespace moi
         const string xml = """
-            <rss xmlns:ht="https://trends.google.com/trending/rss" version="2.0">
+            <rss xmlns:ht="https://trends.google.com/trending/rss">
               <channel>
                 <item>
-                  <title>tây ban nha vs áo</title>
-                  <ht:approx_traffic>10,000+</ht:approx_traffic>
+                  <title>vietlott mega 6 45</title>
+                  <ht:approx_traffic>2000+</ht:approx_traffic>
                   <description/>
                 </item>
               </channel>
@@ -48,9 +49,9 @@ public sealed class TrendSourceParserTests
         var trends = GoogleTrendsRssSource.ParseRss(xml);
 
         trends.Should().ContainSingle();
-        trends[0].Topic.Should().Be("tây ban nha vs áo");
-        trends[0].Metric.Should().Be("10,000+");
-        trends[0].SourceScore.Should().Be(10_000d);
+        trends[0].Topic.Should().Be("vietlott mega 6 45");
+        trends[0].Metric.Should().Be("2000+");
+        trends[0].SourceScore.Should().Be(2_000d);
     }
 
     [Fact]

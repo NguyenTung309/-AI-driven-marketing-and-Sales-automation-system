@@ -37,13 +37,13 @@ public sealed partial class QdrantRagRetriever(
             filters.Add(new VectorMetadataFilter("kb_version_id", activeVersionIds.ToArray()));
 
         var hits = await store.SearchAsync(collection, queryVec, request.TopK, filters, ct).ConfigureAwait(false);
-        var span = queryVec.Span;
+        var array = queryVec.ToArray();
         var hasNaN = false;
         double sumSq = 0;
-        for (var k = 0; k < span.Length; k++)
+        for (var k = 0; k < array.Length; k++)
         {
-            if (float.IsNaN(span[k]) || float.IsInfinity(span[k])) { hasNaN = true; break; }
-            sumSq += span[k] * span[k];
+            if (float.IsNaN(array[k]) || float.IsInfinity(array[k])) { hasNaN = true; break; }
+            sumSq += array[k] * array[k];
         }
         LogRetrieve(logger, collection, queryVec.Length, activeVersionIds?.Count ?? -1, hits.Count, hasNaN, Math.Sqrt(sumSq), request.TenantId, request.KbModuleCode ?? "");
         if (hits.Count == 0)

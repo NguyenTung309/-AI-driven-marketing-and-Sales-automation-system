@@ -143,6 +143,7 @@ public sealed class MessageConfiguration : IEntityTypeConfiguration<Message>
         builder.Property(x => x.Direction).HasMaxLength(8).IsRequired();
         builder.Property(x => x.SenderType).HasMaxLength(16).IsRequired();
         builder.Property(x => x.ContentType).HasMaxLength(32);
+        builder.Property(x => x.AttachmentUrl).HasMaxLength(2048);
         builder.HasIndex(x => new { x.ConversationId, x.SentAt });
         builder.HasIndex(x => new { x.TenantId, x.SentAt });
     }

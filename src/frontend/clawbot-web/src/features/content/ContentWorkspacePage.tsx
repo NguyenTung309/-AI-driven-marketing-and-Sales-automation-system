@@ -83,6 +83,13 @@ function normalize(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
 }
 
+// Trend-scan briefs carry the trend source (e.g. "google_trends") as platform — coerce to a
+// selectable platform so the picker and generate calls never send a value without a prompt template.
+function coercePlatform(platform: string): string {
+  const value = normalize(platform);
+  return PLATFORMS.some((item) => item.value === value) ? value : PLATFORMS[0].value;
+}
+
 function platformConfig(platform: string): PlatformConfig {
   const value = normalize(platform);
   return PLATFORMS.find((item) => item.value === value || value.includes(item.value)) ?? {
@@ -363,11 +370,24 @@ function BriefEditor({
   );
 }
 
+// ISO week (giờ VN ~ local): dùng để lọc xu hướng theo tuần, khớp weekOf backend
+function isoWeekOf(date: Date): string {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
 function TrendPanel({
   trends,
   loading,
   scanning,
   error,
+  week,
+  weekOptions,
+  onWeekChange,
   onScan,
   onOpenSettings,
   onUseIdea,
@@ -376,6 +396,9 @@ function TrendPanel({
   readonly loading: boolean;
   readonly scanning: boolean;
   readonly error: unknown;
+  readonly week: string;
+  readonly weekOptions: readonly { value: string; label: string }[];
+  readonly onWeekChange: (week: string) => void;
   readonly onScan: () => void;
   readonly onOpenSettings: () => void;
   readonly onUseIdea: (idea: string) => void;
@@ -387,7 +410,17 @@ function TrendPanel({
           <h2 className="text-headline-sm text-secondary">Xu hướng tuần</h2>
           <p className="mt-1 text-body-md text-on-surface-variant">Nguồn từ hệ thống xu hướng và agent nghiên cứu.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
+          <select
+            className="rounded border border-outline bg-surface-container-lowest px-2 py-1.5 text-label-sm text-secondary"
+            value={week}
+            onChange={(e) => onWeekChange(e.target.value)}
+            aria-label="Chọn tuần xu hướng"
+          >
+            {weekOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
           <Button type="button" variant="outline" size="sm" onClick={onOpenSettings} aria-label="Cấu hình quét xu hướng">
             <span aria-hidden="true" className="material-symbols-outlined text-[16px]">settings</span>
           </Button>
@@ -409,6 +442,7 @@ function TrendPanel({
                   <p className="text-body-md font-bold text-secondary">{trend.topic}</p>
                   <p className="text-label-sm text-on-surface-variant">
                     {trend.source} · {trend.metric}
+                    {week === "all" && trend.weekOf ? ` · ${trend.weekOf}` : ""}
                   </p>
                 </div>
                 <span className="rounded bg-primary/10 px-2 py-1 font-mono text-mono-status text-primary">
@@ -886,9 +920,13 @@ export default function ContentWorkspacePage() {
     queryKey: ["content", "calendar", calendarRange],
     queryFn: () => getContentCalendar(calendarRange),
   });
+  // Mac dinh chi xem tuan hien tai; "all" = xem lai cac tuan cu (card se kem nhan tuan)
+  const currentWeek = isoWeekOf(new Date());
+  const previousWeek = isoWeekOf(new Date(Date.now() - 7 * 86400000));
+  const [trendWeek, setTrendWeek] = useState<string>(currentWeek);
   const trendsQuery = useQuery({
-    queryKey: ["content", "trends"],
-    queryFn: () => getContentTrends(),
+    queryKey: ["content", "trends", trendWeek],
+    queryFn: () => getContentTrends(trendWeek === "all" ? undefined : trendWeek),
     staleTime: 60_000,
   });
 
@@ -920,7 +958,7 @@ export default function ContentWorkspacePage() {
         : createContentBrief({ platform: briefPlatform, brief: briefText.trim() }),
     onSuccess: async (brief) => {
       setSelectedBriefId(brief.id);
-      setBriefPlatform(brief.platform);
+      setBriefPlatform(coercePlatform(brief.platform));
       setBriefText(brief.brief);
       setNotice({ tone: "success", message: "Đã lưu yêu cầu nội dung." });
       await queryClient.invalidateQueries({ queryKey: ["content", "briefs"] });
@@ -940,7 +978,7 @@ export default function ContentWorkspacePage() {
   const generateMutation = useMutation({
     mutationFn: () =>
       selectedBriefId
-        ? generateContentItems({ briefId: selectedBriefId })
+        ? generateContentItems({ briefId: selectedBriefId, platform: briefPlatform })
         : generateContentItems({ platform: briefPlatform, briefText: briefText.trim() }),
     onSuccess: async (response) => {
       const first = response.items[0];
@@ -1034,6 +1072,8 @@ export default function ContentWorkspacePage() {
     mutationFn: () => scanContentTrends(),
     onSuccess: async () => {
       setNotice({ tone: "success", message: "Đã quét xu hướng mới từ agent nghiên cứu." });
+      // Scan luon ghi vao tuan hien tai -> nhay ve tuan nay de thay ket qua moi
+      setTrendWeek(currentWeek);
       await queryClient.invalidateQueries({ queryKey: ["content", "trends"] });
     },
   });
@@ -1042,7 +1082,7 @@ export default function ContentWorkspacePage() {
 
   function selectBrief(brief: ContentBrief) {
     setSelectedBriefId(brief.id);
-    setBriefPlatform(brief.platform);
+    setBriefPlatform(coercePlatform(brief.platform));
     setBriefText(brief.brief);
   }
 
@@ -1131,6 +1171,13 @@ export default function ContentWorkspacePage() {
             loading={trendsQuery.isLoading}
             scanning={scanMutation.isPending}
             error={trendsQuery.error ?? scanMutation.error}
+            week={trendWeek}
+            weekOptions={[
+              { value: currentWeek, label: `Tuần này (${currentWeek})` },
+              { value: previousWeek, label: `Tuần trước (${previousWeek})` },
+              { value: "all", label: "Tất cả các tuần" },
+            ]}
+            onWeekChange={setTrendWeek}
             onScan={() => scanMutation.mutate()}
             onOpenSettings={() => setTrendSettingsOpen(true)}
             onUseIdea={applyTrendIdea}

@@ -134,6 +134,33 @@ export async function uploadKbVersion(moduleId: string, file: File): Promise<KbU
   return response.data;
 }
 
+export interface KbClassifiedFile {
+  readonly fileName: string;
+  readonly success: boolean;
+  readonly error: string | null;
+  readonly moduleId: string | null;
+  readonly moduleCode: string | null;
+  readonly moduleName: string | null;
+  readonly isNewModule: boolean;
+  readonly confidence: number;
+  readonly reason: string | null;
+  readonly version: KbVersion | null;
+  readonly deployed: boolean;
+}
+
+export interface KbClassifyUploadResponse {
+  readonly results: readonly KbClassifiedFile[];
+}
+
+export async function classifyUploadKb(files: readonly File[], autoDeploy: boolean): Promise<KbClassifyUploadResponse> {
+  const form = new FormData();
+  for (const file of files) form.append("files", file, file.name);
+  const response = await apiClient.post<KbClassifyUploadResponse>("/api/kb/classify-upload", form, {
+    params: { autoDeploy },
+  });
+  return response.data;
+}
+
 export async function deployKbVersion(moduleId: string, versionId: string): Promise<void> {
   await apiClient.post(`/api/kb/modules/${moduleId}/versions/${versionId}/deploy`);
 }

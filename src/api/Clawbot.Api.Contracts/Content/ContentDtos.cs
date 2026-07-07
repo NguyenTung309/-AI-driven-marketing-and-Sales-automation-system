@@ -90,7 +90,8 @@ public sealed record TrendDto(
     string Source,
     string Metric,
     double RelevanceScore,
-    IReadOnlyList<string> ContentIdeas);
+    IReadOnlyList<string> ContentIdeas,
+    string WeekOf = "");
 
 public sealed record TrendScanResponse(IReadOnlyList<TrendDto> Trends);
 
