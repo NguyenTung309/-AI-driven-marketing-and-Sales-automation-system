@@ -15,7 +15,7 @@ public sealed class PancakeChannelAdapter(
     ITenantAccessor tenants,
     IPancakePageTokenResolver? pageTokenResolver = null) : IChannelAdapter
 {
-    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
     // Verified Pancake outbound rate limit (SPEC-16 §5.1): 5 req/s per page -> 429 on overflow.
     // Keyed by page_id when known (per-page bucket); falls back to a tenant bucket for legacy single-page sends.
@@ -132,12 +132,14 @@ public sealed class PancakeChannelAdapter(
         // page access token for that page (page ops require a page token, NOT the user token); WHEN none is stored
         // THE SYSTEM SHALL fall back to the legacy configured token so a single-page tenant still works]
         string outboundToken;
+        string? senderId = null;
         if (string.IsNullOrWhiteSpace(accessToken)
             && !string.IsNullOrEmpty(pagePart)
             && _pageTokenResolver is not null)
         {
             var pageToken = await _pageTokenResolver.ResolveAsync(tenantId, pagePart, ct).ConfigureAwait(false);
             outboundToken = pageToken?.PageAccessToken ?? cfg.AccessToken;
+            senderId = pageToken?.SenderId;
         }
         else
         {
@@ -146,15 +148,20 @@ public sealed class PancakeChannelAdapter(
         if (string.IsNullOrEmpty(outboundToken))
             throw new InvalidOperationException("Pancake access_token not configured.");
 
+        // Send API only supports v1 (polling/webhook use v2).
+        var sendBaseUrl = cfg.BaseUrl
+            .Replace("/v2/", "/v1/")
+            .Replace("/v2", "/v1");
+
         var path = cfg.SendPathTemplate
             .Replace("{page_id}", pagePart, StringComparison.Ordinal)
             .Replace("{thread_id}", threadPart, StringComparison.Ordinal);
-        var url = $"{cfg.BaseUrl.TrimEnd('/')}{path}";
+        var url = $"{sendBaseUrl.TrimEnd('/')}{path}";
         if (string.Equals(cfg.AuthMode, "query", StringComparison.Ordinal))
             url += (url.Contains('?', StringComparison.Ordinal) ? "&" : "?") +
                    "page_access_token=" + Uri.EscapeDataString(outboundToken);
 
-        var payload = new SendBody("reply_inbox", text);
+        var payload = new SendBody("reply_inbox", text, senderId);
         using var req = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = JsonContent.Create(payload, options: JsonOpts),
@@ -203,8 +210,8 @@ public sealed class PancakeChannelAdapter(
 
     private sealed record SendBody(
         [property: JsonPropertyName("action")] string Action,
-        [property: JsonPropertyName("message")] string Message);
-
+        [property: JsonPropertyName("message")] string Message,
+        [property: JsonPropertyName("sender_id")] string? SenderId = null);
     private sealed record PancakeWebhookPayload(
         [property: JsonPropertyName("events")] IReadOnlyList<PancakeEvent>? Events);
 
@@ -221,3 +228,4 @@ public sealed class PancakeChannelAdapter(
         [property: JsonPropertyName("sent_at")] DateTimeOffset? SentAt,
         [property: JsonPropertyName("avatar_url")] string? AvatarUrl);
 }
+
