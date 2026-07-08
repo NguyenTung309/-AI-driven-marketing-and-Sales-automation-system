@@ -93,7 +93,10 @@ public static class LeadsEndpoints
             .ThenByDescending(l => l.LastActivityAt ?? l.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(l => new LeadDto(l.Id, l.ContactId, l.OwnerUserId, l.Score, l.Stage, l.SourcePlatform, l.LastActivityAt, l.CreatedAt))
+            .Select(l => new LeadDto(l.Id, l.ContactId, l.OwnerUserId, l.Score, l.Stage, l.SourcePlatform, l.LastActivityAt, l.CreatedAt,
+                db.Contacts.Where(c => c.Id == l.ContactId).Select(c => c.DisplayName).FirstOrDefault(),
+                db.Contacts.Where(c => c.Id == l.ContactId).Select(c => c.Phone).FirstOrDefault(),
+                db.Users.Where(u => u.Id == l.OwnerUserId).Select(u => u.DisplayName).FirstOrDefault()))
             .ToListAsync(ct).ConfigureAwait(false);
 
         return Results.Ok(rows);
@@ -127,7 +130,20 @@ public static class LeadsEndpoints
         _ = tenants.Require();
         var lead = await db.Leads.AsNoTracking().FirstOrDefaultAsync(l => l.Id == id, ct).ConfigureAwait(false);
         if (lead is null) return Results.NotFound();
-        return Results.Ok(new LeadDto(lead.Id, lead.ContactId, lead.OwnerUserId, lead.Score, lead.Stage, lead.SourcePlatform, lead.LastActivityAt, lead.CreatedAt));
+        var contact = lead.ContactId is null
+            ? null
+            : await db.Contacts.AsNoTracking()
+                .Where(c => c.Id == lead.ContactId)
+                .Select(c => new { c.DisplayName, c.Phone })
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        var ownerName = lead.OwnerUserId is null
+            ? null
+            : await db.Users.AsNoTracking()
+                .Where(u => u.Id == lead.OwnerUserId)
+                .Select(u => u.DisplayName)
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        return Results.Ok(new LeadDto(lead.Id, lead.ContactId, lead.OwnerUserId, lead.Score, lead.Stage, lead.SourcePlatform, lead.LastActivityAt, lead.CreatedAt,
+            contact?.DisplayName, contact?.Phone, ownerName));
     }
 
     private static async Task<IResult> CreateAsync(

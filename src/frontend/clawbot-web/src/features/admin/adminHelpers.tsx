@@ -184,6 +184,7 @@ export interface AdminUserFormState {
   readonly isActive: boolean;
   readonly roles: string[];
   readonly pancakePageId: string;
+  readonly pancakeChannelName: string;
   readonly pancakePlatform: string;
   readonly pancakeAccessToken: string;
 }

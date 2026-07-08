@@ -246,7 +246,9 @@ public static class AgentsEndpoints
         try
         {
             using var _ = llmScope.Begin(tenant.TenantId, agent.Code, now);
-            reply = await chatClient.CompleteAsync(config.SystemPrompt, Array.Empty<ChatTurn>(), redactedMessage, ct).ConfigureAwait(false);
+            // Sandbox phai boc guardrail giong chat that de "Chay thu" phan anh dung hanh vi production.
+            var systemPrompt = Clawbot.Agents.Core.AgentPromptDefaults.Compose(config.SystemPrompt);
+            reply = await chatClient.CompleteAsync(systemPrompt, Array.Empty<ChatTurn>(), redactedMessage, ct).ConfigureAwait(false);
         }
         catch (LlmConfigNotConfiguredException)
         {

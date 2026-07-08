@@ -87,7 +87,9 @@ public sealed record OrchestrationPlanTask(
     IReadOnlyList<string> DependsOn,
     string Status,
     string? Output,
-    string? Error);
+    string? Error,
+    // Planner sinh system prompt rieng cho sub-agent tuy task (tuy chon). Null -> agent dung prompt mac dinh.
+    string? RoleInstruction = null);
 
 public sealed record OrchestrationPlanDocument(
     [property: JsonConverter(typeof(TolerantVersionConverter))] int Version,

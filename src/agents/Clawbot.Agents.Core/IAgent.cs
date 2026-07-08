@@ -4,7 +4,9 @@ public sealed record AgentTask(
     string Id,
     string AgentName,
     string Description,
-    IReadOnlyDictionary<string, string> Input);
+    IReadOnlyDictionary<string, string> Input,
+    // Orchestrator co the sinh system prompt rieng cho sub-agent theo tung task; null -> dung mac dinh cua agent.
+    string? RoleInstruction = null);
 
 public sealed record AgentResult(
     string TaskId,

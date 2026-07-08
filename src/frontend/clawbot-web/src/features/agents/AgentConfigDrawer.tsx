@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listAgentTools, type AgentListItem, type UpdateAgentSettingsPayload } from "@/shared/api/agents";
+import { listKbModules } from "@/shared/api/kb";
+import { listSkillFiles, createSkillFile } from "@/shared/api/skills";
 import {
   createLlmConfig,
   updateLlmConfig,
@@ -57,17 +59,6 @@ const EMPTY_LLM_CONFIG_DRAFT: LlmConfigDraft = {
   timeoutSeconds: "",
   maxOutputTokens: "",
 };
-
-function listToText(values: readonly string[]): string {
-  return values.join("\n");
-}
-
-function textToList(value: string): readonly string[] {
-  return value
-    .split(/\r?\n|,/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
 
 function toNullableNumber(value: string): number | null {
   const trimmed = value.trim();
@@ -178,6 +169,37 @@ export function AgentConfigDrawer({
   const queryClient = useQueryClient();
   const toolsCatalogQuery = useQuery({ queryKey: ["agent-tools"], queryFn: listAgentTools, staleTime: 5 * 60_000 });
   const toolCatalog = toolsCatalogQuery.data ?? [];
+  const kbModulesQuery = useQuery({ queryKey: ["kb-modules"], queryFn: listKbModules, staleTime: 5 * 60_000 });
+  const kbModules = kbModulesQuery.data ?? [];
+  const toggleKbModule = (code: string, on: boolean) => {
+    const current = new Set(form.kbModules);
+    if (on) current.add(code);
+    else current.delete(code);
+    onDraftChange({ kbModules: [...current] });
+  };
+
+  const skillFilesQuery = useQuery({ queryKey: ["skill-files"], queryFn: listSkillFiles, staleTime: 5 * 60_000 });
+  const skillFiles = skillFilesQuery.data ?? [];
+  const [skillUploadError, setSkillUploadError] = useState<string | null>(null);
+  const toggleSkillFile = (name: string, on: boolean) => {
+    const current = new Set(form.skillFiles);
+    if (on) current.add(name);
+    else current.delete(name);
+    onDraftChange({ skillFiles: [...current] });
+  };
+  const uploadSkillMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const contentMd = await file.text();
+      return createSkillFile({ name: file.name, contentMd });
+    },
+    onSuccess: async (created) => {
+      setSkillUploadError(null);
+      toggleSkillFile(created.name, true);
+      await queryClient.invalidateQueries({ queryKey: ["skill-files"] });
+    },
+    onError: (error) =>
+      setSkillUploadError(error instanceof Error ? error.message : "Không tải được tệp kỹ năng."),
+  });
   const toggleTool = (name: string, on: boolean) => {
     const current = new Set(form.allowedTools);
     if (on) current.add(name);
@@ -185,7 +207,7 @@ export function AgentConfigDrawer({
     onDraftChange({ allowedTools: [...current] });
   };
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  const [sandboxMinimized, setSandboxMinimized] = useState(false);
+  const [sandboxMinimized, setSandboxMinimized] = useState(true);
   const [llmDraft, setLlmDraft] = useState<LlmConfigDraft>(EMPTY_LLM_CONFIG_DRAFT);
   const [llmError, setLlmError] = useState<string | null>(null);
   const boundConfig = llmConfigs.find((c) => c.id === form.llmConfigId);
@@ -285,7 +307,7 @@ export function AgentConfigDrawer({
           <ConfigTabButton active={tab === "tools"} label="Công cụ & kết nối" onClick={() => onTabChange("tools")} />
         </div>
 
-        <div className="relative flex-1 overflow-y-auto p-6 pb-[430px] lg:pb-6">
+        <div className="flex-1 overflow-y-auto p-6">
           {settingsLoading ? (
             <div className="rounded-lg border border-outline bg-surface p-4 text-body-md text-on-surface-variant">Đang tải cấu hình agent...</div>
           ) : null}
@@ -295,6 +317,9 @@ export function AgentConfigDrawer({
               <label className="text-label-caps uppercase text-tertiary" htmlFor="agent-system-prompt">
                 Hướng dẫn gốc
               </label>
+              <p className="rounded-lg border border-outline bg-surface px-3 py-2 text-body-md text-on-surface-variant">
+                Hệ thống tự áp quy tắc an toàn chung (luôn tiếng Việt, không bịa giá/cam kết, không lộ cấu hình). Ô dưới là phần tùy chỉnh riêng cho agent — bạn sửa tự do, không ghi đè được quy tắc chung.
+              </p>
               <textarea
                 className="min-h-[300px] resize-y rounded-lg border border-outline-variant bg-[#1e1e1e] p-4 font-mono text-mono-status leading-6 text-green-400 outline-none focus:border-primary"
                 id="agent-system-prompt"
@@ -306,7 +331,10 @@ export function AgentConfigDrawer({
                 <button
                   className="rounded border border-primary px-4 py-2 text-body-md text-primary transition-colors hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={sandboxPending}
-                  onClick={() => onSendSandbox("Kiểm tra kết nối")}
+                  onClick={() => {
+                    setSandboxMinimized(false);
+                    onSendSandbox("Kiểm tra kết nối");
+                  }}
                   type="button"
                 >
                   Thử hướng dẫn
@@ -425,46 +453,122 @@ export function AgentConfigDrawer({
                   </div>
                 )}
               </fieldset>
-              <label className="space-y-2">
-                <span className="text-label-caps uppercase text-tertiary">Tệp kỹ năng</span>
-                <textarea className="min-h-32 w-full resize-y rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" onChange={(event) => onDraftChange({ skillFiles: textToList(event.target.value) })} placeholder="ky-nang-tu-van.md" value={listToText(form.skillFiles)} />
-              </label>
-              <label className="space-y-2">
-                <span className="text-label-caps uppercase text-tertiary">Kho tri thức liên kết</span>
-                <textarea className="min-h-32 w-full resize-y rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary" onChange={(event) => onDraftChange({ kbModules: textToList(event.target.value) })} placeholder="tu-van-hsk&#10;lo-trinh-hsk" value={listToText(form.kbModules)} />
-              </label>
+              <fieldset className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <legend className="text-label-caps uppercase text-tertiary">Tệp kỹ năng</legend>
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded border border-primary px-3 py-1.5 text-body-md font-bold text-primary transition-colors hover:bg-primary/5">
+                    <span aria-hidden="true" className="material-symbols-outlined text-[16px]">upload_file</span>
+                    {uploadSkillMutation.isPending ? "Đang tải..." : "Tải lên .md"}
+                    <input
+                      type="file"
+                      accept=".md,.markdown,.txt"
+                      className="hidden"
+                      disabled={uploadSkillMutation.isPending}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) uploadSkillMutation.mutate(file);
+                        event.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+                <p className="text-body-md text-on-surface-variant">Chọn tệp kỹ năng có sẵn hoặc tải tệp .md mới. Nội dung được nối vào hướng dẫn khi agent trả lời.</p>
+                {skillUploadError ? <p className="text-label-sm text-error">{skillUploadError}</p> : null}
+                {skillFiles.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {skillFiles.map((skill) => {
+                      const checked = form.skillFiles.includes(skill.name);
+                      return (
+                        <label
+                          key={skill.id}
+                          className={[
+                            "inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-body-md transition-colors",
+                            checked ? "border-primary bg-primary/5 text-primary" : "border-outline bg-white text-on-surface hover:border-primary/50",
+                          ].join(" ")}
+                          title={skill.description ?? skill.name}
+                        >
+                          <input
+                            checked={checked}
+                            className="accent-primary"
+                            onChange={(event) => toggleSkillFile(skill.name, event.target.checked)}
+                            type="checkbox"
+                          />
+                          {skill.name}
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded border border-outline bg-surface p-3 text-body-md text-on-surface-variant">
+                    {skillFilesQuery.isLoading ? "Đang tải tệp kỹ năng..." : "Chưa có tệp kỹ năng. Tải lên tệp .md để bắt đầu."}
+                  </div>
+                )}
+              </fieldset>
+              <fieldset className="space-y-2">
+                <legend className="text-label-caps uppercase text-tertiary">Kho tri thức liên kết</legend>
+                <p className="text-body-md text-on-surface-variant">Chọn module tri thức có sẵn cho agent tham chiếu khi trả lời. Quản lý nội dung ở trang Thư viện tài liệu.</p>
+                {kbModules.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {kbModules.map((module) => {
+                      const checked = form.kbModules.includes(module.code);
+                      return (
+                        <label
+                          key={module.id}
+                          className={[
+                            "inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-body-md transition-colors",
+                            checked ? "border-primary bg-primary/5 text-primary" : "border-outline bg-white text-on-surface hover:border-primary/50",
+                          ].join(" ")}
+                          title={module.description ?? module.code}
+                        >
+                          <input
+                            checked={checked}
+                            className="accent-primary"
+                            onChange={(event) => toggleKbModule(module.code, event.target.checked)}
+                            type="checkbox"
+                          />
+                          {module.name || module.code}
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded border border-outline bg-surface p-3 text-body-md text-on-surface-variant">
+                    {kbModulesQuery.isLoading ? "Đang tải kho tri thức..." : "Chưa có module tri thức. Tạo ở trang Thư viện tài liệu trước."}
+                  </div>
+                )}
+              </fieldset>
             </div>
           ) : null}
 
-          <div className="mt-6 rounded-lg border border-outline bg-surface p-4 text-body-md text-on-surface-variant lg:max-w-[calc(100%-360px)]">
+          <div className="mt-6 rounded-lg border border-outline bg-surface p-4 text-body-md text-on-surface-variant">
             Các thiết lập này áp dụng cho agent đang chọn. Khu vực thử phản hồi giúp kiểm tra cách agent trả lời trước khi đưa vào vận hành.
           </div>
-
-          <section className={["absolute bottom-6 right-6 flex w-[calc(100%-3rem)] flex-col overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-2xl lg:w-80", sandboxMinimized ? "h-12" : "h-96"].join(" ")}>
-            <button className="flex items-center justify-between bg-primary-container p-3 text-left" onClick={() => setSandboxMinimized((value) => !value)} type="button">
-              <span className="text-label-caps uppercase text-on-primary">Thử phản hồi</span>
-              <span aria-hidden="true" className="material-symbols-outlined text-sm text-on-primary">{sandboxMinimized ? "expand_less" : "expand_more"}</span>
-            </button>
-            {!sandboxMinimized ? (
-              <>
-                <div className="flex-1 space-y-3 overflow-y-auto bg-surface-container-low p-4">
-                  {sandboxMessages.map((message) => (
-                    <div className={["max-w-[82%] rounded-lg p-2 text-body-md", message.side === "user" ? "ml-auto rounded-tr-none bg-primary-container text-on-primary" : "mr-auto rounded-tl-none bg-white text-on-surface shadow-sm"].join(" ")} key={message.id}>
-                      {message.text}
-                    </div>
-                  ))}
-                  {sandboxPending ? <div className="text-body-md text-on-surface-variant">Đang kiểm tra hướng dẫn...</div> : null}
-                </div>
-                <footer className="flex gap-2 border-t border-outline-variant p-3">
-                  <input className="min-w-0 flex-1 bg-transparent text-body-md outline-none placeholder:text-on-surface-variant/60" onChange={(event) => onSandboxInputChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onSendSandbox(); } }} placeholder="Nhập tin nhắn thử nghiệm..." value={sandboxInput} />
-                  <button aria-label="Gửi tin nhắn thử nghiệm" className="text-primary disabled:opacity-50" disabled={sandboxPending} onClick={() => onSendSandbox()} type="button">
-                    <span aria-hidden="true" className="material-symbols-outlined">send</span>
-                  </button>
-                </footer>
-              </>
-            ) : null}
-          </section>
         </div>
+
+        <section className="flex shrink-0 flex-col overflow-hidden border-t border-outline-variant bg-surface-container-lowest">
+          <button className="flex items-center justify-between bg-primary-container p-3 text-left" onClick={() => setSandboxMinimized((value) => !value)} type="button">
+            <span className="text-label-caps uppercase text-on-primary">Thử phản hồi</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-sm text-on-primary">{sandboxMinimized ? "expand_less" : "expand_more"}</span>
+          </button>
+          {!sandboxMinimized ? (
+            <>
+              <div className="h-56 space-y-3 overflow-y-auto bg-surface-container-low p-4">
+                {sandboxMessages.map((message) => (
+                  <div className={["max-w-[82%] rounded-lg p-2 text-body-md", message.side === "user" ? "ml-auto rounded-tr-none bg-primary-container text-on-primary" : "mr-auto rounded-tl-none bg-white text-on-surface shadow-sm"].join(" ")} key={message.id}>
+                    {message.text}
+                  </div>
+                ))}
+                {sandboxPending ? <div className="text-body-md text-on-surface-variant">Đang kiểm tra hướng dẫn...</div> : null}
+              </div>
+              <footer className="flex gap-2 border-t border-outline-variant p-3">
+                <input className="min-w-0 flex-1 bg-transparent text-body-md outline-none placeholder:text-on-surface-variant/60" onChange={(event) => onSandboxInputChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onSendSandbox(); } }} placeholder="Nhập tin nhắn thử nghiệm..." value={sandboxInput} />
+                <button aria-label="Gửi tin nhắn thử nghiệm" className="text-primary disabled:opacity-50" disabled={sandboxPending} onClick={() => onSendSandbox()} type="button">
+                  <span aria-hidden="true" className="material-symbols-outlined">send</span>
+                </button>
+              </footer>
+            </>
+          ) : null}
+        </section>
 
         <footer className="flex shrink-0 justify-end gap-3 border-t border-outline-variant bg-surface-container-low p-6">
           <button className="rounded border border-outline px-6 py-2 text-body-md text-on-surface" onClick={onClose} type="button">

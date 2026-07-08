@@ -270,6 +270,7 @@ app.MapAuth();
 app.MapRoles();
 app.MapApiKeys();
 app.MapKb();
+app.MapSkills();
 app.MapInbox();
 app.MapLabels();
 app.MapInboxNotes();

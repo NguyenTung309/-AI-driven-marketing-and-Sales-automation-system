@@ -92,6 +92,8 @@ public static class ToolRegistryFactory
             ["content.approve"] = ("Approve/reject a draft content item (reviewer action).", "content:write", ToolRiskLevel.Low),
             ["content.schedule"] = ("Schedule an approved content item for publishing.", "content:write", ToolRiskLevel.Low),
             ["content.publish"] = ("Publish an approved content item via the social publisher.", "content:write", ToolRiskLevel.High),
+            // Read-only external search (SearXNG self-host), no tenant-data write -> no permission gate.
+            ["web.search"] = ("Search the public web (prices, competitors, news) via self-hosted SearXNG.", "", ToolRiskLevel.Low),
         };
 
     // Builds the registry from adapter-wrapped tools PLUS any explicit IAgentTool registrations (AgentService-layer

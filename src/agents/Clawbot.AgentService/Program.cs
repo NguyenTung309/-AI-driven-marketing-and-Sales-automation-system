@@ -48,6 +48,9 @@ builder.Services.AddScoped<IAgentTool, ContentGenerateTool>();
 builder.Services.AddScoped<IAgentTool, ContentApproveTool>();
 builder.Services.AddScoped<IAgentTool, ContentScheduleTool>();
 builder.Services.AddScoped<IAgentTool, ContentPublishTool>();
+// web.search: tra cuu web qua SearXNG self-host (Searxng:BaseUrl); timeout ngan de ReAct loop khong treo
+builder.Services.AddScoped<IAgentTool, WebSearchTool>();
+builder.Services.AddHttpClient(WebSearchTool.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddScoped<ToolRegistry>(sp => ToolRegistryFactory.Build(
     sp.GetRequiredService<IEnumerable<IAgent>>(),
     sp.GetRequiredService<IEnumerable<IAgentTool>>()));

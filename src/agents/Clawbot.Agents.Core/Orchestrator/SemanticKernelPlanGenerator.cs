@@ -138,6 +138,9 @@ public sealed partial class SemanticKernelPlanGenerator(IChatCompletionService c
         return "Return only JSON for an OrchestrationPlanDocument with version (integer) and tasks. " +
                "Each task must have id, agent, description, input, dependsOn, status, output, error. " +
                "Use status pending for new tasks. " +
+               "Each task MAY also include roleInstruction: a short Vietnamese system prompt (1-3 câu) that " +
+               "tailors the sub-agent's persona/rules for THIS specific task. Only add it when it sharpens the " +
+               "sub-agent beyond its default role; otherwise omit it (null). " +
                "The \"agent\" field MUST be exactly one of these codes — do NOT invent new agent names: " +
                allowedCodes + ". " +
                "Available agents:\n" + agents;

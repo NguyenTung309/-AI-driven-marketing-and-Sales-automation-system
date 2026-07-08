@@ -61,7 +61,7 @@ internal sealed class GenericLlmAgentWorker(
 
     private async Task<AgentResult> RunTextOnlyAsync(AgentTask task, IReadOnlyList<RagChunk> chunks, CancellationToken ct)
     {
-        var reply = await CallLlmWithHeartbeatAsync(BuildSystemPrompt(chunks), Array.Empty<ChatTurn>(), BuildUserMessage(task), task, ct).ConfigureAwait(false);
+        var reply = await CallLlmWithHeartbeatAsync(BuildSystemPrompt(chunks, task.RoleInstruction), Array.Empty<ChatTurn>(), BuildUserMessage(task), task, ct).ConfigureAwait(false);
         await RecordCostAsync(reply).ConfigureAwait(false);
         return new AgentResult(task.Id, true, reply.Text, null);
     }
@@ -71,7 +71,7 @@ internal sealed class GenericLlmAgentWorker(
     // final answer and stop]
     private async Task<AgentResult> RunReActAsync(AgentTask task, IReadOnlyList<RagChunk> chunks, IReadOnlyList<IAgentTool> allowedTools, CancellationToken ct)
     {
-        var system = BuildReActSystemPrompt(chunks, allowedTools);
+        var system = BuildReActSystemPrompt(chunks, allowedTools, task.RoleInstruction);
         var history = new List<ChatTurn>();
         var userMessage = BuildUserMessage(task);
         var ctx = new ToolContext(TenantId(task), task.Id, definition.Id, definition.Code, requireHighRiskApproval, dryRun);
@@ -235,10 +235,13 @@ internal sealed class GenericLlmAgentWorker(
         }
     }
 
-    private string BuildSystemPrompt(IReadOnlyList<RagChunk> chunks)
+    private string BuildSystemPrompt(IReadOnlyList<RagChunk> chunks, string? roleInstruction = null)
     {
-        var sb = new StringBuilder(definition.Description.Length + 256);
-        sb.AppendLine(definition.Description.Trim());
+        var sb = new StringBuilder(definition.Description.Length + 512);
+        sb.AppendLine(AgentPromptDefaults.BaseGuardrail);
+        sb.AppendLine();
+        // Orchestrator co the "nan" persona rieng cho task nay; khong co thi dung mo ta cua agent definition.
+        sb.AppendLine(string.IsNullOrWhiteSpace(roleInstruction) ? definition.Description.Trim() : roleInstruction.Trim());
         sb.AppendLine();
         sb.AppendLine("You are a data-defined ClawBot sub-agent. Complete only the delegated task. Return concise, directly usable output.");
 
@@ -246,10 +249,12 @@ internal sealed class GenericLlmAgentWorker(
         return sb.ToString();
     }
 
-    private string BuildReActSystemPrompt(IReadOnlyList<RagChunk> chunks, IReadOnlyList<IAgentTool> tools)
+    private string BuildReActSystemPrompt(IReadOnlyList<RagChunk> chunks, IReadOnlyList<IAgentTool> tools, string? roleInstruction = null)
     {
-        var sb = new StringBuilder(definition.Description.Length + 512);
-        sb.AppendLine(definition.Description.Trim());
+        var sb = new StringBuilder(definition.Description.Length + 768);
+        sb.AppendLine(AgentPromptDefaults.BaseGuardrail);
+        sb.AppendLine();
+        sb.AppendLine(string.IsNullOrWhiteSpace(roleInstruction) ? definition.Description.Trim() : roleInstruction.Trim());
         sb.AppendLine();
         sb.AppendLine("You are a data-defined ClawBot sub-agent. Complete the delegated task by acting on the system through tools.");
         sb.AppendLine("To call a tool, reply with ONLY a JSON action on one line: {\"tool\":\"<name>\",\"args\":{<keys>}}.");

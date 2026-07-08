@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AxiosError } from "axios";
 import { AppShell } from "@/shared/layout/AppShell";
@@ -7,7 +7,6 @@ import { Alert, Button, Card, Input, StatusPill } from "@/shared/ui";
 import { platformClasses } from "@/shared/theme/colors";
 import { getMe } from "@/shared/api/auth";
 import {
-  assignConversation,
   escalateConversation,
   getConversation,
   listConversations,
@@ -324,6 +323,24 @@ interface ChatPanelProps {
 }
 
 function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSubmit, sending, onToggleAi, aiToggling }: ChatPanelProps) {
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const conversationId = conversation?.id ?? null;
+  const messageCount = conversation?.messages.length ?? 0;
+
+  // Giong Zalo: mo hoi thoai la neo o tin moi nhat (cuoi danh sach)
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [conversationId]);
+
+  // Tin moi den: chi keo xuong khi dang o gan day, khong giat khi dang doc lich su
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 240;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [messageCount]);
+
   if (isLoading) {
     return (
       <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-[720px]">
@@ -418,7 +435,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
         </div>
       </header>
 
-      <div className="flex-1 space-y-4 overflow-y-auto bg-surface p-gutter">
+      <div ref={messagesRef} className="flex-1 space-y-4 overflow-y-auto bg-surface p-gutter">
         {conversation.messages.length === 0 ? (
           <div className="rounded-lg border border-dashed border-outline bg-white p-6 text-center text-body-md text-on-surface-variant">
             Chưa có tin nhắn trong hội thoại này.
@@ -480,8 +497,6 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
 
 interface ContextPanelProps {
   readonly conversation: ConversationDetail | undefined;
-  readonly meId: string | null;
-  readonly onAssign: () => void;
   readonly onEscalate: () => void;
   readonly onResolve: () => void;
   readonly onUseSaleAssistDraft: (value: string) => void;
@@ -491,15 +506,12 @@ interface ContextPanelProps {
 
 function ContextPanel({
   conversation,
-  meId,
-  onAssign,
   onEscalate,
   onResolve,
   onUseSaleAssistDraft,
   onNotify,
   busy,
 }: ContextPanelProps) {
-  const assignedToMe = Boolean(conversation?.assignedTo && meId && conversation.assignedTo === meId);
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   const avatarUrl = conversation?.contactAvatarUrl ?? null;
   const showAvatar = Boolean(avatarUrl && failedAvatarUrl !== avatarUrl);
@@ -547,16 +559,6 @@ function ContextPanel({
       <Card>
         <h3 className="mb-4 text-label-caps uppercase text-secondary">Điều phối hội thoại</h3>
         <div className="space-y-2">
-          <Button
-            type="button"
-            className="w-full"
-            variant={assignedToMe ? "outline" : "primary"}
-            onClick={onAssign}
-            disabled={!conversation || !meId || busy || assignedToMe}
-          >
-            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">person_add</span>
-            {assignedToMe ? "Đã gán cho bạn" : "Gán cho tôi"}
-          </Button>
           <Button type="button" className="w-full" variant="outline" onClick={onEscalate} disabled={!conversation || busy}>
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">warning</span>
             Cần người hỗ trợ
@@ -566,9 +568,6 @@ function ContextPanel({
             Đánh dấu đã xử lý
           </Button>
         </div>
-        {!meId ? (
-          <p className="mt-3 text-label-sm text-error">Không đọc được thông tin người dùng, chưa thể gán hội thoại.</p>
-        ) : null}
       </Card>
 
       <SaleAssistPanel
@@ -668,13 +667,6 @@ export default function ConversationsPage() {
     },
   });
 
-  const assignMutation = useMutation({
-    mutationFn: () => assignConversation(activeConversationId ?? "", meId ?? "", selectedConversation?.rowVersion),
-    onSuccess: () => {
-      void invalidateActive();
-    },
-  });
-
   const escalateMutation = useMutation({
     mutationFn: () => escalateConversation(activeConversationId ?? "", selectedConversation?.rowVersion),
     onSuccess: () => {
@@ -697,8 +689,8 @@ export default function ConversationsPage() {
     },
   });
 
-  const actionBusy = assignMutation.isPending || escalateMutation.isPending || resolveMutation.isPending;
-  const actionError = sendMutation.error ?? assignMutation.error ?? escalateMutation.error ?? resolveMutation.error;
+  const actionBusy = escalateMutation.isPending || resolveMutation.isPending;
+  const actionError = sendMutation.error ?? escalateMutation.error ?? resolveMutation.error;
 
   const selectedConversation = detailQuery.data;
   const openCount = conversationItems.filter((item) => item.status === "open").length;
@@ -841,11 +833,7 @@ export default function ConversationsPage() {
 
         <ContextPanel
           conversation={selectedConversation}
-          meId={meId}
           busy={actionBusy}
-          onAssign={() => {
-            if (activeConversationId && meId) assignMutation.mutate();
-          }}
           onEscalate={() => {
             if (activeConversationId) escalateMutation.mutate();
           }}

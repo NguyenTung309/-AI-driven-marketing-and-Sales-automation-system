@@ -18,8 +18,8 @@ namespace Clawbot.Api.Endpoints;
 
 // PancakePageId + PancakeAccessToken: cau hinh kenh cua sale ngay tren form user - luu ve inbox
 // (page_id + token per kenh, nguon duy nhat cho polling/outbound) va gan user lam member cua kenh.
-public sealed record CreateUserRequest(string Email, string DisplayName, string Password, string[]? Roles, string? PancakeAccessToken, string? PancakePageId, string? PancakePlatform);
-public sealed record UpdateUserRequest(string? DisplayName, string[]? Roles, bool? IsActive, string? PancakeAccessToken, bool? ClearPancakeAccessToken, string? PancakePageId, string? PancakePlatform);
+public sealed record CreateUserRequest(string Email, string DisplayName, string Password, string[]? Roles, string? PancakeAccessToken, string? PancakePageId, string? PancakePlatform, string? PancakeChannelName);
+public sealed record UpdateUserRequest(string? DisplayName, string[]? Roles, bool? IsActive, string? PancakeAccessToken, bool? ClearPancakeAccessToken, string? PancakePageId, string? PancakePlatform, string? PancakeChannelName);
 
 // M23 — admin user management (permission: admin.system). Operates on Identity AppUser (`users` table).
 public static class AdminUsersEndpoints
@@ -160,7 +160,7 @@ public static class AdminUsersEndpoints
 
         if (!string.IsNullOrWhiteSpace(req.PancakePageId))
         {
-            var err = await ConnectPancakePageAsync(db, pageTokens, tenantId, user.Id, req.PancakePageId, req.PancakePlatform, req.PancakeAccessToken, ct);
+            var err = await ConnectPancakePageAsync(db, pageTokens, tenantId, user.Id, req.PancakePageId, req.PancakePlatform, req.PancakeAccessToken, req.PancakeChannelName, clock.UtcNow, ct);
             if (err is not null) return err;
         }
 
@@ -177,15 +177,18 @@ public static class AdminUsersEndpoints
         string pageId,
         string? platform,
         string? pageAccessToken,
+        string? channelName,
+        DateTimeOffset now,
         CancellationToken ct)
     {
         pageId = pageId.Trim();
         var plat = string.IsNullOrWhiteSpace(platform) ? "zalo" : platform.Trim();
+        var name = channelName?.Trim() ?? string.Empty;
 
         if (!string.IsNullOrWhiteSpace(pageAccessToken))
         {
             // name rong: giu ten inbox hien co, inbox moi fallback ve pageId
-            await pageTokens.StorePageTokenDirectAsync(tenantId, pageId, name: string.Empty, plat, pageAccessToken.Trim(), ct);
+            await pageTokens.StorePageTokenDirectAsync(tenantId, pageId, name, plat, pageAccessToken.Trim(), ct);
         }
 
         var inbox = await db.Inboxes
@@ -193,6 +196,13 @@ public static class AdminUsersEndpoints
             .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.ExternalPageId == pageId && i.DeletedAt == null, ct);
         if (inbox is null)
             return Results.BadRequest(new { error = "inbox_not_found", message = "Kênh chưa tồn tại - nhập kèm Page Access Token để tạo kênh." });
+
+        // Doi ten hien thi khong can nhap lai token
+        if (name.Length > 0 && inbox.Name != name)
+        {
+            inbox.UpdateName(name, now);
+            await db.SaveChangesAsync(ct);
+        }
 
         var isMember = await db.InboxMembers
             .IgnoreQueryFilters()
@@ -265,7 +275,7 @@ public static class AdminUsersEndpoints
 
         if (!string.IsNullOrWhiteSpace(req.PancakePageId))
         {
-            var err = await ConnectPancakePageAsync(db, pageTokens, tenants.Require().TenantId, user.Id, req.PancakePageId, req.PancakePlatform, req.PancakeAccessToken, ct);
+            var err = await ConnectPancakePageAsync(db, pageTokens, tenants.Require().TenantId, user.Id, req.PancakePageId, req.PancakePlatform, req.PancakeAccessToken, req.PancakeChannelName, clock.UtcNow, ct);
             if (err is not null) return err;
         }
 

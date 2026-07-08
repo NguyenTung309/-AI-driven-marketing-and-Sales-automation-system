@@ -17,7 +17,9 @@ public sealed record ChatAgentRequest(
     IReadOnlyList<ChatTurn> History,
     string? SenderHandle = null,
     string? SourcePlatform = null,
-    string? MatchedScenarioTemplate = null);
+    string? MatchedScenarioTemplate = null,
+    // Prompt custom cua tenant (config.SystemPrompt). Rong -> dung DefaultSystemPrompt. Luon boc guardrail.
+    string? CustomSystemPrompt = null);
 
 public sealed record ChatAgentReply(
     string Text,
@@ -131,7 +133,7 @@ public sealed class ChatAgent(
             ct).ConfigureAwait(false);
 
         var redactedHistory = await RedactHistoryAsync(request.History, ct).ConfigureAwait(false);
-        var system = BuildSystemPrompt(chunks, intentResult.Label, langResult.LanguageCode, request.MatchedScenarioTemplate);
+        var system = BuildSystemPrompt(chunks, intentResult.Label, langResult.LanguageCode, request.MatchedScenarioTemplate, request.CustomSystemPrompt);
         var reply = await _claude.CompleteAsync(system, redactedHistory, redacted.RedactedText, ct).ConfigureAwait(false);
 
         // C2: Outbound toxicity scan — block/regenerate if Claude output is toxic
@@ -227,7 +229,7 @@ public sealed class ChatAgent(
             ct).ConfigureAwait(false);
 
         var redactedHistory = await RedactHistoryAsync(request.History, ct).ConfigureAwait(false);
-        var system = BuildSystemPrompt(chunks, intentResult.Label, langResult.LanguageCode, request.MatchedScenarioTemplate);
+        var system = BuildSystemPrompt(chunks, intentResult.Label, langResult.LanguageCode, request.MatchedScenarioTemplate, request.CustomSystemPrompt);
         var text = new StringBuilder();
         var inputTokens = 0;
         var outputTokens = 0;
@@ -305,10 +307,13 @@ public sealed class ChatAgent(
         IReadOnlyList<RagChunk> chunks,
         string intent,
         string languageCode,
-        string? matchedScenarioTemplate)
+        string? matchedScenarioTemplate,
+        string? customSystemPrompt = null)
     {
-        var sb = new StringBuilder(DefaultSystemPrompt.Length + 256);
-        sb.AppendLine(DefaultSystemPrompt);
+        // Guardrail (khoa) + persona: custom cua tenant neu co, khong thi mau mac dinh.
+        var persona = string.IsNullOrWhiteSpace(customSystemPrompt) ? DefaultSystemPrompt : customSystemPrompt;
+        var sb = new StringBuilder(persona.Length + 512);
+        sb.AppendLine(AgentPromptDefaults.Compose(persona));
         sb.AppendLine(CultureInfo.InvariantCulture, $"Detected intent: {intent}.");
 
         // C1: Language directive — tell Claude to reply in detected language

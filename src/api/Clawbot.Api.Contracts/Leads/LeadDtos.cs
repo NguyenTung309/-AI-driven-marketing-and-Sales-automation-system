@@ -8,7 +8,10 @@ public sealed record LeadDto(
     string Stage,
     string? SourcePlatform,
     DateTimeOffset? LastActivityAt,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string? ContactName = null,
+    string? ContactPhone = null,
+    string? OwnerDisplayName = null);
 
 public sealed record CreateLeadRequest(
     Guid ContactId,

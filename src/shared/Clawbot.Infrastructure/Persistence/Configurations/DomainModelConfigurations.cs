@@ -240,6 +240,19 @@ public sealed class KbModuleConfiguration : IEntityTypeConfiguration<KbModule>
     }
 }
 
+public sealed class SkillFileConfiguration : IEntityTypeConfiguration<SkillFile>
+{
+    public void Configure(EntityTypeBuilder<SkillFile> builder)
+    {
+        builder.ToTable("skill_files");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Name).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.Description).HasMaxLength(512);
+        builder.Property(x => x.ContentMd).HasColumnType("nvarchar(max)");
+        builder.HasIndex(x => new { x.TenantId, x.Name }).IsUnique().HasFilter("[deleted_at] IS NULL");
+    }
+}
+
 public sealed class KbVersionConfiguration : IEntityTypeConfiguration<KbVersion>
 {
     public void Configure(EntityTypeBuilder<KbVersion> builder)
