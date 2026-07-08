@@ -115,6 +115,15 @@ export function AdminUserModal({
                 </StatusPill>
               ) : null}
             </div>
+            <label className="block">
+              <span className="mb-1 block text-label-sm text-on-surface-variant">Tên kênh (hiển thị)</span>
+              <input
+                className={inputClass}
+                value={userForm.pancakeChannelName}
+                onChange={(event) => onChange({ pancakeChannelName: event.target.value })}
+                placeholder="VD: Hồng Vân Học Bá"
+              />
+            </label>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_140px]">
               <label className="block">
                 <span className="mb-1 block text-label-sm text-on-surface-variant">Page ID</span>

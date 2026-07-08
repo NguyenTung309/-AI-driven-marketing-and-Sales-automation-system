@@ -353,6 +353,12 @@ public static partial class RbacSeeder
 
         var metadata = JsonNode.Parse(BuildOrchestrationConfig(code))!.AsObject()["orchestration"]!.DeepClone();
         root["orchestration"] = metadata;
+
+        // Seed prompt mau chi khi con rong -> khong ghi de khi user da sua (re-seed an toan).
+        var existingPrompt = root["systemPrompt"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(existingPrompt))
+            root["systemPrompt"] = Clawbot.Agents.Core.AgentPromptDefaults.DefaultFor(code);
+
         return root.ToJsonString();
     }
 

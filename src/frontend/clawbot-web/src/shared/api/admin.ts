@@ -111,6 +111,7 @@ export async function createAdminUser(body: {
   readonly password: string;
   readonly roles?: readonly string[];
   readonly pancakePageId?: string;
+  readonly pancakeChannelName?: string;
   readonly pancakePlatform?: string;
   readonly pancakeAccessToken?: string;
 }): Promise<Pick<AdminUser, "id" | "email" | "displayName">> {
@@ -125,6 +126,7 @@ export async function updateAdminUser(
     readonly isActive?: boolean;
     readonly roles?: readonly string[];
     readonly pancakePageId?: string;
+    readonly pancakeChannelName?: string;
     readonly pancakePlatform?: string;
     readonly pancakeAccessToken?: string;
   }

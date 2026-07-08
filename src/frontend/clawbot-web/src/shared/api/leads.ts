@@ -11,6 +11,9 @@ export interface LeadListItem {
   readonly sourcePlatform: string | null;
   readonly lastActivityAt: string | null;
   readonly createdAt: string;
+  readonly contactName: string | null;
+  readonly contactPhone: string | null;
+  readonly ownerDisplayName: string | null;
 }
 
 export interface LeadContextContact {

@@ -316,7 +316,8 @@ function BriefEditor({
       <label className="mt-3 block">
         <span className="mb-1 block text-label-caps uppercase text-secondary">Nội dung yêu cầu</span>
         <textarea
-          className="min-h-[180px] w-full resize-y rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
+          className="min-h-[104px] w-full resize-y rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
+          rows={4}
           value={briefText}
           onChange={(event) => onBriefText(event.target.value)}
           placeholder="Đối tượng, ưu đãi, thông điệp chính, CTA, giọng văn..."
@@ -380,36 +381,99 @@ function isoWeekOf(date: Date): string {
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
-function TrendPanel({
+// Compact launcher trong cot 390px: tranh header wrap doc, mo modal rong de xem/dung xu huong.
+function TrendLauncherCard({
+  trends,
+  loading,
+  scanning,
+  onOpen,
+  onScan,
+}: {
+  readonly trends: readonly Trend[];
+  readonly loading: boolean;
+  readonly scanning: boolean;
+  readonly onOpen: () => void;
+  readonly onScan: () => void;
+}) {
+  const top = trends[0];
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span aria-hidden="true" className="material-symbols-outlined text-[22px] text-primary">trending_up</span>
+          <div>
+            <h2 className="text-headline-sm text-secondary">Xu hướng tuần</h2>
+            <p className="mt-0.5 text-label-sm text-on-surface-variant">
+              {loading ? "Đang tải..." : `${trends.length} chủ đề đã quét`}
+            </p>
+          </div>
+        </div>
+        <span className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 font-mono text-mono-status text-primary">
+          {trends.length}
+        </span>
+      </div>
+
+      {top ? (
+        <button
+          type="button"
+          onClick={onOpen}
+          className="mt-3 block w-full rounded-lg border border-outline bg-surface p-3 text-left transition-colors hover:border-primary"
+        >
+          <p className="text-label-sm text-on-surface-variant">Nổi bật nhất</p>
+          <p className="mt-0.5 line-clamp-1 text-body-md font-bold text-secondary">{top.topic}</p>
+          <p className="mt-0.5 text-label-sm text-on-surface-variant">{top.source} · {top.relevanceScore.toFixed(1)} điểm</p>
+        </button>
+      ) : (
+        <p className="mt-3 rounded-lg border border-dashed border-outline bg-surface p-3 text-label-sm text-on-surface-variant">
+          Chưa có xu hướng. Bấm Quét để gọi agent nghiên cứu.
+        </p>
+      )}
+
+      <div className="mt-3 flex gap-2">
+        <Button type="button" variant="outline" size="sm" className="flex-1" onClick={onOpen}>
+          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">visibility</span>
+          Xem tất cả
+        </Button>
+        <Button type="button" size="sm" className="flex-1" onClick={onScan} disabled={scanning}>
+          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">travel_explore</span>
+          {scanning ? "Đang quét" : "Quét"}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function TrendModal({
+  open,
   trends,
   loading,
   scanning,
   error,
   week,
   weekOptions,
+  onClose,
   onWeekChange,
   onScan,
   onOpenSettings,
   onUseIdea,
 }: {
+  readonly open: boolean;
   readonly trends: readonly Trend[];
   readonly loading: boolean;
   readonly scanning: boolean;
   readonly error: unknown;
   readonly week: string;
   readonly weekOptions: readonly { value: string; label: string }[];
+  readonly onClose: () => void;
   readonly onWeekChange: (week: string) => void;
   readonly onScan: () => void;
   readonly onOpenSettings: () => void;
   readonly onUseIdea: (idea: string) => void;
 }) {
   return (
-    <Card>
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-headline-sm text-secondary">Xu hướng tuần</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">Nguồn từ hệ thống xu hướng và agent nghiên cứu.</p>
-        </div>
+    <Modal open={open} onClose={onClose} title="Xu hướng tuần" maxWidthClass="max-w-4xl">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-body-md text-on-surface-variant">Nguồn từ hệ thống xu hướng và agent nghiên cứu.</p>
         <div className="flex shrink-0 items-center gap-2">
           <select
             className="rounded border border-outline bg-surface-container-lowest px-2 py-1.5 text-label-sm text-secondary"
@@ -430,32 +494,33 @@ function TrendPanel({
           </Button>
         </div>
       </div>
+
       {error ? <Alert tone="error">{errorMessage(error)}</Alert> : null}
       {loading ? (
         <p className="text-body-md text-on-surface-variant">Đang tải xu hướng...</p>
       ) : trends.length ? (
-        <div className="space-y-3">
-          {trends.slice(0, 4).map((trend) => (
-            <article key={`${trend.source}-${trend.topic}`} className="rounded-lg border border-outline bg-surface p-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {trends.map((trend) => (
+            <article key={`${trend.source}-${trend.topic}`} className="flex flex-col rounded-lg border border-outline bg-surface p-3">
               <div className="mb-2 flex items-start justify-between gap-3">
-                <div>
+                <div className="min-w-0">
                   <p className="text-body-md font-bold text-secondary">{trend.topic}</p>
                   <p className="text-label-sm text-on-surface-variant">
                     {trend.source} · {trend.metric}
                     {week === "all" && trend.weekOf ? ` · ${trend.weekOf}` : ""}
                   </p>
                 </div>
-                <span className="rounded bg-primary/10 px-2 py-1 font-mono text-mono-status text-primary">
+                <span className="shrink-0 rounded bg-primary/10 px-2 py-1 font-mono text-mono-status text-primary">
                   {trend.relevanceScore.toFixed(1)} điểm
                 </span>
               </div>
-              <div className="space-y-2">
+              <div className="mt-auto space-y-2">
                 {trend.contentIdeas.slice(0, 2).map((idea) => (
                   <button
                     key={idea}
                     type="button"
                     onClick={() => onUseIdea(idea)}
-                    className="block w-full rounded border border-outline bg-white px-3 py-2 text-left text-label-sm text-on-surface hover:border-primary"
+                    className="block w-full rounded border border-outline bg-white px-3 py-2 text-left text-label-sm text-on-surface transition-colors hover:border-primary"
                   >
                     {idea}
                   </button>
@@ -465,11 +530,11 @@ function TrendPanel({
           ))}
         </div>
       ) : (
-        <div className="rounded-lg border border-dashed border-outline bg-surface p-4 text-body-md text-on-surface-variant">
+        <div className="rounded-lg border border-dashed border-outline bg-surface p-6 text-center text-body-md text-on-surface-variant">
           Chưa có xu hướng được quét. Bấm Quét để gọi agent nghiên cứu.
         </div>
       )}
-    </Card>
+    </Modal>
   );
 }
 
@@ -1079,6 +1144,7 @@ export default function ContentWorkspacePage() {
   });
 
   const [trendSettingsOpen, setTrendSettingsOpen] = useState(false);
+  const [trendModalOpen, setTrendModalOpen] = useState(false);
 
   function selectBrief(brief: ContentBrief) {
     setSelectedBriefId(brief.id);
@@ -1166,7 +1232,15 @@ export default function ContentWorkspacePage() {
             }}
             onGenerate={() => generateMutation.mutate()}
           />
-          <TrendPanel
+          <TrendLauncherCard
+            trends={trends}
+            loading={trendsQuery.isLoading}
+            scanning={scanMutation.isPending}
+            onOpen={() => setTrendModalOpen(true)}
+            onScan={() => scanMutation.mutate()}
+          />
+          <TrendModal
+            open={trendModalOpen}
             trends={trends}
             loading={trendsQuery.isLoading}
             scanning={scanMutation.isPending}
@@ -1177,10 +1251,11 @@ export default function ContentWorkspacePage() {
               { value: previousWeek, label: `Tuần trước (${previousWeek})` },
               { value: "all", label: "Tất cả các tuần" },
             ]}
+            onClose={() => setTrendModalOpen(false)}
             onWeekChange={setTrendWeek}
             onScan={() => scanMutation.mutate()}
             onOpenSettings={() => setTrendSettingsOpen(true)}
-            onUseIdea={applyTrendIdea}
+            onUseIdea={(idea) => { applyTrendIdea(idea); setTrendModalOpen(false); }}
           />
           <TrendSettingsDialog open={trendSettingsOpen} onClose={() => setTrendSettingsOpen(false)} />
         </div>

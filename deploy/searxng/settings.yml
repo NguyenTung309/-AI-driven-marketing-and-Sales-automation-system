@@ -1,0 +1,10 @@
+# SearXNG cho Clawbot web.search tool. use_default_settings giu nguyen engine mac dinh,
+# chi bat JSON API va tat limiter (chay noi bo, khong expose ra ngoai).
+use_default_settings: true
+server:
+  secret_key: "clawbot-dev-searxng-secret-change-in-prod"
+  limiter: false
+search:
+  formats:
+    - html
+    - json

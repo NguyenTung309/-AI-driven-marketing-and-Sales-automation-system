@@ -102,9 +102,25 @@ public sealed partial class LeadAutoScorer(
             .OrderByDescending(l => l.CreatedAt)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
-        if (lead is not null) return lead;
+        if (lead is not null)
+        {
+            // Backfill: lead cu chua co owner thi tu gan theo kenh (khach cua kenh nao sale do phu trach)
+            if (lead.OwnerUserId is null)
+            {
+                var backfillOwner = await ResolveChannelSaleAsync(tenantId, contactId, ct).ConfigureAwait(false);
+                if (backfillOwner is { } bo)
+                {
+                    lead.Assign(bo);
+                    // Luu ngay: delta co the bang 0 va bo qua SaveChanges phia sau
+                    await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+                }
+            }
+            return lead;
+        }
 
         lead = Lead.Create(tenantId, contactId, platform ?? "unknown", _clock.UtcNow);
+        var owner = await ResolveChannelSaleAsync(tenantId, contactId, ct).ConfigureAwait(false);
+        if (owner is { } o) lead.Assign(o);
         _db.Leads.Add(lead);
         try
         {
@@ -121,6 +137,26 @@ public sealed partial class LeadAutoScorer(
                 .OrderByDescending(l => l.CreatedAt)
                 .FirstAsync(ct).ConfigureAwait(false);
         }
+    }
+
+    // Khach thuoc kenh nao thi sale phu trach kenh do nhan lead: contact -> hoi thoai moi nhat co inbox
+    // -> thanh vien dau tien cua inbox. Null khi hoi thoai chua gan inbox hoac kenh chua co sale.
+    private async Task<Guid?> ResolveChannelSaleAsync(Guid tenantId, Guid contactId, CancellationToken ct)
+    {
+        var inboxId = await _db.Conversations
+            .IgnoreQueryFilters()
+            .Where(c => c.TenantId == tenantId && c.ContactId == contactId && c.InboxId != null && c.DeletedAt == null)
+            .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
+            .Select(c => c.InboxId)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        if (inboxId is null) return null;
+
+        return await _db.InboxMembers
+            .IgnoreQueryFilters()
+            .Where(m => m.InboxId == inboxId)
+            .OrderBy(m => m.AgentId)
+            .Select(m => (Guid?)m.AgentId)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
     }
 
     [LoggerMessage(EventId = 5101, Level = LogLevel.Information,

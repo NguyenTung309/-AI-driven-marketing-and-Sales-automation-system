@@ -75,6 +75,19 @@ public sealed class BaiduScrapeOptions : HtmlTrendOptions
     }
 }
 
+// SearXNG self-host: nguon trend khong can API key (khac YouTube). Query category=news theo geo,
+// lay tit lam candidate topic; SemanticLlmTrendScorer lo phan cham/loc relevance sau.
+public sealed class SearxngTrendOptions : TrendSourceOptions
+{
+    public const string SectionName = "Content:Trends:Searxng";
+
+    // Base URL cua SearXNG; dung chung voi web.search tool (Searxng:BaseUrl). Rong = tat nguon.
+    public string BaseUrl { get; set; } = string.Empty;
+    // {geo} thay bang region code. Query rong khong hop le voi SearXNG nen can seed keyword.
+    public string QueryTemplate { get; set; } = "tin tức nổi bật {geo}";
+    public int MaxResults { get; set; } = 20;
+}
+
 internal sealed class GoogleTrendsRssSource(HttpClient http, IOptions<GoogleTrendsOptions> options)
     : ITrendSource
 {
@@ -261,6 +274,75 @@ internal sealed class YouTubeDataApiSource(HttpClient http, IOptions<YouTubeTren
     }
 }
 
+internal sealed class SearxngTrendSource(HttpClient http, IOptions<SearxngTrendOptions> options)
+    : ITrendSource
+{
+    private readonly SearxngTrendOptions _options = options.Value;
+
+    public string Source => "searxng";
+    public bool Enabled => _options.Enabled && !string.IsNullOrWhiteSpace(_options.BaseUrl);
+
+    public async Task<IReadOnlyList<RawTrend>> FetchAsync(string geo, TrendSourceOverride? tenantOverride = null, CancellationToken ct = default)
+    {
+        var baseUrl = tenantOverride?.Url;
+        if (string.IsNullOrWhiteSpace(baseUrl))
+            baseUrl = _options.BaseUrl;
+        if (!(tenantOverride?.Enabled ?? _options.Enabled) || string.IsNullOrWhiteSpace(baseUrl))
+            return [];
+
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, _options.TimeoutSeconds)));
+            var query = _options.QueryTemplate.Replace("{geo}", geo, StringComparison.Ordinal);
+            var url = $"{baseUrl.TrimEnd('/')}/search?q={Uri.EscapeDataString(query)}&format=json&categories=news";
+            var json = await http.GetStringAsync(new Uri(url, UriKind.Absolute), timeout.Token).ConfigureAwait(false);
+            return ParseResults(json, _options.MaxResults);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return [];
+        }
+        catch (HttpRequestException)
+        {
+            return [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    internal static IReadOnlyList<RawTrend> ParseResults(string json, int max)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return [];
+
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
+            return [];
+
+        var trends = new List<RawTrend>();
+        foreach (var item in results.EnumerateArray())
+        {
+            var title = item.TryGetProperty("title", out var t) ? t.GetString() : null;
+            if (string.IsNullOrWhiteSpace(title))
+                continue;
+            // score cua SearXNG (do engine dong thuan) lam SourceScore tho; scorer LLM cham lai sau
+            var sourceScore = item.TryGetProperty("score", out var s) && s.ValueKind == JsonValueKind.Number
+                ? s.GetDouble()
+                : 1d;
+            trends.Add(new RawTrend(title.Trim(), "searxng", "news", sourceScore, []));
+            if (trends.Count >= max)
+                break;
+        }
+
+        return trends
+            .DistinctBy(t => t.Topic, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+}
+
 internal sealed class TikTokScrapeSource(HttpClient http, IOptions<TikTokScrapeOptions> options)
     : HtmlTrendSource<TikTokScrapeOptions>(http, options, "tiktok");
 
@@ -358,15 +440,25 @@ public static class ResearchModule
         services.Configure<YouTubeTrendOptions>(configuration.GetSection(YouTubeTrendOptions.SectionName));
         services.Configure<TikTokScrapeOptions>(configuration.GetSection(TikTokScrapeOptions.SectionName));
         services.Configure<BaiduScrapeOptions>(configuration.GetSection(BaiduScrapeOptions.SectionName));
+        // Trend source dung chung SearXNG voi web.search tool: neu chua khai bao Content:Trends:Searxng:BaseUrl
+        // thi fallback ve Searxng:BaseUrl (mot nguon su that cho ca 2).
+        services.Configure<SearxngTrendOptions>(configuration.GetSection(SearxngTrendOptions.SectionName));
+        services.PostConfigure<SearxngTrendOptions>(opts =>
+        {
+            if (string.IsNullOrWhiteSpace(opts.BaseUrl))
+                opts.BaseUrl = configuration["Searxng:BaseUrl"] ?? string.Empty;
+        });
 
         services.AddHttpClient<GoogleTrendsRssSource>();
         services.AddHttpClient<YouTubeDataApiSource>();
         services.AddHttpClient<TikTokScrapeSource>();
         services.AddHttpClient<BaiduScrapeSource>();
+        services.AddHttpClient<SearxngTrendSource>();
         services.AddScoped<ITrendSource>(sp => sp.GetRequiredService<GoogleTrendsRssSource>());
         services.AddScoped<ITrendSource>(sp => sp.GetRequiredService<YouTubeDataApiSource>());
         services.AddScoped<ITrendSource>(sp => sp.GetRequiredService<TikTokScrapeSource>());
         services.AddScoped<ITrendSource>(sp => sp.GetRequiredService<BaiduScrapeSource>());
+        services.AddScoped<ITrendSource>(sp => sp.GetRequiredService<SearxngTrendSource>());
         // Semantic scorer (Qdrant KB + LLM); tu fallback ve keyword heuristic khi host/tenant
         // chua co IRagRetriever/IClaudeChatClient hoac LLM chua duoc bind. Thay the cap
         // WeightedTrendScorer + AiTrendCurator cua nhanh llm-agent (cung muc dich, mot duong di).

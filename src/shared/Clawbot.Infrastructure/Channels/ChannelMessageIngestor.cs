@@ -164,7 +164,16 @@ public sealed partial class ChannelMessageIngestor(
         var contact = await UpsertContactAsync(tenantId, customerMessage, ct, authoritativeName: hasConversationName).ConfigureAwait(false);
         var inboxId = await ResolveInboxIdAsync(tenantId, message, ct).ConfigureAwait(false);
         if (existing is not null)
+        {
+            // Self-heal: hoi thoai tao truoc khi co inbox (inbox_id NULL) duoc gan lai khi co tin moi;
+            // auto-owner lead va filter theo kenh deu can inbox_id nay.
+            if (existing.InboxId is null && inboxId is { } resolvedInboxId)
+            {
+                existing.SetInboxId(resolvedInboxId);
+                await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
             return existing;
+        }
 
         var conv = Conversation.Open(tenantId, message.Channel, message.ExternalThreadId, _clock.UtcNow, contact?.Id, inboxId);
         _db.Conversations.Add(conv);

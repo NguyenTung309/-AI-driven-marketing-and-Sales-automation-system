@@ -42,13 +42,13 @@ export function Modal({ open, onClose, title, children, footer, maxWidthClass = 
       role="presentation"
     >
       <div
-        className={`bg-surface-container-lowest w-full ${maxWidthClass} rounded-xl shadow-2xl overflow-hidden`}
+        className={`bg-surface-container-lowest w-full ${maxWidthClass} flex max-h-[85vh] flex-col overflow-hidden rounded-xl shadow-2xl`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant">
+        <div className="flex shrink-0 items-center justify-between px-6 py-4 border-b border-outline-variant">
           <h3 className="text-headline-sm font-bold text-on-surface">{title}</h3>
           <button
             type="button"
@@ -59,8 +59,8 @@ export function Modal({ open, onClose, title, children, footer, maxWidthClass = 
             <span aria-hidden="true" className="material-symbols-outlined">close</span>
           </button>
         </div>
-        <div className="p-6 space-y-6">{children}</div>
-        {footer ? <div className="px-6 py-4 bg-surface-container-low flex justify-end gap-4">{footer}</div> : null}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">{children}</div>
+        {footer ? <div className="shrink-0 px-6 py-4 bg-surface-container-low flex justify-end gap-4">{footer}</div> : null}
       </div>
     </div>
   );

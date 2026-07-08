@@ -65,6 +65,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     // Knowledge Base
     public DbSet<KbModule> KbModules => Set<KbModule>();
     public DbSet<KbVersion> KbVersions => Set<KbVersion>();
+    public DbSet<SkillFile> SkillFiles => Set<SkillFile>();
     public DbSet<KbTestCase> KbTestCases => Set<KbTestCase>();
 
     // Chat scenarios

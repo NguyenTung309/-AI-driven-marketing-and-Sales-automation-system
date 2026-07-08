@@ -396,7 +396,7 @@ public sealed class AutonomousOrchestrator
             }
         }
 
-        return new AgentTask(task.Id, task.Agent, task.Description, input);
+        return new AgentTask(task.Id, task.Agent, task.Description, input, task.RoleInstruction);
     }
 
     private static readonly string[] PromotableIdKeys = ["content_id", "schedule_id", "post_url"];

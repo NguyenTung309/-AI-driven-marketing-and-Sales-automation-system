@@ -59,6 +59,10 @@ public sealed partial class ChatAgentGrpcService(
             .Select((text, idx) => new CoreChat.ChatTurn(idx % 2 == 0 ? "user" : "assistant", text))
             .ToList();
 
+        // Prompt custom cua tenant tu cau hinh agent "chat-agent" (o "Huong dan tra loi").
+        // Rong -> ChatAgent dung DefaultSystemPrompt; luon boc guardrail o ChatAgent.
+        var customPrompt = await LoadChatSystemPromptAsync(tenantId, context.CancellationToken).ConfigureAwait(false);
+
         var session = AgentSession.Start(tenantId, agentId: null, conversationId: convId,
             goal: "chat-reply", startedAt: _clock.UtcNow);
         _db.AgentSessions.Add(session);
@@ -75,7 +79,8 @@ public sealed partial class ChatAgentGrpcService(
                                    request.UserText,
                                    history,
                                    SourcePlatform: sourcePlatform,
-                                   MatchedScenarioTemplate: matchedScenarioTemplate),
+                                   MatchedScenarioTemplate: matchedScenarioTemplate,
+                                   CustomSystemPrompt: customPrompt),
                                context.CancellationToken).ConfigureAwait(false))
             {
                 if (chunk.Final)
@@ -172,6 +177,74 @@ public sealed partial class ChatAgentGrpcService(
         {
             LogLeadScoreFailure(_logger, ex, tenantId, conversation.Id);
         }
+    }
+
+    private const int MaxSkillPromptChars = 8000;
+
+    // Prompt custom = config.SystemPrompt (ConfigJson.systemPrompt) + noi dung cac Tep ky nang da gan.
+    private async Task<string?> LoadChatSystemPromptAsync(Guid tenantId, CancellationToken ct)
+    {
+        var agent = await _db.AgentConfigs
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(a => a.TenantId == tenantId && a.Code == "chat-agent" && a.DeletedAt == null)
+            .Select(a => new { a.ConfigJson, a.SkillFilesJson })
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        if (agent is null) return null;
+
+        var custom = ExtractSystemPrompt(agent.ConfigJson);
+        var skills = await LoadSkillContentAsync(tenantId, agent.SkillFilesJson, ct).ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(skills)) return custom;
+        return string.IsNullOrWhiteSpace(custom) ? skills : $"{custom}\n\n{skills}";
+    }
+
+    private static string? ExtractSystemPrompt(string? configJson)
+    {
+        if (string.IsNullOrWhiteSpace(configJson)) return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(configJson);
+            return doc.RootElement.TryGetProperty("systemPrompt", out var p) && p.ValueKind == System.Text.Json.JsonValueKind.String
+                ? p.GetString()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    // Ghep noi dung cac skill file (theo Name luu trong SkillFilesJson) vao prompt, cap tong do dai.
+    private async Task<string?> LoadSkillContentAsync(Guid tenantId, string? skillFilesJson, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(skillFilesJson)) return null;
+        string[]? names;
+        try
+        {
+            names = System.Text.Json.JsonSerializer.Deserialize<string[]>(skillFilesJson);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+        if (names is null || names.Length == 0) return null;
+
+        var files = await _db.SkillFiles
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(s => s.TenantId == tenantId && names.Contains(s.Name) && s.DeletedAt == null)
+            .Select(s => new { s.Name, s.ContentMd })
+            .ToListAsync(ct).ConfigureAwait(false);
+        if (files.Count == 0) return null;
+
+        var sb = new System.Text.StringBuilder("## Kỹ năng áp dụng\n");
+        foreach (var file in files)
+        {
+            if (sb.Length + file.ContentMd.Length > MaxSkillPromptChars) break;
+            sb.Append("### ").Append(file.Name).Append('\n').Append(file.ContentMd.Trim()).Append("\n\n");
+        }
+        return sb.ToString().TrimEnd();
     }
 
     private async Task<string?> MatchScenarioTemplateAsync(

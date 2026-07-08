@@ -6,7 +6,6 @@ import { Alert } from "@/shared/ui/Alert";
 import { Card } from "@/shared/ui/Card";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import {
-  assignLead,
   getLead,
   getLeadContext,
   getLeadForecast,
@@ -71,18 +70,20 @@ function sourceLabel(source: string | null): string {
   return source ?? "Không rõ nguồn";
 }
 
-function ownerLabel(ownerUserId: string | null): string {
-  if (!ownerUserId) return "Chưa phân công";
-  return `Sale ${ownerUserId.slice(0, 8)}`;
+function ownerLabel(lead: LeadListItem): string {
+  if (lead.ownerDisplayName?.trim()) return lead.ownerDisplayName.trim();
+  if (!lead.ownerUserId) return "Chưa phân công";
+  return `Sale ${lead.ownerUserId.slice(0, 8)}`;
 }
 
 function contactLabel(lead: LeadListItem, context?: LeadContext | null): string {
-  const name = context?.contact?.name?.trim();
+  const name = lead.contactName?.trim() || context?.contact?.name?.trim();
   if (name) return name;
   return `Lead ${lead.id.slice(0, 8)}`;
 }
 
 function contactMeta(lead: LeadListItem, context?: LeadContext | null): string {
+  if (lead.contactPhone?.trim()) return lead.contactPhone.trim();
   const contact = context?.contact;
   if (contact?.phone) return contact.phone;
   if (contact?.email) return contact.email;
@@ -151,6 +152,9 @@ function filterLeads(
       !searchValue ||
       lead.id.toLowerCase().includes(searchValue) ||
       (lead.contactId ?? "").toLowerCase().includes(searchValue) ||
+      (lead.contactName ?? "").toLowerCase().includes(searchValue) ||
+      (lead.contactPhone ?? "").toLowerCase().includes(searchValue) ||
+      (lead.ownerDisplayName ?? "").toLowerCase().includes(searchValue) ||
       sourceValue.toLowerCase().includes(searchValue) ||
       stageLabel(lead.stage).toLowerCase().includes(searchValue);
     const matchesSource = source === "all" || sourceValue === source;
@@ -202,15 +206,11 @@ function LeadScore({ score }: { readonly score: number }) {
 function LeadTable({
   leads,
   selectedId,
-  assigningId,
   onSelect,
-  onAssign,
 }: {
   readonly leads: readonly LeadListItem[];
   readonly selectedId: string | null;
-  readonly assigningId: string | null;
   readonly onSelect: (lead: LeadListItem) => void;
-  readonly onAssign: (lead: LeadListItem) => void;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -229,7 +229,7 @@ function LeadTable({
             <tr className={selectedId === lead.id ? "bg-red-50/70" : "hover:bg-surface-container-low"} key={lead.id}>
               <td className="px-4 py-4 align-top">
                 <button className="block max-w-[240px] text-left" onClick={() => onSelect(lead)} type="button">
-                  <span className="block truncate text-body-md font-bold text-secondary">Lead {lead.id.slice(0, 8)}</span>
+                  <span className="block truncate text-body-md font-bold text-secondary">{contactLabel(lead)}</span>
                   <span className="mt-1 block text-label-sm text-on-surface-variant">{contactMeta(lead)}</span>
                 </button>
               </td>
@@ -245,19 +245,11 @@ function LeadTable({
               </td>
               <td className="px-4 py-4 align-top">
                 <p className={lead.ownerUserId ? "text-body-md font-semibold text-secondary" : "text-body-md text-on-surface-variant"}>
-                  {ownerLabel(lead.ownerUserId)}
+                  {ownerLabel(lead)}
                 </p>
               </td>
               <td className="px-4 py-4 align-top">
                 <div className="flex justify-end gap-2">
-                  <button
-                    className="rounded border border-primary px-3 py-2 text-label-sm font-bold text-primary hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={assigningId === lead.id}
-                    onClick={() => onAssign(lead)}
-                    type="button"
-                  >
-                    {assigningId === lead.id ? "Đang gán" : "Gán Sale"}
-                  </button>
                   <button
                     className="rounded bg-primary px-3 py-2 text-label-sm font-bold text-on-primary hover:bg-primary-hover"
                     onClick={() => onSelect(lead)}
@@ -306,12 +298,12 @@ function KanbanBoard({ leads, onSelect }: { readonly leads: readonly LeadListIte
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-body-md font-bold text-secondary">Lead {lead.id.slice(0, 8)}</p>
+                        <p className="truncate text-body-md font-bold text-secondary">{contactLabel(lead)}</p>
                         <p className="mt-1 text-label-sm text-on-surface-variant">{sourceLabel(lead.sourcePlatform)}</p>
                       </div>
                       <span className="font-mono text-mono-status font-bold text-primary">{lead.score}</span>
                     </div>
-                    <p className="mt-2 text-label-sm text-on-surface-variant">{ownerLabel(lead.ownerUserId)}</p>
+                    <p className="mt-2 text-label-sm text-on-surface-variant">{ownerLabel(lead)}</p>
                   </button>
                 ))
               ) : (
@@ -334,8 +326,6 @@ function LeadDrawer({
   context,
   loading,
   onClose,
-  onAssign,
-  assigning,
   onRecordActivity,
   recording,
 }: {
@@ -344,8 +334,6 @@ function LeadDrawer({
   readonly context: LeadContext | null;
   readonly loading: boolean;
   readonly onClose: () => void;
-  readonly onAssign: () => void;
-  readonly assigning: boolean;
   readonly onRecordActivity: (eventCode: string, notes: string) => void;
   readonly recording: boolean;
 }) {
@@ -414,20 +402,9 @@ function LeadDrawer({
           ) : tab === "timeline" ? (
             <div className="space-y-5">
               <div className="rounded-lg border border-outline bg-surface-container-lowest p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-label-caps uppercase text-on-surface-variant">Phụ trách</p>
-                    <p className="mt-1 text-body-md font-bold text-secondary">{ownerLabel(hydratedLead.ownerUserId)}</p>
-                  </div>
-                  <button
-                    className="rounded border border-primary px-3 py-2 text-label-sm font-bold text-primary hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={assigning}
-                    onClick={onAssign}
-                    type="button"
-                  >
-                    {assigning ? "Đang gán" : "Đổi Sale"}
-                  </button>
-                </div>
+                <p className="text-label-caps uppercase text-on-surface-variant">Phụ trách</p>
+                <p className="mt-1 text-body-md font-bold text-secondary">{ownerLabel(hydratedLead)}</p>
+                <p className="mt-1 text-label-sm text-on-surface-variant">Sale phụ trách theo kênh của khách, hệ thống tự gán.</p>
               </div>
 
               <form
@@ -590,18 +567,6 @@ export default function LeadsPage() {
   const avgScore = leads.length ? Math.round(leads.reduce((sum, lead) => sum + lead.score, 0) / leads.length) : 0;
   const forecastTotal = forecastQuery.data?.forecast.reduce((sum, point) => sum + point.predicted_leads, 0) ?? 0;
 
-  const assignMutation = useMutation({
-    mutationFn: (leadId: string) => assignLead(leadId, null),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["leads", "list"] }),
-        queryClient.invalidateQueries({ queryKey: ["leads", selectedId] }),
-      ]);
-      setNotice({ tone: "success", message: "Đã nhận lead thành công." });
-    },
-    onError: (error) => setNotice({ tone: "error", message: errorMessage(error) }),
-  });
-
   const activityMutation = useMutation({
     mutationFn: ({ leadId, eventCode, notes }: { readonly leadId: string; readonly eventCode: string; readonly notes: string }) =>
       recordLeadActivity(leadId, { eventCode, platform: selectedLead?.sourcePlatform ?? null, notes: notes.trim() || null }),
@@ -738,9 +703,7 @@ export default function LeadsPage() {
         ) : filteredLeads.length ? (
           <>
             <LeadTable
-              assigningId={assignMutation.isPending ? assignMutation.variables ?? null : null}
               leads={filteredLeads}
-              onAssign={(lead) => assignMutation.mutate(lead.id)}
               onSelect={(lead) => setSelectedId(lead.id)}
               selectedId={selectedId}
             />
@@ -766,12 +729,10 @@ export default function LeadsPage() {
 
       {selectedLead ? (
         <LeadDrawer
-          assigning={assignMutation.isPending && assignMutation.variables === selectedLead.id}
           context={contextQuery.data ?? null}
           detail={detailQuery.data ?? null}
           lead={selectedLead}
           loading={detailQuery.isLoading || contextQuery.isLoading}
-          onAssign={() => assignMutation.mutate(selectedLead.id)}
           onClose={() => setSelectedId(null)}
           onRecordActivity={(eventCode, notes) => activityMutation.mutate({ leadId: selectedLead.id, eventCode, notes })}
           recording={activityMutation.isPending}

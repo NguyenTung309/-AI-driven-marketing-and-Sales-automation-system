@@ -82,6 +82,7 @@ export default function AdminConsolePage() {
     isActive: true,
     roles: [],
     pancakePageId: "",
+    pancakeChannelName: "",
     pancakePlatform: "zalo",
     pancakeAccessToken: "",
   });
@@ -234,6 +235,7 @@ export default function AdminConsolePage() {
             ? {
                 pancakePageId: userForm.pancakePageId.trim(),
                 pancakePlatform: userForm.pancakePlatform,
+                ...(userForm.pancakeChannelName.trim() ? { pancakeChannelName: userForm.pancakeChannelName.trim() } : {}),
                 ...(userForm.pancakeAccessToken.trim() ? { pancakeAccessToken: userForm.pancakeAccessToken.trim() } : {}),
               }
             : {}),
@@ -246,6 +248,7 @@ export default function AdminConsolePage() {
           ? {
               pancakePageId: userForm.pancakePageId.trim(),
               pancakePlatform: userForm.pancakePlatform,
+              ...(userForm.pancakeChannelName.trim() ? { pancakeChannelName: userForm.pancakeChannelName.trim() } : {}),
               ...(userForm.pancakeAccessToken.trim() ? { pancakeAccessToken: userForm.pancakeAccessToken.trim() } : {}),
             }
           : {}),
@@ -412,6 +415,7 @@ export default function AdminConsolePage() {
       isActive: true,
       roles: [],
       pancakePageId: "",
+      pancakeChannelName: "",
       pancakePlatform: "zalo",
       pancakeAccessToken: "",
     });
@@ -427,6 +431,11 @@ export default function AdminConsolePage() {
       isActive: user.isActive,
       roles: [],
       pancakePageId: user.pancakeChannels?.[0]?.pageId ?? "",
+      // Ten kenh legacy = pageId -> de trong cho placeholder goi y nhap ten that
+      pancakeChannelName:
+        user.pancakeChannels?.[0] && user.pancakeChannels[0].name !== user.pancakeChannels[0].pageId
+          ? user.pancakeChannels[0].name
+          : "",
       pancakePlatform: user.pancakeChannels?.[0]?.platform ?? "zalo",
       pancakeAccessToken: "",
     });
