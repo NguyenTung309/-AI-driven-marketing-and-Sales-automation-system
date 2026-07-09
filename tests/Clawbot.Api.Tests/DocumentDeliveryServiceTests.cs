@@ -90,10 +90,10 @@ public sealed class DocumentDeliveryServiceTests
         public Task<IReadOnlyList<ChannelMessage>> ParseAsync(string rawBody, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<ChannelMessage>>([]);
 
-        public Task SendAsync(string externalThreadId, string text, CancellationToken ct = default)
+        public Task<string?> SendAsync(string externalThreadId, string text, CancellationToken ct = default)
         {
             Sends.Add((externalThreadId, text));
-            return Task.CompletedTask;
+            return Task.FromResult<string?>(null);
         }
     }
 

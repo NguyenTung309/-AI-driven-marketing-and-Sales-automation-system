@@ -68,15 +68,16 @@ public sealed partial class ChannelMessageIngestor(
         // Section 9: Auto-reopen resolved/snoozed on inbound message
         conversation.ReopenIfNeeded();
 
-        if (await IsDuplicateAsync(conversation.Id, message, isOwner, ct).ConfigureAwait(false))
+        // Dedup phai so text da StripHtml: Pancake echo boc HTML/entity, row outbound local luu plain text
+        var cleanText = StripHtml(message.Text);
+
+        if (await IsDuplicateAsync(conversation.Id, message, cleanText, isOwner, ct).ConfigureAwait(false))
         {
             LogDuplicate(_logger, conversation.Id, message.ExternalThreadId);
             return new IngestResult(conversation.Id, null, true);
         }
 
         var externalMsgId = message.Metadata.TryGetValue("external_message_id", out var extId) ? extId : null;
-
-        var cleanText = StripHtml(message.Text);
 
         // PII redaction: store original + redacted versions
         var redacted = await _pii.RedactAsync(cleanText, ct).ConfigureAwait(false);
@@ -310,7 +311,7 @@ public sealed partial class ChannelMessageIngestor(
         return contact;
     }
 
-    private async Task<bool> IsDuplicateAsync(Guid conversationId, ChannelMessage message, bool isOwner, CancellationToken ct)
+    private async Task<bool> IsDuplicateAsync(Guid conversationId, ChannelMessage message, string cleanText, bool isOwner, CancellationToken ct)
     {
         // Strict dedup: use external_message_id if available
         if (message.Metadata.TryGetValue("external_message_id", out var externalId) && !string.IsNullOrEmpty(externalId))
@@ -323,31 +324,31 @@ public sealed partial class ChannelMessageIngestor(
             // Owner message with a fresh external id can still be the channel echo of a reply we
             // already persisted locally (sale manual send / AI auto-reply) - those rows have no
             // external id, so match on content within a short window instead.
-            return await IsLocalOutboundEchoAsync(conversationId, message, ct).ConfigureAwait(false);
+            return await IsLocalOutboundEchoAsync(conversationId, message.SentAt, cleanText, ct).ConfigureAwait(false);
         }
 
         if (isOwner)
-            return await IsLocalOutboundEchoAsync(conversationId, message, ct).ConfigureAwait(false);
+            return await IsLocalOutboundEchoAsync(conversationId, message.SentAt, cleanText, ct).ConfigureAwait(false);
 
         // Fallback: heuristic dedup
         return await _db.Messages
             .IgnoreQueryFilters()
             .AnyAsync(m => m.ConversationId == conversationId
                 && m.SentAt == message.SentAt
-                && m.Content == message.Text
+                && m.Content == cleanText
                 && m.Direction == "in", ct).ConfigureAwait(false);
     }
 
-    private async Task<bool> IsLocalOutboundEchoAsync(Guid conversationId, ChannelMessage message, CancellationToken ct)
+    private async Task<bool> IsLocalOutboundEchoAsync(Guid conversationId, DateTimeOffset sentAt, string cleanText, CancellationToken ct)
     {
-        var from = message.SentAt.AddMinutes(-10);
-        var to = message.SentAt.AddMinutes(10);
+        var from = sentAt.AddMinutes(-10);
+        var to = sentAt.AddMinutes(10);
         return await _db.Messages
             .IgnoreQueryFilters()
             .AnyAsync(m => m.ConversationId == conversationId
                 && m.Direction == "out"
                 && m.ExternalMessageId == null
-                && m.Content == message.Text
+                && m.Content == cleanText
                 && m.SentAt >= from && m.SentAt <= to, ct).ConfigureAwait(false);
     }
 

@@ -313,16 +313,18 @@ public static class InboxEndpoints
 
         var senderUserId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
+        string? channelMessageId;
         try
         {
             // Token per-kenh: adapter tu resolve page access token cua inbox (PancakePageTokenResolver)
-            await adapter.SendAsync(conv.ExternalThreadId, body.Content, ct).ConfigureAwait(false);
+            channelMessageId = await adapter.SendAsync(conv.ExternalThreadId, body.Content, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             return Results.BadRequest(new { error = "channel_send_failed", message = "Không thể gửi tin nhắn qua kênh kết nối: " + ex.Message });
         }
-        var msg = conv.AppendMessage("out", "user", body.Content, body.ContentType, clock.UtcNow, senderUserId: senderUserId);
+        // externalMessageId tu send response: poller dedup strict theo id, khong dua vao content-heuristic
+        var msg = conv.AppendMessage("out", "user", body.Content, body.ContentType, clock.UtcNow, senderUserId: senderUserId, externalMessageId: channelMessageId);
         // Handover: sale gui tay -> tat AI auto-reply cho hoi thoai nay
         conv.SetAiAutoReply(false);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);

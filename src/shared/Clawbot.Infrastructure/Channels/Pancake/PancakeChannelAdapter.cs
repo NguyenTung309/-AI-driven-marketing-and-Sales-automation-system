@@ -105,10 +105,10 @@ public sealed class PancakeChannelAdapter(
         return Task.FromResult<IReadOnlyList<ChannelMessage>>(list);
     }
 
-    public Task SendAsync(string externalThreadId, string text, CancellationToken ct = default) =>
+    public Task<string?> SendAsync(string externalThreadId, string text, CancellationToken ct = default) =>
         SendAsync(externalThreadId, text, accessToken: null, ct);
 
-    public async Task SendAsync(string externalThreadId, string text, string? accessToken, CancellationToken ct = default)
+    public async Task<string?> SendAsync(string externalThreadId, string text, string? accessToken, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(externalThreadId))
             throw new ArgumentException("thread id required", nameof(externalThreadId));
@@ -173,10 +173,23 @@ public sealed class PancakeChannelAdapter(
         {
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
             resp.EnsureSuccessStatusCode();
+            // Send response: {success, id, message} - id la message id phia Pancake, cung id-space voi
+            // GET messages cua poller -> caller luu vao ExternalMessageId de dedup strict tin echo.
+            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<SendResponse>(body, JsonOpts);
+                return string.IsNullOrEmpty(parsed?.Id) ? null : parsed.Id;
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
         }
         catch (Exception) when (string.Equals(Environment.GetEnvironmentVariable("DEMO_MODE"), "true", StringComparison.OrdinalIgnoreCase))
         {
             // In demo mode, ignore outbound connection/token failures so messages can still be saved locally for manual/agent review
+            return null;
         }
     }
 
@@ -212,6 +225,10 @@ public sealed class PancakeChannelAdapter(
         [property: JsonPropertyName("action")] string Action,
         [property: JsonPropertyName("message")] string Message,
         [property: JsonPropertyName("sender_id")] string? SenderId = null);
+    private sealed record SendResponse(
+        [property: JsonPropertyName("success")] bool Success,
+        [property: JsonPropertyName("id")] string? Id,
+        [property: JsonPropertyName("message")] string? Message);
     private sealed record PancakeWebhookPayload(
         [property: JsonPropertyName("events")] IReadOnlyList<PancakeEvent>? Events);
 

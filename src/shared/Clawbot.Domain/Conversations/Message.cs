@@ -25,6 +25,9 @@ public sealed class Message : Entity<Guid>, ITenantOwned
 
     private Message() { }
 
+    // Channel echo dedup: gan id tin nhan phia kenh (Pancake send response) sau khi da persist row local
+    public void SetExternalMessageId(string externalMessageId) => ExternalMessageId = externalMessageId;
+
     internal static Message Create(
         Guid conversationId,
         Guid tenantId,

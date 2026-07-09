@@ -114,9 +114,10 @@ public sealed partial class ChatAgentGrpcService(
             _clock.UtcNow);
         session.Finish(_clock.UtcNow);
 
+        Clawbot.Domain.Conversations.Message? persistedReply = null;
         if (convId.HasValue)
         {
-            conversation?.AppendMessage("out", "agent", reply.Text, "text", _clock.UtcNow);
+            persistedReply = conversation?.AppendMessage("out", "agent", reply.Text, "text", _clock.UtcNow);
         }
 
         await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
@@ -128,7 +129,10 @@ public sealed partial class ChatAgentGrpcService(
         {
             try
             {
-                await _channelAdapter.SendAsync(conversation.ExternalThreadId, reply.Text, context.CancellationToken).ConfigureAwait(false);
+                var channelMessageId = await _channelAdapter.SendAsync(conversation.ExternalThreadId, reply.Text, context.CancellationToken).ConfigureAwait(false);
+                // Gan id phia kenh vao row da persist: poller dedup strict tin echo theo external_message_id
+                if (channelMessageId is not null)
+                    persistedReply?.SetExternalMessageId(channelMessageId);
                 session.AppendTrace("chat", "chat-agent", "sent",
                     $"reply sent to channel {conversation.Platform} thread={conversation.ExternalThreadId}", _clock.UtcNow);
             }
