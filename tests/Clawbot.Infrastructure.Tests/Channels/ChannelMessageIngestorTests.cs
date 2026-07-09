@@ -263,6 +263,33 @@ public sealed class ChannelMessageIngestorTests
     }
 
     [Fact]
+    public async Task Owner_echo_with_html_wrapped_text_is_deduplicated()
+    {
+        using var fx = new TestAppDb();
+        var (sut, _) = Build(fx);
+
+        await sut.IngestAsync(fx.TenantId, Msg("hi", thread: "page1:pzl_u_e2", user: "pzl_u_e2",
+            meta: new Dictionary<string, string> { ["external_message_id"] = "in2" }));
+
+        // Sale manual send persisted locally with plain text, no external id
+        var conv = await fx.Db.Conversations.IgnoreQueryFilters().SingleAsync();
+        conv.AppendMessage("out", "user", "kiem tra", "text", Now.AddSeconds(30));
+        await fx.Db.SaveChangesAsync();
+
+        // Pancake echoes the same reply HTML-wrapped with a fresh external id
+        var echo = await sut.IngestAsync(fx.TenantId, Msg("<div>kiem tra</div>", thread: "page1:pzl_u_e2", user: "page1",
+            meta: new Dictionary<string, string>
+            {
+                ["external_message_id"] = "echo2",
+                ["sender_id"] = "page1",
+                ["page_id"] = "page1",
+            }));
+
+        echo.Deduplicated.Should().BeTrue();
+        (await fx.Db.Messages.IgnoreQueryFilters().CountAsync(m => m.Direction == "out")).Should().Be(1);
+    }
+
+    [Fact]
     public async Task Conversation_name_heals_contact_stuck_with_wrong_name()
     {
         using var fx = new TestAppDb();

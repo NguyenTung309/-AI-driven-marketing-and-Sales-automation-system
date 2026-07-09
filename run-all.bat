@@ -323,6 +323,11 @@ if errorlevel 1 (
     echo [ERROR] Data patch failed: deploy\backfill_lead_owners.sql
     exit /b 1
 )
+type "%ROOT%deploy\fix_duplicate_outbound_echo.sql" | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
+if errorlevel 1 (
+    echo [ERROR] Data patch failed: deploy\fix_duplicate_outbound_echo.sql
+    exit /b 1
+)
 exit /b 0
 
 :ensure_seed_tenant

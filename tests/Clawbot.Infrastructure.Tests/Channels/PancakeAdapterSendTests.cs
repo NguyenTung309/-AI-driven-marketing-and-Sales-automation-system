@@ -82,9 +82,33 @@ public sealed class PancakeAdapterSendTests : IDisposable
 
         Assert.Null(ex);
     }
+
+    [Fact]
+    public async Task SendAsync_ReturnsMessageId_FromSendResponse()
+    {
+        using var http = new HttpClient(new PancakeSendTestHandler("test_page_token",
+            responseBody: """{"success":true,"id":"msg_789","message":"ok"}"""));
+        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants);
+
+        var id = await adapter.SendAsync("conv_abc_456", "Hello from test", CancellationToken.None);
+
+        Assert.Equal("msg_789", id);
+    }
+
+    [Fact]
+    public async Task SendAsync_ReturnsNull_WhenResponseHasNoId()
+    {
+        using var http = new HttpClient(new PancakeSendTestHandler("test_page_token",
+            responseBody: """{"success":true}"""));
+        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants);
+
+        var id = await adapter.SendAsync("conv_abc_456", "Hello from test", CancellationToken.None);
+
+        Assert.Null(id);
+    }
 }
 
-public sealed class PancakeSendTestHandler(string expectedToken, string expectedPage = "pzl_test_page_123", string expectedThread = "conv_abc_456") : HttpClientHandler
+public sealed class PancakeSendTestHandler(string expectedToken, string expectedPage = "pzl_test_page_123", string expectedThread = "conv_abc_456", string? responseBody = null) : HttpClientHandler
 {
     protected override Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken)
@@ -92,6 +116,9 @@ public sealed class PancakeSendTestHandler(string expectedToken, string expected
         Assert.Contains(expectedPage, request.RequestUri!.ToString());
         Assert.Contains(expectedThread, request.RequestUri!.ToString());
         Assert.Contains("page_access_token=" + expectedToken, request.RequestUri!.ToString());
-        return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK));
+        var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+        if (responseBody is not null)
+            response.Content = new StringContent(responseBody, System.Text.Encoding.UTF8, "application/json");
+        return Task.FromResult(response);
     }
 }
