@@ -15,6 +15,12 @@ public sealed class Tenant : AggregateRoot<Guid>
     public string? SupportName { get; private set; }
     public string? WidgetGreeting { get; private set; }
     public bool RequireOrchestrationApproval { get; private set; }
+    // Review-gate P1 (QĐ1: default OFF, opt-in per tenant): khi bật, item chỉ được publish khi có
+    // chữ ký reviewer agent (ContentItem.ApprovedByAgentId).
+    public bool RequireContentReview { get; private set; }
+    // Review-gate P3 manual-mode: khi bật, MỌI AI reply hold thành pending_approval chờ người duyệt
+    // (không gửi tự động); tin sale gõ tay miễn (QĐ5).
+    public bool RequireChatReplyApproval { get; private set; }
     // Hạn mức chi tiêu LLM mỗi tháng (USD). null = dùng mặc định hệ thống.
     public decimal? MonthlyCostCapUsd { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -50,6 +56,12 @@ public sealed class Tenant : AggregateRoot<Guid>
 
     public void SetRequireOrchestrationApproval(bool requireApproval) =>
         RequireOrchestrationApproval = requireApproval;
+
+    public void SetRequireContentReview(bool requireReview) =>
+        RequireContentReview = requireReview;
+
+    public void SetRequireChatReplyApproval(bool requireApproval) =>
+        RequireChatReplyApproval = requireApproval;
 
     // null hoặc <= 0 → xoá hạn mức riêng, quay về mặc định hệ thống.
     public void SetMonthlyCostCapUsd(decimal? capUsd) =>

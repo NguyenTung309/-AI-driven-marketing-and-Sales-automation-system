@@ -72,7 +72,8 @@ public sealed class ContentGenerateTool(
 
         // EARS[WHEN the content tool generates a draft THE SYSTEM SHALL persist it as a ContentItem(draft) so the
         // reviewer/publish loop can act on a stored item, not just returned text]
-        var item = ContentItem.Create(tenantId, draft.Platform, draft.Body, createdBy: null, _clock.UtcNow, briefId: draft.BriefId);
+        // createdByAgentId: reviewer-independence check needs to know which agent generated the item.
+        var item = ContentItem.Create(tenantId, draft.Platform, draft.Body, createdBy: null, _clock.UtcNow, briefId: draft.BriefId, createdByAgentId: ctx.AgentDefinitionId);
         _db.ContentItems.Add(item);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -92,12 +93,14 @@ public sealed class ContentGenerateTool(
 public sealed class ContentPublishTool(
     AppDbContext db,
     ISocialPublisher publisher,
-    IClock clock) : IAgentTool
+    IClock clock,
+    Clawbot.SharedKernel.Content.IContentReviewPolicyResolver reviewPolicy) : IAgentTool
 {
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private readonly AppDbContext _db = db;
     private readonly ISocialPublisher _publisher = publisher;
     private readonly IClock _clock = clock;
+    private readonly Clawbot.SharedKernel.Content.IContentReviewPolicyResolver _reviewPolicy = reviewPolicy;
 
     public string Name => "content.publish";
     public string Description => "Publish an approved content item now via the social publisher (FB/Zalo Graph). Args: content_id. Returns {content_id, status, post_url?}.";
@@ -128,6 +131,11 @@ public sealed class ContentPublishTool(
             && !string.Equals(item.Status, "scheduled", StringComparison.OrdinalIgnoreCase))
             return ToolResult.Fail($"content item is '{item.Status}', only approved or scheduled items can be published.");
 
+        // Review-gate P1: mirror of the publish-job gate — autonomous runs cannot publish unreviewed content.
+        var reviewRequired = await _reviewPolicy.IsRequiredAsync(ctx.TenantId, ct).ConfigureAwait(false);
+        if (reviewRequired && item.ApprovedByAgentId is null)
+            return ToolResult.Fail("content_review_required: item needs reviewer-agent signoff (content.approve) before publishing.");
+
         var now = _clock.UtcNow;
         // EARS[WHEN publishing THE SYSTEM SHALL call the social publisher and mark the item published on success]
         var result = await _publisher.PublishAsync(
@@ -136,7 +144,7 @@ public sealed class ContentPublishTool(
         if (!result.Success)
             return ToolResult.Fail($"publish_failed: {result.Error}");
 
-        item.MarkPublished(now);
+        item.MarkPublished(now, requireAgentReview: reviewRequired);
         // If a schedule exists for this item, mark it posted too so the publish job doesn't retry.
         var schedule = await _db.ContentSchedules
             .IgnoreQueryFilters()
@@ -156,11 +164,13 @@ public sealed class ContentPublishTool(
 
 public sealed class ContentScheduleTool(
     AppDbContext db,
-    IClock clock) : IAgentTool
+    IClock clock,
+    Clawbot.SharedKernel.Content.IContentReviewPolicyResolver reviewPolicy) : IAgentTool
 {
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private readonly AppDbContext _db = db;
     private readonly IClock _clock = clock;
+    private readonly Clawbot.SharedKernel.Content.IContentReviewPolicyResolver _reviewPolicy = reviewPolicy;
 
     public string Name => "content.schedule";
     public string Description => "Schedule an approved content item for publishing. Args: content_id, scheduled_at (ISO-8601). Returns {schedule_id, content_id, status, scheduled_at}.";
@@ -193,6 +203,17 @@ public sealed class ContentScheduleTool(
             return ToolResult.Fail($"content item is '{item.Status}', only approved items can be scheduled.");
 
         var now = _clock.UtcNow;
+
+        // Review-gate P1: autonomous run cannot self-approve+schedule unreviewed content (G6) — require the
+        // reviewer-agent signoff before a schedule row exists when the tenant flag is on.
+        // P4: persist the desired deadline BEFORE failing so ContentReviewSlaJob can chase the review.
+        if (await _reviewPolicy.IsRequiredAsync(ctx.TenantId, ct).ConfigureAwait(false) && item.ApprovedByAgentId is null)
+        {
+            item.SetDesiredPublishAt(scheduledAt, now);
+            await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return ToolResult.Fail("content_review_required: item needs reviewer-agent signoff (content.approve) before scheduling.");
+        }
+        item.SetDesiredPublishAt(scheduledAt, now);
         item.MarkScheduled(now);
         var schedule = ContentSchedule.Schedule(ctx.TenantId, item.Id, item.Platform, scheduledAt, now);
         _db.ContentSchedules.Add(schedule);
@@ -217,7 +238,7 @@ public sealed class ContentApproveTool(
     private readonly IClock _clock = clock;
 
     public string Name => "content.approve";
-    public string Description => "Approve or reject a draft content item (reviewer action). Args: content_id, decision (approve|reject), optional reason.";
+    public string Description => "Approve or reject a draft or approved content item (reviewer action; re-review of a human-approved item adds the agent signoff). Args: content_id, decision (approve|reject), optional reason.";
     public string InputSchemaJson => """{"content_id":"guid","decision":"approve|reject","reason?":"text"}""";
     public string RequiredPermission => "content:write";
     public ToolRiskLevel RiskLevel => ToolRiskLevel.Low;
@@ -243,8 +264,11 @@ public sealed class ContentApproveTool(
         if (item is null)
             return ToolResult.Fail($"content item {contentId} not found for tenant.");
 
-        if (!string.Equals(item.Status, "draft", StringComparison.OrdinalIgnoreCase))
-            return ToolResult.Fail($"content item is '{item.Status}', only draft items can be approved/rejected.");
+        // Phase 0 review-gate: 'approved' (human) items stay re-reviewable so the reviewer agent can add
+        // the ApprovedByAgentId signoff that Phase 1 enforces as the publish precondition.
+        if (!string.Equals(item.Status, "draft", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(item.Status, "approved", StringComparison.OrdinalIgnoreCase))
+            return ToolResult.Fail($"content item is '{item.Status}', only draft or approved items can be reviewed.");
 
         var now = _clock.UtcNow;
         if (decision == "approve")
@@ -252,11 +276,14 @@ public sealed class ContentApproveTool(
             // EARS[WHEN approving THE SYSTEM SHALL require an agent identity (ctx.AgentDefinitionId) and attribute the approval to it]
             if (ctx.AgentDefinitionId is null || ctx.AgentDefinitionId == Guid.Empty)
                 return ToolResult.Fail("agent identity is required to approve on behalf of an agent.");
+            // Review-gate P1 (separation of duties): the generating agent cannot sign off its own content.
+            if (item.CreatedByAgentId is not null && item.CreatedByAgentId == ctx.AgentDefinitionId)
+                return ToolResult.Fail("reviewer_independence: the agent that generated this item cannot approve it; a different reviewer agent must sign off.");
             item.ApproveByAgent(ctx.AgentDefinitionId.Value, now);
         }
         else
         {
-            item.Reject(now);
+            item.Reject(now, reason);
         }
 
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);

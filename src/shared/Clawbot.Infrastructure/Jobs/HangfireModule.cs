@@ -56,6 +56,9 @@ public static class HangfireModule
                 services.AddScoped<DripSequenceJob>();
         services.AddScoped<IIdleEscalationRecipientResolver, SalesLeadIdleEscalationRecipientResolver>();
         services.AddScoped<IdleConversationAlertJob>();
+        // Review-gate P4: nhắc/escalate bài chờ review sát giờ đăng.
+        services.AddScoped<IContentReviewEscalationRecipientResolver, ContentReviewEscalationRecipientResolver>();
+        services.AddScoped<ContentReviewSlaJob>();
         services.AddScoped<LeadFollowUpJob>();
         services.AddScoped<KbAccuracyTestJob>();
         services.AddScoped<CompetitorScanJob>();
@@ -122,6 +125,18 @@ public static class HangfireModule
             "content",
             j => j.RunAsync(CancellationToken.None),
             "*/5 * * * *");
+        recurring.AddOrUpdate<ContentReviewSlaJob>(
+            "content-review-sla",
+            "content",
+            j => j.RunAsync(CancellationToken.None),
+            "*/5 * * * *");
+        // Comment auto-reply đường polling: consumer bus chạy đa host không enqueue Hangfire được,
+        // scan quét comment mới (idempotent) thay thế.
+        recurring.AddOrUpdate<CommentAutoReplyJob>(
+            "comment-auto-reply-scan",
+            "default",
+            j => j.RunScanAsync(CancellationToken.None),
+            "*/2 * * * *");
         recurring.AddOrUpdate<AdsRuleEvaluationJob>(
             "ads-rule-evaluation",
             "ads",

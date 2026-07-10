@@ -418,6 +418,22 @@ export default function AgentDashboardPage() {
     onError: (error) =>
       setNotice({ tone: "error", message: `Đổi chế độ duyệt thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
   });
+  // Review-gate P3: 2 flag tenant — agent review bài đăng + duyệt tay AI reply.
+  const requireContentReview = approvalQuery.data?.requireContentReview ?? false;
+  const requireChatReplyApproval = approvalQuery.data?.requireChatReplyApproval ?? false;
+  const reviewFlagMutation = useMutation({
+    mutationFn: (flags: { requireContentReview?: boolean; requireChatReplyApproval?: boolean }) =>
+      setTenantOrchestration(requireApproval, monthlyCostCapUsd, flags),
+    onSuccess: async (res) => {
+      setNotice({
+        tone: "success",
+        message: `Đã cập nhật: agent review bài đăng ${res.requireContentReview ? "BẬT" : "tắt"}, duyệt tay AI reply ${res.requireChatReplyApproval ? "BẬT" : "tắt"}.`,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
+    },
+    onError: (error) =>
+      setNotice({ tone: "error", message: `Đổi chế độ review thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
+  });
   const [capDraft, setCapDraft] = useState<string>("");
   const capMutation = useMutation({
     mutationFn: (cap: number | null) => setTenantOrchestration(requireApproval, cap),
@@ -661,6 +677,34 @@ export default function AgentDashboardPage() {
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{requireApproval ? "approval" : "bolt"}</span>
             {requireApproval ? "Duyệt thủ công mọi phiên" : "Tự động hoàn toàn"}
+          </button>
+          <button
+            aria-pressed={requireContentReview}
+            className={[
+              "flex items-center gap-2 rounded-lg border px-3 py-2 text-body-md font-semibold transition-colors disabled:opacity-60",
+              requireContentReview ? "border-warning bg-warning/10 text-warning" : "border-outline bg-surface-container-lowest text-secondary",
+            ].join(" ")}
+            disabled={reviewFlagMutation.isPending || approvalQuery.isLoading}
+            onClick={() => reviewFlagMutation.mutate({ requireContentReview: !requireContentReview })}
+            title="Bật: bài đăng chỉ được publish khi có chữ ký duyệt của agent review (kể cả bài người đã duyệt tay). Tắt: đăng theo luồng duyệt thường."
+            type="button"
+          >
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">fact_check</span>
+            {requireContentReview ? "Agent review bài đăng: BẬT" : "Agent review bài đăng: tắt"}
+          </button>
+          <button
+            aria-pressed={requireChatReplyApproval}
+            className={[
+              "flex items-center gap-2 rounded-lg border px-3 py-2 text-body-md font-semibold transition-colors disabled:opacity-60",
+              requireChatReplyApproval ? "border-warning bg-warning/10 text-warning" : "border-outline bg-surface-container-lowest text-secondary",
+            ].join(" ")}
+            disabled={reviewFlagMutation.isPending || approvalQuery.isLoading}
+            onClick={() => reviewFlagMutation.mutate({ requireChatReplyApproval: !requireChatReplyApproval })}
+            title="Bật: mọi tin AI trả lời khách bị giữ lại chờ người duyệt trong Hội thoại (không tự gửi). Tin sale gõ tay không bị ảnh hưởng. Tắt: AI gửi tự động qua gate review."
+            type="button"
+          >
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">how_to_reg</span>
+            {requireChatReplyApproval ? "Duyệt tay AI reply: BẬT" : "Duyệt tay AI reply: tắt"}
           </button>
         </div>
       </div>

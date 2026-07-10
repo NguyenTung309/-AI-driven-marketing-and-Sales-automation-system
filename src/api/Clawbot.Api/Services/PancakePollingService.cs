@@ -283,11 +283,17 @@ public sealed partial class PancakePollingService : BackgroundService
                     }
                 }
 
+                // Comment auto-reply: conversation type COMMENT (list API có type + post_id) phải mang
+                // messageType=comment + ParentPostId — thiếu là ingest thành tin text thường và
+                // CommentAutoReplyJob không bao giờ thấy comment từ đường polling.
+                var isComment = string.Equals(conv.Type, "COMMENT", StringComparison.OrdinalIgnoreCase);
                 var channelMsg = new Clawbot.SharedKernel.Channels.ChannelMessage(
                     Channel: "zalo", ExternalThreadId: $"{pageId}:{convId}",
                     ExternalUserId: msg.From?.Id ?? conv.From?.Id ?? "unknown", Text: text,
                     SentAt: msg.InsertedAt.HasValue ? new DateTimeOffset(msg.InsertedAt.Value, TimeSpan.Zero) : (conv.UpdatedAt.HasValue ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow),
-                    Metadata: metadata);
+                    Metadata: metadata,
+                    MessageType: isComment ? "comment" : "text",
+                    ParentPostId: isComment ? conv.PostId : null);
                 await publisher.Publish(new Clawbot.SharedKernel.Channels.ChannelInboundMessageReceived(resolvedTenantId, channelMsg), ct);
             }
             catch (Exception ex) { LogIngestFailed(_log, msg.Id, ex.Message); }
@@ -358,5 +364,6 @@ public sealed record PancakeConversation(
     string? Id, string? Type, string? Snippet, int? MessageCount,
     DateTime? UpdatedAt, DateTime? InsertedAt, string? PageId,
     PancakeFrom? From, PancakeLastSentBy? LastSentBy,
-    IReadOnlyList<PancakeCustomer>? Customers);
+    IReadOnlyList<PancakeCustomer>? Customers,
+    string? PostId = null);
 }

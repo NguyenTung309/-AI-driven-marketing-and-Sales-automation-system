@@ -8,7 +8,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
 
-public sealed record TenantOrchestrationSettingsRequest(bool RequireApproval, decimal? MonthlyCostCapUsd = null);
+// Review-gate P3: 2 flag mới nullable — client cũ không gửi thì giữ nguyên giá trị hiện tại.
+public sealed record TenantOrchestrationSettingsRequest(
+    bool RequireApproval,
+    decimal? MonthlyCostCapUsd = null,
+    bool? RequireContentReview = null,
+    bool? RequireChatReplyApproval = null);
 
 public static class AdminEndpoints
 {
@@ -31,9 +36,15 @@ public static class AdminEndpoints
         var tenantId = tenants.Require().TenantId;
         var settings = await db.Tenants
             .Where(t => t.Id == tenantId)
-            .Select(t => new { t.RequireOrchestrationApproval, t.MonthlyCostCapUsd })
+            .Select(t => new { t.RequireOrchestrationApproval, t.MonthlyCostCapUsd, t.RequireContentReview, t.RequireChatReplyApproval })
             .FirstOrDefaultAsync(ct);
-        return Results.Ok(new { requireApproval = settings?.RequireOrchestrationApproval ?? false, monthlyCostCapUsd = settings?.MonthlyCostCapUsd });
+        return Results.Ok(new
+        {
+            requireApproval = settings?.RequireOrchestrationApproval ?? false,
+            monthlyCostCapUsd = settings?.MonthlyCostCapUsd,
+            requireContentReview = settings?.RequireContentReview ?? false,
+            requireChatReplyApproval = settings?.RequireChatReplyApproval ?? false,
+        });
     }
 
     private static async Task<IResult> UpdateTenantOrchestrationAsync(
@@ -48,8 +59,11 @@ public static class AdminEndpoints
 
         tenant.SetRequireOrchestrationApproval(body.RequireApproval);
         tenant.SetMonthlyCostCapUsd(body.MonthlyCostCapUsd);
+        // Review-gate P3: chỉ đổi khi client gửi tường minh (null = client cũ, giữ nguyên).
+        if (body.RequireContentReview is { } rcr) tenant.SetRequireContentReview(rcr);
+        if (body.RequireChatReplyApproval is { } rca) tenant.SetRequireChatReplyApproval(rca);
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new { tenant.RequireOrchestrationApproval, tenant.MonthlyCostCapUsd });
+        return Results.Ok(new { tenant.RequireOrchestrationApproval, tenant.MonthlyCostCapUsd, tenant.RequireContentReview, tenant.RequireChatReplyApproval });
     }
 
     private static async Task<IResult> ListAuditLogsAsync(

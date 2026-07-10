@@ -7,10 +7,12 @@ import { Alert, Button, Card, Input, StatusPill } from "@/shared/ui";
 import { platformClasses } from "@/shared/theme/colors";
 import { getMe } from "@/shared/api/auth";
 import {
+  approveConversationDraft,
   escalateConversation,
   getConversation,
   listConversations,
   listChannels,
+  rejectConversationDraft,
   resolveConversation,
   sendConversationMessage,
   setConversationAi,
@@ -221,9 +223,12 @@ interface MessageBubbleProps {
   readonly message: InboxMessage;
   readonly contactAvatarUrl: string | null;
   readonly contactDisplayName: string | null;
+  readonly onApproveDraft?: (messageId: string) => void;
+  readonly onRejectDraft?: (messageId: string) => void;
+  readonly draftActionBusy?: boolean;
 }
 
-function MessageBubble({ message, contactAvatarUrl, contactDisplayName }: MessageBubbleProps) {
+function MessageBubble({ message, contactAvatarUrl, contactDisplayName, onApproveDraft, onRejectDraft, draftActionBusy }: MessageBubbleProps) {
   const outbound = isOutbound(message);
   const byAi = message.senderType === "ai" || message.senderType === "bot";
   const avatarUrl = message.senderAvatarUrl || contactAvatarUrl;
@@ -290,10 +295,34 @@ function MessageBubble({ message, contactAvatarUrl, contactDisplayName }: Messag
         ) : (
           <p className="whitespace-pre-wrap text-body-md text-on-surface">{message.content}</p>
         )}
-        <span className={`mt-1 block text-label-sm text-on-surface-variant ${outbound ? "text-right" : ""}`}>
+        <span className={`mt-1 block text-label-sm ${message.status === "pending_approval" ? "font-semibold text-warning" : message.status === "blocked" ? "font-semibold text-error" : "text-on-surface-variant"} ${outbound ? "text-right" : ""}`}>
           {formatTime(message.sentAt)}
-          {byAi ? " - AI trả lời" : outbound ? " - Đã gửi" : ""}
+          {message.status === "pending_approval"
+            ? " - Chờ duyệt (chưa gửi)"
+            : message.status === "blocked"
+              ? " - Đã chặn (không gửi)"
+              : byAi ? " - AI trả lời" : outbound ? " - Đã gửi" : ""}
         </span>
+        {message.status === "pending_approval" && onApproveDraft && onRejectDraft ? (
+          <div className="mt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              disabled={draftActionBusy}
+              onClick={() => onRejectDraft(message.id)}
+              className="rounded border border-error/40 px-2.5 py-1 text-label-sm font-semibold text-error hover:bg-error/10 disabled:opacity-50"
+            >
+              Bỏ tin này
+            </button>
+            <button
+              type="button"
+              disabled={draftActionBusy}
+              onClick={() => onApproveDraft(message.id)}
+              className="rounded bg-primary px-2.5 py-1 text-label-sm font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50"
+            >
+              Duyệt & gửi
+            </button>
+          </div>
+        ) : null}
       </div>
       {outbound ? (
         <div
@@ -320,9 +349,12 @@ interface ChatPanelProps {
   readonly sending: boolean;
   readonly onToggleAi: (enabled: boolean) => void;
   readonly aiToggling: boolean;
+  readonly onApproveDraft: (messageId: string) => void;
+  readonly onRejectDraft: (messageId: string) => void;
+  readonly draftActionBusy: boolean;
 }
 
-function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSubmit, sending, onToggleAi, aiToggling }: ChatPanelProps) {
+function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSubmit, sending, onToggleAi, aiToggling, onApproveDraft, onRejectDraft, draftActionBusy }: ChatPanelProps) {
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const conversationId = conversation?.id ?? null;
   const messageCount = conversation?.messages.length ?? 0;
@@ -447,6 +479,9 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
               message={message}
               contactAvatarUrl={conversation.contactAvatarUrl}
               contactDisplayName={conversation.contactDisplayName}
+              onApproveDraft={onApproveDraft}
+              onRejectDraft={onRejectDraft}
+              draftActionBusy={draftActionBusy}
             />
           ))
         )}
@@ -689,6 +724,24 @@ export default function ConversationsPage() {
     },
   });
 
+  // Review-gate P3: duyệt/từ chối AI draft đang hold (status pending_approval)
+  const approveDraftMutation = useMutation({
+    mutationFn: (messageId: string) => approveConversationDraft(activeConversationId ?? "", messageId),
+    onSuccess: () => {
+      showNotice("Đã duyệt — tin nhắn được gửi tới khách.", "success");
+      void invalidateActive();
+    },
+    onError: (error) => showNotice(errorMessage(error), "error"),
+  });
+  const rejectDraftMutation = useMutation({
+    mutationFn: (messageId: string) => rejectConversationDraft(activeConversationId ?? "", messageId),
+    onSuccess: () => {
+      showNotice("Đã bỏ bản nháp AI — tin không được gửi.", "info");
+      void invalidateActive();
+    },
+    onError: (error) => showNotice(errorMessage(error), "error"),
+  });
+
   const actionBusy = escalateMutation.isPending || resolveMutation.isPending;
   const actionError = sendMutation.error ?? escalateMutation.error ?? resolveMutation.error;
 
@@ -828,6 +881,15 @@ export default function ConversationsPage() {
           onToggleAi={(enabled) => {
             if (!activeConversationId || aiToggleMutation.isPending) return;
             aiToggleMutation.mutate(enabled);
+          }}
+          draftActionBusy={approveDraftMutation.isPending || rejectDraftMutation.isPending}
+          onApproveDraft={(messageId) => {
+            if (!activeConversationId || approveDraftMutation.isPending) return;
+            approveDraftMutation.mutate(messageId);
+          }}
+          onRejectDraft={(messageId) => {
+            if (!activeConversationId || rejectDraftMutation.isPending) return;
+            rejectDraftMutation.mutate(messageId);
           }}
         />
 

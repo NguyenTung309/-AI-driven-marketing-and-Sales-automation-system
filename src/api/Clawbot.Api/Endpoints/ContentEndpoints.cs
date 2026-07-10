@@ -349,6 +349,11 @@ public static class ContentEndpoints
         if (item is null)
             return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
 
+        // G9: đã scheduled/published thì không approve lại được — tránh revert ngoài luồng.
+        if (string.Equals(item.Status, "scheduled", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(item.Status, "published", StringComparison.OrdinalIgnoreCase))
+            return Error(http, StatusCodes.Status400BadRequest, "content.item_not_approvable", $"Content item is '{item.Status}' and cannot be re-approved.");
+
         item.Approve(userId.Value, clock.UtcNow);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.Ok(ToDto(item));
@@ -364,13 +369,12 @@ public static class ContentEndpoints
         CancellationToken ct)
     {
         _ = tenants.Require();
-        _ = body;
         var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
             .ConfigureAwait(false);
         if (item is null)
             return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
 
-        item.Reject(clock.UtcNow);
+        item.Reject(clock.UtcNow, body?.Reason);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.Ok(ToDto(item));
     }
@@ -418,6 +422,8 @@ public static class ContentEndpoints
         ITenantAccessor tenants,
         IClock clock,
         IGoldenHourResolver goldenHour,
+        Clawbot.SharedKernel.Content.IContentReviewPolicyResolver reviewPolicy,
+        ContentAgent.ContentAgentClient grpc,
         HttpContext http,
         CancellationToken ct)
     {
@@ -438,6 +444,37 @@ public static class ContentEndpoints
             .AnyAsync(s => s.ContentItemId == id && s.Status == "pending", ct).ConfigureAwait(false);
         if (exists)
             return Error(http, StatusCodes.Status409Conflict, "content.schedule_exists", "Content item already has a pending schedule.");
+
+        // Review-gate P4 (SLA): lưu deadline mong muốn TRƯỚC khi qua review-gate — review fail thì
+        // ContentReviewSlaJob vẫn có mốc để nhắc người duyệt kịp giờ đăng.
+        item.SetDesiredPublishAt(resolution.ScheduledAt, now);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // Review-gate P1: human approve xong vẫn phải có chữ ký reviewer agent trước khi lên lịch.
+        // Sync review bounded; mọi lỗi/timeout => KHÔNG tạo schedule (fail-closed, QĐ3) — item giữ
+        // trạng thái approved-chưa-ký, SLA job (Phase 4) nhắc người xử lý theo DesiredPublishAt vừa lưu.
+        if (item.ApprovedByAgentId is null
+            && await reviewPolicy.IsRequiredAsync(item.TenantId, ct).ConfigureAwait(false))
+        {
+            try
+            {
+                var review = await grpc.ReviewAsync(
+                    new ReviewContentRequest { TenantId = item.TenantId.ToString(), ContentId = item.Id.ToString() },
+                    deadline: DateTime.UtcNow.AddSeconds(25),
+                    cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
+                if (!string.Equals(review.Verdict, "approve", StringComparison.OrdinalIgnoreCase))
+                    return Error(http, StatusCodes.Status422UnprocessableEntity,
+                        "content.review_" + review.Verdict,
+                        string.IsNullOrWhiteSpace(review.Reason) ? "Nội dung chưa qua agent review." : review.Reason);
+                // Reviewer đã stamp ApprovedByAgentId ở AgentService; entity local chỉ cần đi tiếp tạo schedule.
+            }
+            catch (RpcException)
+            {
+                return Error(http, StatusCodes.Status422UnprocessableEntity,
+                    "content.review_unavailable",
+                    "Không gọi được agent review — bài chưa được lên lịch. Thử lại hoặc chờ duyệt tay.");
+            }
+        }
 
         var schedule = ContentSchedule.Schedule(item.TenantId, item.Id, item.Platform, resolution.ScheduledAt, now);
         item.MarkScheduled(now);

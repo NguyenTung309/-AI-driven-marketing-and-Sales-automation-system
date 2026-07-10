@@ -36,6 +36,10 @@ builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IAutonomousPlanner, 
 builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IAutonomousRunSink, Clawbot.AgentService.Services.AutonomousRunSink>();
 // SPEC-16 P4-4: tenant high-risk approval toggle resolver (reads Tenant.RequireOrchestrationApproval).
 builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IOrchestrationApprovalResolver, Clawbot.Infrastructure.Agents.EfOrchestrationApprovalResolver>();
+// Review-gate P1: tenant RequireContentReview flag — dùng bởi content.schedule/content.publish tools + Review RPC.
+builder.Services.AddScoped<Clawbot.SharedKernel.Content.IContentReviewPolicyResolver, Clawbot.Infrastructure.Agents.EfContentReviewPolicyResolver>();
+// Review-gate P3 manual-mode: tenant RequireChatReplyApproval — ChatAgentGrpcService hold-all khi bật.
+builder.Services.AddScoped<Clawbot.SharedKernel.Inbox.IChatApprovalPolicyResolver, Clawbot.Infrastructure.Agents.EfChatApprovalPolicyResolver>();
 // Autonomous orchestration options bound from config (MaxRounds, transient-retry caps) so they are tunable without redeploy.
 var autonomousOptions = builder.Configuration.GetSection("AutonomousOrchestration").Get<AutonomousOrchestratorOptions>()
     ?? new AutonomousOrchestratorOptions();

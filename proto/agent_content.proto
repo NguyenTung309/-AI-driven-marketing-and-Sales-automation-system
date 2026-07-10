@@ -7,6 +7,9 @@ package clawbot.agents.content;
 service ContentAgent {
   rpc Generate (ContentRequest) returns (ContentResponse);
   rpc Repurpose (RepurposeRequest) returns (ContentResponse);
+  // Review-gate P1: reviewer-agent chấm một content item; verdict=approve thì stamp ApprovedByAgentId,
+  // reject thì demote kèm lý do, needs_human giữ nguyên chờ người (fail-closed).
+  rpc Review (ReviewContentRequest) returns (ReviewContentResponse);
 }
 
 message ContentRequest {
@@ -35,4 +38,15 @@ message RepurposeRequest {
   string content_id = 2;
   repeated string target_channels = 3;
   string source_body = 4;
+}
+
+message ReviewContentRequest {
+  string tenant_id = 1;
+  string content_id = 2;
+}
+
+message ReviewContentResponse {
+  string verdict = 1; // approve | reject | needs_human
+  string reason = 2;
+  string reviewed_by_agent_definition_id = 3; // set khi verdict=approve
 }

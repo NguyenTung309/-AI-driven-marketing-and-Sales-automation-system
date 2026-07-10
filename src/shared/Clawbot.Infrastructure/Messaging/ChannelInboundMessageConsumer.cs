@@ -46,6 +46,10 @@ public sealed partial class ChannelInboundMessageConsumer(
     // the ingest would dedup, and the reply would never be retried anyway).
     private async Task TryAutoReplyAsync(ChannelInboundMessageReceived msg, Guid conversationId, CancellationToken ct)
     {
+        // Comment thread: chat auto-reply gửi reply_inbox là SAI ngữ nghĩa (phải reply_comment/private_replies)
+        // — CommentAutoReplyJob (scan định kỳ) lo loại này.
+        if (string.Equals(msg.Message.MessageType, "comment", StringComparison.OrdinalIgnoreCase))
+            return;
         // Only reply to customer messages, never to owner/AI echo
         if (msg.Message.Metadata.TryGetValue("is_owner", out var owner) && string.Equals(owner, "true", StringComparison.OrdinalIgnoreCase))
             return;

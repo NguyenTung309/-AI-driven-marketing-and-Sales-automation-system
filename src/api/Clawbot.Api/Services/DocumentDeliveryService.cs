@@ -94,6 +94,9 @@ public sealed class DocumentDeliveryService(
     private static string FormatExpiry(DateTimeOffset? expiresAt) =>
         expiresAt?.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) ?? "7 ngày";
 
+    // Review-gate P5 (QĐ6 template-approved): template tĩnh duyệt 1 lần; biến nội suy là URL nội bộ do hệ
+    // thống sinh + ngày hết hạn — không có dữ liệu ngoài, nên không cần toxicity per-send. Thêm biến từ
+    // dữ liệu khách/LLM thì bản render phải qua toxicity trước SendAsync (xem DripSequenceJob).
     private static string BuildMessage(string fileUrl, string expiry) =>
         $"Xin chào, tài liệu của bạn đã sẵn sàng: {fileUrl}\nLiên kết có hiệu lực đến {expiry}.";
 }

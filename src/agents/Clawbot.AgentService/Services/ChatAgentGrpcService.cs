@@ -14,17 +14,24 @@ namespace Clawbot.AgentService.Services;
 
 public sealed partial class ChatAgentGrpcService(
     CoreChat.ChatAgent agent,
+    Clawbot.Agents.Core.Content.ContentReviewer reviewer,
     AppDbContext db,
     IClock clock,
     LeadAutoScorer leadScorer,
     ILogger<ChatAgentGrpcService> logger,
-    IChannelAdapter? channelAdapter = null) : ChatAgent.ChatAgentBase
+    IChannelAdapter? channelAdapter = null,
+    Clawbot.SharedKernel.Inbox.IChatApprovalPolicyResolver? approvalPolicy = null) : ChatAgent.ChatAgentBase
 {
+    // Review-gate P2: cap cho LLM critic trên hot-path chat (consumer tuần tự) — quá hạn coi như needs_human.
+    private static readonly TimeSpan ChatReviewTimeout = TimeSpan.FromSeconds(8);
+
     private readonly CoreChat.ChatAgent _agent = agent;
+    private readonly Clawbot.Agents.Core.Content.ContentReviewer _reviewer = reviewer;
     private readonly AppDbContext _db = db;
     private readonly IClock _clock = clock;
     private readonly LeadAutoScorer _leadScorer = leadScorer;
     private readonly IChannelAdapter? _channelAdapter = channelAdapter;
+    private readonly Clawbot.SharedKernel.Inbox.IChatApprovalPolicyResolver? _approvalPolicy = approvalPolicy;
     private readonly ILogger<ChatAgentGrpcService> _logger = logger;
 
     public override async Task Reply(ChatRequest request, IServerStreamWriter<ChatToken> responseStream, ServerCallContext context)
@@ -108,24 +115,63 @@ public sealed partial class ChatAgentGrpcService(
             throw new RpcException(new Status(StatusCode.Internal, "chat-agent failure"));
         }
 
-        var phase = reply.Blocked ? "blocked" : "completed";
+        // Review-gate P3 manual-mode: tenant bật RequireChatReplyApproval → hold MỌI reply chờ người duyệt
+        // (khỏi tốn LLM critic — người là reviewer cuối). Tin sale gõ tay không đi qua đường này (QĐ5).
+        var requireApproval = !reply.Blocked
+            && _approvalPolicy is not null
+            && await _approvalPolicy.IsRequiredAsync(tenantId, context.CancellationToken).ConfigureAwait(false);
+
+        // Review-gate P2 (QĐ2 tiered): tầng 1 deterministic (ChatReplyReviewTrigger — Escalate + nội dung
+        // giá/cam kết) chạy 100%; tầng 2 LLM critic chỉ cho tin nghi ngờ. ContentReviewer fail-closed:
+        // LLM down/timeout/JSON hỏng => needs_human — không bao giờ fail-open thành gửi (QĐ3).
+        string? reviewVerdict = null;
+        string? reviewReason = null;
+        if (!reply.Blocked && !requireApproval && !string.IsNullOrWhiteSpace(reply.Text)
+            && CoreChat.ChatReplyReviewTrigger.NeedsLlmReview(reply))
+        {
+            using var reviewCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+            reviewCts.CancelAfter(ChatReviewTimeout);
+            var review = await _reviewer.ReviewAsync(
+                tenantId, conversation?.Platform ?? "chat", reply.Text, reviewCts.Token).ConfigureAwait(false);
+            reviewVerdict = review.Verdict;
+            reviewReason = review.Reason;
+        }
+
+        // Trạng thái row tin nhắn: sent (gửi được) | pending_approval (chờ người duyệt) | blocked (chặn hẳn).
+        var messageStatus = reply.Blocked
+            ? "blocked"
+            : requireApproval
+                ? "pending_approval"
+                : reviewVerdict == Clawbot.Agents.Core.Content.ContentReviewResult.RejectVerdict
+                    ? "blocked"
+                    : reviewVerdict == Clawbot.Agents.Core.Content.ContentReviewResult.NeedsHuman
+                        ? "pending_approval"
+                        : "sent";
+
+        var phase = reply.Blocked
+            ? "blocked"
+            : requireApproval
+                ? "held_for_approval"
+                : messageStatus == "blocked"
+                    ? "review_rejected"
+                    : messageStatus == "pending_approval" ? "held_for_review" : "completed";
         session.AppendTrace("chat", "chat-agent", phase,
-            $"intent={reply.Intent} blocked={reply.Blocked} latency={reply.LatencyMs}ms tokens={reply.InputTokens}/{reply.OutputTokens} usd={reply.UsdCost:0.0000} citations={reply.Citations.Count} lang={reply.Language} toxic_blocked={reply.ToxicityBlocked} spam={reply.SpamFlagged}{(reply.BlockReason is null ? "" : " block=" + reply.BlockReason)}",
+            $"intent={reply.Intent} blocked={reply.Blocked} latency={reply.LatencyMs}ms tokens={reply.InputTokens}/{reply.OutputTokens} usd={reply.UsdCost:0.0000} citations={reply.Citations.Count} lang={reply.Language} toxic_blocked={reply.ToxicityBlocked} spam={reply.SpamFlagged}{(reply.BlockReason is null ? "" : " block=" + reply.BlockReason)}{(reviewVerdict is null ? "" : $" review={reviewVerdict} reason={reviewReason}")}",
             _clock.UtcNow);
         session.Finish(_clock.UtcNow);
 
         Clawbot.Domain.Conversations.Message? persistedReply = null;
         if (convId.HasValue)
         {
-            persistedReply = conversation?.AppendMessage("out", "agent", reply.Text, "text", _clock.UtcNow);
+            persistedReply = conversation?.AppendMessage("out", "agent", reply.Text, "text", _clock.UtcNow, status: messageStatus);
         }
 
         await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
 
         // SPEC-16 P2-10: physically send the AI reply to the channel after persisting it. Best-effort — a channel
         // failure surfaces a trace but does not undo the persisted reply. Only send when not blocked (safety/toxicity
-        // gates) and the conversation has an external thread id to address.
-        if (!reply.Blocked && conversation is { ExternalThreadId.Length: > 0 } && _channelAdapter is not null)
+        // gates), the review gate let it through (status=sent), and the conversation has an external thread id.
+        if (!reply.Blocked && messageStatus == "sent" && conversation is { ExternalThreadId.Length: > 0 } && _channelAdapter is not null)
         {
             try
             {

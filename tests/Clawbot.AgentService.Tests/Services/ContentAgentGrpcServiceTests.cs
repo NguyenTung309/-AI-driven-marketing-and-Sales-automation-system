@@ -121,9 +121,11 @@ public sealed class ContentAgentGrpcServiceTests
                 Arg.Any<CancellationToken>())
             .Returns(call => new ClaudeReply($"Draft for {call.ArgAt<string>(2)}", 11, 7, 0m, "content-model"));
         var agent = new CoreContent.ContentAgent(rag, templates, claude, new LlmCallScope());
+        var reviewer = new CoreContent.ContentReviewer(claude, new LlmCallScope());
 
         return new ContentAgentGrpcService(
             agent,
+            reviewer,
             fx.Db,
             new FixedClock(Now),
             NullLogger<ContentAgentGrpcService>.Instance);
