@@ -80,6 +80,10 @@ public static partial class RbacSeeder
         ("docs-agent", "Agent-Docs", "docs"),
         ("report-agent", "Agent-Report", "report"),
         ("ads-agent", "Agent-Ads", "ads"),
+        // Review-gate Phase 0: reviewer needs an AgentConfig row so it auto-binds to the tenant's LLM
+        // config here (like every other agent) — AgentDefinitionCatalog hides unbound agents, which made
+        // the reviewer invisible in prod (dev worked only via DemoLlmConfigSeeder).
+        ("reviewer-agent", "Agent-Review", "reviewer"),
     ];
 
     private static readonly Dictionary<string, string[]> LegacyRolePermissions = new()

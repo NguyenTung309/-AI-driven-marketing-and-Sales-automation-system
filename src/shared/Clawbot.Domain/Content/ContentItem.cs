@@ -11,10 +11,19 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
     public string Body { get; private set; } = string.Empty;
     public string AssetsJson { get; private set; } = "[]";
     public Guid? CreatedBy { get; private set; }
+    // Review-gate P1: agent that generated this item — the reviewer must be a DIFFERENT definition
+    // (separation of duties), enforced in ContentApproveTool and the Review RPC.
+    public Guid? CreatedByAgentId { get; private set; }
     public Guid? ApprovedBy { get; private set; }
     // SPEC-16 P2-6: when a reviewer (lead-type) agent approves, attribution is the agent_definition id, not a human userId.
     public Guid? ApprovedByAgentId { get; private set; }
     public DateTimeOffset? ApprovedAt { get; private set; }
+    public string? RejectedReason { get; private set; }
+    // Review-gate P4 (SLA): giờ đăng mong muốn — set NGAY khi người/agent lên lịch, kể cả khi review-gate
+    // chặn không tạo được schedule row, để ContentReviewSlaJob còn deadline mà nhắc người duyệt.
+    public DateTimeOffset? DesiredPublishAt { get; private set; }
+    // Chống spam alert: mỗi tier (trước hạn / quá hạn) chỉ notify 1 lần.
+    public DateTimeOffset? LastReviewAlertAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public DateTimeOffset? DeletedAt { get; private set; }
@@ -27,7 +36,8 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
         string body,
         Guid? createdBy,
         DateTimeOffset createdAt,
-        Guid? briefId = null) =>
+        Guid? briefId = null,
+        Guid? createdByAgentId = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -36,6 +46,7 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
             Platform = platform,
             Body = body,
             CreatedBy = createdBy,
+            CreatedByAgentId = createdByAgentId,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         };
@@ -59,9 +70,10 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
         UpdatedAt = at;
     }
 
-    public void Reject(DateTimeOffset at)
+    public void Reject(DateTimeOffset at, string? reason = null)
     {
         Status = "rejected";
+        RejectedReason = string.IsNullOrWhiteSpace(reason) ? RejectedReason : reason.Trim();
         UpdatedAt = at;
     }
 
@@ -77,8 +89,12 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
         UpdatedAt = at;
     }
 
-    public void MarkPublished(DateTimeOffset at)
+    // requireAgentReview: resolved tenant flag (RequireContentReview). Domain-level backstop — every
+    // publish path (Hangfire job, content.publish tool) hits this regardless of caller-side gates.
+    public void MarkPublished(DateTimeOffset at, bool requireAgentReview = false)
     {
+        if (requireAgentReview && ApprovedByAgentId is null)
+            throw new InvalidOperationException("content_review_required: item lacks reviewer-agent signoff (ApprovedByAgentId).");
         Status = "published";
         UpdatedAt = at;
     }
@@ -100,4 +116,12 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
         Status = "approved";
         UpdatedAt = at;
     }
+
+    public void SetDesiredPublishAt(DateTimeOffset desiredAt, DateTimeOffset at)
+    {
+        DesiredPublishAt = desiredAt;
+        UpdatedAt = at;
+    }
+
+    public void MarkReviewAlerted(DateTimeOffset at) => LastReviewAlertAt = at;
 }

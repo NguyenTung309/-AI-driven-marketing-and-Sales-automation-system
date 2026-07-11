@@ -126,6 +126,7 @@ function providerLabel(provider: string): string {
   const normalized = provider.toLowerCase();
   if (normalized === "anthropic" || normalized === "claude") return "Claude";
   if (normalized === "openai" || normalized === "openai-compatible") return "Chuẩn OpenAI";
+  if (normalized === "openai-responses") return "Chuẩn OpenAI v2";
   return provider;
 }
 
@@ -618,6 +619,7 @@ export function AgentConfigDrawer({
                     <select className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" onChange={(event) => setLlmDraft((current) => ({ ...current, provider: event.target.value as LlmProvider }))} value={llmDraft.provider}>
                       <option value="anthropic">Anthropic</option>
                       <option value="openai">Chuẩn OpenAI</option>
+                      <option value="openai-responses">Chuẩn OpenAI v2 (Responses)</option>
                     </select>
                   </label>
                   <label className="space-y-1">
@@ -692,6 +694,7 @@ export function AgentConfigDrawer({
                           <select className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" onChange={(event) => setEditDraft((current) => ({ ...current, provider: event.target.value as LlmProvider }))} value={editDraft.provider}>
                             <option value="anthropic">Anthropic</option>
                             <option value="openai">Chuẩn OpenAI</option>
+                            <option value="openai-responses">Chuẩn OpenAI v2 (Responses)</option>
                           </select>
                         </label>
                         <label className="space-y-1">

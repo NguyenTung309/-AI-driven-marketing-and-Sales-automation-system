@@ -105,10 +105,83 @@ public sealed class ContentPublishJobTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task RunAsync_holds_unreviewed_item_when_tenant_requires_review()
+    {
+        // Review-gate P1 (G1): schedule stays pending, publisher never called, item untouched.
+        using var fx = new TestAppDb();
+        var item = ContentItem.Create(fx.TenantId, "facebook", "Post body", createdBy: null, Now.AddHours(-2));
+        item.Approve(Guid.NewGuid(), Now.AddHours(-1)); // human approved only — no agent signoff
+        item.MarkScheduled(Now.AddHours(-1));
+        var schedule = ContentSchedule.Schedule(fx.TenantId, item.Id, "facebook", Now.AddMinutes(-5), Now.AddHours(-1));
+        fx.Db.ContentItems.Add(item);
+        fx.Db.ContentSchedules.Add(schedule);
+        await fx.Db.SaveChangesAsync();
+        var publisher = new RecordingPublisher(new PublishResult(true, "https://social.example/posts/1", null));
+        var notifier = Substitute.For<IContentNotifier>();
+        var job = BuildJob(fx, publisher, notifier, reviewRequired: true);
+
+        await job.RunAsync(CancellationToken.None);
+
+        publisher.Requests.Should().BeEmpty();
+        (await fx.Db.ContentSchedules.IgnoreQueryFilters().SingleAsync()).Status.Should().Be("pending");
+        (await fx.Db.ContentItems.IgnoreQueryFilters().SingleAsync()).Status.Should().Be("scheduled");
+    }
+
+    [Fact]
+    public async Task RunAsync_publishes_reviewed_item_when_tenant_requires_review()
+    {
+        using var fx = new TestAppDb();
+        var item = ContentItem.Create(fx.TenantId, "facebook", "Post body", createdBy: null, Now.AddHours(-2));
+        item.ApproveByAgent(Guid.NewGuid(), Now.AddHours(-1)); // reviewer signoff present
+        item.MarkScheduled(Now.AddHours(-1));
+        var schedule = ContentSchedule.Schedule(fx.TenantId, item.Id, "facebook", Now.AddMinutes(-5), Now.AddHours(-1));
+        fx.Db.ContentItems.Add(item);
+        fx.Db.ContentSchedules.Add(schedule);
+        await fx.Db.SaveChangesAsync();
+        var publisher = new RecordingPublisher(new PublishResult(true, "https://social.example/posts/1", null));
+        var notifier = Substitute.For<IContentNotifier>();
+        var job = BuildJob(fx, publisher, notifier, reviewRequired: true);
+
+        await job.RunAsync(CancellationToken.None);
+
+        publisher.Requests.Should().ContainSingle();
+        (await fx.Db.ContentItems.IgnoreQueryFilters().SingleAsync()).Status.Should().Be("published");
+    }
+
+    [Fact]
+    public async Task RunAsync_skips_stale_schedule_when_item_no_longer_scheduled()
+    {
+        // Item reverted to approved after scheduling — pending schedule must not publish it.
+        using var fx = new TestAppDb();
+        var item = ContentItem.Create(fx.TenantId, "facebook", "Post body", createdBy: null, Now.AddHours(-2));
+        item.ApproveByAgent(Guid.NewGuid(), Now.AddHours(-1));
+        item.MarkScheduled(Now.AddHours(-1));
+        var schedule = ContentSchedule.Schedule(fx.TenantId, item.Id, "facebook", Now.AddMinutes(-5), Now.AddHours(-1));
+        item.RevertToApproved(Now.AddMinutes(-30));
+        fx.Db.ContentItems.Add(item);
+        fx.Db.ContentSchedules.Add(schedule);
+        await fx.Db.SaveChangesAsync();
+        var publisher = new RecordingPublisher(new PublishResult(true, "https://social.example/posts/1", null));
+        var notifier = Substitute.For<IContentNotifier>();
+        var job = BuildJob(fx, publisher, notifier);
+
+        await job.RunAsync(CancellationToken.None);
+
+        publisher.Requests.Should().BeEmpty();
+        (await fx.Db.ContentItems.IgnoreQueryFilters().SingleAsync()).Status.Should().Be("approved");
+    }
+
+    private sealed class FakeReviewPolicy(bool required) : IContentReviewPolicyResolver
+    {
+        public Task<bool> IsRequiredAsync(Guid tenantId, CancellationToken ct = default) => Task.FromResult(required);
+    }
+
     private static ContentPublishJob BuildJob(
         TestAppDb fx,
         ISocialPublisher publisher,
-        IContentNotifier notifier)
+        IContentNotifier notifier,
+        bool reviewRequired = false)
     {
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
@@ -117,7 +190,8 @@ public sealed class ContentPublishJobTests
             publisher,
             notifier,
             clock,
-            NullLogger<ContentPublishJob>.Instance);
+            NullLogger<ContentPublishJob>.Instance,
+            new FakeReviewPolicy(reviewRequired));
     }
 
     private sealed class RecordingPublisher(PublishResult result) : ISocialPublisher

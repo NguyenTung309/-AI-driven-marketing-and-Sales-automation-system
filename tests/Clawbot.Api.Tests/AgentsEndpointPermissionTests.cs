@@ -36,7 +36,8 @@ public sealed class AgentsEndpointPermissionTests
         source.Should().Contain("IClaudeChatClient chatClient");
         source.Should().Contain("ILlmCallScope llmScope");
         source.Should().Contain("llmScope.Begin(tenant.TenantId, agent.Code, now)");
-        source.Should().Contain("chatClient.CompleteAsync(config.SystemPrompt, Array.Empty<ChatTurn>(), redactedMessage, ct)");
+        // 5cee084 (agent prompt system) doi bien config.SystemPrompt -> systemPrompt (compose guardrail truoc khi goi)
+        source.Should().Contain("chatClient.CompleteAsync(systemPrompt, Array.Empty<ChatTurn>(), redactedMessage, ct)");
         source.Should().NotContain("BuildSandboxReply");
     }
 

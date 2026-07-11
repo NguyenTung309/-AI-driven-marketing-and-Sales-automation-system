@@ -158,6 +158,10 @@ public static class DependencyInjection
             .AddPolicyHandler(HttpResiliencePolicies.Retry())
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
+        // Comment auto-reply: cùng instance adapter Pancake, expose thêm action reply_comment/private_replies.
+        services.AddScoped<ICommentChannelAdapter>(sp =>
+            sp.GetRequiredService<IChannelAdapter>() as ICommentChannelAdapter
+            ?? throw new InvalidOperationException("ICommentChannelAdapter not available"));
         // SPEC-16 P2-8: graph publisher (FB Graph /feed + Zalo OA) when GraphPublisher is enabled; otherwise the
         // legacy generic webhook publisher (HttpSocialPublisher) stays the default for backward compatibility.
         services.Configure<GraphPublisherOptions>(cfg.GetSection(GraphPublisherOptions.SectionName));

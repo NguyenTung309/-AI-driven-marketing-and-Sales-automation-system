@@ -1,5 +1,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AxiosError } from "axios";
 import { AppShell } from "@/shared/layout/AppShell";
@@ -7,10 +8,12 @@ import { Alert, Button, Card, Input, StatusPill } from "@/shared/ui";
 import { platformClasses } from "@/shared/theme/colors";
 import { getMe } from "@/shared/api/auth";
 import {
+  approveConversationDraft,
   escalateConversation,
   getConversation,
   listConversations,
   listChannels,
+  rejectConversationDraft,
   resolveConversation,
   sendConversationMessage,
   setConversationAi,
@@ -221,9 +224,12 @@ interface MessageBubbleProps {
   readonly message: InboxMessage;
   readonly contactAvatarUrl: string | null;
   readonly contactDisplayName: string | null;
+  readonly onApproveDraft?: (messageId: string) => void;
+  readonly onRejectDraft?: (messageId: string) => void;
+  readonly draftActionBusy?: boolean;
 }
 
-function MessageBubble({ message, contactAvatarUrl, contactDisplayName }: MessageBubbleProps) {
+function MessageBubble({ message, contactAvatarUrl, contactDisplayName, onApproveDraft, onRejectDraft, draftActionBusy }: MessageBubbleProps) {
   const outbound = isOutbound(message);
   const byAi = message.senderType === "ai" || message.senderType === "bot";
   const avatarUrl = message.senderAvatarUrl || contactAvatarUrl;
@@ -290,10 +296,34 @@ function MessageBubble({ message, contactAvatarUrl, contactDisplayName }: Messag
         ) : (
           <p className="whitespace-pre-wrap text-body-md text-on-surface">{message.content}</p>
         )}
-        <span className={`mt-1 block text-label-sm text-on-surface-variant ${outbound ? "text-right" : ""}`}>
+        <span className={`mt-1 block text-label-sm ${message.status === "pending_approval" ? "font-semibold text-warning" : message.status === "blocked" ? "font-semibold text-error" : "text-on-surface-variant"} ${outbound ? "text-right" : ""}`}>
           {formatTime(message.sentAt)}
-          {byAi ? " - AI trả lời" : outbound ? " - Đã gửi" : ""}
+          {message.status === "pending_approval"
+            ? " - Chờ duyệt (chưa gửi)"
+            : message.status === "blocked"
+              ? " - Đã chặn (không gửi)"
+              : byAi ? " - AI trả lời" : outbound ? " - Đã gửi" : ""}
         </span>
+        {message.status === "pending_approval" && onApproveDraft && onRejectDraft ? (
+          <div className="mt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              disabled={draftActionBusy}
+              onClick={() => onRejectDraft(message.id)}
+              className="rounded border border-error/40 px-2.5 py-1 text-label-sm font-semibold text-error hover:bg-error/10 disabled:opacity-50"
+            >
+              Bỏ tin này
+            </button>
+            <button
+              type="button"
+              disabled={draftActionBusy}
+              onClick={() => onApproveDraft(message.id)}
+              className="rounded bg-primary px-2.5 py-1 text-label-sm font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50"
+            >
+              Duyệt & gửi
+            </button>
+          </div>
+        ) : null}
       </div>
       {outbound ? (
         <div
@@ -320,9 +350,12 @@ interface ChatPanelProps {
   readonly sending: boolean;
   readonly onToggleAi: (enabled: boolean) => void;
   readonly aiToggling: boolean;
+  readonly onApproveDraft: (messageId: string) => void;
+  readonly onRejectDraft: (messageId: string) => void;
+  readonly draftActionBusy: boolean;
 }
 
-function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSubmit, sending, onToggleAi, aiToggling }: ChatPanelProps) {
+function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSubmit, sending, onToggleAi, aiToggling, onApproveDraft, onRejectDraft, draftActionBusy }: ChatPanelProps) {
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const conversationId = conversation?.id ?? null;
   const messageCount = conversation?.messages.length ?? 0;
@@ -343,7 +376,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
 
   if (isLoading) {
     return (
-      <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-[720px]">
+      <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
         <div className="m-auto text-body-md text-on-surface-variant">Đang tải hội thoại...</div>
       </section>
     );
@@ -351,7 +384,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
 
   if (error) {
     return (
-      <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-[720px]">
+      <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
         <div className="m-auto max-w-md text-center">
           <span aria-hidden="true" className="material-symbols-outlined text-[40px] text-error">error</span>
           <p className="mt-3 text-body-md text-on-surface">{errorMessage(error)}</p>
@@ -362,7 +395,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
 
   if (!conversation) {
     return (
-      <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-[720px]">
+      <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
         <div className="m-auto max-w-md text-center">
           <span aria-hidden="true" className="material-symbols-outlined text-[44px] text-on-surface-variant">forum</span>
           <h2 className="mt-3 text-headline-sm">Chưa có hội thoại</h2>
@@ -375,7 +408,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
   }
 
   return (
-    <section className="flex h-full min-h-[480px] flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest xl:min-h-[720px]">
+    <section className="flex h-full min-h-[480px] flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
       {conversation.status === "escalated" ? (
         <div className="flex items-center justify-between bg-warning px-gutter py-2 text-label-lg font-semibold text-white">
           <span className="flex items-center gap-2">
@@ -447,6 +480,9 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
               message={message}
               contactAvatarUrl={conversation.contactAvatarUrl}
               contactDisplayName={conversation.contactDisplayName}
+              onApproveDraft={onApproveDraft}
+              onRejectDraft={onRejectDraft}
+              draftActionBusy={draftActionBusy}
             />
           ))
         )}
@@ -516,7 +552,7 @@ function ContextPanel({
   const avatarUrl = conversation?.contactAvatarUrl ?? null;
   const showAvatar = Boolean(avatarUrl && failedAvatarUrl !== avatarUrl);
   return (
-    <aside className="flex min-h-0 flex-col gap-gutter overflow-y-auto xl:min-h-[720px]">
+    <aside className="flex min-h-0 flex-col gap-gutter overflow-y-auto overflow-x-hidden xl:h-full">
       <Card>
         <h3 className="mb-4 text-label-caps uppercase text-secondary">Thông tin khách hàng</h3>
         <div className="text-center">
@@ -545,9 +581,9 @@ function ContextPanel({
             <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-tertiary">hub</span>
             <span>{conversation ? platformLabel(conversation.platform) : "Mọi kênh"}</span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-start gap-3">
             <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-tertiary">tag</span>
-            <span className="font-mono text-mono-status">{conversation?.externalThreadId ?? "Chưa có mã"}</span>
+            <span className="min-w-0 break-all font-mono text-mono-status">{conversation?.externalThreadId ?? "Chưa có mã"}</span>
           </div>
           <div className="flex items-center gap-3">
             <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-tertiary">schedule</span>
@@ -582,10 +618,16 @@ function ContextPanel({
 
 export default function ConversationsPage() {
   const queryClient = useQueryClient();
+  // Deep-link từ notification: /conversations/{id} preselect hội thoại đó.
+  const { conversationId: routeConversationId } = useParams<{ conversationId: string }>();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [inboxIdFilter, setInboxIdFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(routeConversationId ?? null);
+
+  useEffect(() => {
+    if (routeConversationId) setSelectedId(routeConversationId);
+  }, [routeConversationId]);
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<PageNotice | null>(null);
 
@@ -689,6 +731,24 @@ export default function ConversationsPage() {
     },
   });
 
+  // Review-gate P3: duyệt/từ chối AI draft đang hold (status pending_approval)
+  const approveDraftMutation = useMutation({
+    mutationFn: (messageId: string) => approveConversationDraft(activeConversationId ?? "", messageId),
+    onSuccess: () => {
+      showNotice("Đã duyệt — tin nhắn được gửi tới khách.", "success");
+      void invalidateActive();
+    },
+    onError: (error) => showNotice(errorMessage(error), "error"),
+  });
+  const rejectDraftMutation = useMutation({
+    mutationFn: (messageId: string) => rejectConversationDraft(activeConversationId ?? "", messageId),
+    onSuccess: () => {
+      showNotice("Đã bỏ bản nháp AI — tin không được gửi.", "info");
+      void invalidateActive();
+    },
+    onError: (error) => showNotice(errorMessage(error), "error"),
+  });
+
   const actionBusy = escalateMutation.isPending || resolveMutation.isPending;
   const actionError = sendMutation.error ?? escalateMutation.error ?? resolveMutation.error;
 
@@ -698,14 +758,17 @@ export default function ConversationsPage() {
   const mineCount = meId ? conversationItems.filter((item) => item.assignedTo === meId).length : 0;
 
   return (
-    <AppShell title="Hội thoại đa kênh">
+    <AppShell title="Hội thoại đa kênh" noPadding>
+      {/* Flex-fill khít viewport (không calc cứng): header shrink-0, khối 3 cột chiếm phần còn lại.
+          Dưới xl: cuộn cả trang như cũ; từ xl: khóa trong màn hình, từng cột tự cuộn. */}
+      <div className="flex h-full min-h-0 flex-col overflow-y-auto p-stack-lg xl:overflow-hidden">
       {notice ? (
         <div className="fixed right-4 top-20 z-[90] w-[min(360px,calc(100vw-32px))]">
           <Alert tone={notice.tone}>{notice.message}</Alert>
         </div>
       ) : null}
 
-      <div className="mb-gutter grid grid-cols-1 gap-gutter lg:grid-cols-4">
+      <div className="mb-gutter grid shrink-0 grid-cols-1 gap-gutter lg:grid-cols-4">
         <Card className="lg:col-span-3">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
@@ -741,13 +804,13 @@ export default function ConversationsPage() {
       </div>
 
       {actionError ? (
-        <div className="mb-gutter rounded-lg border border-error/30 bg-error/10 p-4 text-body-md text-error">
+        <div className="mb-gutter shrink-0 rounded-lg border border-error/30 bg-error/10 p-4 text-body-md text-error">
           {errorMessage(actionError)}
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-gutter xl:min-h-[720px] xl:grid-cols-[minmax(280px,1fr)_minmax(480px,2fr)_minmax(280px,1fr)]">
-        <aside className="flex min-h-[480px] flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest xl:min-h-[720px]">
+      <div className="grid grid-cols-1 gap-gutter xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(280px,1fr)_minmax(480px,2fr)_minmax(280px,1fr)]">
+        <aside className="flex min-h-[480px] flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest xl:h-full xl:min-h-0">
           <div className="shrink-0 border-b border-outline p-gutter">
             <h2 className="mb-stack-md text-headline-sm">Danh sách hội thoại</h2>
             <Input
@@ -829,6 +892,15 @@ export default function ConversationsPage() {
             if (!activeConversationId || aiToggleMutation.isPending) return;
             aiToggleMutation.mutate(enabled);
           }}
+          draftActionBusy={approveDraftMutation.isPending || rejectDraftMutation.isPending}
+          onApproveDraft={(messageId) => {
+            if (!activeConversationId || approveDraftMutation.isPending) return;
+            approveDraftMutation.mutate(messageId);
+          }}
+          onRejectDraft={(messageId) => {
+            if (!activeConversationId || rejectDraftMutation.isPending) return;
+            rejectDraftMutation.mutate(messageId);
+          }}
         />
 
         <ContextPanel
@@ -843,6 +915,7 @@ export default function ConversationsPage() {
           onUseSaleAssistDraft={(value) => setDraft(value)}
           onNotify={showNotice}
         />
+      </div>
       </div>
     </AppShell>
   );

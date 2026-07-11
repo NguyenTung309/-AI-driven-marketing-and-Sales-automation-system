@@ -38,6 +38,8 @@ public sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.Property(x => x.SupportName).HasMaxLength(256);
         builder.Property(x => x.WidgetGreeting).HasMaxLength(1024);
         builder.Property(x => x.RequireOrchestrationApproval).HasDefaultValue(false);
+        builder.Property(x => x.RequireContentReview).HasDefaultValue(false);
+        builder.Property(x => x.RequireChatReplyApproval).HasDefaultValue(false);
         builder.Property(x => x.MonthlyCostCapUsd).HasColumnType("decimal(12,2)");
         builder.HasIndex(x => x.Slug).IsUnique();
     }
@@ -144,6 +146,7 @@ public sealed class MessageConfiguration : IEntityTypeConfiguration<Message>
         builder.Property(x => x.SenderType).HasMaxLength(16).IsRequired();
         builder.Property(x => x.ContentType).HasMaxLength(32);
         builder.Property(x => x.AttachmentUrl).HasMaxLength(2048);
+        builder.Property(x => x.Status).HasMaxLength(32).IsRequired().HasDefaultValue("sent");
         builder.HasIndex(x => new { x.ConversationId, x.SentAt });
         builder.HasIndex(x => new { x.TenantId, x.SentAt });
     }
@@ -516,6 +519,7 @@ public sealed class ContentItemConfiguration : IEntityTypeConfiguration<ContentI
         builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
         builder.Property(x => x.Status).HasMaxLength(32).IsRequired();
         builder.Property(x => x.ApprovedByAgentId).HasColumnName("approved_by_agent_id");
+        builder.Property(x => x.RejectedReason).HasMaxLength(1024);
         builder.HasIndex(x => new { x.TenantId, x.Status, x.CreatedAt });
     }
 }

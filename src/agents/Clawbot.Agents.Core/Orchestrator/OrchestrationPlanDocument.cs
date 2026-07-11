@@ -72,6 +72,53 @@ internal sealed class TolerantStringDictionaryConverter : JsonConverter<IReadOnl
     }
 }
 
+// Planner LLMs sometimes emit task ids / dependsOn entries as numbers (1, 2) instead of strings ("t1").
+// The id is an opaque handle, so coerce scalars to their textual form instead of failing the parse.
+internal sealed class TolerantStringConverter : JsonConverter<string>
+{
+    public override string Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        reader.TokenType switch
+        {
+            JsonTokenType.String => reader.GetString() ?? string.Empty,
+            JsonTokenType.Number => reader.GetRawValue(),
+            JsonTokenType.True => "true",
+            JsonTokenType.False => "false",
+            JsonTokenType.Null => string.Empty,
+            _ => throw new JsonException("Expected a scalar value."),
+        };
+
+    public override void Write(Utf8JsonWriter writer, string value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value);
+}
+
+internal sealed class TolerantStringListConverter : JsonConverter<IReadOnlyList<string>>
+{
+    private static readonly TolerantStringConverter Scalar = new();
+
+    public override IReadOnlyList<string> Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var result = new List<string>();
+        if (reader.TokenType != JsonTokenType.StartArray)
+        {
+            // Scalar đơn lẻ thay vì mảng -> coi như mảng 1 phần tử.
+            result.Add(Scalar.Read(ref reader, typeof(string), options));
+            return result;
+        }
+
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+            result.Add(Scalar.Read(ref reader, typeof(string), options));
+        return result;
+    }
+
+    public override void Write(Utf8JsonWriter writer, IReadOnlyList<string> value, JsonSerializerOptions options)
+    {
+        writer.WriteStartArray();
+        foreach (var item in value)
+            writer.WriteStringValue(item);
+        writer.WriteEndArray();
+    }
+}
+
 internal static class Utf8JsonReaderExtensions
 {
     // Read a Number token's exact textual form without losing precision (e.g. 30, 1.5, 1e3).
@@ -80,11 +127,11 @@ internal static class Utf8JsonReaderExtensions
 }
 
 public sealed record OrchestrationPlanTask(
-    string Id,
+    [property: JsonConverter(typeof(TolerantStringConverter))] string Id,
     string Agent,
     string Description,
     [property: JsonConverter(typeof(TolerantStringDictionaryConverter))] IReadOnlyDictionary<string, string> Input,
-    IReadOnlyList<string> DependsOn,
+    [property: JsonConverter(typeof(TolerantStringListConverter))] IReadOnlyList<string> DependsOn,
     string Status,
     string? Output,
     string? Error,

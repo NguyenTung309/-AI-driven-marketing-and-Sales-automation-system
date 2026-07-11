@@ -137,10 +137,35 @@ public sealed class LlmConfigValidationTests
     [InlineData("openai", "gpt-4o", true)]
     [InlineData("openai", "llama-3-70b", true)]       // OpenAI-compatible custom names allowed
     [InlineData("openai", "claude-opus-4", false)]
+    [InlineData("openai-responses", "gpt-5.5", true)] // chuẩn OpenAI v2 (Responses API)
+    [InlineData("openai-responses", "claude-opus-4", false)]
     [InlineData("vllm-custom", "anything", true)]     // unknown provider unconstrained
     public void IsModelCompatibleWithProvider_blocks_cross_provider_models(string provider, string model, bool ok)
     {
         AgentsEndpoints.IsModelCompatibleWithProvider(provider, model).Should().Be(ok);
+    }
+
+    // "Tự động xây dựng kế hoạch" — parser phải chịu được fence/markdown/lời dẫn/top-level array.
+    [Fact]
+    public void ParseSuggestions_handles_plain_fenced_and_array_replies()
+    {
+        const string plain = """{"suggestions":[{"name":"Chăm lead nguội","goal":"Rà lead 7 ngày không tương tác","cadence":"weekly","reason":"lead ứ đọng"}]}""";
+        OrchestrationV2Endpoints.ParseSuggestions(plain).Should().ContainSingle()
+            .Which.Name.Should().Be("Chăm lead nguội");
+
+        const string fenced = "Đây là đề xuất:\n```json\n{\"suggestions\":[{\"name\":\"Báo cáo tuần\",\"goal\":\"Tổng hợp KPI tuần\",\"cadence\":\"weekly\",\"reason\":\"theo dõi\"}]}\n```\nHết.";
+        OrchestrationV2Endpoints.ParseSuggestions(fenced).Should().ContainSingle()
+            .Which.Name.Should().Be("Báo cáo tuần");
+
+        const string array = """[{"name":"Quét nội dung","goal":"Kiểm tra bài draft tồn","cadence":"daily","reason":"draft ùn"}]""";
+        OrchestrationV2Endpoints.ParseSuggestions(array).Should().ContainSingle()
+            .Which.Cadence.Should().Be("daily");
+
+        const string invalidCadence = """{"suggestions":[{"name":"X","goal":"Y","cadence":"hourly","reason":""}]}""";
+        OrchestrationV2Endpoints.ParseSuggestions(invalidCadence).Should().ContainSingle()
+            .Which.Cadence.Should().Be("weekly"); // cadence lạ rơi về weekly
+
+        OrchestrationV2Endpoints.ParseSuggestions("xin lỗi, tôi không thể").Should().BeEmpty();
     }
 
     [Fact]

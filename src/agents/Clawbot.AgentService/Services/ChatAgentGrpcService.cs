@@ -14,17 +14,24 @@ namespace Clawbot.AgentService.Services;
 
 public sealed partial class ChatAgentGrpcService(
     CoreChat.ChatAgent agent,
+    Clawbot.Agents.Core.Content.ContentReviewer reviewer,
     AppDbContext db,
     IClock clock,
     LeadAutoScorer leadScorer,
     ILogger<ChatAgentGrpcService> logger,
-    IChannelAdapter? channelAdapter = null) : ChatAgent.ChatAgentBase
+    IChannelAdapter? channelAdapter = null,
+    Clawbot.SharedKernel.Inbox.IChatApprovalPolicyResolver? approvalPolicy = null) : ChatAgent.ChatAgentBase
 {
+    // Review-gate P2: cap cho LLM critic trên hot-path chat (consumer tuần tự) — quá hạn coi như needs_human.
+    private static readonly TimeSpan ChatReviewTimeout = TimeSpan.FromSeconds(8);
+
     private readonly CoreChat.ChatAgent _agent = agent;
+    private readonly Clawbot.Agents.Core.Content.ContentReviewer _reviewer = reviewer;
     private readonly AppDbContext _db = db;
     private readonly IClock _clock = clock;
     private readonly LeadAutoScorer _leadScorer = leadScorer;
     private readonly IChannelAdapter? _channelAdapter = channelAdapter;
+    private readonly Clawbot.SharedKernel.Inbox.IChatApprovalPolicyResolver? _approvalPolicy = approvalPolicy;
     private readonly ILogger<ChatAgentGrpcService> _logger = logger;
 
     public override async Task Reply(ChatRequest request, IServerStreamWriter<ChatToken> responseStream, ServerCallContext context)
@@ -100,32 +107,81 @@ public sealed partial class ChatAgentGrpcService(
         {
             LogChatFailure(_logger, ex, tenantId, convId);
             session.AppendTrace("chat", "chat-agent", "error", ex.Message, _clock.UtcNow);
-            session.Finish(_clock.UtcNow);
-            await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
+            session.Fail(_clock.UtcNow);
+            // CancellationToken.None: request bị hủy (client timeout/LLM chậm) vẫn phải chốt session —
+            // save bằng token đã cancel sẽ throw ngay và để session kẹt "running" vĩnh viễn.
+            await _db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
             // Let the typed "no provider config bound" error escape so the interceptor maps it to
             // FailedPrecondition/llm_config_not_configured instead of a generic Internal failure.
             if (ex is CoreChat.LlmConfigNotConfiguredException) throw;
             throw new RpcException(new Status(StatusCode.Internal, "chat-agent failure"));
         }
 
-        var phase = reply.Blocked ? "blocked" : "completed";
+        // Echo guard: gateway/model lỗi đôi khi trả lại NGUYÊN tin khách làm reply (quan sát gpt-5.5
+        // qua gateway 2026-07) — reply trùng tin nhập vào thì chặn hẳn, không cho vào hàng duyệt.
+        if (!reply.Blocked && !string.IsNullOrWhiteSpace(reply.Text)
+            && string.Equals(NormalizeForEchoCheck(reply.Text), NormalizeForEchoCheck(request.UserText), StringComparison.OrdinalIgnoreCase))
+        {
+            reply = reply with { Blocked = true, BlockReason = "echo_reply" };
+        }
+
+        // Review-gate P3 manual-mode: tenant bật RequireChatReplyApproval → hold MỌI reply chờ người duyệt
+        // (khỏi tốn LLM critic — người là reviewer cuối). Tin sale gõ tay không đi qua đường này (QĐ5).
+        var requireApproval = !reply.Blocked
+            && _approvalPolicy is not null
+            && await _approvalPolicy.IsRequiredAsync(tenantId, context.CancellationToken).ConfigureAwait(false);
+
+        // Review-gate P2 (QĐ2 tiered): tầng 1 deterministic (ChatReplyReviewTrigger — Escalate + nội dung
+        // giá/cam kết) chạy 100%; tầng 2 LLM critic chỉ cho tin nghi ngờ. ContentReviewer fail-closed:
+        // LLM down/timeout/JSON hỏng => needs_human — không bao giờ fail-open thành gửi (QĐ3).
+        string? reviewVerdict = null;
+        string? reviewReason = null;
+        if (!reply.Blocked && !requireApproval && !string.IsNullOrWhiteSpace(reply.Text)
+            && CoreChat.ChatReplyReviewTrigger.NeedsLlmReview(reply))
+        {
+            using var reviewCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+            reviewCts.CancelAfter(ChatReviewTimeout);
+            var review = await _reviewer.ReviewAsync(
+                tenantId, conversation?.Platform ?? "chat", reply.Text, reviewCts.Token).ConfigureAwait(false);
+            reviewVerdict = review.Verdict;
+            reviewReason = review.Reason;
+        }
+
+        // Trạng thái row tin nhắn: sent (gửi được) | pending_approval (chờ người duyệt) | blocked (chặn hẳn).
+        var messageStatus = reply.Blocked
+            ? "blocked"
+            : requireApproval
+                ? "pending_approval"
+                : reviewVerdict == Clawbot.Agents.Core.Content.ContentReviewResult.RejectVerdict
+                    ? "blocked"
+                    : reviewVerdict == Clawbot.Agents.Core.Content.ContentReviewResult.NeedsHuman
+                        ? "pending_approval"
+                        : "sent";
+
+        var phase = reply.Blocked
+            ? "blocked"
+            : requireApproval
+                ? "held_for_approval"
+                : messageStatus == "blocked"
+                    ? "review_rejected"
+                    : messageStatus == "pending_approval" ? "held_for_review" : "completed";
         session.AppendTrace("chat", "chat-agent", phase,
-            $"intent={reply.Intent} blocked={reply.Blocked} latency={reply.LatencyMs}ms tokens={reply.InputTokens}/{reply.OutputTokens} usd={reply.UsdCost:0.0000} citations={reply.Citations.Count} lang={reply.Language} toxic_blocked={reply.ToxicityBlocked} spam={reply.SpamFlagged}{(reply.BlockReason is null ? "" : " block=" + reply.BlockReason)}",
+            $"intent={reply.Intent} blocked={reply.Blocked} latency={reply.LatencyMs}ms tokens={reply.InputTokens}/{reply.OutputTokens} usd={reply.UsdCost:0.0000} citations={reply.Citations.Count} lang={reply.Language} toxic_blocked={reply.ToxicityBlocked} spam={reply.SpamFlagged}{(reply.BlockReason is null ? "" : " block=" + reply.BlockReason)}{(reviewVerdict is null ? "" : $" review={reviewVerdict} reason={reviewReason}")}",
             _clock.UtcNow);
         session.Finish(_clock.UtcNow);
 
         Clawbot.Domain.Conversations.Message? persistedReply = null;
         if (convId.HasValue)
         {
-            persistedReply = conversation?.AppendMessage("out", "agent", reply.Text, "text", _clock.UtcNow);
+            persistedReply = conversation?.AppendMessage("out", "agent", reply.Text, "text", _clock.UtcNow, status: messageStatus);
         }
 
         await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
 
         // SPEC-16 P2-10: physically send the AI reply to the channel after persisting it. Best-effort — a channel
         // failure surfaces a trace but does not undo the persisted reply. Only send when not blocked (safety/toxicity
-        // gates) and the conversation has an external thread id to address.
-        if (!reply.Blocked && conversation is { ExternalThreadId.Length: > 0 } && _channelAdapter is not null)
+        // gates), the review gate let it through (status=sent), and the conversation has an external thread id.
+        if (!reply.Blocked && messageStatus == "sent" && conversation is { ExternalThreadId.Length: > 0 } && _channelAdapter is not null)
         {
             try
             {
@@ -202,6 +258,12 @@ public sealed partial class ChatAgentGrpcService(
         if (string.IsNullOrWhiteSpace(skills)) return custom;
         return string.IsNullOrWhiteSpace(custom) ? skills : $"{custom}\n\n{skills}";
     }
+
+    // So sánh echo: bỏ thẻ HTML + gom khoảng trắng — tin Pancake bọc <div> còn reply model là text trần.
+    private static string NormalizeForEchoCheck(string text) =>
+        System.Text.RegularExpressions.Regex.Replace(
+            System.Text.RegularExpressions.Regex.Replace(text, "<[^>]+>", " "),
+            @"\s+", " ").Trim();
 
     private static string? ExtractSystemPrompt(string? configJson)
     {

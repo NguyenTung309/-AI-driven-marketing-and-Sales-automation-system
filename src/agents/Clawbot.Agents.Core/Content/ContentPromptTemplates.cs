@@ -60,6 +60,8 @@ public static class ContentModule
         // ContentAgent now resolves its provider via the scoped IClaudeChatClient (D8) — the old
         // env-config OpenAI client (ContentLlmOptions) is gone. Chat wiring (AddClawbotChat) supplies it.
         services.AddScoped<ContentAgent>();
+        // Review-gate P1: LLM reviewer (reviewer-agent binding) cho content output.
+        services.AddScoped<ContentReviewer>();
         return services;
     }
 

@@ -16,11 +16,16 @@ import { useOrchestrationRealtime } from "./useOrchestrationRealtime";
 import { CreateSubAgentDialog } from "./CreateSubAgentDialog";
 import { useAuthStore } from "@/shared/auth/authStore";
 import {
+  createOrchestrationV2Schedule,
   getOrchestrationV2Run,
   listOrchestrationV2Agents,
   listOrchestrationV2Runs,
+  suggestOrchestrationPlans,
+  type OrchestrationPlanSuggestion,
+  type OrchestrationPlanSuggestionsResponse,
   type OrchestrationV2Agent,
 } from "@/shared/api/orchestrationV2";
+import { PlanSuggestionsDialog } from "./PlanSuggestionsDialog";
 import { listLlmConfigs, type LlmConfig } from "@/shared/api/llmConfigs";
 import { getTenantOrchestration, setTenantOrchestration } from "@/shared/api/admin";
 import {
@@ -418,6 +423,62 @@ export default function AgentDashboardPage() {
     onError: (error) =>
       setNotice({ tone: "error", message: `Đổi chế độ duyệt thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
   });
+  // Review-gate P3: 2 flag tenant — agent review bài đăng + duyệt tay AI reply.
+  const requireContentReview = approvalQuery.data?.requireContentReview ?? false;
+  const requireChatReplyApproval = approvalQuery.data?.requireChatReplyApproval ?? false;
+  const reviewFlagMutation = useMutation({
+    mutationFn: (flags: { requireContentReview?: boolean; requireChatReplyApproval?: boolean }) =>
+      setTenantOrchestration(requireApproval, monthlyCostCapUsd, flags),
+    onSuccess: async (res) => {
+      setNotice({
+        tone: "success",
+        message: `Đã cập nhật: agent review bài đăng ${res.requireContentReview ? "BẬT" : "tắt"}, duyệt tay AI reply ${res.requireChatReplyApproval ? "BẬT" : "tắt"}.`,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
+    },
+    onError: (error) =>
+      setNotice({ tone: "error", message: `Đổi chế độ review thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
+  });
+  // "Tự động xây dựng kế hoạch": orchestrator quét hệ thống -> dialog checklist -> tạo schedules đã chọn.
+  const [planSuggestions, setPlanSuggestions] = useState<OrchestrationPlanSuggestionsResponse | null>(null);
+  const suggestPlansMutation = useMutation({
+    mutationFn: suggestOrchestrationPlans,
+    onSuccess: (res) => {
+      if (res.items.length === 0) {
+        setNotice({
+          tone: "info",
+          message: res.skippedDuplicates > 0
+            ? `Không còn kế hoạch mới để đề xuất — ${res.skippedDuplicates} đề xuất trùng kế hoạch sẵn có.`
+            : "Orchestrator chưa tìm được kế hoạch phù hợp — thử lại sau khi hệ thống có thêm dữ liệu.",
+        });
+        return;
+      }
+      setPlanSuggestions(res);
+    },
+    onError: (error) =>
+      setNotice({ tone: "error", message: `Quét đề xuất kế hoạch thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
+  });
+  const applyPlansMutation = useMutation({
+    mutationFn: async (selected: readonly OrchestrationPlanSuggestion[]) => {
+      for (const plan of selected) {
+        await createOrchestrationV2Schedule({
+          name: plan.name,
+          goalTemplate: plan.goal,
+          cadence: plan.cadence,
+          timezoneId: "Asia/Ho_Chi_Minh",
+          requiresApproval: requireApproval,
+        });
+      }
+      return selected.length;
+    },
+    onSuccess: async (count) => {
+      setPlanSuggestions(null);
+      setNotice({ tone: "success", message: `Đã tạo ${count} kế hoạch định kỳ từ đề xuất của orchestrator.` });
+      await queryClient.invalidateQueries({ queryKey: ["orchestration", "schedules"] });
+    },
+    onError: (error) =>
+      setNotice({ tone: "error", message: `Tạo kế hoạch thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
+  });
   const [capDraft, setCapDraft] = useState<string>("");
   const capMutation = useMutation({
     mutationFn: (cap: number | null) => setTenantOrchestration(requireApproval, cap),
@@ -643,6 +704,18 @@ export default function AgentDashboardPage() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {agentsQuery.isError ? <StatusPill tone="error">Mất kết nối dữ liệu</StatusPill> : null}
+          <button
+            className="flex items-center gap-2 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-body-md font-semibold text-primary transition-colors hover:bg-primary/20 disabled:opacity-60"
+            disabled={suggestPlansMutation.isPending || applyPlansMutation.isPending}
+            onClick={() => suggestPlansMutation.mutate()}
+            title="Orchestrator quét dữ liệu hệ thống (lead, hội thoại, nội dung, kế hoạch sẵn có) và đề xuất các kế hoạch định kỳ mới chưa trùng."
+            type="button"
+          >
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">
+              {suggestPlansMutation.isPending ? "hourglass_top" : "checklist"}
+            </span>
+            {suggestPlansMutation.isPending ? "Đang quét hệ thống..." : "Tự động xây dựng kế hoạch"}
+          </button>
           {pendingApprovalCount > 0 ? (
             <RouterLink title="Mở hàng đợi phê duyệt" to="/agents/runs">
               <StatusPill tone="warning">{pendingApprovalCount} phiên chờ duyệt</StatusPill>
@@ -662,6 +735,34 @@ export default function AgentDashboardPage() {
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{requireApproval ? "approval" : "bolt"}</span>
             {requireApproval ? "Duyệt thủ công mọi phiên" : "Tự động hoàn toàn"}
           </button>
+          <button
+            aria-pressed={requireContentReview}
+            className={[
+              "flex items-center gap-2 rounded-lg border px-3 py-2 text-body-md font-semibold transition-colors disabled:opacity-60",
+              requireContentReview ? "border-warning bg-warning/10 text-warning" : "border-outline bg-surface-container-lowest text-secondary",
+            ].join(" ")}
+            disabled={reviewFlagMutation.isPending || approvalQuery.isLoading}
+            onClick={() => reviewFlagMutation.mutate({ requireContentReview: !requireContentReview })}
+            title="Bật: bài đăng chỉ được publish khi có chữ ký duyệt của agent review (kể cả bài người đã duyệt tay). Tắt: đăng theo luồng duyệt thường."
+            type="button"
+          >
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">fact_check</span>
+            {requireContentReview ? "Agent review bài đăng: BẬT" : "Agent review bài đăng: tắt"}
+          </button>
+          <button
+            aria-pressed={requireChatReplyApproval}
+            className={[
+              "flex items-center gap-2 rounded-lg border px-3 py-2 text-body-md font-semibold transition-colors disabled:opacity-60",
+              requireChatReplyApproval ? "border-warning bg-warning/10 text-warning" : "border-outline bg-surface-container-lowest text-secondary",
+            ].join(" ")}
+            disabled={reviewFlagMutation.isPending || approvalQuery.isLoading}
+            onClick={() => reviewFlagMutation.mutate({ requireChatReplyApproval: !requireChatReplyApproval })}
+            title="Bật: mọi tin AI trả lời khách bị giữ lại chờ người duyệt trong Hội thoại (không tự gửi). Tin sale gõ tay không bị ảnh hưởng. Tắt: AI gửi tự động qua gate review."
+            type="button"
+          >
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">how_to_reg</span>
+            {requireChatReplyApproval ? "Duyệt tay AI reply: BẬT" : "Duyệt tay AI reply: tắt"}
+          </button>
         </div>
       </div>
 
@@ -669,6 +770,16 @@ export default function AgentDashboardPage() {
         <div className="mb-gutter">
           <Alert tone={notice.tone}>{notice.message}</Alert>
         </div>
+      ) : null}
+
+      {planSuggestions ? (
+        <PlanSuggestionsDialog
+          suggestions={planSuggestions.items}
+          skippedDuplicates={planSuggestions.skippedDuplicates}
+          applying={applyPlansMutation.isPending}
+          onApply={(selected) => applyPlansMutation.mutate(selected)}
+          onClose={() => setPlanSuggestions(null)}
+        />
       ) : null}
 
       <div className="mb-gutter flex flex-wrap gap-2">

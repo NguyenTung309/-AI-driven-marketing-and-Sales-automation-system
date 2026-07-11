@@ -46,7 +46,9 @@ public sealed record MessageDto(
     DateTimeOffset SentAt,
     string? SenderDisplayName,
     string? SenderAvatarUrl = null,
-    string? AttachmentUrl = null);
+    string? AttachmentUrl = null,
+    // Review-gate P2: sent | pending_approval | blocked
+    string Status = "sent");
 
 public sealed record AssignConversationRequest(Guid UserId);
 

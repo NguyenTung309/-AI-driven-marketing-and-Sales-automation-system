@@ -13,7 +13,8 @@ public sealed partial class ContentPublishJob(
     ISocialPublisher publisher,
     IContentNotifier notifier,
     IClock clock,
-    ILogger<ContentPublishJob> logger)
+    ILogger<ContentPublishJob> logger,
+    IContentReviewPolicyResolver reviewPolicy)
 {
     private const int BatchSize = 50;
 
@@ -22,6 +23,7 @@ public sealed partial class ContentPublishJob(
     private readonly IContentNotifier _notifier = notifier;
     private readonly IClock _clock = clock;
     private readonly ILogger<ContentPublishJob> _logger = logger;
+    private readonly IContentReviewPolicyResolver _reviewPolicy = reviewPolicy;
 
     [DisableConcurrentExecution(timeoutInSeconds: 600)]
     public async Task RunAsync(CancellationToken ct = default)
@@ -43,10 +45,32 @@ public sealed partial class ContentPublishJob(
             .Where(item => contentItemIds.Contains(item.Id) && item.DeletedAt == null)
             .ToDictionaryAsync(item => item.Id, ct).ConfigureAwait(false);
 
+        var reviewRequiredByTenant = new Dictionary<Guid, bool>();
         foreach (var schedule in dueSchedules)
         {
             if (!itemsById.TryGetValue(schedule.ContentItemId, out var item) || item.TenantId != schedule.TenantId)
                 continue;
+
+            // Stale schedule: item was reverted/rejected after scheduling — never publish silently from a
+            // pending schedule whose item is no longer 'scheduled'.
+            if (!string.Equals(item.Status, "scheduled", StringComparison.OrdinalIgnoreCase))
+            {
+                LogStaleScheduleSkipped(_logger, schedule.TenantId, item.Id, schedule.Id, item.Status);
+                continue;
+            }
+
+            // Review-gate P1: when the tenant requires content review, hold (skip, schedule stays pending)
+            // any item without the reviewer-agent signoff. SLA notifications land in Phase 4.
+            if (!reviewRequiredByTenant.TryGetValue(schedule.TenantId, out var reviewRequired))
+            {
+                reviewRequired = await _reviewPolicy.IsRequiredAsync(schedule.TenantId, ct).ConfigureAwait(false);
+                reviewRequiredByTenant[schedule.TenantId] = reviewRequired;
+            }
+            if (reviewRequired && item.ApprovedByAgentId is null)
+            {
+                LogHeldForReview(_logger, schedule.TenantId, item.Id, schedule.Id);
+                continue;
+            }
 
             var request = new PublishRequest(
                 schedule.TenantId,
@@ -60,7 +84,7 @@ public sealed partial class ContentPublishJob(
             if (result.Success)
             {
                 schedule.MarkPosted(result.PostUrl ?? string.Empty, now);
-                item.MarkPublished(now);
+                item.MarkPublished(now, requireAgentReview: reviewRequired);
                 LogPublished(_logger, schedule.TenantId, item.Id, schedule.Id);
             }
             else
@@ -122,4 +146,16 @@ public sealed partial class ContentPublishJob(
         Guid scheduleId,
         int attempt,
         string reason);
+
+    [LoggerMessage(
+        EventId = 5106,
+        Level = LogLevel.Warning,
+        Message = "Held content item {ContentItemId} tenant {TenantId} schedule {ScheduleId}: tenant requires agent review and item lacks reviewer signoff")]
+    private static partial void LogHeldForReview(ILogger logger, Guid tenantId, Guid contentItemId, Guid scheduleId);
+
+    [LoggerMessage(
+        EventId = 5107,
+        Level = LogLevel.Warning,
+        Message = "Skipped stale schedule {ScheduleId} for content item {ContentItemId} tenant {TenantId}: item status is '{Status}', not 'scheduled'")]
+    private static partial void LogStaleScheduleSkipped(ILogger logger, Guid tenantId, Guid contentItemId, Guid scheduleId, string status);
 }

@@ -1,3 +1,4 @@
+using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Domain.Leads;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
@@ -5,14 +6,19 @@ using Clawbot.SharedKernel.Time;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Clawbot.Infrastructure.Jobs;
 
+// Review-gate P5: template drip là text tĩnh duyệt-1-lần (QĐ6), NHƯNG {lead_name} interpolate từ tên
+// contact (dữ liệu khách tự đặt) — nên bản đã render phải qua toxicity trước khi rời hệ thống.
 public sealed partial class DripSequenceJob(
     AppDbContext db,
     IChannelAdapter adapter,
     IClock clock,
-    ILogger<DripSequenceJob> logger)
+    ILogger<DripSequenceJob> logger,
+    IToxicityFilter? toxicity = null,
+    IOptions<ToxicityOptions>? toxicityOptions = null)
 {
     [DisableConcurrentExecution(timeoutInSeconds: 300)]
     public async Task RunAsync(CancellationToken ct = default)
@@ -80,9 +86,27 @@ public sealed partial class DripSequenceJob(
                     continue;
                 }
 
+                // Review-gate P3: sale đang cầm hội thoại (handover/manual) → drip đứng yên, KHÔNG cancel —
+                // enrollment giữ nguyên và tự thử lại lần chạy sau; AI bật lại thì sequence tiếp tục.
+                if (!conversation.AiAutoReplyEnabled)
+                {
+                    LogHeldManualMode(logger, enrollment.Id, conversation.Id);
+                    continue;
+                }
+
                 // Build personalized message
                 var body = step.TemplateBody
                     .Replace("{lead_name}", contact?.DisplayName ?? "bạn", StringComparison.Ordinal);
+
+                // P5: bản render (template + tên khách) toxic → hủy enrollment (lỗi cấu hình template
+                // hoặc tên contact bẩn — retry vô ích), log error cho người sửa. Fail-closed.
+                if (toxicity is not null
+                    && await toxicity.IsBlockedAsync(body, toxicityOptions?.Value.OutboundBlockThreshold ?? 0.8f, ct).ConfigureAwait(false))
+                {
+                    LogToxicBlocked(logger, enrollment.Id, conversation.Id);
+                    enrollment.Cancel();
+                    continue;
+                }
 
                 // Send via channel adapter
                 LogSending(logger, enrollment.Id, step.Channel, currentStepIdx);
@@ -136,4 +160,12 @@ public sealed partial class DripSequenceJob(
     [LoggerMessage(EventId = 11005, Level = LogLevel.Error,
         Message = "DripSequence error for enrollment {Id}")]
     private static partial void LogError(ILogger logger, Exception ex, Guid id);
+
+    [LoggerMessage(EventId = 11006, Level = LogLevel.Information,
+        Message = "DripSequence held enrollment {Id}: conversation {ConversationId} is in manual mode (AiAutoReplyEnabled=false)")]
+    private static partial void LogHeldManualMode(ILogger logger, Guid id, Guid conversationId);
+
+    [LoggerMessage(EventId = 11007, Level = LogLevel.Error,
+        Message = "DripSequence blocked toxic rendered message for enrollment {Id} conversation {ConversationId} — enrollment cancelled, fix the template/contact name")]
+    private static partial void LogToxicBlocked(ILogger logger, Guid id, Guid conversationId);
 }

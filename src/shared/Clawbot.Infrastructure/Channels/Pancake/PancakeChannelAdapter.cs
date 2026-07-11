@@ -13,7 +13,7 @@ public sealed class PancakeChannelAdapter(
     HttpClient http,
     IPancakeConfigResolver resolver,
     ITenantAccessor tenants,
-    IPancakePageTokenResolver? pageTokenResolver = null) : IChannelAdapter
+    IPancakePageTokenResolver? pageTokenResolver = null) : IChannelAdapter, ICommentChannelAdapter
 {
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
@@ -70,7 +70,11 @@ public sealed class PancakeChannelAdapter(
         try { payload = JsonSerializer.Deserialize<PancakeWebhookPayload>(rawBody, JsonOpts); }
         catch (JsonException) { payload = null; }
         if (payload?.Events is null || payload.Events.Count == 0)
-            return Task.FromResult<IReadOnlyList<ChannelMessage>>(Array.Empty<ChannelMessage>());
+            // Format webhook THẬT của Pancake (developer.pancake.biz/webhook):
+            // {page_id, event_type: "messaging", data: {conversation, message, post}} — khác hẳn
+            // format events[] phía trên (giữ lại cho tích hợp cũ/test). Không parse được nhánh này
+            // thì CommentAutoReplyJob không bao giờ chạy qua webhook.
+            return Task.FromResult<IReadOnlyList<ChannelMessage>>(ParseMessagingWebhook(rawBody));
 
         var list = new List<ChannelMessage>(payload.Events.Count);
         foreach (var evt in payload.Events)
@@ -108,7 +112,30 @@ public sealed class PancakeChannelAdapter(
     public Task<string?> SendAsync(string externalThreadId, string text, CancellationToken ct = default) =>
         SendAsync(externalThreadId, text, accessToken: null, ct);
 
-    public async Task<string?> SendAsync(string externalThreadId, string text, string? accessToken, CancellationToken ct = default)
+    public Task<string?> SendAsync(string externalThreadId, string text, string? accessToken, CancellationToken ct = default) =>
+        SendPayloadAsync(externalThreadId, accessToken,
+            senderId => new SendBody("reply_inbox", text, senderId), ct);
+
+    // Comment auto-reply: rep công khai dưới comment (spec: action reply_comment + message_id).
+    public Task<string?> SendCommentReplyAsync(string externalThreadId, string commentMessageId, string text, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(commentMessageId))
+            throw new ArgumentException("comment message id required", nameof(commentMessageId));
+        return SendPayloadAsync(externalThreadId, accessToken: null,
+            senderId => new SendBody("reply_comment", text, senderId, MessageId: commentMessageId), ct);
+    }
+
+    // Private reply từ comment (spec: action private_replies + post_id + message_id + from_id; FB/IG only).
+    public Task<string?> SendPrivateReplyAsync(string externalThreadId, string postId, string commentMessageId, string fromId, string text, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(postId)) throw new ArgumentException("post id required", nameof(postId));
+        if (string.IsNullOrEmpty(commentMessageId)) throw new ArgumentException("comment message id required", nameof(commentMessageId));
+        if (string.IsNullOrEmpty(fromId)) throw new ArgumentException("from id required", nameof(fromId));
+        return SendPayloadAsync(externalThreadId, accessToken: null,
+            senderId => new SendBody("private_replies", text, senderId, MessageId: commentMessageId, PostId: postId, FromId: fromId), ct);
+    }
+
+    private async Task<string?> SendPayloadAsync(string externalThreadId, string? accessToken, Func<string?, SendBody> payloadFactory, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(externalThreadId))
             throw new ArgumentException("thread id required", nameof(externalThreadId));
@@ -161,7 +188,7 @@ public sealed class PancakeChannelAdapter(
             url += (url.Contains('?', StringComparison.Ordinal) ? "&" : "?") +
                    "page_access_token=" + Uri.EscapeDataString(outboundToken);
 
-        var payload = new SendBody("reply_inbox", text, senderId);
+        var payload = payloadFactory(senderId);
         using var req = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = JsonContent.Create(payload, options: JsonOpts),
@@ -191,6 +218,64 @@ public sealed class PancakeChannelAdapter(
             // In demo mode, ignore outbound connection/token failures so messages can still be saved locally for manual/agent review
             return null;
         }
+    }
+
+    private static ChannelMessage[] ParseMessagingWebhook(string rawBody)
+    {
+        PancakeMessagingWebhook? hook;
+        try { hook = JsonSerializer.Deserialize<PancakeMessagingWebhook>(rawBody, JsonOpts); }
+        catch (JsonException) { return Array.Empty<ChannelMessage>(); }
+
+        if (hook is null
+            || !string.Equals(hook.EventType, "messaging", StringComparison.OrdinalIgnoreCase)
+            || hook.Data?.Message is not { } m)
+            return Array.Empty<ChannelMessage>();
+
+        var conv = hook.Data.Conversation;
+        var pageId = hook.PageId ?? m.PageId ?? string.Empty;
+        var convId = conv?.Id ?? m.ConversationId ?? string.Empty;
+        var text = !string.IsNullOrWhiteSpace(m.Message) ? m.Message : m.OriginalMessage;
+        if (string.IsNullOrEmpty(convId) || string.IsNullOrWhiteSpace(text))
+            return Array.Empty<ChannelMessage>();
+
+        var senderId = m.From?.Id ?? string.Empty;
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["event_type"] = "messaging",
+        };
+        if (!string.IsNullOrEmpty(m.Id)) meta["external_message_id"] = m.Id;
+        if (!string.IsNullOrEmpty(pageId)) meta["page_id"] = pageId;
+        if (!string.IsNullOrEmpty(senderId)) meta["sender_id"] = senderId;
+        if (!string.IsNullOrEmpty(m.From?.Name)) meta["sender_name"] = m.From.Name;
+        // Page tự rep (echo) — cùng cờ is_owner như poller để ingestor set direction=out + khỏi auto-reply.
+        if (!string.IsNullOrEmpty(senderId) && string.Equals(senderId, pageId, StringComparison.Ordinal))
+            meta["is_owner"] = "true";
+
+        var isComment = string.Equals(m.Type, "COMMENT", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(conv?.Type, "COMMENT", StringComparison.OrdinalIgnoreCase);
+        var postId = hook.Data.Post?.Id ?? conv?.PostId;
+
+        return
+        [
+            new ChannelMessage(
+                Channel: PlatformFromPageId(pageId),
+                ExternalThreadId: string.IsNullOrEmpty(pageId) ? convId : $"{pageId}:{convId}",
+                ExternalUserId: senderId,
+                Text: text!,
+                SentAt: m.InsertedAt.HasValue ? new DateTimeOffset(m.InsertedAt.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow,
+                Metadata: meta,
+                MessageType: isComment ? "comment" : "text",
+                ParentPostId: isComment ? postId : null),
+        ];
+    }
+
+    // Pancake prefix page id theo nền tảng (pzl_ zalo cá nhân, tt_ tiktok, ig_ instagram); FB page id thuần số.
+    private static string PlatformFromPageId(string pageId)
+    {
+        if (pageId.StartsWith("pzl_", StringComparison.OrdinalIgnoreCase)) return "zalo";
+        if (pageId.StartsWith("tt_", StringComparison.OrdinalIgnoreCase)) return "tiktok";
+        if (pageId.StartsWith("ig_", StringComparison.OrdinalIgnoreCase)) return "instagram";
+        return "facebook";
     }
 
     private async Task<PancakeRuntimeConfig?> CurrentConfigAsync(CancellationToken ct)
@@ -224,7 +309,10 @@ public sealed class PancakeChannelAdapter(
     private sealed record SendBody(
         [property: JsonPropertyName("action")] string Action,
         [property: JsonPropertyName("message")] string Message,
-        [property: JsonPropertyName("sender_id")] string? SenderId = null);
+        [property: JsonPropertyName("sender_id")] string? SenderId = null,
+        [property: JsonPropertyName("message_id")] string? MessageId = null,
+        [property: JsonPropertyName("post_id")] string? PostId = null,
+        [property: JsonPropertyName("from_id")] string? FromId = null);
     private sealed record SendResponse(
         [property: JsonPropertyName("success")] bool Success,
         [property: JsonPropertyName("id")] string? Id,
@@ -244,5 +332,38 @@ public sealed class PancakeChannelAdapter(
         [property: JsonPropertyName("post_id")] string? PostId,
         [property: JsonPropertyName("sent_at")] DateTimeOffset? SentAt,
         [property: JsonPropertyName("avatar_url")] string? AvatarUrl);
+
+    // Format webhook chính thức của Pancake (event_type=messaging).
+    private sealed record PancakeMessagingWebhook(
+        [property: JsonPropertyName("page_id")] string? PageId,
+        [property: JsonPropertyName("event_type")] string? EventType,
+        [property: JsonPropertyName("data")] PancakeMessagingData? Data);
+
+    private sealed record PancakeMessagingData(
+        [property: JsonPropertyName("conversation")] PancakeWebhookConversation? Conversation,
+        [property: JsonPropertyName("message")] PancakeWebhookMessage? Message,
+        [property: JsonPropertyName("post")] PancakeWebhookPost? Post);
+
+    private sealed record PancakeWebhookConversation(
+        [property: JsonPropertyName("id")] string? Id,
+        [property: JsonPropertyName("type")] string? Type,
+        [property: JsonPropertyName("post_id")] string? PostId);
+
+    private sealed record PancakeWebhookMessage(
+        [property: JsonPropertyName("id")] string? Id,
+        [property: JsonPropertyName("conversation_id")] string? ConversationId,
+        [property: JsonPropertyName("page_id")] string? PageId,
+        [property: JsonPropertyName("message")] string? Message,
+        [property: JsonPropertyName("original_message")] string? OriginalMessage,
+        [property: JsonPropertyName("type")] string? Type,
+        [property: JsonPropertyName("inserted_at")] DateTime? InsertedAt,
+        [property: JsonPropertyName("from")] PancakeWebhookParty? From);
+
+    private sealed record PancakeWebhookParty(
+        [property: JsonPropertyName("id")] string? Id,
+        [property: JsonPropertyName("name")] string? Name);
+
+    private sealed record PancakeWebhookPost(
+        [property: JsonPropertyName("id")] string? Id);
 }
 

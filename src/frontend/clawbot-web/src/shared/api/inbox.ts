@@ -69,6 +69,8 @@ export interface InboxMessage {
   readonly senderDisplayName: string | null;
   readonly senderAvatarUrl: string | null;
   readonly attachmentUrl: string | null;
+  // Review-gate P2: sent | pending_approval (AI reply chờ duyệt) | blocked (bị chặn, không gửi)
+  readonly status?: string;
 }
 
 export interface ConversationDetail {
@@ -162,6 +164,22 @@ export async function sendConversationMessage(id: string, content: string): Prom
     content,
     contentType: "text",
   });
+  return res.data;
+}
+
+// Review-gate P3: duyệt AI draft đang hold — gửi thật qua kênh + chuyển status sent.
+export async function approveConversationDraft(conversationId: string, messageId: string): Promise<InboxMessage> {
+  const res = await apiClient.post<InboxMessage>(
+    `/api/inbox/conversations/${conversationId}/drafts/${messageId}/approve`,
+  );
+  return res.data;
+}
+
+// Từ chối draft — chuyển status blocked, không bao giờ gửi.
+export async function rejectConversationDraft(conversationId: string, messageId: string): Promise<InboxMessage> {
+  const res = await apiClient.post<InboxMessage>(
+    `/api/inbox/conversations/${conversationId}/drafts/${messageId}/reject`,
+  );
   return res.data;
 }
 

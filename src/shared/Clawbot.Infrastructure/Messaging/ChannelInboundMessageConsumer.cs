@@ -46,6 +46,10 @@ public sealed partial class ChannelInboundMessageConsumer(
     // the ingest would dedup, and the reply would never be retried anyway).
     private async Task TryAutoReplyAsync(ChannelInboundMessageReceived msg, Guid conversationId, CancellationToken ct)
     {
+        // Comment thread: chat auto-reply gửi reply_inbox là SAI ngữ nghĩa (phải reply_comment/private_replies)
+        // — CommentAutoReplyJob (scan định kỳ) lo loại này.
+        if (string.Equals(msg.Message.MessageType, "comment", StringComparison.OrdinalIgnoreCase))
+            return;
         // Only reply to customer messages, never to owner/AI echo
         if (msg.Message.Metadata.TryGetValue("is_owner", out var owner) && string.Equals(owner, "true", StringComparison.OrdinalIgnoreCase))
             return;
@@ -80,7 +84,10 @@ public sealed partial class ChannelInboundMessageConsumer(
                 .Select(m => m.Content)
                 .ToListAsync(ct).ConfigureAwait(false);
 
-            await _chatAgent.ReplyAsync(msg.TenantId, conversationId, msg.Message.Text, history, ct).ConfigureAwait(false);
+            // Strip HTML trước khi đưa vào ChatAgent: tin Pancake bọc <div>/<br> — đẩy raw vào LLM
+            // vừa bẩn prompt vừa từng khiến model echo nguyên tin khách (kèm thẻ div) làm reply.
+            var userText = ChannelMessageIngestor.StripHtml(msg.Message.Text);
+            await _chatAgent.ReplyAsync(msg.TenantId, conversationId, userText, history, ct).ConfigureAwait(false);
 
             await _notifier.NotifyConversationUpdatedAsync(msg.TenantId,
                 new InboxConversationEvent(conversationId, conv.Status, conv.AssignedTo, conv.LastMessageAt), ct).ConfigureAwait(false);

@@ -104,6 +104,54 @@ public sealed class ChannelInboundMessageConsumerTests
     }
 
     [Fact]
+    public async Task Consume_SkipsChatAutoReply_ForCommentMessage()
+    {
+        // Comment thread: chat auto-reply (reply_inbox) sai ngữ nghĩa — CommentAutoReplyJob scan lo.
+        using var fx = new TestAppDb();
+        var conv = Conversation.Open(fx.TenantId, "facebook", "page1:conv1", Now);
+        fx.Db.Conversations.Add(conv);
+        await fx.Db.SaveChangesAsync();
+
+        var ingestor = Substitute.For<IChannelMessageIngestor>();
+        ingestor.IngestAsync(Arg.Any<Guid>(), Arg.Any<ChannelMessage>(), Arg.Any<CancellationToken>())
+            .Returns(new IngestResult(conv.Id, Guid.NewGuid(), false));
+        var gateway = Substitute.For<IChatAutoReplyGateway>();
+
+        var commentMsg = new ChannelMessage("facebook", "page1:conv1", "user1", "gia bao nhieu?", Now,
+            new Dictionary<string, string> { ["external_message_id"] = "cmt1" },
+            MessageType: "comment", ParentPostId: "post-1");
+        var sut = new ChannelInboundMessageConsumer(ingestor, fx.Db, Substitute.For<IInboxNotifier>(), gateway,
+            NullLogger<ChannelInboundMessageConsumer>.Instance);
+        await sut.Consume(Context(fx.TenantId, commentMsg));
+
+        await gateway.DidNotReceive().ReplyAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<string>(),
+            Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Consume_SkipsAutoReply_WhenIngestDeduplicated()
+    {
+        // Idempotency (review-gate P2): MassTransit redelivery của cùng inbound → ingest dedup
+        // → tuyệt đối không sinh reply/draft lần hai.
+        using var fx = new TestAppDb();
+        var conv = Conversation.Open(fx.TenantId, "zalo", "page1:conv1", Now);
+        fx.Db.Conversations.Add(conv);
+        await fx.Db.SaveChangesAsync();
+
+        var ingestor = Substitute.For<IChannelMessageIngestor>();
+        ingestor.IngestAsync(Arg.Any<Guid>(), Arg.Any<ChannelMessage>(), Arg.Any<CancellationToken>())
+            .Returns(new IngestResult(conv.Id, null, Deduplicated: true));
+        var gateway = Substitute.For<IChatAutoReplyGateway>();
+
+        var sut = new ChannelInboundMessageConsumer(ingestor, fx.Db, Substitute.For<IInboxNotifier>(), gateway,
+            NullLogger<ChannelInboundMessageConsumer>.Instance);
+        await sut.Consume(Context(fx.TenantId, Msg()));
+
+        await gateway.DidNotReceive().ReplyAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<string>(),
+            Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Consume_SkipsAutoReply_ForOwnerEcho()
     {
         using var fx = new TestAppDb();

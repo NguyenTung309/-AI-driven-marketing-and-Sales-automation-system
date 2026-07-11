@@ -84,6 +84,36 @@ public sealed class PancakeAdapterSendTests : IDisposable
     }
 
     [Fact]
+    public async Task SendCommentReplyAsync_UsesReplyCommentAction_WithCommentId()
+    {
+        var handler = new PancakeSendTestHandler("test_page_token", responseBody: """{"success":true,"id":"cmt-reply-9"}""");
+        using var http = new HttpClient(handler);
+        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants);
+
+        var id = await adapter.SendCommentReplyAsync("conv_abc_456", "cmt-1", "Cam on ban", CancellationToken.None);
+
+        Assert.Equal("cmt-reply-9", id);
+        Assert.Contains("\"action\":\"reply_comment\"", handler.LastRequestBody);
+        Assert.Contains("\"message_id\":\"cmt-1\"", handler.LastRequestBody);
+    }
+
+    [Fact]
+    public async Task SendPrivateReplyAsync_UsesPrivateRepliesAction_WithPostAndFromIds()
+    {
+        var handler = new PancakeSendTestHandler("test_page_token", responseBody: """{"success":true,"id":"pm-9"}""");
+        using var http = new HttpClient(handler);
+        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants);
+
+        var id = await adapter.SendPrivateReplyAsync("conv_abc_456", "post-7", "cmt-1", "fb-user-77", "Chao ban", CancellationToken.None);
+
+        Assert.Equal("pm-9", id);
+        Assert.Contains("\"action\":\"private_replies\"", handler.LastRequestBody);
+        Assert.Contains("\"post_id\":\"post-7\"", handler.LastRequestBody);
+        Assert.Contains("\"message_id\":\"cmt-1\"", handler.LastRequestBody);
+        Assert.Contains("\"from_id\":\"fb-user-77\"", handler.LastRequestBody);
+    }
+
+    [Fact]
     public async Task SendAsync_ReturnsMessageId_FromSendResponse()
     {
         using var http = new HttpClient(new PancakeSendTestHandler("test_page_token",
@@ -110,15 +140,18 @@ public sealed class PancakeAdapterSendTests : IDisposable
 
 public sealed class PancakeSendTestHandler(string expectedToken, string expectedPage = "pzl_test_page_123", string expectedThread = "conv_abc_456", string? responseBody = null) : HttpClientHandler
 {
-    protected override Task<HttpResponseMessage> SendAsync(
+    public string? LastRequestBody { get; private set; }
+
+    protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken)
     {
         Assert.Contains(expectedPage, request.RequestUri!.ToString());
         Assert.Contains(expectedThread, request.RequestUri!.ToString());
         Assert.Contains("page_access_token=" + expectedToken, request.RequestUri!.ToString());
+        LastRequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
         var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK);
         if (responseBody is not null)
             response.Content = new StringContent(responseBody, System.Text.Encoding.UTF8, "application/json");
-        return Task.FromResult(response);
+        return response;
     }
 }

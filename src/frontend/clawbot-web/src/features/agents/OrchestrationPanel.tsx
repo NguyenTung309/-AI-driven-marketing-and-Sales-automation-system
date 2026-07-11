@@ -216,9 +216,9 @@ export function OrchestrationPanel({ live = false }: { readonly live?: boolean }
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1 text-label-sm text-on-surface-variant" title={live ? "Cập nhật đẩy qua SignalR" : "Hub realtime chưa kết nối — tự làm mới định kỳ"}>
+          <span className="flex items-center gap-1 text-label-sm text-on-surface-variant" title={live ? "Cập nhật đẩy qua SignalR" : "Hub cập nhật tức thì chưa kết nối — tự làm mới định kỳ"}>
             <span aria-hidden="true" className={`size-2 rounded-full ${live ? "bg-success" : "bg-on-surface-variant/40"}`} />
-            {live ? "Realtime" : "Dự phòng"}
+            {live ? null : "Dự phòng"}
           </span>
           {session && traceItems.some((trace) => trace.phase === "dry_run") && (
             <StatusPill tone="warning">Bản chạy thử</StatusPill>

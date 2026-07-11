@@ -142,6 +142,8 @@ builder.Services.AddScoped<DocumentDeliveryService>();
 builder.Services.AddScoped<DocumentOpenReceiptService>();
 builder.Services.AddScoped<ExperimentService>();
 builder.Services.AddScoped<TenantBrandingService>();
+// Review-gate P1: tenant RequireContentReview flag — dùng bởi content endpoints + ContentPublishJob (Hangfire host này)
+builder.Services.AddScoped<Clawbot.SharedKernel.Content.IContentReviewPolicyResolver, Clawbot.Infrastructure.Agents.EfContentReviewPolicyResolver>();
 
 var agentServiceUrl = builder.Configuration["AgentService:Url"] ?? "http://localhost:15875";
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.SaleAssist.SaleAssistAgent.SaleAssistAgentClient>(o =>

@@ -41,15 +41,15 @@ export default function AgentRunsPage() {
   const canApprove = permissions.includes("orchestration:approve");
   const canManage = permissions.includes("orchestration:manage");
   const [filter, setFilter] = useState<RunFilter>("all");
-  // C3: chọn đúng 2 phiên để so sánh cạnh nhau.
-  const [compareSelection, setCompareSelection] = useState<readonly string[]>([]);
+  // Selection đa dụng: tick nhiều phiên để ẩn hàng loạt; "So sánh" yêu cầu đúng 2 phiên được tick.
+  const [selection, setSelection] = useState<readonly string[]>([]);
   const [compareIds, setCompareIds] = useState<readonly [string, string] | null>(null);
 
-  function toggleCompare(sessionId: string) {
-    setCompareSelection((current) =>
+  function toggleSelect(sessionId: string) {
+    setSelection((current) =>
       current.includes(sessionId)
         ? current.filter((id) => id !== sessionId)
-        : [...current, sessionId].slice(-2),
+        : [...current, sessionId],
     );
   }
 
@@ -63,9 +63,20 @@ export default function AgentRunsPage() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["orchestration", "runs"] });
   const archiveMutation = useMutation({ mutationFn: archiveOrchestrationV2Run, onSuccess: invalidate });
   const unarchiveMutation = useMutation({ mutationFn: unarchiveOrchestrationV2Run, onSuccess: invalidate });
+  // Ẩn hàng loạt các phiên đã tick (chỉ phiên đã kết thúc — completed/failed/cancelled).
+  const bulkArchiveMutation = useMutation({
+    mutationFn: async (ids: readonly string[]) => {
+      for (const id of ids) await archiveOrchestrationV2Run(id);
+      return ids.length;
+    },
+    onSuccess: () => {
+      setSelection([]);
+      invalidate();
+    },
+  });
 
-  const busy = controls.busy || archiveMutation.isPending || unarchiveMutation.isPending;
-  const error = runsQuery.error ?? controls.error ?? archiveMutation.error ?? unarchiveMutation.error;
+  const busy = controls.busy || archiveMutation.isPending || unarchiveMutation.isPending || bulkArchiveMutation.isPending;
+  const error = runsQuery.error ?? controls.error ?? archiveMutation.error ?? unarchiveMutation.error ?? bulkArchiveMutation.error;
 
   const allRuns = runsQuery.data ?? [];
   // Run chờ duyệt ghim lên đầu ở mọi filter (trừ khi đang xem "Đã ẩn").
@@ -76,6 +87,16 @@ export default function AgentRunsPage() {
       return pendingDelta !== 0 ? pendingDelta : b.startedAt.localeCompare(a.startedAt);
     });
   const pendingCount = allRuns.filter((run) => run.status === "pending_approval").length;
+  const isArchivable = (run: OrchestrationV2RunSummary) =>
+    run.status === "completed" || run.status === "failed" || run.status === "cancelled";
+  const archivableSelectedIds = runs
+    .filter((run) => selection.includes(run.sessionId) && isArchivable(run))
+    .map((run) => run.sessionId);
+  const allDisplayedSelected = runs.length > 0 && runs.every((run) => selection.includes(run.sessionId));
+
+  function toggleSelectAll() {
+    setSelection(allDisplayedSelected ? [] : runs.map((run) => run.sessionId));
+  }
 
   return (
     <AppShell title="Phiên điều phối">
@@ -106,14 +127,30 @@ export default function AgentRunsPage() {
             </button>
           ))}
           <Button
-            disabled={compareSelection.length !== 2}
-            onClick={() => setCompareIds([compareSelection[0], compareSelection[1]])}
+            disabled={selection.length !== 2}
+            onClick={() => setCompareIds([selection[0], selection[1]])}
             size="sm"
-            title="Tick 2 phiên trong bảng để so sánh"
+            title="Tick đúng 2 phiên trong bảng để so sánh"
             variant="outline"
           >
-            So sánh ({compareSelection.length}/2)
+            So sánh ({Math.min(selection.length, 2)}/2)
           </Button>
+          {filter !== "archived" ? (
+            <Button
+              disabled={!canManage || busy || archivableSelectedIds.length === 0}
+              onClick={() => {
+                if (window.confirm(`Ẩn ${archivableSelectedIds.length} phiên đã chọn?`))
+                  bulkArchiveMutation.mutate(archivableSelectedIds);
+              }}
+              size="sm"
+              title={!canManage
+                ? "Cần quyền orchestration:manage"
+                : "Chỉ ẩn được phiên đã kết thúc (Hoàn tất / Thất bại / Đã hủy) trong số đã tick"}
+              variant="ghost"
+            >
+              {bulkArchiveMutation.isPending ? "Đang ẩn..." : `Ẩn đã chọn (${archivableSelectedIds.length})`}
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -128,7 +165,15 @@ export default function AgentRunsPage() {
           <table className="w-full text-left text-body-md">
             <thead>
               <tr className="text-label-sm text-on-surface-variant">
-                <th className="w-8 px-3 py-2" title="Chọn để so sánh" />
+                <th className="w-8 px-3 py-2">
+                  <input
+                    aria-label="Chọn tất cả phiên đang hiển thị"
+                    checked={allDisplayedSelected}
+                    onChange={toggleSelectAll}
+                    title="Chọn tất cả"
+                    type="checkbox"
+                  />
+                </th>
                 <th className="px-3 py-2">Trạng thái</th>
                 <th className="px-3 py-2">Mục tiêu</th>
                 <th className="px-3 py-2">Bắt đầu</th>
@@ -141,9 +186,9 @@ export default function AgentRunsPage() {
                 <tr className="border-t border-outline hover:bg-surface-container-low" key={run.sessionId}>
                   <td className="px-3 py-3">
                     <input
-                      aria-label="Chọn phiên để so sánh"
-                      checked={compareSelection.includes(run.sessionId)}
-                      onChange={() => toggleCompare(run.sessionId)}
+                      aria-label="Chọn phiên"
+                      checked={selection.includes(run.sessionId)}
+                      onChange={() => toggleSelect(run.sessionId)}
                       type="checkbox"
                     />
                   </td>

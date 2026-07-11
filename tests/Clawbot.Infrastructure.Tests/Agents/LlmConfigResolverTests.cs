@@ -128,7 +128,7 @@ public sealed class LlmConfigResolverTests
     }
 
     [Fact]
-    public async Task ResolveAsync_throws_when_bound_config_is_inactive()
+    public async Task ResolveAsync_throws_when_bound_config_inactive_and_no_active_fallback_exists()
     {
         using var fx = new TestAppDb();
         var config = LlmConfig.Create(fx.TenantId, "openai", "gpt-4o", "cipher-key", Now);
@@ -144,6 +144,35 @@ public sealed class LlmConfigResolverTests
         var act = async () => await sut.ResolveAsync(fx.TenantId, "content-agent");
 
         await act.Should().ThrowAsync<LlmConfigNotConfiguredException>();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_falls_back_to_oldest_active_config_when_bound_config_inactive()
+    {
+        // Admin tắt config cũ sau khi tạo config mới — agent không được chết vì binding cũ.
+        using var fx = new TestAppDb();
+        var inactive = LlmConfig.Create(fx.TenantId, "openai", "gpt-4o", "old-cipher", Now);
+        inactive.Deactivate(Now.AddDays(2));
+        var active = LlmConfig.Create(
+            fx.TenantId, "openai-responses", "gpt-5.5", "new-cipher", Now.AddDays(1),
+            baseUrl: "https://aigatewayport.com/v1");
+        var agent = AgentConfig.Create(fx.TenantId, "content-agent", "Content", "content", "gpt-4o-mini", Now);
+        agent.BindLlmConfig(inactive.Id, Now);
+        fx.Db.LlmConfigs.AddRange(inactive, active);
+        fx.Db.AgentConfigs.Add(agent);
+        await fx.Db.SaveChangesAsync();
+
+        var decryptor = Substitute.For<IEncryptor>();
+        decryptor.Decrypt("new-cipher").Returns("new-plain");
+        var sut = new LlmConfigResolver(BuildScopeFactory(fx), decryptor);
+
+        var resolved = await sut.ResolveAsync(fx.TenantId, "content-agent");
+
+        resolved.Provider.Should().Be("openai-responses");
+        // Fallback bỏ model override của binding gốc — dùng model của config fallback.
+        resolved.Model.Should().Be("gpt-5.5");
+        resolved.ApiKey.Should().Be("new-plain");
+        resolved.BaseUrl.Should().Be("https://aigatewayport.com/v1");
     }
 
     private static IServiceScopeFactory BuildScopeFactory(TestAppDb fx)

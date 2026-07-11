@@ -195,6 +195,24 @@ export async function activateOrchestrationV2Schedule(id: string): Promise<Orche
   return res.data;
 }
 
+// "Tự động xây dựng kế hoạch": orchestrator quét snapshot hệ thống, đề xuất kế hoạch định kỳ chưa trùng.
+export interface OrchestrationPlanSuggestion {
+  readonly name: string;
+  readonly goal: string;
+  readonly cadence: string;
+  readonly reason: string;
+}
+
+export interface OrchestrationPlanSuggestionsResponse {
+  readonly items: readonly OrchestrationPlanSuggestion[];
+  readonly skippedDuplicates: number;
+}
+
+export async function suggestOrchestrationPlans(): Promise<OrchestrationPlanSuggestionsResponse> {
+  const res = await apiClient.post<OrchestrationPlanSuggestionsResponse>("/api/orchestration/v2/plan-suggestions");
+  return res.data;
+}
+
 export interface OrchestrationCostSummary {
   readonly monthToDateUsd: number;
   readonly capUsd: number;

@@ -37,6 +37,7 @@ public sealed class ChatAgentGrpcServiceTests
         var clock = new FixedClock(Now);
         var service = new ChatAgentGrpcService(
             BuildAgent(claude),
+            BuildReviewer(),
             fx.Db,
             clock,
             BuildLeadScorer(fx.Db, clock),
@@ -75,6 +76,7 @@ public sealed class ChatAgentGrpcServiceTests
         var clock = new FixedClock(Now);
         var service = new ChatAgentGrpcService(
             BuildAgent(claude),
+            BuildReviewer(),
             fx.Db,
             clock,
             BuildLeadScorer(fx.Db, clock),
@@ -118,6 +120,7 @@ public sealed class ChatAgentGrpcServiceTests
         channel.Name.Returns("pancake");
         var service = new ChatAgentGrpcService(
             BuildAgent(claude),
+            BuildReviewer(),
             fx.Db,
             clock,
             BuildLeadScorer(fx.Db, clock),
@@ -150,6 +153,7 @@ public sealed class ChatAgentGrpcServiceTests
         var channel = Substitute.For<Clawbot.SharedKernel.Channels.IChannelAdapter>();
         var service = new ChatAgentGrpcService(
             BuildAgent(claude, toxicityBlocked: true),
+            BuildReviewer(),
             fx.Db,
             clock,
             BuildLeadScorer(fx.Db, clock),
@@ -165,6 +169,158 @@ public sealed class ChatAgentGrpcServiceTests
         }, stream, TestServerCallContext.Create());
 
         await channel.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Reply_holds_pending_approval_when_reviewer_needs_human()
+    {
+        // Review-gate P2: KB rỗng → Escalate → LLM critic; verdict needs_human → hold, KHÔNG gửi kênh.
+        using var fx = new AgentServiceTestAppDb(TenantId);
+        var conversation = Conversation.Open(TenantId, "pancake", "page_1:thread-hold", Now);
+        fx.Db.Add(conversation);
+        await fx.Db.SaveChangesAsync();
+
+        var claude = new CapturingClaude();
+        var clock = new FixedClock(Now);
+        var channel = Substitute.For<Clawbot.SharedKernel.Channels.IChannelAdapter>();
+        var service = new ChatAgentGrpcService(
+            BuildAgent(claude),
+            BuildReviewer("""{"verdict":"needs_human","reason":"thieu du lieu doi chieu"}"""),
+            fx.Db,
+            clock,
+            BuildLeadScorer(fx.Db, clock),
+            NullLogger<ChatAgentGrpcService>.Instance,
+            channel);
+        var stream = new CapturingChatStream();
+
+        await service.Reply(new ChatRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            ConversationId = conversation.Id.ToString("D"),
+            UserText = "hoc phi bao nhieu",
+        }, stream, TestServerCallContext.Create());
+
+        await channel.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        var saved = fx.Db.Messages.Single(m => m.ConversationId == conversation.Id && m.Direction == "out");
+        saved.Status.Should().Be("pending_approval");
+        fx.Db.AgentTraces.Should().Contain(t => t.Phase == "held_for_review");
+    }
+
+    [Fact]
+    public async Task Reply_blocks_and_does_not_send_when_reviewer_rejects()
+    {
+        using var fx = new AgentServiceTestAppDb(TenantId);
+        var conversation = Conversation.Open(TenantId, "pancake", "page_1:thread-rej", Now);
+        fx.Db.Add(conversation);
+        await fx.Db.SaveChangesAsync();
+
+        var claude = new CapturingClaude();
+        var clock = new FixedClock(Now);
+        var channel = Substitute.For<Clawbot.SharedKernel.Channels.IChannelAdapter>();
+        var service = new ChatAgentGrpcService(
+            BuildAgent(claude),
+            BuildReviewer("""{"verdict":"reject","reason":"bia cam ket"}"""),
+            fx.Db,
+            clock,
+            BuildLeadScorer(fx.Db, clock),
+            NullLogger<ChatAgentGrpcService>.Instance,
+            channel);
+        var stream = new CapturingChatStream();
+
+        await service.Reply(new ChatRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            ConversationId = conversation.Id.ToString("D"),
+            UserText = "cam ket dau ra?",
+        }, stream, TestServerCallContext.Create());
+
+        await channel.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        fx.Db.Messages.Single(m => m.Direction == "out").Status.Should().Be("blocked");
+        fx.Db.AgentTraces.Should().Contain(t => t.Phase == "review_rejected");
+    }
+
+    [Fact]
+    public async Task Reply_holds_when_reviewer_llm_unavailable_fail_closed()
+    {
+        // QĐ3 fail-closed: reviewer chết → hold chờ người, tuyệt đối không gửi.
+        using var fx = new AgentServiceTestAppDb(TenantId);
+        var conversation = Conversation.Open(TenantId, "pancake", "page_1:thread-down", Now);
+        fx.Db.Add(conversation);
+        await fx.Db.SaveChangesAsync();
+
+        var claude = new CapturingClaude();
+        var clock = new FixedClock(Now);
+        var channel = Substitute.For<Clawbot.SharedKernel.Channels.IChannelAdapter>();
+        var reviewerClaude = Substitute.For<IClaudeChatClient>();
+        reviewerClaude.CompleteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<Task<ClaudeReply>>(_ => throw new HttpRequestException("provider down"));
+        var service = new ChatAgentGrpcService(
+            BuildAgent(claude),
+            new Clawbot.Agents.Core.Content.ContentReviewer(reviewerClaude, new CoreChat.LlmCallScope()),
+            fx.Db,
+            clock,
+            BuildLeadScorer(fx.Db, clock),
+            NullLogger<ChatAgentGrpcService>.Instance,
+            channel);
+        var stream = new CapturingChatStream();
+
+        await service.Reply(new ChatRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            ConversationId = conversation.Id.ToString("D"),
+            UserText = "xin chao",
+        }, stream, TestServerCallContext.Create());
+
+        await channel.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        fx.Db.Messages.Single(m => m.Direction == "out").Status.Should().Be("pending_approval");
+    }
+
+    [Fact]
+    public async Task Reply_holds_all_when_tenant_requires_manual_approval()
+    {
+        // Review-gate P3: RequireChatReplyApproval on → hold MỌI reply (skip luôn LLM critic), không gửi.
+        using var fx = new AgentServiceTestAppDb(TenantId);
+        var conversation = Conversation.Open(TenantId, "pancake", "page_1:thread-manual", Now);
+        fx.Db.Add(conversation);
+        await fx.Db.SaveChangesAsync();
+
+        var claude = new CapturingClaude();
+        var clock = new FixedClock(Now);
+        var channel = Substitute.For<Clawbot.SharedKernel.Channels.IChannelAdapter>();
+        var service = new ChatAgentGrpcService(
+            BuildAgent(claude),
+            BuildReviewer(), // critic sẽ approve nếu được gọi — phase held_for_approval chứng minh nó bị skip
+            fx.Db,
+            clock,
+            BuildLeadScorer(fx.Db, clock),
+            NullLogger<ChatAgentGrpcService>.Instance,
+            channel,
+            new FakeChatApprovalPolicy(true));
+        var stream = new CapturingChatStream();
+
+        await service.Reply(new ChatRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            ConversationId = conversation.Id.ToString("D"),
+            UserText = "xin chao",
+        }, stream, TestServerCallContext.Create());
+
+        await channel.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        fx.Db.Messages.Single(m => m.Direction == "out").Status.Should().Be("pending_approval");
+        fx.Db.AgentTraces.Should().Contain(t => t.Phase == "held_for_approval");
+    }
+
+    private sealed class FakeChatApprovalPolicy(bool required) : Clawbot.SharedKernel.Inbox.IChatApprovalPolicyResolver
+    {
+        public Task<bool> IsRequiredAsync(Guid tenantId, CancellationToken ct = default) => Task.FromResult(required);
+    }
+
+    private static Clawbot.Agents.Core.Content.ContentReviewer BuildReviewer(string? verdictJson = null)
+    {
+        var claude = Substitute.For<IClaudeChatClient>();
+        claude.CompleteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ClaudeReply(verdictJson ?? """{"verdict":"approve","reason":"ok"}""", 1, 1, 0m));
+        return new Clawbot.Agents.Core.Content.ContentReviewer(claude, new CoreChat.LlmCallScope());
     }
 
     private static CoreChat.ChatAgent BuildAgent(IClaudeChatClient claude) => BuildAgent(claude, toxicityBlocked: false);

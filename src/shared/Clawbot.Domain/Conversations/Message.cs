@@ -21,12 +21,21 @@ public sealed class Message : Entity<Guid>, ITenantOwned
     public string? SenderDisplayName { get; private set; }
     public string? SenderAvatarUrl { get; private set; }
     public string? AttachmentUrl { get; private set; }
+    // Review-gate P2: 'sent' (đã gửi/nhận bình thường) | 'pending_approval' (AI reply bị hold chờ người duyệt)
+    // | 'blocked' (bị chặn bởi safety/review — không bao giờ gửi).
+    public string Status { get; private set; } = "sent";
     public DateTimeOffset SentAt { get; private set; }
 
     private Message() { }
 
     // Channel echo dedup: gan id tin nhan phia kenh (Pancake send response) sau khi da persist row local
     public void SetExternalMessageId(string externalMessageId) => ExternalMessageId = externalMessageId;
+
+    // Review-gate: draft duoc nguoi duyet (Phase 3) hoac he thong gui thanh cong -> sent.
+    public void MarkSent() => Status = "sent";
+
+    // Review-gate P3: nguoi tu choi draft pending_approval -> blocked (giu audit, khong bao gio gui).
+    public void MarkBlocked() => Status = "blocked";
 
     internal static Message Create(
         Guid conversationId,
@@ -44,7 +53,8 @@ public sealed class Message : Entity<Guid>, ITenantOwned
         string? parentPostId = null,
         string? senderDisplayName = null,
         string? senderAvatarUrl = null,
-        string? attachmentUrl = null) =>
+        string? attachmentUrl = null,
+        string status = "sent") =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -63,6 +73,7 @@ public sealed class Message : Entity<Guid>, ITenantOwned
             SenderDisplayName = senderDisplayName,
             SenderAvatarUrl = senderAvatarUrl,
             AttachmentUrl = attachmentUrl,
+            Status = status,
             SentAt = sentAt,
         };
 }

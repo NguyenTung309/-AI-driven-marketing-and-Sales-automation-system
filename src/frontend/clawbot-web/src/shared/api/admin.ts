@@ -246,6 +246,17 @@ export interface TenantOrchestrationSettings {
   readonly requireApproval: boolean;
   /** Hạn mức chi tiêu LLM/tháng (USD); null = dùng mặc định hệ thống ($200). */
   readonly monthlyCostCapUsd: number | null;
+  /** Review-gate: bài đăng phải có chữ ký reviewer agent trước khi publish. */
+  readonly requireContentReview: boolean;
+  /** Manual-mode: mọi AI reply hold chờ người duyệt thay vì gửi tự động. */
+  readonly requireChatReplyApproval: boolean;
+}
+
+export interface TenantOrchestrationUpdateResult {
+  readonly requireOrchestrationApproval: boolean;
+  readonly monthlyCostCapUsd: number | null;
+  readonly requireContentReview: boolean;
+  readonly requireChatReplyApproval: boolean;
 }
 
 export async function getTenantOrchestration(): Promise<TenantOrchestrationSettings> {
@@ -256,10 +267,17 @@ export async function getTenantOrchestration(): Promise<TenantOrchestrationSetti
 export async function setTenantOrchestration(
   requireApproval: boolean,
   monthlyCostCapUsd?: number | null,
-): Promise<{ readonly requireOrchestrationApproval: boolean; readonly monthlyCostCapUsd: number | null }> {
-  const res = await apiClient.put<{ requireOrchestrationApproval: boolean; monthlyCostCapUsd: number | null }>(
+  flags?: { readonly requireContentReview?: boolean; readonly requireChatReplyApproval?: boolean },
+): Promise<TenantOrchestrationUpdateResult> {
+  const res = await apiClient.put<TenantOrchestrationUpdateResult>(
     "/api/admin/tenant/orchestration",
-    { requireApproval, monthlyCostCapUsd: monthlyCostCapUsd ?? null },
+    {
+      requireApproval,
+      monthlyCostCapUsd: monthlyCostCapUsd ?? null,
+      // undefined = không gửi field -> BE giữ nguyên giá trị hiện tại
+      requireContentReview: flags?.requireContentReview,
+      requireChatReplyApproval: flags?.requireChatReplyApproval,
+    },
   );
   return res.data;
 }

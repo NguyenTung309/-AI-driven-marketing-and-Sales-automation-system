@@ -33,6 +33,9 @@ public static class InboxEndpoints
         grp.MapPost("/conversations/{id:guid}/escalate", EscalateAsync).RequirePermission("conversations:write");
         grp.MapPost("/conversations/{id:guid}/ai", SetAiAutoReplyAsync).RequirePermission("conversations:write");
         grp.MapPost("/conversations/{id:guid}/messages", SendOutboundAsync).RequirePermission("conversations:write");
+        // Review-gate P3: duyệt/từ chối AI draft đang hold (messages.status=pending_approval)
+        grp.MapPost("/conversations/{id:guid}/drafts/{messageId:guid}/approve", ApproveDraftAsync).RequirePermission("conversations:write");
+        grp.MapPost("/conversations/{id:guid}/drafts/{messageId:guid}/reject", RejectDraftAsync).RequirePermission("conversations:write");
         grp.MapGet("/channels", ListChannelsAsync).RequirePermission("conversations:read");
         grp.MapGet("/daily-summary", DailySummaryAsync).RequirePermission("conversations:read");
 
@@ -132,7 +135,7 @@ public static class InboxEndpoints
                 .Select(c => new { c.DisplayName, c.AvatarUrl }).FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
         var messages = conv.Messages.OrderBy(m => m.SentAt)
-            .Select(m => new MessageDto(m.Id, m.Direction, m.SenderType, m.SenderUserId, m.Content, m.ContentType, m.SentAt, m.SenderDisplayName, m.SenderAvatarUrl, m.AttachmentUrl))
+            .Select(m => new MessageDto(m.Id, m.Direction, m.SenderType, m.SenderUserId, m.Content, m.ContentType, m.SentAt, m.SenderDisplayName, m.SenderAvatarUrl, m.AttachmentUrl, m.Status))
             .ToList();
 
         string? inboxName = null;
@@ -333,6 +336,77 @@ public static class InboxEndpoints
             new InboxMessageEvent(conv.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt, conv.AssignedTo, msg.SenderDisplayName, msg.SenderAvatarUrl), ct).ConfigureAwait(false);
 
         return Results.Ok(new MessageDto(msg.Id, msg.Direction, msg.SenderType, msg.SenderUserId, msg.Content, msg.ContentType, msg.SentAt, msg.SenderDisplayName, msg.SenderAvatarUrl, msg.AttachmentUrl));
+    }
+
+    // Review-gate P3: người duyệt AI draft — chạy lại safety gate rồi gửi thật qua kênh, mark sent.
+    private static async Task<IResult> ApproveDraftAsync(
+        Guid id, Guid messageId,
+        AppDbContext db, ITenantAccessor tenants, IInboxNotifier notifier,
+        IChannelAdapter adapter, OutboundMessageSafetyService safety,
+        ClaimsPrincipal user, IUserInboxResolver resolver,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id, ct).ConfigureAwait(false);
+        if (conv is null) return Results.NotFound();
+
+        var inboxIds = await resolver.GetInboxIdsAsync(user, ct);
+        if (inboxIds.Count > 0 && conv.InboxId.HasValue && !inboxIds.Contains(conv.InboxId.Value))
+            return Results.Forbid();
+
+        var msg = await db.Messages
+            .FirstOrDefaultAsync(m => m.Id == messageId && m.ConversationId == id, ct).ConfigureAwait(false);
+        if (msg is null) return Results.NotFound();
+        if (!string.Equals(msg.Status, "pending_approval", StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest(new { error = "draft_not_pending", message = "Tin này không ở trạng thái chờ duyệt." });
+
+        try { await safety.EnsureAllowedAsync(msg.Content, ct).ConfigureAwait(false); }
+        catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+
+        string? channelMessageId;
+        try
+        {
+            channelMessageId = await adapter.SendAsync(conv.ExternalThreadId, msg.Content, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { error = "channel_send_failed", message = "Không thể gửi tin nhắn qua kênh kết nối: " + ex.Message });
+        }
+
+        msg.MarkSent();
+        if (channelMessageId is not null)
+            msg.SetExternalMessageId(channelMessageId);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        await notifier.NotifyMessageAsync(tenant.TenantId,
+            new InboxMessageEvent(conv.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt, conv.AssignedTo, msg.SenderDisplayName, msg.SenderAvatarUrl), ct).ConfigureAwait(false);
+
+        return Results.Ok(new MessageDto(msg.Id, msg.Direction, msg.SenderType, msg.SenderUserId, msg.Content, msg.ContentType, msg.SentAt, msg.SenderDisplayName, msg.SenderAvatarUrl, msg.AttachmentUrl, msg.Status));
+    }
+
+    private static async Task<IResult> RejectDraftAsync(
+        Guid id, Guid messageId,
+        AppDbContext db, ITenantAccessor tenants,
+        ClaimsPrincipal user, IUserInboxResolver resolver,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id, ct).ConfigureAwait(false);
+        if (conv is null) return Results.NotFound();
+
+        var inboxIds = await resolver.GetInboxIdsAsync(user, ct);
+        if (inboxIds.Count > 0 && conv.InboxId.HasValue && !inboxIds.Contains(conv.InboxId.Value))
+            return Results.Forbid();
+
+        var msg = await db.Messages
+            .FirstOrDefaultAsync(m => m.Id == messageId && m.ConversationId == id, ct).ConfigureAwait(false);
+        if (msg is null) return Results.NotFound();
+        if (!string.Equals(msg.Status, "pending_approval", StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest(new { error = "draft_not_pending", message = "Tin này không ở trạng thái chờ duyệt." });
+
+        msg.MarkBlocked();
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.Ok(new MessageDto(msg.Id, msg.Direction, msg.SenderType, msg.SenderUserId, msg.Content, msg.ContentType, msg.SentAt, msg.SenderDisplayName, msg.SenderAvatarUrl, msg.AttachmentUrl, msg.Status));
     }
 
     private static string Preview(string text) =>

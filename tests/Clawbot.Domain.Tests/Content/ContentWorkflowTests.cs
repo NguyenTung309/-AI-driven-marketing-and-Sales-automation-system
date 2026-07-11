@@ -36,6 +36,41 @@ public sealed class ContentWorkflowTests
     }
 
     [Fact]
+    public void ContentItem_mark_published_throws_when_review_required_and_unsigned()
+    {
+        // Review-gate P1 domain backstop: no publish path can emit an unreviewed item when the tenant flag is on.
+        var item = ContentItem.Create(TenantId, "facebook", "body", createdBy: null, CreatedAt);
+        item.Approve(Guid.NewGuid(), CreatedAt.AddHours(1)); // human only — no agent signoff
+
+        var act = () => item.MarkPublished(CreatedAt.AddHours(2), requireAgentReview: true);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*content_review_required*");
+        item.Status.Should().Be("approved");
+    }
+
+    [Fact]
+    public void ContentItem_mark_published_succeeds_with_agent_signoff_when_review_required()
+    {
+        var item = ContentItem.Create(TenantId, "facebook", "body", createdBy: null, CreatedAt);
+        item.ApproveByAgent(Guid.NewGuid(), CreatedAt.AddHours(1));
+
+        item.MarkPublished(CreatedAt.AddHours(2), requireAgentReview: true);
+
+        item.Status.Should().Be("published");
+    }
+
+    [Fact]
+    public void ContentItem_reject_persists_reason()
+    {
+        var item = ContentItem.Create(TenantId, "facebook", "body", createdBy: null, CreatedAt);
+
+        item.Reject(CreatedAt.AddHours(1), "bịa giá khuyến mãi");
+
+        item.Status.Should().Be("rejected");
+        item.RejectedReason.Should().Be("bịa giá khuyến mãi");
+    }
+
+    [Fact]
     public void ContentItem_update_body_keeps_status_and_sets_updated_at()
     {
         var item = ContentItem.Create(TenantId, "tiktok", "Draft v1", createdBy: null, CreatedAt);

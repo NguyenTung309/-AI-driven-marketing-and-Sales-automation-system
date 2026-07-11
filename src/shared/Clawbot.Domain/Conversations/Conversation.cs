@@ -58,9 +58,9 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
 
     public void SetAiAutoReply(bool enabled) => AiAutoReplyEnabled = enabled;
 
-    public Message AppendMessage(string direction, string senderType, string content, string contentType, DateTimeOffset sentAt, Guid? senderUserId = null, string? externalMessageId = null, string? originalContent = null, string? redactedContent = null, string messageType = "text", string? parentPostId = null, string? senderDisplayName = null, string? senderAvatarUrl = null, string? attachmentUrl = null)
+    public Message AppendMessage(string direction, string senderType, string content, string contentType, DateTimeOffset sentAt, Guid? senderUserId = null, string? externalMessageId = null, string? originalContent = null, string? redactedContent = null, string messageType = "text", string? parentPostId = null, string? senderDisplayName = null, string? senderAvatarUrl = null, string? attachmentUrl = null, string status = "sent")
     {
-        var msg = Message.Create(Id, TenantId, direction, senderType, content, contentType, sentAt, senderUserId, externalMessageId, originalContent, redactedContent, messageType, parentPostId, senderDisplayName, senderAvatarUrl, attachmentUrl);
+        var msg = Message.Create(Id, TenantId, direction, senderType, content, contentType, sentAt, senderUserId, externalMessageId, originalContent, redactedContent, messageType, parentPostId, senderDisplayName, senderAvatarUrl, attachmentUrl, status);
         _messages.Add(msg);
         LastMessageAt = sentAt;
         return msg;
