@@ -21,6 +21,9 @@ public sealed class Tenant : AggregateRoot<Guid>
     // Review-gate P3 manual-mode: khi bật, MỌI AI reply hold thành pending_approval chờ người duyệt
     // (không gửi tự động); tin sale gõ tay miễn (QĐ5).
     public bool RequireChatReplyApproval { get; private set; }
+    // Gate tri thức tự học: default OFF = AI tự duyệt kb_suggestions khi rail đạt (verdict approve +
+    // accuracy không giảm). Bật = mọi đề xuất chờ người duyệt (QĐ 2026-07-11, ngược chiều 2 flag trên).
+    public bool RequireKbHumanReview { get; private set; }
     // Hạn mức chi tiêu LLM mỗi tháng (USD). null = dùng mặc định hệ thống.
     public decimal? MonthlyCostCapUsd { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -62,6 +65,9 @@ public sealed class Tenant : AggregateRoot<Guid>
 
     public void SetRequireChatReplyApproval(bool requireApproval) =>
         RequireChatReplyApproval = requireApproval;
+
+    public void SetRequireKbHumanReview(bool requireReview) =>
+        RequireKbHumanReview = requireReview;
 
     // null hoặc <= 0 → xoá hạn mức riêng, quay về mặc định hệ thống.
     public void SetMonthlyCostCapUsd(decimal? capUsd) =>

@@ -70,6 +70,8 @@ public sealed partial class ChatAgentGrpcService(
         // Rong -> ChatAgent dung DefaultSystemPrompt; luon boc guardrail o ChatAgent.
         var customPrompt = await LoadChatSystemPromptAsync(tenantId, context.CancellationToken).ConfigureAwait(false);
 
+        var contactFacts = await LoadContactFactsAsync(tenantId, conversation?.ContactId, context.CancellationToken).ConfigureAwait(false);
+
         var session = AgentSession.Start(tenantId, agentId: null, conversationId: convId,
             goal: "chat-reply", startedAt: _clock.UtcNow);
         _db.AgentSessions.Add(session);
@@ -87,7 +89,8 @@ public sealed partial class ChatAgentGrpcService(
                                    history,
                                    SourcePlatform: sourcePlatform,
                                    MatchedScenarioTemplate: matchedScenarioTemplate,
-                                   CustomSystemPrompt: customPrompt),
+                                   CustomSystemPrompt: customPrompt,
+                                   ContactFacts: contactFacts),
                                context.CancellationToken).ConfigureAwait(false))
             {
                 if (chunk.Final)
@@ -259,6 +262,30 @@ public sealed partial class ChatAgentGrpcService(
         return string.IsNullOrWhiteSpace(custom) ? skills : $"{custom}\n\n{skills}";
     }
 
+    // ai-self-learning-memory Lop 2: top-10 facts active ve khach (moi nhat truoc, confidence >= 0.6).
+    // Loi query -> bo qua, KHONG fail reply — memory la gia vi, khong phai xuong song.
+    private async Task<IReadOnlyList<string>?> LoadContactFactsAsync(Guid tenantId, Guid? contactId, CancellationToken ct)
+    {
+        if (contactId is null) return null;
+        try
+        {
+            var facts = await _db.ContactMemories
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Where(m => m.TenantId == tenantId && m.ContactId == contactId && m.IsActive && m.Confidence >= 0.6m)
+                .OrderByDescending(m => m.UpdatedAt)
+                .Take(10)
+                .Select(m => m.Fact)
+                .ToListAsync(ct).ConfigureAwait(false);
+            return facts.Count > 0 ? facts : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogContactFactsFailed(_logger, ex, tenantId, contactId.Value);
+            return null;
+        }
+    }
+
     // So sánh echo: bỏ thẻ HTML + gom khoảng trắng — tin Pancake bọc <div> còn reply model là text trần.
     private static string NormalizeForEchoCheck(string text) =>
         System.Text.RegularExpressions.Regex.Replace(
@@ -339,4 +366,7 @@ public sealed partial class ChatAgentGrpcService(
 
     [LoggerMessage(EventId = 4003, Level = LogLevel.Warning, Message = "Chat reply channel send failed tenant={TenantId} conv={ConversationId} platform={Platform}")]
     private static partial void LogChannelSendFailure(ILogger logger, Exception ex, Guid tenantId, Guid? conversationId, string platform);
+
+    [LoggerMessage(EventId = 4004, Level = LogLevel.Warning, Message = "Contact facts load failed tenant={TenantId} contact={ContactId} — reply continues without memory")]
+    private static partial void LogContactFactsFailed(ILogger logger, Exception ex, Guid tenantId, Guid contactId);
 }

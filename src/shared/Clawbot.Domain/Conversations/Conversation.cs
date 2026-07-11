@@ -16,6 +16,9 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
     public Guid? AssignedTo { get; private set; }
     public DateTimeOffset? SnoozedUntil { get; private set; }
     public DateTimeOffset? LastMessageAt { get; private set; }
+    // Watermark trích memory khách (ai-self-learning-memory Lớp 2): CHỈ set khi trích thành công —
+    // fail giữ nguyên để lượt scan sau quét lại (không nuốt fail).
+    public DateTimeOffset? MemoryExtractedAt { get; private set; }
     public Guid? InboxId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? DeletedAt { get; private set; }
@@ -57,6 +60,8 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
     }
 
     public void SetAiAutoReply(bool enabled) => AiAutoReplyEnabled = enabled;
+
+    public void MarkMemoryExtracted(DateTimeOffset at) => MemoryExtractedAt = at;
 
     public Message AppendMessage(string direction, string senderType, string content, string contentType, DateTimeOffset sentAt, Guid? senderUserId = null, string? externalMessageId = null, string? originalContent = null, string? redactedContent = null, string messageType = "text", string? parentPostId = null, string? senderDisplayName = null, string? senderAvatarUrl = null, string? attachmentUrl = null, string status = "sent")
     {

@@ -31,6 +31,7 @@ import {
   type KbVersionDiff,
 } from "@/shared/api/kb";
 import { KbAutoClassifyModal } from "./KbAutoClassifyModal";
+import { KbSuggestionsPanel } from "./KbSuggestionsPanel";
 import { ModuleFormModal, QaModal, type ModuleDialogMode } from "./KnowledgeBaseDialogs";
 import { AccuracyPanel, DiffDrawer, EditorWorkspace, ModuleRail, VersionRail } from "./KnowledgeBaseWorkspace";
 
@@ -276,6 +277,8 @@ export default function KnowledgeBasePage() {
           </Alert>
         </div>
       ) : null}
+
+      <KbSuggestionsPanel />
 
       <section className="overflow-hidden rounded-lg border border-outline shadow-sm xl:grid xl:grid-cols-[250px_310px_minmax(0,1fr)]">
         <ModuleRail

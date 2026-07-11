@@ -424,15 +424,17 @@ export default function AgentDashboardPage() {
       setNotice({ tone: "error", message: `Đổi chế độ duyệt thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
   });
   // Review-gate P3: 2 flag tenant — agent review bài đăng + duyệt tay AI reply.
+  // ai-self-learning-memory: requireKbHumanReview (bật = tắt AI tự duyệt tri thức).
   const requireContentReview = approvalQuery.data?.requireContentReview ?? false;
   const requireChatReplyApproval = approvalQuery.data?.requireChatReplyApproval ?? false;
+  const requireKbHumanReview = approvalQuery.data?.requireKbHumanReview ?? false;
   const reviewFlagMutation = useMutation({
-    mutationFn: (flags: { requireContentReview?: boolean; requireChatReplyApproval?: boolean }) =>
+    mutationFn: (flags: { requireContentReview?: boolean; requireChatReplyApproval?: boolean; requireKbHumanReview?: boolean }) =>
       setTenantOrchestration(requireApproval, monthlyCostCapUsd, flags),
     onSuccess: async (res) => {
       setNotice({
         tone: "success",
-        message: `Đã cập nhật: agent review bài đăng ${res.requireContentReview ? "BẬT" : "tắt"}, duyệt tay AI reply ${res.requireChatReplyApproval ? "BẬT" : "tắt"}.`,
+        message: `Đã cập nhật: agent review bài đăng ${res.requireContentReview ? "BẬT" : "tắt"}, duyệt tay AI reply ${res.requireChatReplyApproval ? "BẬT" : "tắt"}, AI tự duyệt tri thức ${res.requireKbHumanReview ? "tắt" : "BẬT"}.`,
       });
       await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
     },
@@ -543,7 +545,7 @@ export default function AgentDashboardPage() {
     );
 
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ readonly tone: "success" | "error"; readonly message: string } | null>(null);
+  const [notice, setNotice] = useState<{ readonly tone: "success" | "error" | "info"; readonly message: string } | null>(null);
   // Toast tự ẩn sau 8 giây thay vì treo vĩnh viễn.
   useEffect(() => {
     if (!notice) return;
@@ -762,6 +764,20 @@ export default function AgentDashboardPage() {
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">how_to_reg</span>
             {requireChatReplyApproval ? "Duyệt tay AI reply: BẬT" : "Duyệt tay AI reply: tắt"}
+          </button>
+          <button
+            aria-pressed={!requireKbHumanReview}
+            className={[
+              "flex items-center gap-2 rounded-lg border px-3 py-2 text-body-md font-semibold transition-colors disabled:opacity-60",
+              !requireKbHumanReview ? "border-primary bg-primary/10 text-primary" : "border-outline bg-surface-container-lowest text-secondary",
+            ].join(" ")}
+            disabled={reviewFlagMutation.isPending || approvalQuery.isLoading}
+            onClick={() => reviewFlagMutation.mutate({ requireKbHumanReview: !requireKbHumanReview })}
+            title="Bật: tri thức AI chưng cất từ hội thoại được tự đưa vào kho khi đạt chuẩn kép (reviewer duyệt + accuracy không giảm); không đạt vẫn chờ người. Tắt: mọi tri thức mới chờ người duyệt."
+            type="button"
+          >
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">school</span>
+            {!requireKbHumanReview ? "AI tự duyệt tri thức: BẬT" : "AI tự duyệt tri thức: tắt"}
           </button>
         </div>
       </div>

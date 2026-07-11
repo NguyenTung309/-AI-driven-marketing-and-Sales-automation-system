@@ -2,6 +2,7 @@ using Hangfire;
 using Hangfire.SqlServer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Clawbot.Infrastructure.Jobs;
 
@@ -43,6 +44,8 @@ public static class HangfireModule
         services.AddScoped<IWeeklyTrendScanner, GrpcWeeklyTrendScanner>();
         services.AddScoped<WeeklyTrendScanJob>();
         services.AddScoped<ContentPublishJob>();
+        services.AddScoped<MetaConnectionHealthJob>();
+        services.AddScoped<MetaBusinessIntegrationWebhookJob>();
         services.AddScoped<AdsRuleEvaluationJob>();
         services.AddScoped<AdsCreativeRotationJob>();
         services.AddScoped<AdsRemarketingJob>();
@@ -62,6 +65,17 @@ public static class HangfireModule
         services.AddScoped<LeadFollowUpJob>();
         services.AddScoped<KbAccuracyTestJob>();
         services.AddScoped<CompetitorScanJob>();
+        // ai-self-learning-memory Lớp 1: chưng cất tri thức đêm. ContentReviewer đăng ký tại đây vì
+        // API host không gọi AddClawbotContent (chỉ AgentService có) — job cần reviewer chấm đề xuất.
+        services.Configure<Clawbot.Infrastructure.Learning.LearningOptions>(cfg.GetSection(Clawbot.Infrastructure.Learning.LearningOptions.SectionName));
+        services.TryAddScoped<Clawbot.Agents.Core.Content.ContentReviewer>();
+        services.AddScoped<Clawbot.Agents.Core.Learning.KnowledgeDistiller>();
+        services.AddScoped<Clawbot.Agents.Core.Learning.KbSuggestionAccuracyEvaluator>();
+        services.AddScoped<Clawbot.Infrastructure.Learning.KbSuggestionMaterializer>();
+        services.AddScoped<KnowledgeDistillationJob>();
+        // Lớp 2: trích facts về khách sau hội thoại idle.
+        services.AddScoped<Clawbot.Agents.Core.Learning.ContactFactExtractor>();
+        services.AddScoped<ContactMemoryExtractionJob>();
         return services;
     }
 
@@ -130,6 +144,11 @@ public static class HangfireModule
             "content",
             j => j.RunAsync(CancellationToken.None),
             "*/5 * * * *");
+        recurring.AddOrUpdate<MetaConnectionHealthJob>(
+            "meta-connection-health",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Daily(2, 15));
         // Comment auto-reply đường polling: consumer bus chạy đa host không enqueue Hangfire được,
         // scan quét comment mới (idempotent) thay thế.
         recurring.AddOrUpdate<CommentAutoReplyJob>(
@@ -209,5 +228,18 @@ public static class HangfireModule
             j => j.RunAsync(CancellationToken.None),
             Cron.Daily(6),
             new RecurringJobOptions { TimeZone = VietnamTimeZone });
+        // AI tự học: chưng cất tri thức từ hội thoại thật — 02:00 giờ VN hằng đêm.
+        recurring.AddOrUpdate<KnowledgeDistillationJob>(
+            "kb-knowledge-distillation",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Daily(2),
+            new RecurringJobOptions { TimeZone = VietnamTimeZone });
+        // AI tự học Lớp 2: trích memory về khách từ hội thoại idle — 30 phút/lần.
+        recurring.AddOrUpdate<ContactMemoryExtractionJob>(
+            "contact-memory-extraction",
+            "default",
+            j => j.RunScanAsync(CancellationToken.None),
+            "*/30 * * * *");
     }
 }

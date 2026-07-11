@@ -19,7 +19,9 @@ public sealed record ChatAgentRequest(
     string? SourcePlatform = null,
     string? MatchedScenarioTemplate = null,
     // Prompt custom cua tenant (config.SystemPrompt). Rong -> dung DefaultSystemPrompt. Luon boc guardrail.
-    string? CustomSystemPrompt = null);
+    string? CustomSystemPrompt = null,
+    // ai-self-learning-memory Lop 2: top-k facts AI nho ve khach (da redact), caller load tu contact_memories.
+    IReadOnlyList<string>? ContactFacts = null);
 
 public sealed record ChatAgentReply(
     string Text,
@@ -133,7 +135,7 @@ public sealed class ChatAgent(
             ct).ConfigureAwait(false);
 
         var redactedHistory = await RedactHistoryAsync(request.History, ct).ConfigureAwait(false);
-        var system = BuildSystemPrompt(chunks, intentResult.Label, langResult.LanguageCode, request.MatchedScenarioTemplate, request.CustomSystemPrompt);
+        var system = BuildSystemPrompt(chunks, intentResult.Label, langResult.LanguageCode, request.MatchedScenarioTemplate, request.CustomSystemPrompt, request.ContactFacts);
         var reply = await _claude.CompleteAsync(system, redactedHistory, redacted.RedactedText, ct).ConfigureAwait(false);
 
         // C2: Outbound toxicity scan — block/regenerate if Claude output is toxic
@@ -229,7 +231,7 @@ public sealed class ChatAgent(
             ct).ConfigureAwait(false);
 
         var redactedHistory = await RedactHistoryAsync(request.History, ct).ConfigureAwait(false);
-        var system = BuildSystemPrompt(chunks, intentResult.Label, langResult.LanguageCode, request.MatchedScenarioTemplate, request.CustomSystemPrompt);
+        var system = BuildSystemPrompt(chunks, intentResult.Label, langResult.LanguageCode, request.MatchedScenarioTemplate, request.CustomSystemPrompt, request.ContactFacts);
         var text = new StringBuilder();
         var inputTokens = 0;
         var outputTokens = 0;
@@ -308,7 +310,8 @@ public sealed class ChatAgent(
         string intent,
         string languageCode,
         string? matchedScenarioTemplate,
-        string? customSystemPrompt = null)
+        string? customSystemPrompt = null,
+        IReadOnlyList<string>? contactFacts = null)
     {
         // Guardrail (khoa) + persona: custom cua tenant neu co, khong thi mau mac dinh.
         var persona = string.IsNullOrWhiteSpace(customSystemPrompt) ? DefaultSystemPrompt : customSystemPrompt;
@@ -337,6 +340,16 @@ public sealed class ChatAgent(
             sb.AppendLine();
             sb.AppendLine("## Matched chat scenario template");
             sb.AppendLine(matchedScenarioTemplate.Trim());
+        }
+
+        // ai-self-learning-memory Lop 2: tri nho dai han ve khach — dung tu nhien, khong doc lai
+        // nguyen van kieu "toi nho ban la..."; fact co the cu, uu tien thong tin khach vua noi.
+        if (contactFacts is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Ghi nho ve khach hang nay (tham khao, khach vua noi khac thi theo khach):");
+            foreach (var fact in contactFacts)
+                sb.AppendLine(CultureInfo.InvariantCulture, $"- {fact}");
         }
 
         if (chunks.Count == 0) return sb.ToString();

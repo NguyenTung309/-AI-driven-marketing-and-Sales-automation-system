@@ -22,6 +22,7 @@ import {
   type ConversationStatus,
   type InboxMessage,
 } from "@/shared/api/inbox";
+import { ContactMemoryPanel } from "./ContactMemoryPanel";
 import { SaleAssistPanel } from "./SaleAssistPanel";
 import { useInboxRealtime } from "./useInboxRealtime";
 import { toUserFriendlyError } from "@/shared/utils/userText";
@@ -605,6 +606,11 @@ function ContextPanel({
           </Button>
         </div>
       </Card>
+
+      <ContactMemoryPanel
+        contactId={conversation?.contactId ?? null}
+        onNotify={(message) => onNotify(message)}
+      />
 
       <SaleAssistPanel
         conversationId={conversation?.id ?? null}

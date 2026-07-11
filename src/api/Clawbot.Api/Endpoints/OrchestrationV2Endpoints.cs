@@ -619,12 +619,21 @@ public static partial class OrchestrationV2Endpoints
         }
 
         var objStart = text.IndexOf('{');
+        var arrStart = text.IndexOf('[');
+
+        // Mảng mở trước object => root là mảng (object chỉ là phần tử bên trong) — bóc mảng,
+        // không thì nhánh object sẽ cắt nhầm phần tử đầu và làm mất cả danh sách.
+        if (arrStart >= 0 && (objStart < 0 || arrStart < objStart))
+        {
+            var arrEnd = text.LastIndexOf(']');
+            if (arrEnd > arrStart) return text[arrStart..(arrEnd + 1)];
+        }
+
         var objEnd = text.LastIndexOf('}');
         if (objStart >= 0 && objEnd > objStart) return text[objStart..(objEnd + 1)];
 
-        var arrStart = text.IndexOf('[');
-        var arrEnd = text.LastIndexOf(']');
-        if (arrStart >= 0 && arrEnd > arrStart) return text[arrStart..(arrEnd + 1)];
+        var arrEndFallback = text.LastIndexOf(']');
+        if (arrStart >= 0 && arrEndFallback > arrStart) return text[arrStart..(arrEndFallback + 1)];
 
         return null;
     }
