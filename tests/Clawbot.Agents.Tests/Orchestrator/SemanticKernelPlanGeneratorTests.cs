@@ -104,6 +104,60 @@ public sealed class SemanticKernelPlanGeneratorTests
     }
 
     [Fact]
+    public async Task GenerateAsync_tolerates_numeric_task_ids_and_depends_on()
+    {
+        // Model hay trả id/dependsOn dạng số (1, 2) — id là handle mờ, ép về chuỗi thay vì fail plan.
+        var chat = new FixedClaudeChatClient("""
+        {
+          "version": 1,
+          "tasks": [
+            { "id": 1, "agent": "content", "description": "write post", "input": {}, "dependsOn": [], "status": "pending" },
+            { "id": 2, "agent": "content", "description": "review post", "input": {}, "dependsOn": [1], "status": "pending" }
+          ]
+        }
+        """);
+        var generator = new SemanticKernelPlanGenerator(new ClawbotChatCompletionService(chat));
+
+        var plan = await generator.GenerateAsync("launch HSK4", [Content], CancellationToken.None);
+
+        plan.Tasks.Should().HaveCount(2);
+        plan.Tasks[0].Id.Should().Be("1");
+        plan.Tasks[1].DependsOn.Should().ContainSingle().Which.Should().Be("1");
+    }
+
+    [Fact]
+    public async Task GenerateAsync_self_repairs_after_invalid_json_reply()
+    {
+        // Self-repair: lần 1 model trả rác -> feedback lỗi -> lần 2 JSON hợp lệ -> plan OK, không fail run.
+        var chat = new SequenceClaudeChatClient(
+            "xin lỗi, tôi không thể",
+            """
+            { "version": 1, "tasks": [ { "id": "t1", "agent": "content", "description": "write", "input": {}, "dependsOn": [], "status": "pending" } ] }
+            """);
+        var generator = new SemanticKernelPlanGenerator(new ClawbotChatCompletionService(chat));
+
+        var plan = await generator.GenerateAsync("launch HSK4", [Content], CancellationToken.None);
+
+        plan.Tasks.Should().ContainSingle().Which.Id.Should().Be("t1");
+        chat.Calls.Should().Be(2);
+        // Feedback lần 2 phải mang lỗi lần 1 để model biết đường sửa.
+        chat.LastUserMessage.Should().Contain("không hợp lệ");
+    }
+
+    [Fact]
+    public async Task GenerateAsync_gives_up_after_three_invalid_attempts()
+    {
+        var chat = new SequenceClaudeChatClient("rác 1", "rác 2", "rác 3");
+        var generator = new SemanticKernelPlanGenerator(new ClawbotChatCompletionService(chat));
+
+        Func<Task> act = async () => await generator.GenerateAsync("launch HSK4", [Content], CancellationToken.None);
+
+        await act.Should().ThrowAsync<PlanGenerationException>()
+            .WithMessage("Mô hình trả về JSON không hợp lệ*");
+        chat.Calls.Should().Be(3);
+    }
+
+    [Fact]
     public async Task GenerateAsync_wraps_provider_auth_failures_with_operator_message()
     {
         var generator = new SemanticKernelPlanGenerator(new ClawbotChatCompletionService(new ThrowingClaudeChatClient(
@@ -138,6 +192,37 @@ public sealed class SemanticKernelPlanGeneratorTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Kế hoạch sai cấu trúc: unknown_agent:t1:missing*");
+    }
+
+    private sealed class SequenceClaudeChatClient(params string[] responses) : IClaudeChatClient
+    {
+        public int Calls { get; private set; }
+        public string? LastUserMessage { get; private set; }
+
+        public Task<ClaudeReply> CompleteAsync(
+            string systemPrompt,
+            IReadOnlyList<ChatTurn> history,
+            string userMessage,
+            CancellationToken ct = default)
+        {
+            // ChatHistory dồn feedback vào history/userMessage tùy adapter — giữ tin cuối để assert.
+            LastUserMessage = history.Count > 0 ? history[^1].Content : userMessage;
+            if (!string.IsNullOrEmpty(userMessage)) LastUserMessage = userMessage;
+            var response = responses[Math.Min(Calls, responses.Length - 1)];
+            Calls++;
+            return Task.FromResult(new ClaudeReply(response, 1, 1, 0.01m, "test"));
+        }
+
+        public async IAsyncEnumerable<ClaudeStreamChunk> StreamAsync(
+            string systemPrompt,
+            IReadOnlyList<ChatTurn> history,
+            string userMessage,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            var reply = await CompleteAsync(systemPrompt, history, userMessage, ct);
+            yield return new ClaudeStreamChunk(reply.Text, Final: false, 0, 0, 0m);
+            yield return new ClaudeStreamChunk(string.Empty, Final: true, reply.InputTokens, reply.OutputTokens, reply.UsdCost, "test");
+        }
     }
 
     private sealed class ThrowingClaudeChatClient(Exception error) : IClaudeChatClient
