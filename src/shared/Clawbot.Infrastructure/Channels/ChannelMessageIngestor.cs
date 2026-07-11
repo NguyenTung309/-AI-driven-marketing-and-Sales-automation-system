@@ -372,7 +372,8 @@ public sealed partial class ChannelMessageIngestor(
         return idx > 0 ? externalThreadId[(idx + 1)..] : externalThreadId;
     }
 
-    private static string StripHtml(string input)
+    // internal: ChannelInboundMessageConsumer strip text trước khi đưa vào ChatAgent (tin Pancake bọc HTML).
+    internal static string StripHtml(string input)
     {
         if (string.IsNullOrEmpty(input)) return string.Empty;
 

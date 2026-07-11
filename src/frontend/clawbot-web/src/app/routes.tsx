@@ -51,6 +51,15 @@ export const router = createBrowserRouter([
     ),
   },
   {
+    // Deep-link từ notification: /conversations/{id} mở thẳng hội thoại đó.
+    path: "/conversations/:conversationId",
+    element: (
+      <RequireAuth>
+        <ConversationsPage />
+      </RequireAuth>
+    ),
+  },
+  {
     path: "/leads",
     element: (
       <RequireAuth>

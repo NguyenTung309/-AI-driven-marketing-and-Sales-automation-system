@@ -363,7 +363,7 @@ public static class AgentsEndpoints
         return provider.ToLowerInvariant() switch
         {
             "anthropic" => m.StartsWith("claude", StringComparison.OrdinalIgnoreCase),
-            "openai" or "openai-compatible" => !m.StartsWith("claude", StringComparison.OrdinalIgnoreCase),
+            "openai" or "openai-compatible" or "openai-responses" => !m.StartsWith("claude", StringComparison.OrdinalIgnoreCase),
             _ => true,
         };
     }

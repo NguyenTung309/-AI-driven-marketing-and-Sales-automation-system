@@ -1,6 +1,8 @@
 import { apiClient } from "./client";
 
-export type LlmProvider = "anthropic" | "openai";
+// openai = Chat Completions (/chat/completions); openai-responses = chuẩn OpenAI v2 (Responses API,
+// /responses) cho gateway không expose chat/completions.
+export type LlmProvider = "anthropic" | "openai" | "openai-responses";
 
 export interface LlmConfig {
   readonly id: string;

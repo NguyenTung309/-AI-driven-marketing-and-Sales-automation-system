@@ -22,7 +22,7 @@ namespace Clawbot.Api.Endpoints;
 public static partial class LlmConfigsEndpoints
 {
     private static readonly HashSet<string> AllowedProviders =
-        new(StringComparer.OrdinalIgnoreCase) { "anthropic", "openai", "openai-compatible" };
+        new(StringComparer.OrdinalIgnoreCase) { "anthropic", "openai", "openai-compatible", "openai-responses" };
 
     public static IEndpointRouteBuilder MapLlmConfigs(this IEndpointRouteBuilder app)
     {
@@ -384,6 +384,8 @@ public static partial class LlmConfigsEndpoints
         {
             "openai" => NormalizeOpenAiBaseUrl(url, forceV1: true),
             "openai-compatible" => NormalizeOpenAiBaseUrl(url, forceV1: false),
+            // Admin hay dán nguyên endpoint gateway (https://host/v1/responses) — client tự nối /responses.
+            "openai-responses" => NormalizeOpenAiResponsesBaseUrl(url),
             "anthropic" => url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? url[..^"/v1".Length] : url,
             _ => url,
         };
@@ -395,6 +397,14 @@ public static partial class LlmConfigsEndpoints
         if (url.EndsWith(chatCompletionsPath, StringComparison.OrdinalIgnoreCase))
             url = url[..^chatCompletionsPath.Length];
         return forceV1 && !url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? url + "/v1" : url;
+    }
+
+    private static string NormalizeOpenAiResponsesBaseUrl(string url)
+    {
+        const string responsesPath = "/responses";
+        return url.EndsWith(responsesPath, StringComparison.OrdinalIgnoreCase)
+            ? url[..^responsesPath.Length]
+            : url;
     }
 
     // Request timeout bounds: 1s floor, 600s (10 min) ceiling. null → global default.

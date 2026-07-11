@@ -24,6 +24,10 @@ public sealed partial class SemanticKernelPlanGenerator(IChatCompletionService c
     private readonly IChatCompletionService _chat = chat;
     private readonly ILogger<SemanticKernelPlanGenerator> _logger = logger ?? NullLogger<SemanticKernelPlanGenerator>.Instance;
 
+    // Self-repair: LLM chập chờn (rỗng / JSON hỏng / sai schema) là bản chất — mỗi lần fail, đưa chính
+    // lỗi đó lại cho model tự sửa thay vì đánh fail cả run ngay lần đầu.
+    private const int MaxAttempts = 3;
+
     public async Task<OrchestrationPlanDocument> GenerateAsync(
         string goal,
         IReadOnlyList<AgentCatalogEntry> catalog,
@@ -33,55 +37,67 @@ public sealed partial class SemanticKernelPlanGenerator(IChatCompletionService c
         var history = new ChatHistory(BuildSystemPrompt(catalog));
         history.AddUserMessage((goal ?? string.Empty).Trim());
 
-        string? json;
-        try
+        PlanGenerationException? lastFailure = null;
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
-            var replies = await _chat.GetChatMessageContentsAsync(history, cancellationToken: ct).ConfigureAwait(false);
-            json = replies.Count > 0 ? replies[0].Content : null;
-        }
-        catch (Exception ex) when (IsProviderAuthFailure(ex))
-        {
-            LogProviderAuthFailed(_logger, ex);
-            throw new PlanGenerationException("LLM của orchestrator bị từ chối (401/403). Kiểm tra API key, model, base URL, rồi bấm Test trong Cấu hình LLM trước khi bind agent.", ex);
-        }
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            // Empty model output — usually a misconfigured provider/model or a refused completion.
-            LogEmptyResponse(_logger, catalog.Count);
-            throw new PlanGenerationException("Mô hình lập kế hoạch không trả về nội dung. Kiểm tra cấu hình provider/model của agent orchestrator.");
+            string? json;
+            try
+            {
+                var replies = await _chat.GetChatMessageContentsAsync(history, cancellationToken: ct).ConfigureAwait(false);
+                json = replies.Count > 0 ? replies[0].Content : null;
+            }
+            catch (Exception ex) when (IsProviderAuthFailure(ex))
+            {
+                // Auth hỏng là lỗi cấu hình — retry vô nghĩa.
+                LogProviderAuthFailed(_logger, ex);
+                throw new PlanGenerationException("LLM của orchestrator bị từ chối (401/403). Kiểm tra API key, model, base URL, rồi bấm Test trong Cấu hình LLM trước khi bind agent.", ex);
+            }
+
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                LogEmptyResponse(_logger, catalog.Count);
+                lastFailure = new PlanGenerationException("Mô hình lập kế hoạch không trả về nội dung. Kiểm tra cấu hình provider/model của agent orchestrator.");
+                history.AddUserMessage("Bạn vừa trả về rỗng. Trả về DUY NHẤT JSON OrchestrationPlanDocument hợp lệ theo schema đã nêu, không thêm chữ nào khác.");
+                continue;
+            }
+
+            OrchestrationPlanDocument? plan = null;
+            try
+            {
+                plan = JsonSerializer.Deserialize<OrchestrationPlanDocument>(NormalizeJson(json), JsonOptions);
+            }
+            catch (JsonException ex)
+            {
+                LogParseFailed(_logger, ex, Truncate(json), ex.Message);
+                var at = string.IsNullOrEmpty(ex.Path) ? "" : $" (vị trí {ex.Path})";
+                lastFailure = new PlanGenerationException($"Mô hình trả về JSON không hợp lệ{at}.", ex);
+                history.AddAssistantMessage(json);
+                history.AddUserMessage($"JSON trên không hợp lệ{at}: {ex.Message}. Sửa lại và trả về DUY NHẤT JSON hợp lệ đúng schema (id/agent/description/status là chuỗi, dependsOn là mảng chuỗi).");
+                continue;
+            }
+
+            if (plan is null)
+            {
+                LogParseFailed(_logger, null, Truncate(json), "deserialized to null");
+                lastFailure = new PlanGenerationException("Mô hình trả về JSON rỗng.");
+                history.AddUserMessage("Kết quả rỗng. Trả về DUY NHẤT JSON OrchestrationPlanDocument hợp lệ.");
+                continue;
+            }
+
+            var validation = OrchestrationPlanValidator.Validate(plan, catalog);
+            if (!validation.IsValid)
+            {
+                LogValidationFailed(_logger, validation.Error, Truncate(json));
+                lastFailure = new PlanGenerationException($"Kế hoạch sai cấu trúc: {validation.Error}");
+                history.AddAssistantMessage(json);
+                history.AddUserMessage($"Kế hoạch trên sai cấu trúc: {validation.Error}. Sửa đúng lỗi này (chỉ dùng agent code trong danh sách cho phép) và trả về DUY NHẤT JSON hợp lệ.");
+                continue;
+            }
+
+            return plan;
         }
 
-        OrchestrationPlanDocument? plan;
-        try
-        {
-            plan = JsonSerializer.Deserialize<OrchestrationPlanDocument>(NormalizeJson(json), JsonOptions);
-        }
-        catch (JsonException ex)
-        {
-            // Model returned non-JSON / malformed JSON. Log the raw response (truncated) server-side so the
-            // root cause is diagnosable without leaking it to the user-facing trace. The safe reason carries
-            // the JSON path (e.g. $.version) — diagnosable on the FE without exposing raw output.
-            LogParseFailed(_logger, ex, Truncate(json), ex.Message);
-            var at = string.IsNullOrEmpty(ex.Path) ? "" : $" (vị trí {ex.Path})";
-            throw new PlanGenerationException($"Mô hình trả về JSON không hợp lệ{at}.", ex);
-        }
-
-        if (plan is null)
-        {
-            LogParseFailed(_logger, null, Truncate(json), "deserialized to null");
-            throw new PlanGenerationException("Mô hình trả về JSON rỗng.");
-        }
-
-        var validation = OrchestrationPlanValidator.Validate(plan, catalog);
-        if (!validation.IsValid)
-        {
-            // JSON parsed but is schema-invalid (e.g. unknown agent, missing field). Distinct reason so the
-            // user/trace sees what was wrong instead of the generic JSON error.
-            LogValidationFailed(_logger, validation.Error, Truncate(json));
-            throw new PlanGenerationException($"Kế hoạch sai cấu trúc: {validation.Error}");
-        }
-
-        return plan;
+        throw lastFailure ?? new PlanGenerationException("Mô hình lập kế hoạch không trả về nội dung.");
     }
 
     private static bool IsProviderAuthFailure(Exception ex) =>

@@ -23,6 +23,9 @@ public sealed record OrchestrationV2ApproveRequest(string? Etag = null);
 public sealed record OrchestrationV2AgentDto(Guid Id, string Code, string DisplayName, string AgentType, bool IsOrchestratable, int Version, string? KbModuleCode, string AllowedToolsJson = "[]", string InputSchemaJson = "{}", string PersonaPrompt = "", Guid? LlmConfigId = null);
 public sealed record OrchestrationV2ScheduleDto(Guid Id, string Name, string GoalTemplate, string Cadence, string TimezoneId, DateTimeOffset NextRunAt, DateTimeOffset? LastRunAt, bool IsActive, bool RequiresApproval, string TriggerType = "cadence", string? EventKey = null);
 public sealed record OrchestrationV2TraceDto(string TaskId, string AgentName, string Phase, string Message, DateTimeOffset OccurredAt);
+// "Tự động xây dựng kế hoạch": orchestrator quét snapshot hệ thống, đề xuất kế hoạch định kỳ chưa trùng.
+public sealed record OrchestrationPlanSuggestionDto(string Name, string Goal, string Cadence, string Reason);
+public sealed record OrchestrationPlanSuggestionsResponse(IReadOnlyList<OrchestrationPlanSuggestionDto> Items, int SkippedDuplicates);
 public sealed record OrchestrationV2MessageDto(Guid Id, string TaskId, string Intent, string Status, string PayloadJson, string? Error, DateTimeOffset CreatedAt, DateTimeOffset? ProcessedAt);
 
 // SPEC-16 P3-2: derive per-agent UseCount (how many tasks in this session use that agent) and CurrentTaskId
@@ -69,7 +72,7 @@ public sealed record OrchestrationV2RunDto(
     IReadOnlyList<OrchestrationV2MessageDto> Messages,
     decimal ActualCostUsd = 0m);
 
-public static class OrchestrationV2Endpoints
+public static partial class OrchestrationV2Endpoints
 {
     private static readonly System.Text.Json.JsonSerializerOptions WebJsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web);
 
@@ -92,6 +95,8 @@ public static class OrchestrationV2Endpoints
         group.MapPost("/agents", UpsertAgentAsync).RequirePermission("orchestration:manage");
         group.MapGet("/schedules", ListSchedulesAsync).RequirePermission("orchestration:view");
         group.MapPost("/schedules", CreateScheduleAsync).RequirePermission("orchestration:manage");
+        // "Tự động xây dựng kế hoạch": LLM đọc snapshot hệ thống + kế hoạch hiện có -> đề xuất checklist.
+        group.MapPost("/plan-suggestions", SuggestPlansAsync).RequirePermission("orchestration:run");
         group.MapPost("/schedules/{id:guid}/run-now", RunScheduleNowAsync).RequirePermission("orchestration:run");
         group.MapPost("/schedules/{id:guid}/pause", PauseScheduleAsync).RequirePermission("orchestration:manage");
         group.MapPost("/schedules/{id:guid}/activate", ActivateScheduleAsync).RequirePermission("orchestration:manage");
@@ -121,7 +126,10 @@ public static class OrchestrationV2Endpoints
         var showArchived = string.Equals(http.Request.Query["archived"], "true", StringComparison.OrdinalIgnoreCase);
         var query = db.AgentSessions.IgnoreQueryFilters().AsNoTracking()
             .Where(s => s.TenantId == tenant.TenantId)
-            .Where(s => showArchived ? s.ArchivedAt != null : s.ArchivedAt == null);
+            .Where(s => showArchived ? s.ArchivedAt != null : s.ArchivedAt == null)
+            // Session nội bộ (auto-reply mỗi tin khách 1 phiên, sandbox chạy thử) không phải "phiên
+            // điều phối" — tràn màn runs thành noise; trace của chúng xem ở màn agent tương ứng.
+            .Where(s => s.Goal != "chat-reply" && s.Goal != "Agent configuration sandbox");
         // SPEC-16 P3-6: when the caller passes ?mine=true, filter to their own runs (URL-independent run list).
         if (string.Equals(http.Request.Query["mine"], "true", StringComparison.OrdinalIgnoreCase))
         {
@@ -436,6 +444,192 @@ public static class OrchestrationV2Endpoints
             .ToListAsync(ct).ConfigureAwait(false);
         return Results.Ok(new { items = schedules });
     }
+
+    // "Tự động xây dựng kế hoạch": quét snapshot dữ liệu tenant -> LLM (binding orchestrator) đề xuất
+    // 3-6 kế hoạch định kỳ -> lọc trùng với schedules hiện có (LLM được nhắc tránh + BE lọc lại lần cuối).
+    private static async Task<IResult> SuggestPlansAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        Clawbot.Agents.Core.Chat.IClaudeChatClient chatClient,
+        Clawbot.Agents.Core.Chat.ILlmCallScope llmScope,
+        IClock clock,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var tenantId = tenant.TenantId;
+
+        // Snapshot gọn — chỉ số liệu tổng hợp, không kéo nội dung (khỏi dính PII).
+        var leadsByStage = await db.Leads.IgnoreQueryFilters().AsNoTracking()
+            .Where(l => l.TenantId == tenantId)
+            .GroupBy(l => l.Stage).Select(g => new { Stage = g.Key, Count = g.Count() })
+            .ToListAsync(ct).ConfigureAwait(false);
+        var openConversations = await db.Conversations.IgnoreQueryFilters().AsNoTracking()
+            .CountAsync(c => c.TenantId == tenantId && c.Status == "open", ct).ConfigureAwait(false);
+        var escalatedConversations = await db.Conversations.IgnoreQueryFilters().AsNoTracking()
+            .CountAsync(c => c.TenantId == tenantId && c.Status == "escalated", ct).ConfigureAwait(false);
+        var contentByStatus = await db.ContentItems.IgnoreQueryFilters().AsNoTracking()
+            .Where(i => i.TenantId == tenantId && i.DeletedAt == null)
+            .GroupBy(i => i.Status).Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToListAsync(ct).ConfigureAwait(false);
+        var existingSchedules = await db.AgentSchedules.IgnoreQueryFilters().AsNoTracking()
+            .Where(s => s.TenantId == tenantId && s.DeletedAt == null)
+            .Select(s => new { s.Name, s.GoalTemplate })
+            .ToListAsync(ct).ConfigureAwait(false);
+        var boundAgents = await db.AgentDefinitions.IgnoreQueryFilters().AsNoTracking()
+            .Where(a => a.TenantId == tenantId && a.DeletedAt == null && a.IsOrchestratable)
+            .Select(a => a.Code)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var snapshot = new System.Text.StringBuilder();
+        snapshot.AppendLine("## Snapshot hệ thống");
+        snapshot.AppendLine(inv, $"- Leads theo giai đoạn: {string.Join(", ", leadsByStage.Select(x => $"{x.Stage}={x.Count}"))}");
+        snapshot.AppendLine(inv, $"- Hội thoại: open={openConversations}, cần hỗ trợ={escalatedConversations}");
+        snapshot.AppendLine(inv, $"- Nội dung: {string.Join(", ", contentByStatus.Select(x => $"{x.Status}={x.Count}"))}");
+        snapshot.AppendLine(inv, $"- Agent khả dụng: {string.Join(", ", boundAgents)}");
+        snapshot.AppendLine();
+        snapshot.AppendLine("## Kế hoạch ĐÃ CÓ (tuyệt đối không đề xuất trùng/na ná)");
+        if (existingSchedules.Count == 0) snapshot.AppendLine("- (chưa có)");
+        foreach (var s in existingSchedules) snapshot.AppendLine(inv, $"- {s.Name}: {s.GoalTemplate}");
+
+        var system = Clawbot.Agents.Core.AgentPromptDefaults.Compose(
+            Clawbot.Agents.Core.AgentPromptDefaults.DefaultFor("orchestrator"))
+            + "\n\n# Định dạng trả lời (bắt buộc)\n"
+            + "Chỉ trả về đúng một JSON object, không thêm chữ nào khác: "
+            + """{"suggestions":[{"name":"Chấm điểm lead nguội","goal":"Chấm điểm toàn bộ lead nguội theo độ tương tác và nguồn, chọn 5 lead ưu tiên chăm trong tuần","cadence":"daily|weekly|monthly|quarterly","reason":"vì sao hệ thống cần, dựa trên snapshot"}]}"""
+            + "\nJSON thô — KHÔNG bọc trong ``` hay thêm lời dẫn/giải thích trước sau."
+            + "\nBẮT BUỘC: toàn bộ giá trị name, goal, reason viết bằng TIẾNG VIỆT 100% (tuyệt đối không dùng tiếng Anh); chỉ cadence giữ nguyên daily|weekly|monthly|quarterly.";
+        var user = snapshot
+            + "\nDựa trên snapshot, đề xuất 3-6 kế hoạch ĐỊNH KỲ mới giúp trung tâm vận hành tốt hơn "
+            + "(chăm lead, nội dung, chất lượng hội thoại, báo cáo...). Mỗi kế hoạch phải khác hẳn danh sách đã có.";
+
+        // LLM chập chờn là bản chất (lúc trả JSON sạch, lúc kèm lời dẫn/bị cạn token giữa chừng) —
+        // retry 1 lần trước khi trả lỗi cho người dùng.
+        var parsed = new List<OrchestrationPlanSuggestionDto>();
+        var replyText = string.Empty;
+        for (var attempt = 1; attempt <= 2 && parsed.Count == 0; attempt++)
+        {
+            try
+            {
+                using var _ = llmScope.Begin(tenantId, "orchestrator", clock.UtcNow);
+                var reply = await chatClient.CompleteAsync(system, Array.Empty<Clawbot.Agents.Core.Chat.ChatTurn>(), user, ct).ConfigureAwait(false);
+                replyText = reply.Text;
+            }
+            catch (Clawbot.Agents.Core.Chat.LlmConfigNotConfiguredException)
+            {
+                return Results.BadRequest(new { error = "llm_config_not_configured" });
+            }
+
+            parsed = ParseSuggestions(replyText);
+            if (parsed.Count == 0)
+            {
+                // Log reply thô (cắt ngắn) — snapshot chỉ chứa số liệu tổng hợp, không PII.
+                var suggestLogger = loggerFactory.CreateLogger(nameof(OrchestrationV2Endpoints));
+                LogSuggestionParseFailed(suggestLogger, tenantId, replyText.Length,
+                    replyText.Length > 800 ? replyText[..800] : replyText);
+            }
+        }
+
+        if (parsed.Count == 0)
+        {
+            var preview = replyText.Length > 300 ? replyText[..300] + "..." : replyText;
+            return Results.UnprocessableEntity(new
+            {
+                error = "suggestion_parse_failed",
+                message = "Orchestrator không trả về đề xuất hợp lệ sau 2 lần thử — thử lại hoặc kiểm tra cấu hình model.",
+                detail = string.IsNullOrWhiteSpace(preview) ? "(model trả về rỗng — nghi hết token output; bỏ trống 'Số token tối đa' trong cấu hình LLM)" : preview,
+            });
+        }
+
+        // Lọc trùng lần cuối: tên chuẩn hóa trùng, hoặc goal giao tokens >= 60% với kế hoạch đã có.
+        var existingNorms = existingSchedules
+            .Select(s => (Name: NormalizePlanText(s.Name), GoalTokens: PlanTokens(s.GoalTemplate)))
+            .ToList();
+        var items = new List<OrchestrationPlanSuggestionDto>();
+        var skipped = 0;
+        foreach (var suggestion in parsed)
+        {
+            var normName = NormalizePlanText(suggestion.Name);
+            var goalTokens = PlanTokens(suggestion.Goal);
+            var duplicate = existingNorms.Any(e =>
+                e.Name == normName
+                || (goalTokens.Count > 0 && e.GoalTokens.Count > 0
+                    && (double)goalTokens.Intersect(e.GoalTokens).Count() / Math.Min(goalTokens.Count, e.GoalTokens.Count) >= 0.6));
+            if (duplicate) { skipped++; continue; }
+            items.Add(suggestion);
+        }
+
+        return Results.Ok(new OrchestrationPlanSuggestionsResponse(items, skipped));
+    }
+
+    internal static List<OrchestrationPlanSuggestionDto> ParseSuggestions(string text)
+    {
+        var result = new List<OrchestrationPlanSuggestionDto>();
+        var candidate = ExtractJsonCandidate(text);
+        if (candidate is null) return result;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(candidate);
+            var root = doc.RootElement;
+            System.Text.Json.JsonElement arr;
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Array)
+                arr = root; // model trả thẳng mảng suggestions
+            else if (root.TryGetProperty("suggestions", out var s) && s.ValueKind == System.Text.Json.JsonValueKind.Array)
+                arr = s;
+            else
+                return result;
+
+            foreach (var el in arr.EnumerateArray())
+            {
+                if (el.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                var name = el.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : null;
+                var goal = el.TryGetProperty("goal", out var g) ? g.GetString()?.Trim() : null;
+                var cadence = el.TryGetProperty("cadence", out var c) ? c.GetString()?.Trim().ToLowerInvariant() : null;
+                var reason = el.TryGetProperty("reason", out var r) ? r.GetString()?.Trim() ?? string.Empty : string.Empty;
+                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(goal)) continue;
+                if (cadence is null || !IsKnownCadence(cadence)) cadence = "weekly";
+                result.Add(new OrchestrationPlanSuggestionDto(name, goal, cadence, reason));
+            }
+        }
+        catch (System.Text.Json.JsonException) { /* fail-safe: caller trả suggestion_parse_failed khi rỗng */ }
+        return result;
+    }
+
+    // Model hay bọc ```json ...``` hoặc thêm lời dẫn dù đã cấm — bóc fence trước, rồi object, rồi mảng.
+    private static string? ExtractJsonCandidate(string text)
+    {
+        var fenceStart = text.IndexOf("```", StringComparison.Ordinal);
+        if (fenceStart >= 0)
+        {
+            var contentStart = text.IndexOf('\n', fenceStart);
+            var fenceEnd = contentStart > 0 ? text.IndexOf("```", contentStart, StringComparison.Ordinal) : -1;
+            if (contentStart > 0 && fenceEnd > contentStart)
+                text = text[(contentStart + 1)..fenceEnd];
+        }
+
+        var objStart = text.IndexOf('{');
+        var objEnd = text.LastIndexOf('}');
+        if (objStart >= 0 && objEnd > objStart) return text[objStart..(objEnd + 1)];
+
+        var arrStart = text.IndexOf('[');
+        var arrEnd = text.LastIndexOf(']');
+        if (arrStart >= 0 && arrEnd > arrStart) return text[arrStart..(arrEnd + 1)];
+
+        return null;
+    }
+
+    [LoggerMessage(EventId = 7401, Level = LogLevel.Warning,
+        Message = "Plan suggestions parse failed for tenant {TenantId}: replyLength={ReplyLength} replyPreview={ReplyPreview}")]
+    private static partial void LogSuggestionParseFailed(ILogger logger, Guid tenantId, int replyLength, string replyPreview);
+
+    private static string NormalizePlanText(string text) =>
+        string.Join(' ', PlanTokens(text));
+
+    private static HashSet<string> PlanTokens(string text) =>
+        new(text.ToLowerInvariant()
+            .Split([' ', ',', '.', ':', ';', '-', '_', '/', '(', ')', '"', '\'', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(t => t.Length > 2), StringComparer.Ordinal);
 
     private static async Task<IResult> CreateScheduleAsync(OrchestrationV2ScheduleRequest body, AppDbContext db, ITenantAccessor tenants, IClock clock, CancellationToken ct)
     {

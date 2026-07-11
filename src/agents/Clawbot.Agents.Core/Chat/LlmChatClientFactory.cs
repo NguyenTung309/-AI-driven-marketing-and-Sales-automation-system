@@ -19,6 +19,8 @@ public sealed class LlmChatClientFactory(IHttpClientFactory httpClientFactory, b
         {
             "anthropic" => new AnthropicChatClient(CreateAnthropicHttpClient(config), config),
             "openai" or "openai-compatible" => new OpenAiChatClient(config, allowPrivateBaseUrls),
+            // Chuẩn OpenAI v2 (Responses API, POST /responses) — cho gateway không expose chat/completions.
+            "openai-responses" => new OpenAiResponsesChatClient(config, allowPrivateBaseUrls),
             _ => throw new NotSupportedException($"Unsupported LLM provider '{config.Provider}'."),
         };
     }

@@ -84,7 +84,10 @@ public sealed partial class ChannelInboundMessageConsumer(
                 .Select(m => m.Content)
                 .ToListAsync(ct).ConfigureAwait(false);
 
-            await _chatAgent.ReplyAsync(msg.TenantId, conversationId, msg.Message.Text, history, ct).ConfigureAwait(false);
+            // Strip HTML trước khi đưa vào ChatAgent: tin Pancake bọc <div>/<br> — đẩy raw vào LLM
+            // vừa bẩn prompt vừa từng khiến model echo nguyên tin khách (kèm thẻ div) làm reply.
+            var userText = ChannelMessageIngestor.StripHtml(msg.Message.Text);
+            await _chatAgent.ReplyAsync(msg.TenantId, conversationId, userText, history, ct).ConfigureAwait(false);
 
             await _notifier.NotifyConversationUpdatedAsync(msg.TenantId,
                 new InboxConversationEvent(conversationId, conv.Status, conv.AssignedTo, conv.LastMessageAt), ct).ConfigureAwait(false);

@@ -107,12 +107,22 @@ public sealed partial class ChatAgentGrpcService(
         {
             LogChatFailure(_logger, ex, tenantId, convId);
             session.AppendTrace("chat", "chat-agent", "error", ex.Message, _clock.UtcNow);
-            session.Finish(_clock.UtcNow);
-            await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
+            session.Fail(_clock.UtcNow);
+            // CancellationToken.None: request bị hủy (client timeout/LLM chậm) vẫn phải chốt session —
+            // save bằng token đã cancel sẽ throw ngay và để session kẹt "running" vĩnh viễn.
+            await _db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
             // Let the typed "no provider config bound" error escape so the interceptor maps it to
             // FailedPrecondition/llm_config_not_configured instead of a generic Internal failure.
             if (ex is CoreChat.LlmConfigNotConfiguredException) throw;
             throw new RpcException(new Status(StatusCode.Internal, "chat-agent failure"));
+        }
+
+        // Echo guard: gateway/model lỗi đôi khi trả lại NGUYÊN tin khách làm reply (quan sát gpt-5.5
+        // qua gateway 2026-07) — reply trùng tin nhập vào thì chặn hẳn, không cho vào hàng duyệt.
+        if (!reply.Blocked && !string.IsNullOrWhiteSpace(reply.Text)
+            && string.Equals(NormalizeForEchoCheck(reply.Text), NormalizeForEchoCheck(request.UserText), StringComparison.OrdinalIgnoreCase))
+        {
+            reply = reply with { Blocked = true, BlockReason = "echo_reply" };
         }
 
         // Review-gate P3 manual-mode: tenant bật RequireChatReplyApproval → hold MỌI reply chờ người duyệt
@@ -248,6 +258,12 @@ public sealed partial class ChatAgentGrpcService(
         if (string.IsNullOrWhiteSpace(skills)) return custom;
         return string.IsNullOrWhiteSpace(custom) ? skills : $"{custom}\n\n{skills}";
     }
+
+    // So sánh echo: bỏ thẻ HTML + gom khoảng trắng — tin Pancake bọc <div> còn reply model là text trần.
+    private static string NormalizeForEchoCheck(string text) =>
+        System.Text.RegularExpressions.Regex.Replace(
+            System.Text.RegularExpressions.Regex.Replace(text, "<[^>]+>", " "),
+            @"\s+", " ").Trim();
 
     private static string? ExtractSystemPrompt(string? configJson)
     {
