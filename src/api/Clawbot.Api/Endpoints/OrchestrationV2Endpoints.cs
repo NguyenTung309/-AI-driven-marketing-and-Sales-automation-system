@@ -497,12 +497,22 @@ public static partial class OrchestrationV2Endpoints
             Clawbot.Agents.Core.AgentPromptDefaults.DefaultFor("orchestrator"))
             + "\n\n# Định dạng trả lời (bắt buộc)\n"
             + "Chỉ trả về đúng một JSON object, không thêm chữ nào khác: "
-            + """{"suggestions":[{"name":"Chấm điểm lead nguội","goal":"Chấm điểm toàn bộ lead nguội theo độ tương tác và nguồn, chọn 5 lead ưu tiên chăm trong tuần","cadence":"daily|weekly|monthly|quarterly","reason":"vì sao hệ thống cần, dựa trên snapshot"}]}"""
+            + """{"suggestions":[{"name":"Chấm điểm khách tiềm năng","goal":"Chấm điểm toàn bộ khách tiềm năng theo mức tương tác gần đây và nguồn, chọn 5 khách ưu tiên chăm trong tuần","cadence":"daily|weekly|monthly|quarterly","reason":"vì sao hệ thống cần, dựa trên snapshot"}]}"""
             + "\nJSON thô — KHÔNG bọc trong ``` hay thêm lời dẫn/giải thích trước sau."
             + "\nBẮT BUỘC: toàn bộ giá trị name, goal, reason viết bằng TIẾNG VIỆT 100% (tuyệt đối không dùng tiếng Anh); chỉ cadence giữ nguyên daily|weekly|monthly|quarterly.";
         var user = snapshot
-            + "\nDựa trên snapshot, đề xuất 3-6 kế hoạch ĐỊNH KỲ mới giúp trung tâm vận hành tốt hơn "
-            + "(chăm lead, nội dung, chất lượng hội thoại, báo cáo...). Mỗi kế hoạch phải khác hẳn danh sách đã có.";
+            + "\n## Nhóm kế hoạch NỀN TẢNG (ưu tiên đề xuất TRƯỚC nếu danh sách đã có còn thiếu)"
+            + "\n- Tự động sáng tạo + đăng bài định kỳ theo lịch (tuyển sinh, khóa học, thương hiệu)"
+            + "\n- Tự động chấm điểm + phân loại khách hàng tiềm năng, chọn nhóm ưu tiên chăm"
+            + "\n- Tự động nhắn lại chăm sóc khách tiềm năng lâu không tương tác (khơi lại quan tâm theo chuỗi định kỳ)"
+            + "\n- Tự động cải thiện kho tri thức: rà hội thoại tìm câu hỏi AI trả lời kém, đề xuất bổ sung KB"
+            + "\n- Nghiên cứu chủ đề/đối thủ định kỳ để lên brief nội dung"
+            + "\n- Báo cáo KPI vận hành định kỳ cho quản lý"
+            + "\n"
+            + "\nDựa trên snapshot, đề xuất CÀNG NHIỀU kế hoạch ĐỊNH KỲ mới càng tốt (tối thiểu 8, không giới hạn trên): "
+            + "điền đủ nhóm NỀN TẢNG còn thiếu trước, rồi mở rộng sang kế hoạch chuyên sâu (giám sát cảm xúc, "
+            + "cân bằng tải, thử nghiệm nội dung, chăm khách cũ...). Sắp xếp kết quả: nền tảng trước, chuyên sâu sau. "
+            + "Mỗi kế hoạch phải khả thi với danh sách agent khả dụng ở trên và khác hẳn danh sách đã có.";
 
         // LLM chập chờn là bản chất (lúc trả JSON sạch, lúc kèm lời dẫn/bị cạn token giữa chừng) —
         // retry 1 lần trước khi trả lỗi cho người dùng.
