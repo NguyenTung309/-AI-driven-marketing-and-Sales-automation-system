@@ -89,9 +89,12 @@ Các nhóm biến quan trọng:
 | `PANCAKE_TENANT_SLUG` | Tenant nhận webhook | Local dev dùng `default` |
 | `CLAWBOT_PUBLIC_BASE_URL` | URL public nhận webhook | Dùng URL tunnel hoặc URL deploy thật |
 | `ANTHROPIC_API_KEY`, `EMBEDDING_API_KEY`, `CONTENT_LLM_API_KEY` | AI/LLM | Không có key thì các luồng AI thật có thể không chạy đầy đủ |
-| `META_ACCESS_TOKEN`, `TIKTOK_ACCESS_TOKEN` | Ads/publisher | Chỉ cần khi demo publish/ads live |
+| `Meta__Graph__AppId`, `Meta__Graph__AppSecret`, `Meta__Graph__ConfigurationId`, `Meta__Graph__AuthorizationMode` | Meta Graph/Marketing API | Fallback tùy chọn; local dùng `development_user`, production dùng `business_system_user`; cấu hình chính được tenant lưu mã hóa tại `/system` > Kênh đăng bài |
+| `TIKTOK_ACCESS_TOKEN` | TikTok Ads | Chỉ cần khi demo TikTok Ads live |
 
-Điểm dễ nhầm: `deploy\.env` được Docker Compose và các script deploy/readiness đọc. Khi chạy `dotnet run` thủ công, .NET không tự import toàn bộ biến trong `.env`. Nếu cần API hoặc AgentService dùng credential thật khi chạy thủ công, đặt biến môi trường trong terminal đang chạy service, hoặc cấu hình qua màn `/system` nếu luồng đó đã sẵn sàng ở branch đang chạy.
+Điểm dễ nhầm: `deploy\.env` được Docker Compose đọc nhưng nhóm `Meta__Graph__*` chỉ là bootstrap fallback. Quản trị viên tenant có thể nhập/cập nhật Meta App trực tiếp tại `/system`; cấu hình DB mã hóa luôn được ưu tiên. Với các credential khác, hãy đặt biến môi trường trong terminal đang chạy service hoặc dùng màn cấu hình tương ứng.
+
+Riêng tích hợp Meta Graph API v25.0, xem hướng dẫn đầy đủ tại `docs/meta-facebook-graph-v25.md`. Không dán Page Access Token của Facebook vào màn quản trị; token được nhận qua Facebook Login for Business và mã hóa trong database. Chế độ `development_user` cho phép test localhost bằng User access token của tài khoản có vai trò trong App; production dùng System-user access token.
 
 ## 5. Chạy nhanh bằng one-click
 

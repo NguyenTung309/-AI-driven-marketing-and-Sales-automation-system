@@ -153,8 +153,9 @@ public sealed partial class ContentAgentGrpcService(
             ?? throw new RpcException(new Status(StatusCode.NotFound, "content item not found"));
 
         if (!string.Equals(item.Status, "draft", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(item.Status, "approved", StringComparison.OrdinalIgnoreCase))
-            throw new RpcException(new Status(StatusCode.FailedPrecondition, $"content item is '{item.Status}', only draft or approved items can be reviewed"));
+            && !string.Equals(item.Status, "approved", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(item.Status, "scheduled", StringComparison.OrdinalIgnoreCase))
+            throw new RpcException(new Status(StatusCode.FailedPrecondition, $"content item is '{item.Status}', only draft, approved or scheduled items can be reviewed"));
 
         var reviewerDefId = await _db.AgentDefinitions
             .IgnoreQueryFilters()
@@ -176,7 +177,11 @@ public sealed partial class ContentAgentGrpcService(
         var now = _clock.UtcNow;
         if (result.Verdict == CoreContent.ContentReviewResult.Approve)
         {
-            item.ApproveByAgent(reviewerDefId.Value, now);
+            // Item đã 'scheduled': chỉ gắn chữ ký, GIỮ status để publish job đăng (ApproveByAgent sẽ hủy lịch).
+            if (string.Equals(item.Status, "scheduled", StringComparison.OrdinalIgnoreCase))
+                item.AttachAgentSignoff(reviewerDefId.Value, now);
+            else
+                item.ApproveByAgent(reviewerDefId.Value, now);
             await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
         }
         else if (result.Verdict == CoreContent.ContentReviewResult.RejectVerdict)

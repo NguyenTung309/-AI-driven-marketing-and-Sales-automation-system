@@ -132,6 +132,52 @@ public sealed class KnowledgeDistillationJobTests
         (await harness.Db.KbSuggestions.IgnoreQueryFilters().CountAsync()).Should().Be(1);
     }
 
+    [Fact]
+    public async Task Mines_sale_answered_source_as_add_suggestion()
+    {
+        using var harness = new Harness();
+        await harness.SeedSaleAnsweredConversationAsync();
+        // op=add (chưa có module) => distill -> consolidate add -> reviewer; accuracy NULL nên chờ người.
+        harness.Script(
+            """{"title":"Lớp mất gốc","contentMd":"## Sơ cấp\nKhai giảng đầu tháng","rationale":"sale trả lời tay","normalizedQuestion":"lop mat goc"}""",
+            """{"op":"add","targetModuleId":null,"mergedContentMd":null}""",
+            ReviewApprove);
+
+        await harness.Job.RunForTenantAsync(harness.TenantId, requireHumanReview: false);
+
+        var suggestion = await harness.Db.KbSuggestions.IgnoreQueryFilters().SingleAsync();
+        suggestion.Op.Should().Be(KbSuggestion.OpAdd);
+        suggestion.Status.Should().Be(KbSuggestion.StatusPending);
+        suggestion.EvidenceJson.Should().Contain("sale_answered");
+    }
+
+    [Fact]
+    public async Task Mines_repeated_question_source()
+    {
+        using var harness = new Harness();
+        await harness.SeedRepeatedQuestionAsync(times: 3);
+        harness.Script(
+            """{"title":"Học online","contentMd":"## Online\nCó lớp online","rationale":"hỏi lặp nhiều","normalizedQuestion":"day online"}""",
+            """{"op":"add","targetModuleId":null,"mergedContentMd":null}""",
+            ReviewApprove);
+
+        await harness.Job.RunForTenantAsync(harness.TenantId, requireHumanReview: false);
+
+        var suggestion = await harness.Db.KbSuggestions.IgnoreQueryFilters().SingleAsync();
+        suggestion.EvidenceJson.Should().Contain("repeated_question");
+    }
+
+    [Fact]
+    public async Task Repeated_question_below_threshold_not_mined()
+    {
+        using var harness = new Harness();
+        await harness.SeedRepeatedQuestionAsync(times: 2); // < ngưỡng 3
+
+        await harness.Job.RunForTenantAsync(harness.TenantId, requireHumanReview: false);
+
+        (await harness.Db.KbSuggestions.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+    }
+
     private sealed class Harness : IDisposable
     {
         private readonly TestAppDb _testDb;
@@ -199,6 +245,28 @@ public sealed class KnowledgeDistillationJobTests
 
             await Db.SaveChangesAsync();
             return module.Id;
+        }
+
+        // Nguồn 2: hội thoại KHÔNG escalated, khách hỏi rồi sale (out/user) trả lời tay trong cửa sổ.
+        public async Task SeedSaleAnsweredConversationAsync()
+        {
+            var conv = Clawbot.Domain.Conversations.Conversation.Open(TenantId, "zalo", "thread-sale", Now.AddHours(-3));
+            conv.AppendMessage("in", "contact", "Có lớp cho người mất gốc không?", "text", Now.AddHours(-2));
+            conv.AppendMessage("out", "user", "Có ạ, lớp sơ cấp khai giảng đầu tháng.", "text", Now.AddHours(-1));
+            Db.Conversations.Add(conv);
+            await Db.SaveChangesAsync();
+        }
+
+        // Nguồn 3: cùng 1 câu hỏi lặp ở >= 3 hội thoại khác nhau trong cửa sổ 7 ngày.
+        public async Task SeedRepeatedQuestionAsync(int times = 3)
+        {
+            for (var i = 0; i < times; i++)
+            {
+                var conv = Clawbot.Domain.Conversations.Conversation.Open(TenantId, "zalo", $"thread-rep-{i}", Now.AddDays(-2));
+                conv.AppendMessage("in", "contact", "Trung tâm có dạy online không?", "text", Now.AddDays(-2).AddMinutes(i));
+                Db.Conversations.Add(conv);
+            }
+            await Db.SaveChangesAsync();
         }
 
         public void Dispose() => _testDb.Dispose();

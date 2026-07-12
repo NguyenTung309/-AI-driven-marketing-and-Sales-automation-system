@@ -195,7 +195,7 @@ public static class AdminUsersEndpoints
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.ExternalPageId == pageId && i.DeletedAt == null, ct);
         if (inbox is null)
-            return Results.BadRequest(new { error = "inbox_not_found", message = "Kênh chưa tồn tại - nhập kèm Page Access Token để tạo kênh." });
+            return Results.BadRequest(new { error = "inbox_not_found", message = "Kênh chưa tồn tại - nhập kèm Pancake Page Access Token để tạo kênh." });
 
         // Doi ten hien thi khong can nhap lai token
         if (name.Length > 0 && inbox.Name != name)

@@ -32,7 +32,7 @@ public sealed class PublishingContentNotifierTests
         request.Severity.Should().Be("warning");
         request.Title.Should().Contain("facebook");
         request.Body.Should().Contain("Graph token expired");
-        request.Link.Should().Be("/content");
+        request.Link.Should().Be($"/content?tab=queue&itemId={evt.ContentItemId}");
     }
 
     [Fact]

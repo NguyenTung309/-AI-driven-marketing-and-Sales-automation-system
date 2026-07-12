@@ -281,6 +281,20 @@ public sealed class KbTestCaseConfiguration : IEntityTypeConfiguration<KbTestCas
     }
 }
 
+public sealed class AgentMemoryConfiguration : IEntityTypeConfiguration<AgentMemory>
+{
+    public void Configure(EntityTypeBuilder<AgentMemory> builder)
+    {
+        builder.ToTable("agent_memories");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.AgentCode).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.Fact).HasMaxLength(1024).IsRequired();
+        builder.Property(x => x.Category).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.Confidence).HasPrecision(3, 2);
+        builder.HasIndex(x => new { x.TenantId, x.AgentCode, x.IsActive });
+    }
+}
+
 public sealed class ContactMemoryConfiguration : IEntityTypeConfiguration<Clawbot.Domain.Contacts.ContactMemory>
 {
     public void Configure(EntityTypeBuilder<Clawbot.Domain.Contacts.ContactMemory> builder)

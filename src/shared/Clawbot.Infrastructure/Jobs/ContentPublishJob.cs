@@ -78,7 +78,8 @@ public sealed partial class ContentPublishJob(
                 schedule.Platform,
                 item.Body,
                 item.AssetsJson,
-                schedule.ScheduledAt);
+                schedule.ScheduledAt,
+                schedule.MetaAssetId);
             var result = await _publisher.PublishAsync(request, ct).ConfigureAwait(false);
 
             if (result.Success)

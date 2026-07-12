@@ -114,10 +114,12 @@ public sealed class AdsAgentAdapter(AdsAgent agent) : AgentAdapterBase("ads-agen
     protected override async Task<string> ExecuteCoreAsync(AgentTask task, CancellationToken ct)
     {
         var input = task.Input;
+        var tenantId = AgentTaskInput.RequiredGuid(input, "tenant_id");
         var operation = AgentTaskInput.OptionalString(input, "operation") ?? "apply";
         if (string.Equals(operation, "lookalike", StringComparison.OrdinalIgnoreCase))
         {
             var audienceId = await _agent.BuildLookalikeAsync(
+                tenantId,
                 AgentTaskInput.RequiredString(input, "platform"),
                 AgentTaskInput.StringList(input, "seed_contact_keys"), ct).ConfigureAwait(false);
             return Json(new { audienceId });
@@ -126,6 +128,7 @@ public sealed class AdsAgentAdapter(AdsAgent agent) : AgentAdapterBase("ads-agen
         if (string.Equals(operation, "remarketing", StringComparison.OrdinalIgnoreCase))
         {
             var ok = await _agent.BuildRemarketingAsync(
+                tenantId,
                 AgentTaskInput.RequiredString(input, "platform"),
                 AgentTaskInput.RequiredString(input, "audience_name"),
                 AgentTaskInput.StringList(input, "contact_keys"), ct).ConfigureAwait(false);
@@ -133,6 +136,7 @@ public sealed class AdsAgentAdapter(AdsAgent agent) : AgentAdapterBase("ads-agen
         }
 
         var applied = await _agent.ApplyActionAsync(
+            tenantId,
             AgentTaskInput.RequiredString(input, "platform"),
             AgentTaskInput.RequiredString(input, "campaign_id"),
             AgentTaskInput.RequiredString(input, "action"),

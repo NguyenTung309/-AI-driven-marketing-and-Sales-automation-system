@@ -11,7 +11,7 @@ description: Break down work into actionable tasks and estimate timeline
 
 - [x] M1 — Vòng học kín chạy thật (code xong 2026-07-11, cần chạy lại run-all.bat để nạp migration 0056 + job; xác nhận thật sau 1 đêm chạy): đêm chạy job chưng cất, sáng thấy đề xuất chờ duyệt kèm accuracy trước/sau, duyệt xong AI trả lời được câu hôm qua trượt.
 - [x] M2 — AI nhớ khách (code xong 2026-07-11; job tests chờ Infrastructure.Tests hết vỡ compile bởi refactor Meta song song): hội thoại khách cũ có facts inject vào prompt, sale thấy "Ghi nhớ về khách" ở panel phải.
-- [ ] M3 — Tự bảo trì: reviewer-agent có memory lỗi hay gặp; KB được đề xuất nén/gộp hằng tuần.
+- [x] M3 — Tự bảo trì (code xong 2026-07-12; còn 3.3 đo vận hành sau 2 tuần deploy): reviewer-agent có memory lỗi hay gặp; KB được đề xuất nén/gộp hằng tuần.
 
 ## Task Breakdown
 **What specific work needs to be done?**
@@ -37,9 +37,14 @@ description: Break down work into actionable tasks and estimate timeline
 - [x] 2.6 API + FE. DONE 2026-07-11: ContactsEndpoints GET memories / DELETE all (xóa cứng — quyền được quên) / DELETE 1 fact (hạ cờ giữ vết); FE `ContactMemoryPanel` ở panel phải hội thoại (nhãn category tiếng Việt, nút gỡ từng fact) + contactMemories.ts; tsc sạch.
 
 ### Phase 3: Memory theo agent + nén KB (M3)
-- [ ] 3.1 `agent_memories` (migration 0058): reviewer-agent tích lũy lỗi content lặp (mine từ traces review_rejected), inject top-k vào persona reviewer khi chấm; tests.
-- [ ] 3.2 `KbCompressionJob` weekly: tìm KB modules na ná (title/keyword), sinh suggestion `op=merge` đi đúng pipeline chờ-duyệt của Phase 1 (không đường tắt).
-- [ ] 3.3 Đo sau 2 tuần chạy: accuracy trend + số đề xuất được duyệt/loại — quyết định chỉnh ngưỡng (câu lặp ≥3, idle 15 phút, cap 50).
+- [x] 3.1 `agent_memories` (migration 0058). DONE 2026-07-12: Domain AgentMemory (supersede như ContactMemory) + EF config + repair block; `AgentMistakeExtractor` (memory-ops, category ép "mistake"); `AgentMemoryDistillationJob` 01:30 VN mine `content_items.rejected_reason` 24h (cap 50/tenant) → bài học cho reviewer-agent; inject qua `IAgentMemoryProvider` (Agents.Core) + `EfAgentMemoryProvider` (Infrastructure DI cả 2 host) → `ContentReviewer.ComposePersonaAsync` nạp top-10 vào persona cả 2 đường chấm, provider lỗi không chặn review. Tests: Domain 5 + extractor 3 + job 2 + reviewer-injection 2.
+- [x] 3.2 `KbCompressionJob` weekly. DONE 2026-07-12: Chủ nhật 03:00 VN; `ProposeMergesAsync` (cặp trùng từ catalog excerpt, id bịa/tự-gộp bị bắt sửa) → `MergeModulesAsync` (gộp FULL content, mâu thuẫn giữ cả 2 + [CẦN NGƯỜI KIỂM]) → suggestion `op=merge` dedup theo cặp code; **merge LUÔN chờ người** (không đo accuracy → rail đóng, không auto — gộp nhóm là thay đổi lớn, duyệt xong người tự lưu trữ nhóm nguồn, ghi rõ trong rationale + notification). Tests 2 (pending-never-auto + dedup cặp).
+- [ ] 3.3 Đo sau 2 tuần chạy (việc VẬN HÀNH, không phải code — bắt đầu tính từ ngày deploy): accuracy trend + số đề xuất được duyệt/loại — quyết định chỉnh ngưỡng (câu lặp ≥3, idle 15 phút, cap 50).
+
+### Fix từ /check-implementation (2026-07-12)
+- [x] CRITICAL: accuracy rail tautology — KbSuggestionAccuracyEvaluator đổi `contextAfter = proposedContentMd` (replace, bỏ append) nên accuracy_after phản ánh đúng trạng thái post-deploy; rail lấy lại răng. +3 test evaluator (proposed kém → after < before → chặn được).
+- [x] LOW: KbCompressionJob redact cả title + rationale (đồng bộ KnowledgeDistillationJob).
+- [x] MEDIUM: +3 test mining nguồn 2 (sale_answered) & 3 (repeated_question) + case dưới ngưỡng không mine.
 
 ## Dependencies
 **What needs to happen in what order?**

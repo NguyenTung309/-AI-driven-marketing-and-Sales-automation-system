@@ -134,6 +134,16 @@
       - PANCAKE_ACCESS_TOKEN=${PANCAKE_ACCESS_TOKEN:-}
       - PANCAKE_PAGE_ACCESS_TOKEN=${PANCAKE_PAGE_ACCESS_TOKEN:-}
       - PANCAKE_PAGE_ID=${PANCAKE_PAGE_ID:-}
+      - Meta__Graph__AppId=${Meta__Graph__AppId:-}
+      - Meta__Graph__AppSecret=${Meta__Graph__AppSecret:-}
+      - Meta__Graph__ConfigurationId=${Meta__Graph__ConfigurationId:-}
+      - Meta__Graph__AuthorizationMode=${Meta__Graph__AuthorizationMode:-business_system_user}
+      - Meta__Graph__WebhookVerifyToken=${Meta__Graph__WebhookVerifyToken:-}
+      - Meta__Graph__RedirectUri=${Meta__Graph__RedirectUri:-}
+      - Meta__Graph__FrontendReturnUrl=${Meta__Graph__FrontendReturnUrl:-}
+      - Meta__Graph__ApiVersion=${Meta__Graph__ApiVersion:-v25.0}
+      - Ads__Meta__Enabled=${Ads__Meta__Enabled:-false}
+      - Ads__Meta__WebhookSecret=${Ads__Meta__WebhookSecret:-}
     depends_on:
       sqlserver:
         condition: service_healthy

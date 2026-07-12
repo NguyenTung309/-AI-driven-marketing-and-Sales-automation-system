@@ -109,6 +109,24 @@ public sealed class ContentWorkflowTests
         item.UpdatedAt.Should().Be(publishedAt);
     }
 
+    // Review-gate: ký reviewer lên item ĐÃ scheduled không được revert về approved (không thì hủy lịch,
+    // publish job bỏ qua). AttachAgentSignoff giữ status, publish job đăng được sau khi có chữ ký.
+    [Fact]
+    public void ContentItem_attach_agent_signoff_keeps_scheduled_status_and_unblocks_publish()
+    {
+        var item = ContentItem.Create(TenantId, "facebook", "Post body", createdBy: null, CreatedAt);
+        item.MarkScheduled(CreatedAt.AddHours(1));
+        var agentId = Guid.NewGuid();
+
+        item.AttachAgentSignoff(agentId, CreatedAt.AddHours(2));
+
+        item.Status.Should().Be("scheduled");
+        item.ApprovedByAgentId.Should().Be(agentId);
+        item.Invoking(i => i.MarkPublished(CreatedAt.AddHours(3), requireAgentReview: true))
+            .Should().NotThrow();
+        item.Status.Should().Be("published");
+    }
+
     [Fact]
     public void ContentItem_approve_records_audit_and_updated_at()
     {

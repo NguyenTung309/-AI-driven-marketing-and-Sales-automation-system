@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getTenantOrchestration, setTenantOrchestration } from "@/shared/api/admin";
 import { Alert } from "@/shared/ui/Alert";
 import { Modal } from "@/shared/ui/Modal";
 import { toUserFriendlyError } from "@/shared/utils/userText";
@@ -151,9 +152,14 @@ function SuggestionCard({ suggestion, busy, onApprove, onReject }: SuggestionCar
   );
 }
 
+interface KbSuggestionsPanelProps {
+  // alwaysShow: dùng khi panel là 1 tab — hiện cả khi rỗng (kèm empty-state) thay vì tự ẩn.
+  readonly alwaysShow?: boolean;
+}
+
 // Panel "Đề xuất tri thức" (ai-self-learning-memory): đề xuất do job chưng cất đêm sinh —
 // pending chờ người duyệt; mục "Đã tự duyệt" để soi lại các bản AI tự đưa vào kho.
-export function KbSuggestionsPanel() {
+export function KbSuggestionsPanel({ alwaysShow = false }: KbSuggestionsPanelProps = {}) {
   const queryClient = useQueryClient();
   const [showDecided, setShowDecided] = useState(false);
   const [rejectTarget, setRejectTarget] = useState<KbSuggestion | null>(null);
@@ -181,7 +187,23 @@ export function KbSuggestionsPanel() {
     },
   });
 
-  if (suggestionsQuery.isLoading || (pending.length === 0 && decided.length === 0)) return null;
+  // Toggle "AI tự duyệt tri thức" (cùng flag requireKbHumanReview với trang /agents). Bật = AI tự đưa
+  // vào kho khi đạt chuẩn kép; tắt = mọi đề xuất chờ người. Đặt ngay đây cho đúng ngữ cảnh quản đề xuất.
+  const orchestrationQuery = useQuery({ queryKey: ["tenant", "orchestration"], queryFn: getTenantOrchestration });
+  const requireKbHumanReview = orchestrationQuery.data?.requireKbHumanReview ?? false;
+  const autoApproveMutation = useMutation({
+    mutationFn: (nextRequireHuman: boolean) =>
+      setTenantOrchestration(
+        orchestrationQuery.data?.requireApproval ?? false,
+        orchestrationQuery.data?.monthlyCostCapUsd ?? null,
+        { requireKbHumanReview: nextRequireHuman },
+      ),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
+    },
+  });
+
+  if (!alwaysShow && (suggestionsQuery.isLoading || (pending.length === 0 && decided.length === 0))) return null;
 
   const busy = approveMutation.isPending || rejectMutation.isPending;
   const error = suggestionsQuery.error ?? approveMutation.error ?? rejectMutation.error;
@@ -195,15 +217,31 @@ export function KbSuggestionsPanel() {
             AI chưng cất mỗi đêm từ câu AI trả lời kém, câu sale trả lời tay và câu hỏi lặp nhiều.
           </p>
         </div>
-        {decided.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-3">
           <button
-            className="text-body-sm font-semibold text-primary hover:underline"
-            onClick={() => setShowDecided((v) => !v)}
+            aria-pressed={!requireKbHumanReview}
+            className={[
+              "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-body-sm font-semibold transition-colors disabled:opacity-60",
+              !requireKbHumanReview ? "border-primary bg-primary/10 text-primary" : "border-outline bg-surface-container-lowest text-secondary",
+            ].join(" ")}
+            disabled={autoApproveMutation.isPending || orchestrationQuery.isLoading}
+            onClick={() => autoApproveMutation.mutate(!requireKbHumanReview)}
+            title="Bật: tri thức AI chưng cất được tự đưa vào kho khi đạt chuẩn kép (reviewer duyệt + accuracy không giảm); không đạt vẫn chờ người. Tắt: mọi tri thức mới chờ người duyệt."
             type="button"
           >
-            {showDecided ? "Ẩn lịch sử đã quyết" : `Lịch sử đã quyết (${decided.length})`}
+            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">school</span>
+            {!requireKbHumanReview ? "AI tự duyệt & lưu kho: BẬT" : "AI tự duyệt & lưu kho: tắt"}
           </button>
-        ) : null}
+          {decided.length > 0 ? (
+            <button
+              className="text-body-sm font-semibold text-primary hover:underline"
+              onClick={() => setShowDecided((v) => !v)}
+              type="button"
+            >
+              {showDecided ? "Ẩn lịch sử đã quyết" : `Lịch sử đã quyết (${decided.length})`}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {error ? (
@@ -212,7 +250,9 @@ export function KbSuggestionsPanel() {
         </div>
       ) : null}
 
-      {pending.length === 0 ? (
+      {suggestionsQuery.isLoading ? (
+        <p className="mt-3 text-body-sm text-on-surface-variant">Đang tải...</p>
+      ) : pending.length === 0 ? (
         <p className="mt-3 text-body-sm text-on-surface-variant">Không có đề xuất nào chờ duyệt.</p>
       ) : (
         <div className="mt-3 space-y-3">

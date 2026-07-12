@@ -44,6 +44,7 @@ public static class HangfireModule
         services.AddScoped<IWeeklyTrendScanner, GrpcWeeklyTrendScanner>();
         services.AddScoped<WeeklyTrendScanJob>();
         services.AddScoped<ContentPublishJob>();
+        services.AddScoped<MetaEngagementSyncJob>();
         services.AddScoped<MetaConnectionHealthJob>();
         services.AddScoped<MetaBusinessIntegrationWebhookJob>();
         services.AddScoped<AdsRuleEvaluationJob>();
@@ -76,6 +77,10 @@ public static class HangfireModule
         // Lớp 2: trích facts về khách sau hội thoại idle.
         services.AddScoped<Clawbot.Agents.Core.Learning.ContactFactExtractor>();
         services.AddScoped<ContactMemoryExtractionJob>();
+        // Lớp 3: bài học cho reviewer từ lý do reject + nén KB weekly.
+        services.AddScoped<Clawbot.Agents.Core.Learning.AgentMistakeExtractor>();
+        services.AddScoped<AgentMemoryDistillationJob>();
+        services.AddScoped<KbCompressionJob>();
         return services;
     }
 
@@ -156,6 +161,12 @@ public static class HangfireModule
             "default",
             j => j.RunScanAsync(CancellationToken.None),
             "*/2 * * * *");
+        // Refresh like/comment counts on published Facebook posts (Graph API — Pancake has no metric).
+        recurring.AddOrUpdate<MetaEngagementSyncJob>(
+            "meta-engagement-sync",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            "*/15 * * * *");
         recurring.AddOrUpdate<AdsRuleEvaluationJob>(
             "ads-rule-evaluation",
             "ads",
@@ -241,5 +252,19 @@ public static class HangfireModule
             "default",
             j => j.RunScanAsync(CancellationToken.None),
             "*/30 * * * *");
+        // AI tự học Lớp 3: bài học reviewer từ lý do reject — 01:30 giờ VN (trước distillation 02:00).
+        recurring.AddOrUpdate<AgentMemoryDistillationJob>(
+            "agent-memory-distillation",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            "30 1 * * *",
+            new RecurringJobOptions { TimeZone = VietnamTimeZone });
+        // AI tự học 3.2: nén/gộp KB trùng lắp — Chủ nhật 03:00 giờ VN, đề xuất merge luôn chờ người.
+        recurring.AddOrUpdate<KbCompressionJob>(
+            "kb-compression",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            Cron.Weekly(DayOfWeek.Sunday, 3, 0),
+            new RecurringJobOptions { TimeZone = VietnamTimeZone });
     }
 }

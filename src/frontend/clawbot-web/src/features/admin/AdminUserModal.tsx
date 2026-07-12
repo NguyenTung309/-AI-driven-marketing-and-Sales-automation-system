@@ -147,7 +147,7 @@ export function AdminUserModal({
               </label>
             </div>
             <label className="block">
-              <span className="mb-1 block text-label-sm text-on-surface-variant">Page Access Token</span>
+              <span className="mb-1 block text-label-sm text-on-surface-variant">Pancake Page Access Token</span>
               <input
                 className={inputClass}
                 type="password"

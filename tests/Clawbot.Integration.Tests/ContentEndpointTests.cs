@@ -91,6 +91,14 @@ public sealed class ContentEndpointTests : IClassFixture<SqlServerFixture>, IAsy
         var updated = await ReadJsonAsync(update);
         updated.RootElement.GetProperty("body").GetString().Should().Be("Updated carousel draft");
 
+        var read = await _client.GetAsync($"/api/content/items/{itemId}");
+        read.StatusCode.Should().Be(HttpStatusCode.OK);
+        var readJson = await ReadJsonAsync(read);
+        readJson.RootElement.GetProperty("id").GetGuid().Should().Be(itemId);
+
+        var missing = await _client.GetAsync($"/api/content/items/{Guid.NewGuid()}");
+        missing.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
         var approve = await _client.PostAsync($"/api/content/items/{itemId}/approve", content: null);
         approve.StatusCode.Should().Be(HttpStatusCode.OK);
         var approved = await ReadJsonAsync(approve);

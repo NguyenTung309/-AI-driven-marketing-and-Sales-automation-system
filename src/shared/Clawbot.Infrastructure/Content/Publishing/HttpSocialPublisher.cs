@@ -12,7 +12,8 @@ public sealed record PublishRequest(
     string Platform,
     string Body,
     string AssetsJson,
-    DateTimeOffset ScheduledAt);
+    DateTimeOffset ScheduledAt,
+    Guid? MetaAssetId = null);
 
 public sealed record PublishResult(bool Success, string? PostUrl, string? Error);
 

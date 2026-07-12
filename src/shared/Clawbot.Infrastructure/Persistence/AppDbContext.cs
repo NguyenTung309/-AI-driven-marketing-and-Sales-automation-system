@@ -70,6 +70,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<KbTestCase> KbTestCases => Set<KbTestCase>();
     public DbSet<KbSuggestion> KbSuggestions => Set<KbSuggestion>();
     public DbSet<ContactMemory> ContactMemories => Set<ContactMemory>();
+    public DbSet<AgentMemory> AgentMemories => Set<AgentMemory>();
 
     // Chat scenarios
     public DbSet<ChatScenario> ChatScenarios => Set<ChatScenario>();

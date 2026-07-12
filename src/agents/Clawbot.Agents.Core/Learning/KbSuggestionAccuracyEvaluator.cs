@@ -38,12 +38,13 @@ public sealed class KbSuggestionAccuracyEvaluator(IRagRetriever rag, IClaudeChat
 
         foreach (var testCase in sample)
         {
+            // RAG đã module-scoped (moduleCode) nên contextBefore = nội dung HIỆN TẠI của đúng module đích.
             var chunks = await _rag.RetrieveAsync(
                 new RagRequest(tenantId, moduleCode, testCase.Question, 3), ct).ConfigureAwait(false);
             var contextBefore = string.Join("\n---\n", chunks.Select(c => c.Snippet));
-            var contextAfter = string.IsNullOrEmpty(contextBefore)
-                ? proposedContentMd
-                : contextBefore + "\n---\n" + proposedContentMd;
+            // Deploy đề xuất = REPLACE nội dung module (archive bản cũ), nên "sau" là proposed ĐỨNG MỘT MÌNH,
+            // KHÔNG nối thêm contextBefore. Append sẽ làm after luôn >= before -> rail auto-approve vô nghĩa.
+            var contextAfter = proposedContentMd;
 
             if (await JudgeAsync(contextBefore, testCase, ct).ConfigureAwait(false)) passedBefore++;
             if (await JudgeAsync(contextAfter, testCase, ct).ConfigureAwait(false)) passedAfter++;

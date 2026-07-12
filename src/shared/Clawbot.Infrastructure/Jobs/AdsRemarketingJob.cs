@@ -16,12 +16,13 @@ public sealed partial class AdsRemarketingJob(
     {
         var campaigns = await db.AdsCampaigns.IgnoreQueryFilters()
             .Where(c => c.Status == "ACTIVE")
-            .GroupBy(c => c.Platform)
+            .GroupBy(c => new { c.TenantId, c.Platform })
             .ToListAsync(ct).ConfigureAwait(false);
 
         foreach (var group in campaigns)
         {
-            var platform = group.Key;
+            var tenantId = group.Key.TenantId;
+            var platform = group.Key.Platform;
             try
             {
                 var connector = connectorResolver.Resolve(platform);
@@ -29,7 +30,7 @@ public sealed partial class AdsRemarketingJob(
                     continue;
 
                 var coldLeads = await db.Leads.IgnoreQueryFilters()
-                    .Where(l => l.Stage == "cold")
+                    .Where(l => l.TenantId == tenantId && l.Stage == "cold")
                     .Join(db.Contacts.IgnoreQueryFilters(),
                         l => l.ContactId,
                         c => c.Id,
@@ -43,7 +44,7 @@ public sealed partial class AdsRemarketingJob(
                     continue;
 
                 var success = await connector.BuildRemarketingAsync(
-                    $"cold-leads-{platform}", coldLeads, ct).ConfigureAwait(false);
+                    tenantId, $"cold-leads-{platform}", coldLeads, ct).ConfigureAwait(false);
 
                 LogRemarketing(logger, platform, coldLeads.Count, success);
             }

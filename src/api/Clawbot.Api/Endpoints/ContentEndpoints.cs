@@ -10,6 +10,7 @@ using Clawbot.Api.Contracts.Content;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Content;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.Infrastructure.Integrations.Meta;
 using Clawbot.SharedKernel.Content;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
@@ -50,6 +51,7 @@ public static class ContentEndpoints
         grp.MapPost("/image-prompts", GenerateImagePromptAsync).RequirePermission("content:write");
         grp.MapGet("/queue", QueueAsync).RequirePermission("content:read");
         grp.MapGet("/items", QueueAsync).RequirePermission("content:read");
+        grp.MapGet("/items/{id:guid}", GetItemAsync).RequirePermission("content:read");
         grp.MapPut("/items/{id:guid}", UpdateItemAsync).RequirePermission("content:write");
         grp.MapPost("/items/{id:guid}/assets", UploadItemAssetAsync)
             .RequirePermission("content:write")
@@ -61,6 +63,7 @@ public static class ContentEndpoints
         grp.MapPost("/items/{id:guid}/schedule", ScheduleItemAsync).RequirePermission("content:write");
         grp.MapPost("/items/{id:guid}/repurpose", RepurposeItemAsync).RequirePermission("content:write");
         grp.MapGet("/calendar", CalendarAsync).RequirePermission("content:read");
+        grp.MapGet("/publish-targets", PublishTargetsAsync).RequirePermission("content:read");
         grp.MapDelete("/schedule/{id:guid}", DeleteScheduleAsync).RequirePermission("content:write");
 
         return app;
@@ -243,6 +246,20 @@ public static class ContentEndpoints
         return Results.Ok(new ContentQueueResponse(items, total, page, pageSize));
     }
 
+    private static async Task<IResult> GetItemAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var item = await LoadItemAsync(id, db, ct).ConfigureAwait(false);
+        return item is null
+            ? Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.")
+            : Results.Ok(item);
+    }
+
     private static async Task<IResult> UpdateItemAsync(
         Guid id,
         UpdateContentItemRequest body,
@@ -423,6 +440,7 @@ public static class ContentEndpoints
         IClock clock,
         IGoldenHourResolver goldenHour,
         Clawbot.SharedKernel.Content.IContentReviewPolicyResolver reviewPolicy,
+        IMetaIntegrationService metaIntegrations,
         ContentAgent.ContentAgentClient grpc,
         HttpContext http,
         CancellationToken ct)
@@ -476,7 +494,23 @@ public static class ContentEndpoints
             }
         }
 
-        var schedule = ContentSchedule.Schedule(item.TenantId, item.Id, item.Platform, resolution.ScheduledAt, now);
+        Guid? metaAssetId = null;
+        if (string.Equals(item.Platform, "facebook", StringComparison.OrdinalIgnoreCase))
+        {
+            var pages = await metaIntegrations.GetPublishablePagesAsync(item.TenantId, ct).ConfigureAwait(false);
+            var page = body.MetaAssetId.HasValue
+                ? pages.FirstOrDefault(x => x.Id == body.MetaAssetId.Value)
+                : pages.FirstOrDefault(x => x.IsDefault) ?? (pages.Count > 0 ? pages[0] : null);
+            if (page is null)
+                return Error(http, StatusCodes.Status400BadRequest, "content.meta_page_required", "Hãy kết nối và chọn Facebook Page trước khi lên lịch.");
+            metaAssetId = page.Id;
+        }
+        else if (body.MetaAssetId.HasValue)
+        {
+            return Error(http, StatusCodes.Status400BadRequest, "content.meta_page_invalid", "Facebook Page chỉ áp dụng cho nội dung Facebook.");
+        }
+
+        var schedule = ContentSchedule.Schedule(item.TenantId, item.Id, item.Platform, resolution.ScheduledAt, now, metaAssetId);
         item.MarkScheduled(now);
         db.ContentSchedules.Add(schedule);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -513,6 +547,25 @@ public static class ContentEndpoints
         var rows = BuildCalendarRows(schedules, itemsById);
 
         return Results.Ok(new ContentCalendarResponse(rows));
+    }
+
+    private static async Task<IResult> PublishTargetsAsync(
+        [FromQuery] string? platform,
+        ITenantAccessor tenants,
+        IMetaIntegrationService metaIntegrations,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        if (!string.Equals(platform, "facebook", StringComparison.OrdinalIgnoreCase))
+            return Results.Ok(Array.Empty<ContentPublishTargetDto>());
+
+        var pages = await metaIntegrations.GetPublishablePagesAsync(tenant.TenantId, ct).ConfigureAwait(false);
+        return Results.Ok(pages.Select(x => new ContentPublishTargetDto(
+            x.Id,
+            "facebook",
+            x.ExternalId,
+            x.Name,
+            x.IsDefault)).ToList());
     }
 
     private static async Task<IResult> DeleteScheduleAsync(
@@ -690,7 +743,11 @@ public static class ContentEndpoints
             schedule.Status,
             schedule.PostUrl,
             schedule.CreatedAt,
-            schedule.UpdatedAt);
+            schedule.UpdatedAt,
+            schedule.MetaAssetId,
+            schedule.LikeCount,
+            schedule.CommentCount,
+            schedule.EngagementSyncedAt);
 
     internal static IReadOnlyList<ContentCalendarItemDto> BuildCalendarRows(
         IReadOnlyList<ContentSchedule> schedules,
@@ -708,7 +765,10 @@ public static class ContentEndpoints
                     item.Body,
                     s.ScheduledAt,
                     s.PostedAt,
-                    s.PostUrl);
+                    s.PostUrl,
+                    s.MetaAssetId,
+                    s.LikeCount,
+                    s.CommentCount);
             })
             .ToList();
 

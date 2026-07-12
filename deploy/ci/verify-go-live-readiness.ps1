@@ -151,8 +151,7 @@ function Test-LlmReadiness {
 }
 
 function Test-VendorReadiness {
-    Test-RequiredEnv -Name "META_ACCESS_TOKEN" -Purpose "Meta Graph/Marketing API access token" -Aliases @("Ads__Meta__AccessToken")
-    Test-RequiredEnv -Name "META_PAGE_ID" -Purpose "Meta page id for native publishing"
+    # Meta App credentials are tenant-managed in the encrypted admin UI; env values are optional bootstrap fallback.
     Test-RequiredEnv -Name "TIKTOK_ACCESS_TOKEN" -Purpose "TikTok Business API access token" -Aliases @("Ads__TikTok__AccessToken")
     Test-RequiredEnv -Name "TIKTOK_ADVERTISER_ID" -Purpose "TikTok advertiser id for ads/lookalike verification" -Aliases @("Ads__TikTok__AdvertiserId")
     Test-RequiredEnv -Name "CONTENT_PUBLISHER_BASE_URL" -Purpose "native or brokered content publisher API base URL" -Aliases @("Content__Publisher__Endpoint")

@@ -18,6 +18,11 @@ public sealed record ExistingKbModule(Guid Id, string Code, string Name, string 
 // Memory-ops kiểu mem0: add (module mới) | update (sửa module đích) | merge (gộp vào module đích) | noop (trùng, bỏ).
 public sealed record ConsolidationResult(string Op, Guid? TargetModuleId, string? MergedContentMd);
 
+// Cặp module trùng lắp đáng gộp (KbCompressionJob weekly). Target = module giữ lại.
+public sealed record KbMergeCandidate(Guid TargetModuleId, Guid SourceModuleId, string Reason);
+
+internal sealed record KbMergeCandidatesEnvelope(IReadOnlyList<KbMergeCandidate> Merges);
+
 // Chưng cất tri thức từ hội thoại thật (Lớp 1 của ai-self-learning-memory). LLM chập chờn là bản chất
 // => mỗi bước có self-repair <=3 attempt với feedback lỗi (pattern SemanticKernelPlanGenerator).
 public sealed class KnowledgeDistiller(IClaudeChatClient claude, ILlmCallScope llmScope)
@@ -94,6 +99,62 @@ public sealed class KnowledgeDistiller(IClaudeChatClient claude, ILlmCallScope l
                 if (result.Op is "update" or "merge" && result.TargetModuleId is null) return null;
                 return result;
             }, ct).ConfigureAwait(false);
+    }
+
+    // Nén KB weekly: tìm các CẶP module trùng lắp từ catalog (title + excerpt). Không tìm thấy => mảng rỗng.
+    public async Task<IReadOnlyList<KbMergeCandidate>?> ProposeMergesAsync(
+        Guid tenantId,
+        IReadOnlyList<ExistingKbModule> modules,
+        CancellationToken ct = default)
+    {
+        if (modules.Count < 2) return [];
+
+        var system =
+            "Bạn quản lý kho tri thức. Tìm các CẶP nhóm tri thức TRÙNG LẮP NHIỀU đáng gộp làm một " +
+            "(cùng chủ đề, nội dung chồng nhau). Chỉ đề xuất khi thật sự trùng — nghi ngờ thì bỏ qua. " +
+            "Trả về DUY NHẤT JSON: {\"merges\":[{\"targetModuleId\":\"guid giữ lại\",\"sourceModuleId\":\"guid gộp vào\",\"reason\":\"tiếng Việt ngắn gọn\"}]} " +
+            "(mảng rỗng nếu không có cặp nào).";
+        var user = "Danh sách nhóm tri thức:\n" + string.Join("\n", modules.Select(m =>
+            $"- id={m.Id} code={m.Code} tên={m.Name}\n  trích: {m.ContentExcerpt}"));
+
+        var ids = modules.Select(m => m.Id).ToHashSet();
+        return (await CompleteJsonWithRepairAsync(
+            tenantId, system, user,
+            json =>
+            {
+                var envelope = JsonSerializer.Deserialize<KbMergeCandidatesEnvelope>(json, JsonOpts);
+                if (envelope?.Merges is null) return null;
+                // id bịa hoặc tự gộp vào chính mình -> bắt model sửa.
+                return envelope.Merges.All(m => m.TargetModuleId != m.SourceModuleId
+                    && ids.Contains(m.TargetModuleId) && ids.Contains(m.SourceModuleId))
+                    ? envelope : null;
+            }, ct).ConfigureAwait(false))?.Merges;
+    }
+
+    // Gộp nội dung ĐẦY ĐỦ của 2 module thành 1 bản hoàn chỉnh (không phải excerpt).
+    public Task<KbSuggestionDraft?> MergeModulesAsync(
+        Guid tenantId,
+        string targetName,
+        string targetContentMd,
+        string sourceName,
+        string sourceContentMd,
+        CancellationToken ct = default)
+    {
+        var system =
+            "Bạn quản lý kho tri thức. Gộp 2 nhóm tri thức trùng lắp thành MỘT bản markdown hoàn chỉnh, " +
+            "TIẾNG VIỆT 100%: giữ đủ mọi sự thật của cả 2, khử trùng lặp, mâu thuẫn thì giữ CẢ 2 phiên bản kèm chú thích [CẦN NGƯỜI KIỂM]. " +
+            "Trả về DUY NHẤT JSON: {\"title\":\"...\",\"contentMd\":\"markdown gộp\",\"rationale\":\"vì sao gộp\"," +
+            "\"normalizedQuestion\":\"merge " + $"{targetName} {sourceName}" + "\"}";
+        var user = $"Nhóm GIỮ LẠI ({targetName}):\n{targetContentMd}\n\nNhóm GỘP VÀO ({sourceName}):\n{sourceContentMd}";
+
+        return CompleteJsonWithRepairAsync(
+            tenantId, system, user,
+            static json =>
+            {
+                var draft = JsonSerializer.Deserialize<KbSuggestionDraft>(json, JsonOpts);
+                return draft is { Title.Length: > 0, ContentMd.Length: > 0, NormalizedQuestion.Length: > 0 }
+                    ? draft : null;
+            }, ct);
     }
 
     // Câu hỏi chuẩn hóa -> hash idempotency (unique tenant_id + dedup_hash). Chuẩn hóa thô: thường,

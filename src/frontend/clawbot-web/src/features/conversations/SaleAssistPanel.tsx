@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Modal, StatusPill, ToggleSwitch } from "@/shared/ui";
 import { toUserFriendlyError } from "@/shared/utils/userText";
+import { getTenantOrchestration, setTenantOrchestration } from "@/shared/api/admin";
 import {
   createQuickReply,
   deleteQuickReply,
@@ -228,7 +229,28 @@ function QuickReplyDialog({ state, saving, error, onClose, onSubmit }: QuickRepl
 
 export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify }: SaleAssistPanelProps) {
   const queryClient = useQueryClient();
-  const [manualApproval, setManualApproval] = useState(true);
+  // "Duyệt tay AI reply" là flag tenant-global (requireChatReplyApproval) — cùng nguồn với dialog
+  // "Cấu hình duyệt" ở /agents. Share query key ["tenant","orchestration"] để 2 chỗ luôn đồng bộ.
+  const orchestrationQuery = useQuery({
+    queryKey: ["tenant", "orchestration"],
+    queryFn: getTenantOrchestration,
+    staleTime: 60_000,
+  });
+  const manualApproval = orchestrationQuery.data?.requireChatReplyApproval ?? false;
+  const manualApprovalMutation = useMutation({
+    // PUT ghi cả requireApproval + cap, nên phải gửi kèm giá trị hiện tại (tránh xoá nhầm field khác).
+    mutationFn: (next: boolean) =>
+      setTenantOrchestration(
+        orchestrationQuery.data?.requireApproval ?? false,
+        orchestrationQuery.data?.monthlyCostCapUsd ?? null,
+        { requireChatReplyApproval: next },
+      ),
+    onSuccess: async (res) => {
+      await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
+      onNotify?.(res.requireChatReplyApproval ? "Đã bật duyệt tay AI reply." : "Đã tắt duyệt tay AI reply.", "success");
+    },
+    onError: (error) => onNotify?.(toUserFriendlyError(error), "error"),
+  });
   const [draftState, setDraftState] = useState<DraftState | null>(null);
   const [summaryState, setSummaryState] = useState<SummaryState | null>(null);
   const [dialogState, setDialogState] = useState<QuickReplyDialogState | null>(null);
@@ -355,7 +377,12 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
         </div>
 
         <div className="mb-4 flex items-center justify-between rounded-lg border border-outline bg-surface p-3">
-          <ToggleSwitch checked={manualApproval} onChange={setManualApproval} label="Duyệt trước khi gửi" />
+          <ToggleSwitch
+            checked={manualApproval}
+            onChange={(next) => manualApprovalMutation.mutate(next)}
+            disabled={manualApprovalMutation.isPending || orchestrationQuery.isLoading}
+            label="Duyệt trước khi gửi"
+          />
           <span className="text-label-sm text-on-surface-variant">{platform ?? "Mọi kênh"}</span>
         </div>
 

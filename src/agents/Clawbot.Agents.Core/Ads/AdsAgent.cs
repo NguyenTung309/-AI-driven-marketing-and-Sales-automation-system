@@ -18,10 +18,10 @@ public sealed record AdsDecision(
 public interface IAdsPlatformConnector
 {
     string Platform { get; }
-    Task<AdsMetricSnapshot?> FetchMetricsAsync(string externalCampaignId, CancellationToken ct = default);
-    Task<bool> ApplyActionAsync(string externalCampaignId, string action, decimal? newBudget, CancellationToken ct = default);
-    Task<string?> BuildLookalikeAsync(IReadOnlyList<string> seedContactKeys, CancellationToken ct = default);
-    Task<bool> BuildRemarketingAsync(string audienceName, IReadOnlyList<string> contactKeys, CancellationToken ct = default);
+    Task<AdsMetricSnapshot?> FetchMetricsAsync(Guid tenantId, string externalCampaignId, CancellationToken ct = default);
+    Task<bool> ApplyActionAsync(Guid tenantId, string externalCampaignId, string action, decimal? newBudget, CancellationToken ct = default);
+    Task<string?> BuildLookalikeAsync(Guid tenantId, IReadOnlyList<string> seedContactKeys, CancellationToken ct = default);
+    Task<bool> BuildRemarketingAsync(Guid tenantId, string audienceName, IReadOnlyList<string> contactKeys, CancellationToken ct = default);
 }
 
 public interface IAdsConnectorResolver
@@ -45,7 +45,7 @@ public sealed class AdsAgent(IAdsConnectorResolver connectorResolver)
         if (connector is null)
             return [];
 
-        var snapshot = await connector.FetchMetricsAsync(campaign.ExternalCampaignId, ct).ConfigureAwait(false);
+        var snapshot = await connector.FetchMetricsAsync(campaign.TenantId, campaign.ExternalCampaignId, ct).ConfigureAwait(false);
         if (snapshot is null)
             return [];
 
@@ -59,6 +59,7 @@ public sealed class AdsAgent(IAdsConnectorResolver connectorResolver)
     }
 
     public async Task<bool> ApplyActionAsync(
+        Guid tenantId,
         string platform,
         string externalCampaignId,
         string action,
@@ -69,10 +70,11 @@ public sealed class AdsAgent(IAdsConnectorResolver connectorResolver)
         if (connector is null)
             return false;
 
-        return await connector.ApplyActionAsync(externalCampaignId, action, newBudget, ct).ConfigureAwait(false);
+        return await connector.ApplyActionAsync(tenantId, externalCampaignId, action, newBudget, ct).ConfigureAwait(false);
     }
 
     public async Task<string?> BuildLookalikeAsync(
+        Guid tenantId,
         string platform,
         IReadOnlyList<string> seedContactKeys,
         CancellationToken ct = default)
@@ -81,10 +83,11 @@ public sealed class AdsAgent(IAdsConnectorResolver connectorResolver)
         if (connector is null)
             return null;
 
-        return await connector.BuildLookalikeAsync(seedContactKeys, ct).ConfigureAwait(false);
+        return await connector.BuildLookalikeAsync(tenantId, seedContactKeys, ct).ConfigureAwait(false);
     }
 
     public async Task<bool> BuildRemarketingAsync(
+        Guid tenantId,
         string platform,
         string audienceName,
         IReadOnlyList<string> contactKeys,
@@ -94,6 +97,6 @@ public sealed class AdsAgent(IAdsConnectorResolver connectorResolver)
         if (connector is null)
             return false;
 
-        return await connector.BuildRemarketingAsync(audienceName, contactKeys, ct).ConfigureAwait(false);
+        return await connector.BuildRemarketingAsync(tenantId, audienceName, contactKeys, ct).ConfigureAwait(false);
     }
 }

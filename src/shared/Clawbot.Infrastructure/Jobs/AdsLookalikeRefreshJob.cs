@@ -47,7 +47,7 @@ public sealed partial class AdsLookalikeRefreshJob(
                     continue;
                 }
 
-                var audienceId = await connector.BuildLookalikeAsync(seedKeys, ct).ConfigureAwait(false);
+                var audienceId = await connector.BuildLookalikeAsync(tenantId, seedKeys, ct).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(audienceId))
                 {
                     await publisher.PublishAsync(new NotificationRequest(

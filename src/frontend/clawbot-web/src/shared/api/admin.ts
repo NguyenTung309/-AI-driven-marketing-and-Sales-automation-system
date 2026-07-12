@@ -498,12 +498,15 @@ export interface MetaAsset {
   readonly lastSyncedAt: string;
 }
 
+export type MetaAuthorizationMode = "development_user" | "business_system_user";
+
 export interface MetaAppConfiguration {
   readonly configured: boolean;
   readonly businessWebhookConfigured: boolean;
   readonly source: "database" | "environment";
   readonly appId: string;
   readonly configurationId: string;
+  readonly authorizationMode: MetaAuthorizationMode;
   readonly hasAppSecret: boolean;
   readonly hasWebhookVerifyToken: boolean;
   readonly redirectUri: string;
@@ -520,6 +523,7 @@ export interface MetaIntegrationStatus {
   readonly status: string;
   readonly clientBusinessId: string;
   readonly systemUserId: string;
+  readonly tokenType: "user" | "business_integration_system_user" | "";
   readonly grantedScopes: readonly string[];
   readonly expiresAt?: string | null;
   readonly dataAccessExpiresAt?: string | null;
@@ -537,6 +541,7 @@ export async function updateMetaAppConfiguration(body: {
   readonly appId: string;
   readonly appSecret: string | null;
   readonly configurationId: string;
+  readonly authorizationMode: MetaAuthorizationMode;
   readonly webhookVerifyToken: string | null;
   readonly redirectUri: string;
   readonly frontendReturnUrl: string;

@@ -454,7 +454,7 @@
 - [x] Chat-2 comment auto-reply + DM code path — `ChannelMessage.MessageType=comment|dm` + `parent_post_id`, Pancake parse, purchase/price/trial intent, `CommentAutoReplyJob` reply+DM invite. Live Pancake payload verification vẫn cần ops.
 - [x] Docs-1 extract info hội thoại + `ExpiresAt` 7d + gửi Zalo/email thật. → M17.
 
-**Partial by-design / blocked (không phải gap):** Chat-1 Pancake unified broker (M06 design) · Content-3 + Ads-2 native API/connector cần creds Meta/TikTok (ops) · SignalR-only thay Telegram (quyết định 2026-06-13) · forecast seasonality + KB Chinese content (blocked).
+**Partial by-design / blocked (không phải gap):** Chat-1 Pancake unified broker (M06 design) · Content-3 đã có Meta Graph v25.0 + Facebook Login for Business nhưng vẫn cần App Review/live assets; Ads-2 lookalike connector còn cần implementation + creds Meta/TikTok · SignalR-only thay Telegram (quyết định 2026-06-13) · forecast seasonality + KB Chinese content (blocked).
 
 ### Pancake capability (xác minh API thật 2026-06-13)
 - **Reply comment + DM (Chat-2):** ✅ qua Pancake code path — `messages` trên conversation `type=COMMENT` (filter `?type=COMMENT` hợp lệ; `post_id` có trên conversation). Adapter hiện parse `type=COMMENT` + `post_id`; cần 1 comment thật + 1 webhook payload thật để verify field names/send semantics.
@@ -468,7 +468,7 @@
 | **Qdrant** | `Vector:Qdrant` | ✅ **fix** — `QdrantOptions` (Host/Port/UseTls/ApiKey), bỏ raw `cfg[]` |
 | **SMTP** | `Email:Smtp` | ✅ **fix** — `SmtpOptions`, `SmtpEmailSender` dùng `IOptions` |
 | **MinIO** | `Docs:Storage:Minio` | ✅ **fix** — `MinioOptions`, bỏ raw `cfg[]` |
-| Meta Graph (đăng bài — NEW) | `Ads:Meta`/`Graph` | ⏳ cần `MetaGraphOptions` khi build Content-3 posting |
+| Meta Graph (Page publishing + Ads auth) | UI `/system` + `Meta:Graph` fallback + `Ads:Meta` | ✅ Meta App config mã hóa theo tenant trên UI, Facebook Login for Business Authorization Code, BISU token, `/me/accounts`, Page token mã hóa, Graph v25.0 |
 | Redis · RabbitMq · SqlServer | ConnectionStrings | ✅ connstr (infra) |
 
 ---

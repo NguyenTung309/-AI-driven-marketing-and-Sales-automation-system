@@ -17,6 +17,7 @@ import {
   getKbVersion,
   getKbVersionDiff,
   listKbModules,
+  listKbSuggestions,
   listKbTestCases,
   listKbVersions,
   rollbackKbVersion,
@@ -69,6 +70,11 @@ export default function KnowledgeBasePage() {
   const [autoClassifyOpen, setAutoClassifyOpen] = useState(false);
   const [diff, setDiff] = useState<KbVersionDiff | null>(null);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
+  const [activeTab, setActiveTab] = useState<"modules" | "suggestions">("modules");
+
+  // Cùng queryKey với KbSuggestionsPanel -> React Query dùng chung cache, không fetch đôi. Chỉ để badge đếm.
+  const suggestionsQuery = useQuery({ queryKey: ["kb", "suggestions"], queryFn: () => listKbSuggestions() });
+  const pendingSuggestions = (suggestionsQuery.data ?? []).filter((s) => s.status === "pending").length;
 
   const modulesQuery = useQuery({ queryKey: ["kb", "modules"], queryFn: listKbModules });
   const accuracyQuery = useQuery({ queryKey: ["kb", "accuracy"], queryFn: getKbAccuracy });
@@ -270,17 +276,49 @@ export default function KnowledgeBasePage() {
         </div>
       ) : null}
 
-      {embeddingStatusQuery.data?.isFallback ? (
-        <div className="mb-gutter">
-          <Alert tone="warning">
-            Kho tri thức đang dùng embedding hash fallback ({embeddingStatusQuery.data.dimension} chiều), chỉ phù hợp demo. Cấu hình embedding thật rồi phát hành lại KB để tăng độ chính xác RAG.
-          </Alert>
-        </div>
-      ) : null}
+      <div className="mb-stack-lg flex gap-1 border-b border-outline" role="tablist">
+        <button
+          aria-selected={activeTab === "modules"}
+          className={[
+            "-mb-px border-b-2 px-4 py-2 text-body-md font-bold transition-colors",
+            activeTab === "modules" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary",
+          ].join(" ")}
+          onClick={() => setActiveTab("modules")}
+          role="tab"
+          type="button"
+        >
+          Nhóm tri thức
+        </button>
+        <button
+          aria-selected={activeTab === "suggestions"}
+          className={[
+            "-mb-px flex items-center gap-2 border-b-2 px-4 py-2 text-body-md font-bold transition-colors",
+            activeTab === "suggestions" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary",
+          ].join(" ")}
+          onClick={() => setActiveTab("suggestions")}
+          role="tab"
+          type="button"
+        >
+          Đề xuất tri thức
+          {pendingSuggestions > 0 ? (
+            <span className="rounded-full bg-primary px-2 py-0.5 text-label-sm font-bold text-white">{pendingSuggestions}</span>
+          ) : null}
+        </button>
+      </div>
 
-      <KbSuggestionsPanel />
+      {activeTab === "suggestions" ? (
+        <KbSuggestionsPanel alwaysShow />
+      ) : (
+        <>
+          {embeddingStatusQuery.data?.isFallback ? (
+            <div className="mb-gutter">
+              <Alert tone="warning">
+                Kho tri thức đang dùng embedding hash fallback ({embeddingStatusQuery.data.dimension} chiều), chỉ phù hợp demo. Cấu hình embedding thật rồi phát hành lại KB để tăng độ chính xác RAG.
+              </Alert>
+            </div>
+          ) : null}
 
-      <section className="overflow-hidden rounded-lg border border-outline shadow-sm xl:grid xl:grid-cols-[250px_310px_minmax(0,1fr)]">
+          <section className="overflow-hidden rounded-lg border border-outline shadow-sm xl:grid xl:grid-cols-[250px_310px_minmax(0,1fr)]">
         <ModuleRail
           loading={modulesQuery.isLoading}
           modules={visibleModules}
@@ -320,6 +358,8 @@ export default function KnowledgeBasePage() {
       </section>
 
       <AccuracyPanel items={accuracy} loading={accuracyQuery.isLoading} />
+        </>
+      )}
 
       <KbAutoClassifyModal
         key={autoClassifyOpen ? "open" : "closed"}

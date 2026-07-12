@@ -68,7 +68,7 @@ Trách nhiệm chính:
 | dedup_hash | nvarchar(64) | hash câu-hỏi-chuẩn-hóa; unique (tenant_id, dedup_hash) → job idempotent |
 | reviewer_verdict | nvarchar(16) NULL | `approve` \| `reject` \| `needs_human` — cùng bộ giá trị fail-closed của ContentReviewer (không dùng score số) |
 | reviewer_notes | nvarchar(max) NULL | |
-| accuracy_before / accuracy_after | decimal(5,2) NULL | đo bằng KbTestRunnerService.EvaluateAsync trên test cases của module đích: "trước" = context RAG hiện tại; "sau" = context RAG + contentMd đề xuất nối thêm (không cần deploy tạm). `op=add` module mới chưa có test case → NULL |
+| accuracy_before / accuracy_after | decimal(5,2) NULL | đo trên test cases module đích, RAG module-scoped: "trước" = context RAG hiện tại (nội dung module cũ); "sau" = **contentMd đề xuất ĐỨNG MỘT MÌNH** (deploy = REPLACE, không phải append). Nối before+proposed sẽ làm after luôn ≥ before → rail vô nghĩa (sửa 2026-07-12). `op=add` chưa có test case → NULL |
 | status | nvarchar(16) | `pending` \| `approved` \| `rejected` |
 | approval_mode | nvarchar(8) NULL | `auto` \| `human` — set khi approved |
 | rejected_reason | nvarchar(1024) NULL | |
@@ -122,6 +122,8 @@ LLM interface: tái dùng `IClaudeChatClient` qua LlmCallScope (cost ledger tự
 1. **Distill**: input = cụm tín hiệu (câu khách + AI trả lời sao + sale trả lời sao), output JSON `{title, contentMd, rationale, normalizedQuestion}`.
 2. **Memory-ops consolidate**: input = đề xuất mới + top KB modules liên quan (title + trích ContentMd), output JSON `{op: add|update|merge|noop, targetModuleId?, mergedContentMd?}` — NOOP thì bỏ, không ghi.
 3. **Extract facts**: input = transcript hội thoại (đã strip HTML), facts hiện có của contact, output JSON `{ops: [{op, factId?, fact, category, confidence}]}`.
+
+Đo accuracy (KbSuggestionAccuracyEvaluator): RAG đã module-scoped nên "trước" = nội dung module hiện tại; "sau" = proposed đứng một mình (khớp deploy=replace). Rail chỉ có ý nghĩa khi 2 lưới đo THẬT SỰ độc lập — nếu "sau" ⊇ "trước" thì accuracy_after ≥ before tự động và auto-approve chỉ còn dựa reviewer verdict (đúng cái cần tránh).
 
 Cả 3 dùng self-repair pattern sẵn có (retry ≤3 với feedback lỗi, tolerant converters) — gateway chập chờn là bản chất.
 

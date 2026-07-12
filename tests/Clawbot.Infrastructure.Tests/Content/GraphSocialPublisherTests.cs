@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Clawbot.Infrastructure.Content.Publishing;
+using Clawbot.Infrastructure.Integrations.Meta;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -20,7 +21,6 @@ public sealed class GraphSocialPublisherTests
         Facebook = new GraphChannelOptions
         {
             Enabled = true,
-            Endpoint = "https://graph.facebook.com/v21.0",
             PageId = "123456",
             PageAccessToken = "pgt_fb",
         },
@@ -53,7 +53,7 @@ public sealed class GraphSocialPublisherTests
         var result = await publisher.PublishAsync(FacebookRequest(), CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        result.PostUrl.Should().Be("https://www.facebook.com/123456/posts/789");
+        result.PostUrl.Should().Be("https://www.facebook.com/123456_789");
         handler.Method.Should().Be(HttpMethod.Post);
         handler.RequestUri!.ToString().Should().EndWith("/123456/feed");
         // access_token + message travel in the form body (Graph requires form-encoded for /feed with a page token).
@@ -210,7 +210,6 @@ public sealed class GraphSocialPublisherTests
         var dbCreds = new GraphChannelOptions
         {
             Enabled = true,
-            Endpoint = "https://graph.facebook.com/v21.0",
             PageId = "dbpage",
             PageAccessToken = "pgt_from_db",
         };
@@ -231,6 +230,63 @@ public sealed class GraphSocialPublisherTests
         handler.Body.Should().Contain("access_token=pgt_from_db");
     }
 
+    [Fact]
+    public async Task PublishAsync_Facebook_uses_tenant_meta_page_connection()
+    {
+        var handler = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK));
+        var integrations = Substitute.For<IMetaIntegrationService>();
+        integrations.ResolvePageAsync(TenantId, Arg.Any<Guid?>(), Arg.Any<CancellationToken>())
+            .Returns(new MetaPageCredential(Guid.NewGuid(), "page-123", "Main Page", "page-token"));
+        var graph = Substitute.For<IMetaGraphClient>();
+        graph.PublishPageAsync(TenantId, "page-123", "page-token", "Learn HSK today", null, Arg.Any<CancellationToken>())
+            .Returns(new MetaPublishedPost("page-123_9", "https://www.facebook.com/page-123_9"));
+        var publisher = new GraphSocialPublisher(
+            new HttpClient(handler),
+            Options.Create(new GraphPublisherOptions()),
+            credentialResolver: null,
+            NullLogger<GraphSocialPublisher>.Instance,
+            integrations,
+            graph);
+
+        var result = await publisher.PublishAsync(FacebookRequest(), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.PostUrl.Should().Be("https://www.facebook.com/page-123_9");
+        handler.RequestCount.Should().Be(0, "the legacy Page token path must not run when a tenant Meta connection exists");
+    }
+
+    [Fact]
+    public async Task PublishAsync_Facebook_refreshes_page_token_once_after_graph_token_error()
+    {
+        var assetId = Guid.NewGuid();
+        var integrations = Substitute.For<IMetaIntegrationService>();
+        integrations.ResolvePageAsync(TenantId, assetId, Arg.Any<CancellationToken>())
+            .Returns(new MetaPageCredential(assetId, "page-123", "Main Page", "expired-token"));
+        integrations.RefreshPageAsync(TenantId, assetId, Arg.Any<CancellationToken>())
+            .Returns(new MetaPageCredential(assetId, "page-123", "Main Page", "fresh-token"));
+        var graph = Substitute.For<IMetaGraphClient>();
+        graph.PublishPageAsync(TenantId, "page-123", "expired-token", "Learn HSK today", null, Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<MetaPublishedPost>(new MetaGraphException("expired", code: 190, subcode: 463)));
+        graph.PublishPageAsync(TenantId, "page-123", "fresh-token", "Learn HSK today", null, Arg.Any<CancellationToken>())
+            .Returns(new MetaPublishedPost("page-123_10", "https://www.facebook.com/page-123_10"));
+        var publisher = new GraphSocialPublisher(
+            new HttpClient(new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK))),
+            Options.Create(new GraphPublisherOptions()),
+            credentialResolver: null,
+            NullLogger<GraphSocialPublisher>.Instance,
+            integrations,
+            graph);
+
+        var result = await publisher.PublishAsync(
+            new PublishRequest(TenantId, ContentItemId, "facebook", "Learn HSK today", "[]", ScheduledAt, assetId),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.PostUrl.Should().Be("https://www.facebook.com/page-123_10");
+        await integrations.Received(1).RefreshPageAsync(TenantId, assetId, Arg.Any<CancellationToken>());
+        await graph.Received(1).PublishPageAsync(TenantId, "page-123", "fresh-token", "Learn HSK today", null, Arg.Any<CancellationToken>());
+    }
+
     private static PublishRequest FacebookRequest() =>
         new(TenantId, ContentItemId, "facebook", "Learn HSK today", "[]", ScheduledAt);
 
@@ -242,9 +298,11 @@ public sealed class GraphSocialPublisherTests
         public HttpMethod Method { get; private set; } = HttpMethod.Get;
         public Uri? RequestUri { get; private set; }
         public string Body { get; private set; } = string.Empty;
+        public int RequestCount { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            RequestCount++;
             Method = request.Method;
             RequestUri = request.RequestUri;
             if (request.Content is not null)

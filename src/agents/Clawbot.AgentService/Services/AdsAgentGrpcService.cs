@@ -79,7 +79,7 @@ public sealed partial class AdsAgentGrpcService(
             }
 
             var applied = await _agent.ApplyActionAsync(
-                campaign.Platform, campaign.ExternalCampaignId, decision.Action, null, context.CancellationToken).ConfigureAwait(false);
+                tenantId, campaign.Platform, campaign.ExternalCampaignId, decision.Action, null, context.CancellationToken).ConfigureAwait(false);
 
             if (applied && decision.Action is "pause" or "scale_up" or "scale_down")
             {
@@ -116,7 +116,7 @@ public sealed partial class AdsAgentGrpcService(
             throw new RpcException(new Status(StatusCode.InvalidArgument, "seed_contact_keys required"));
 
         var audienceId = await _agent.BuildLookalikeAsync(
-            request.Platform, request.SeedContactKeys.ToList(), context.CancellationToken).ConfigureAwait(false);
+            tenantId, request.Platform, request.SeedContactKeys.ToList(), context.CancellationToken).ConfigureAwait(false);
 
         return new AdsLookalikeResponse
         {
@@ -133,7 +133,7 @@ public sealed partial class AdsAgentGrpcService(
             throw new RpcException(new Status(StatusCode.InvalidArgument, "contact_keys required"));
 
         var success = await _agent.BuildRemarketingAsync(
-            request.Platform, request.AudienceName, request.ContactKeys.ToList(), context.CancellationToken).ConfigureAwait(false);
+            tenantId, request.Platform, request.AudienceName, request.ContactKeys.ToList(), context.CancellationToken).ConfigureAwait(false);
 
         return new AdsRemarketResponse { Success = success };
     }

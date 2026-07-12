@@ -5,7 +5,6 @@ public sealed class MetaAdsOptions
     public const string SectionName = "Ads:Meta";
 
     public bool Enabled { get; set; }
-    public string Endpoint { get; set; } = "https://graph.facebook.com/v21.0";
     public string AccessToken { get; set; } = string.Empty;
     public string AdAccountId { get; set; } = string.Empty;
     public string WebhookSecret { get; set; } = string.Empty;

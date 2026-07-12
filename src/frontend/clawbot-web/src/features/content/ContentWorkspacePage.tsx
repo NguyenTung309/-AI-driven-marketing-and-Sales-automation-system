@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, Modal, StatusPill, type StatusTone } from "@/shared/ui";
 import { TrendSettingsDialog } from "./TrendSettingsDialog";
@@ -13,6 +14,8 @@ import {
   deleteContentSchedule,
   generateContentItems,
   getContentCalendar,
+  getContentItem,
+  getContentPublishTargets,
   getContentQueue,
   getContentTrends,
   listContentBriefs,
@@ -26,10 +29,12 @@ import {
   type ContentBrief,
   type ContentCalendarItem,
   type ContentItem,
+  type ContentPublishTarget,
   type Trend,
 } from "@/shared/api/content";
 
 type QueueStatusFilter = "all" | "draft" | "approved" | "scheduled" | "published" | "rejected";
+type ContentWorkspaceTab = "queue" | "calendar";
 type ScheduleMode = "golden" | "specific";
 type NoticeTone = "info" | "success" | "warning" | "error";
 
@@ -105,7 +110,7 @@ function statusLabel(status: string): string {
   if (value === "draft") return "Chờ duyệt";
   if (value === "approved") return "Đã duyệt";
   if (value === "scheduled") return "Đã lên lịch";
-  if (value === "published") return "Đã đăng";
+  if (value === "published" || value === "posted") return "Đã đăng";
   if (value === "rejected") return "Từ chối";
   if (value === "pending") return "Yêu cầu mới";
   return status || "Không rõ";
@@ -113,7 +118,7 @@ function statusLabel(status: string): string {
 
 function statusTone(status: string): StatusTone {
   const value = normalize(status);
-  if (value === "approved" || value === "published") return "success";
+  if (value === "approved" || value === "published" || value === "posted") return "success";
   if (value === "scheduled" || value === "pending") return "warning";
   if (value === "rejected" || value === "failed") return "error";
   return "neutral";
@@ -793,11 +798,13 @@ function CalendarPanel({
   loading,
   cancelingId,
   onCancel,
+  onSelectItem,
 }: {
   readonly items: readonly ContentCalendarItem[];
   readonly loading: boolean;
   readonly cancelingId: string | null;
   readonly onCancel: (id: string) => void;
+  readonly onSelectItem: (id: string) => void;
 }) {
   const groups = groupCalendar(items);
   return (
@@ -825,6 +832,26 @@ function CalendarPanel({
                     </div>
                     <p className="text-body-md font-semibold text-secondary">{compactBody(row.body, 88)}</p>
                     <p className="mt-1 text-label-sm text-on-surface-variant">{formatDateTime(row.scheduledAt)}</p>
+                    {normalize(row.status) === "posted" && (row.likeCount !== null || row.commentCount !== null) ? (
+                      <div className="mt-2 flex items-center gap-3 text-label-sm text-on-surface-variant">
+                        <span className="inline-flex items-center gap-1">
+                          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">thumb_up</span>
+                          {row.likeCount ?? 0}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">mode_comment</span>
+                          {row.commentCount ?? 0}
+                        </span>
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="mt-2 inline-flex items-center gap-1 text-label-sm font-semibold text-primary hover:underline"
+                      onClick={() => onSelectItem(row.contentItemId)}
+                    >
+                      <span aria-hidden="true" className="material-symbols-outlined text-[16px]">visibility</span>
+                      Xem bài
+                    </button>
                     {normalize(row.status) === "pending" ? (
                       <button
                         type="button"
@@ -858,9 +885,13 @@ function ScheduleDialog({
   time,
   saving,
   error,
+  targets,
+  targetsLoading,
+  selectedTargetId,
   onMode,
   onDate,
   onTime,
+  onTarget,
   onClose,
   onSubmit,
 }: {
@@ -870,9 +901,13 @@ function ScheduleDialog({
   readonly time: string;
   readonly saving: boolean;
   readonly error: unknown;
+  readonly targets: readonly ContentPublishTarget[];
+  readonly targetsLoading: boolean;
+  readonly selectedTargetId: string | null;
   readonly onMode: (value: ScheduleMode) => void;
   readonly onDate: (value: string) => void;
   readonly onTime: (value: string) => void;
+  readonly onTarget: (value: string) => void;
   readonly onClose: () => void;
   readonly onSubmit: () => void;
 }) {
@@ -886,7 +921,7 @@ function ScheduleDialog({
           <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
             Hủy bỏ
           </Button>
-          <Button type="button" onClick={onSubmit} disabled={saving}>
+          <Button type="button" onClick={onSubmit} disabled={saving || (normalize(item.platform) === "facebook" && !selectedTargetId)}>
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">event_available</span>
             {saving ? "Đang lên lịch..." : "Xác nhận lên lịch"}
           </Button>
@@ -899,6 +934,27 @@ function ScheduleDialog({
           <p className="mb-2 text-label-caps uppercase text-secondary">Kênh đăng tải</p>
           <PlatformBadge platform={item.platform} />
         </div>
+        {normalize(item.platform) === "facebook" ? (
+          <label className="block">
+            <span className="mb-1 block text-label-caps uppercase text-secondary">Facebook Page</span>
+            {targetsLoading ? (
+              <p className="rounded border border-outline bg-surface px-3 py-2 text-body-md text-on-surface-variant">Đang tải danh sách Page...</p>
+            ) : targets.length ? (
+              <select
+                className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
+                value={selectedTargetId ?? ""}
+                onChange={(event) => onTarget(event.target.value)}
+              >
+                <option value="" disabled>Chọn Page sẽ đăng</option>
+                {targets.map((target) => (
+                  <option key={target.id} value={target.id}>{target.name}{target.isDefault ? " (mặc định)" : ""}</option>
+                ))}
+              </select>
+            ) : (
+              <Alert tone="warning">Chưa có Facebook Page khả dụng. Hãy kết nối Meta trong phần Quản trị hệ thống.</Alert>
+            )}
+          </label>
+        ) : null}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="block">
             <span className="mb-1 block text-label-caps uppercase text-secondary">Ngày</span>
@@ -956,7 +1012,10 @@ function ScheduleDialog({
 
 export default function ContentWorkspacePage() {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const calendarRange = useMemo(() => buildCalendarRange(), []);
+  const requestedItemId = searchParams.get("itemId");
+  const activeTab: ContentWorkspaceTab = requestedItemId || searchParams.get("tab") !== "calendar" ? "queue" : "calendar";
   const [selectedBriefId, setSelectedBriefId] = useState<string | null>(null);
   const [briefPlatform, setBriefPlatform] = useState(PLATFORMS[0].value);
   const [briefText, setBriefText] = useState("");
@@ -968,6 +1027,7 @@ export default function ContentWorkspacePage() {
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("golden");
   const [scheduleDate, setScheduleDate] = useState(defaultScheduleDate);
   const [scheduleTime, setScheduleTime] = useState("09:00");
+  const [scheduleMetaAssetId, setScheduleMetaAssetId] = useState<string | null>(null);
   const [notice, setNotice] = useState<NoticeState | null>(null);
 
   const briefsQuery = useQuery({ queryKey: ["content", "briefs"], queryFn: () => listContentBriefs() });
@@ -985,9 +1045,26 @@ export default function ContentWorkspacePage() {
     queryKey: ["content", "calendar", calendarRange],
     queryFn: () => getContentCalendar(calendarRange),
   });
+  const linkedItemQuery = useQuery({
+    queryKey: ["content", "item", requestedItemId],
+    queryFn: () => getContentItem(requestedItemId!),
+    enabled: Boolean(requestedItemId),
+    retry: false,
+  });
+  const publishTargetsQuery = useQuery({
+    queryKey: ["content", "publish-targets", "facebook"],
+    queryFn: () => getContentPublishTargets("facebook"),
+  });
   // Mac dinh chi xem tuan hien tai; "all" = xem lai cac tuan cu (card se kem nhan tuan)
-  const currentWeek = isoWeekOf(new Date());
-  const previousWeek = isoWeekOf(new Date(Date.now() - 7 * 86400000));
+  const [trendWeeks] = useState(() => {
+    const now = new Date();
+    return {
+      current: isoWeekOf(now),
+      previous: isoWeekOf(new Date(now.getTime() - 7 * 86400000)),
+    };
+  });
+  const currentWeek = trendWeeks.current;
+  const previousWeek = trendWeeks.previous;
   const [trendWeek, setTrendWeek] = useState<string>(currentWeek);
   const trendsQuery = useQuery({
     queryKey: ["content", "trends", trendWeek],
@@ -999,7 +1076,14 @@ export default function ContentWorkspacePage() {
   const queueItems = Array.isArray(queueQuery.data?.items) ? queueQuery.data.items : EMPTY_ITEMS;
   const calendarItems = Array.isArray(calendarQuery.data?.items) ? calendarQuery.data.items : EMPTY_CALENDAR;
   const trends = Array.isArray(trendsQuery.data?.trends) ? trendsQuery.data.trends : EMPTY_TRENDS;
-  const selectedItem = queueItems.find((item) => item.id === selectedItemId) ?? queueItems[0] ?? null;
+  const linkedItem = linkedItemQuery.data ?? null;
+  const displayedQueueItems = linkedItem && !queueItems.some((item) => item.id === linkedItem.id)
+    ? [linkedItem, ...queueItems]
+    : queueItems;
+  // itemId phải mở đúng bài hoặc hiện trạng thái unavailable; tuyệt đối không fallback qua bài đầu tiên.
+  const selectedItem = requestedItemId
+    ? linkedItem ?? queueItems.find((item) => item.id === requestedItemId) ?? null
+    : queueItems.find((item) => item.id === selectedItemId) ?? queueItems[0] ?? null;
   const matchingDraft = editorDraft && selectedItem && editorDraft.itemId === selectedItem.id ? editorDraft : null;
   const editorBody = matchingDraft?.body ?? selectedItem?.body ?? "";
   const editorAssets = (matchingDraft?.assetsJson ?? selectedItem?.assetsJson) || "[]";
@@ -1007,12 +1091,17 @@ export default function ContentWorkspacePage() {
   const readyCount = queueItems.filter((item) => normalize(item.status) === "approved").length;
   const activeError = briefsQuery.error ?? queueQuery.error ?? calendarQuery.error;
 
+  const invalidateLinkedItem = async () => {
+    if (requestedItemId) await queryClient.invalidateQueries({ queryKey: ["content", "item", requestedItemId] });
+  };
+
   const invalidateContent = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["content", "briefs"] }),
       queryClient.invalidateQueries({ queryKey: ["content", "queue"] }),
       queryClient.invalidateQueries({ queryKey: ["content", "calendar"] }),
       queryClient.invalidateQueries({ queryKey: ["content", "trends"] }),
+      invalidateLinkedItem(),
     ]);
   };
 
@@ -1050,6 +1139,7 @@ export default function ContentWorkspacePage() {
       if (first) {
         setSelectedItemId(first.id);
         setEditorDraft({ itemId: first.id, body: first.body, assetsJson: first.assetsJson || "[]" });
+        openContentItem(first.id);
       }
       setNotice({ tone: "success", message: `Đã sinh ${response.items.length || 1} bài nháp từ agent nội dung.` });
       await queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
@@ -1065,16 +1155,24 @@ export default function ContentWorkspacePage() {
     onSuccess: async (item) => {
       setEditorDraft({ itemId: item.id, body: item.body, assetsJson: item.assetsJson || "[]" });
       setNotice({ tone: "success", message: "Đã cập nhật nội dung bài viết." });
-      await queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["content", "queue"] }),
+        invalidateLinkedItem(),
+      ]);
     },
   });
 
   const uploadAssetMutation = useMutation({
     mutationFn: ({ item, file }: { readonly item: ContentItem; readonly file: File }) => uploadContentAsset(item.id, file),
-    onSuccess: async (response) => {
-      if (selectedItem) setEditorDraft({ itemId: selectedItem.id, body: editorBody, assetsJson: response.assetsJson });
+    onSuccess: async (response, variables) => {
+      if (selectedItem?.id === variables.item.id) {
+        setEditorDraft({ itemId: variables.item.id, body: editorBody, assetsJson: response.assetsJson });
+      }
       setNotice({ tone: "success", message: "Đã tải ảnh lên bài viết." });
-      await queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["content", "queue"] }),
+        invalidateLinkedItem(),
+      ]);
     },
   });
 
@@ -1082,7 +1180,10 @@ export default function ContentWorkspacePage() {
     mutationFn: (id: string) => approveContentItem(id),
     onSuccess: async () => {
       setNotice({ tone: "success", message: "Đã duyệt bài, có thể lên lịch xuất bản." });
-      await queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["content", "queue"] }),
+        invalidateLinkedItem(),
+      ]);
     },
   });
 
@@ -1090,7 +1191,10 @@ export default function ContentWorkspacePage() {
     mutationFn: (id: string) => rejectContentItem(id, "Từ chối trong màn hình quản lý nội dung"),
     onSuccess: async () => {
       setNotice({ tone: "warning", message: "Đã chuyển bài sang trạng thái từ chối." });
-      await queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["content", "queue"] }),
+        invalidateLinkedItem(),
+      ]);
     },
   });
 
@@ -1098,7 +1202,10 @@ export default function ContentWorkspacePage() {
     mutationFn: (id: string) => deleteContentItem(id),
     onSuccess: async () => {
       setNotice({ tone: "success", message: "Đã xóa bài khỏi hàng đợi." });
-      await queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["content", "queue"] }),
+        invalidateLinkedItem(),
+      ]);
     },
   });
 
@@ -1111,13 +1218,19 @@ export default function ContentWorkspacePage() {
   });
 
   const scheduleMutation = useMutation({
-    mutationFn: (item: ContentItem) => scheduleContentItem(item.id, scheduledAtIso(scheduleMode, scheduleDate, scheduleTime)),
+    mutationFn: (item: ContentItem) => scheduleContentItem(
+      item.id,
+      scheduledAtIso(scheduleMode, scheduleDate, scheduleTime),
+      normalize(item.platform) === "facebook" ? scheduleMetaAssetId : null,
+    ),
     onSuccess: async () => {
       setScheduleItem(null);
+      setScheduleMetaAssetId(null);
       setNotice({ tone: "success", message: "Đã lên lịch xuất bản nội dung." });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["content", "queue"] }),
         queryClient.invalidateQueries({ queryKey: ["content", "calendar"] }),
+        invalidateLinkedItem(),
       ]);
     },
   });
@@ -1152,9 +1265,24 @@ export default function ContentWorkspacePage() {
     setBriefText(brief.brief);
   }
 
+  function openContentItem(itemId: string) {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", "queue");
+    next.set("itemId", itemId);
+    setSearchParams(next, { replace: true });
+  }
+
   function selectItem(item: ContentItem) {
     setSelectedItemId(item.id);
     setEditorDraft({ itemId: item.id, body: item.body, assetsJson: item.assetsJson || "[]" });
+    openContentItem(item.id);
+  }
+
+  function selectCalendarTab(tab: ContentWorkspaceTab) {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", tab);
+    if (tab === "calendar") next.delete("itemId");
+    setSearchParams(next, { replace: true });
   }
 
   function updateEditorBody(value: string) {
@@ -1261,110 +1389,99 @@ export default function ContentWorkspacePage() {
         </div>
 
         <div className="space-y-gutter">
-          <Card>
-            <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <h2 className="text-headline-sm text-secondary">Hàng đợi duyệt bài</h2>
-                <p className="mt-1 text-body-md text-on-surface-variant">Soạn thảo trực tiếp cho bài chờ duyệt, duyệt bài và tạo biến thể sang kênh khác.</p>
+          <nav className="flex gap-2 border-b border-outline" aria-label="Nội dung" role="tablist">
+            <button
+              id="content-queue-tab"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "queue"}
+              aria-controls="content-queue-panel"
+              onClick={() => selectCalendarTab("queue")}
+              className={`border-b-2 px-4 py-3 text-body-md font-semibold ${activeTab === "queue" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"}`}
+            >
+              Hàng đợi duyệt bài
+            </button>
+            <button
+              id="content-calendar-tab"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "calendar"}
+              aria-controls="content-calendar-panel"
+              onClick={() => selectCalendarTab("calendar")}
+              className={`border-b-2 px-4 py-3 text-body-md font-semibold ${activeTab === "calendar" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"}`}
+            >
+              Lịch xuất bản
+            </button>
+          </nav>
+
+          {activeTab === "queue" ? (
+            <div id="content-queue-panel" role="tabpanel" aria-labelledby="content-queue-tab">
+            <Card>
+              <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <h2 className="text-headline-sm text-secondary">Hàng đợi duyệt bài</h2>
+                  <p className="mt-1 text-body-md text-on-surface-variant">Soạn thảo, duyệt và lên lịch bài viết.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <select className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" value={queuePlatform} onChange={(event) => setQueuePlatform(event.target.value)}>
+                    <option value="all">Tất cả kênh</option>
+                    {PLATFORMS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                  </select>
+                  <select className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" value={queueStatus} onChange={(event) => setQueueStatus(event.target.value as QueueStatusFilter)}>
+                    {STATUS_FILTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                  </select>
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <select
-                  className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
-                  value={queuePlatform}
-                  onChange={(event) => setQueuePlatform(event.target.value)}
-                >
-                  <option value="all">Tất cả kênh</option>
-                  {PLATFORMS.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
-                  value={queueStatus}
-                  onChange={(event) => setQueueStatus(event.target.value as QueueStatusFilter)}
-                >
-                  {STATUS_FILTERS.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
+
+              {(updateItemMutation.error || uploadAssetMutation.error || approveMutation.error || rejectMutation.error || deleteItemMutation.error || repurposeMutation.error || queueQuery.error || linkedItemQuery.error) ? (
+                <div className="mb-4"><Alert tone="error">{errorMessage(updateItemMutation.error ?? uploadAssetMutation.error ?? approveMutation.error ?? rejectMutation.error ?? deleteItemMutation.error ?? repurposeMutation.error ?? queueQuery.error ?? linkedItemQuery.error)}</Alert></div>
+              ) : null}
+
+              <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[320px_minmax(0,1fr)]">
+                <QueueList items={displayedQueueItems} selectedId={selectedItem?.id ?? selectedItemId} onSelect={selectItem} />
+                {requestedItemId && linkedItemQuery.isLoading ? (
+                  <div className="flex min-h-[520px] items-center justify-center rounded-lg border border-dashed border-outline bg-surface p-6 text-body-md text-on-surface-variant">Đang mở bài viết...</div>
+                ) : requestedItemId && linkedItemQuery.isError && !selectedItem ? (
+                  <div className="flex min-h-[520px] items-center justify-center rounded-lg border border-dashed border-outline bg-surface p-6 text-center text-body-md text-on-surface-variant">Không tìm thấy bài viết từ liên kết này.</div>
+                ) : (
+                  <QueueEditor
+                    key={selectedItem?.id ?? "empty"}
+                    item={selectedItem}
+                    body={editorBody}
+                    assetsJson={editorAssets}
+                    saving={updateItemMutation.isPending}
+                    uploading={uploadAssetMutation.isPending}
+                    acting={approveMutation.isPending || rejectMutation.isPending || deleteItemMutation.isPending || repurposeMutation.isPending}
+                    onBody={updateEditorBody}
+                    onUploadAsset={(file) => { if (selectedItem) uploadAssetMutation.mutate({ item: selectedItem, file }); }}
+                    onSave={() => { if (selectedItem) updateItemMutation.mutate(selectedItem); }}
+                    onApprove={() => { if (selectedItem) approveMutation.mutate(selectedItem.id); }}
+                    onReject={() => { if (selectedItem) rejectMutation.mutate(selectedItem.id); }}
+                    onSchedule={() => {
+                      if (selectedItem) {
+                        const defaultTarget = publishTargetsQuery.data?.find((target) => target.isDefault) ?? publishTargetsQuery.data?.[0];
+                        setScheduleMetaAssetId(normalize(selectedItem.platform) === "facebook" ? defaultTarget?.id ?? null : null);
+                        setScheduleItem(selectedItem);
+                      }
+                    }}
+                    onRepurpose={(targets) => { if (selectedItem) repurposeMutation.mutate({ id: selectedItem.id, targets }); }}
+                    onDelete={() => { if (selectedItem) deleteItemMutation.mutate(selectedItem.id); }}
+                  />
+                )}
               </div>
+            </Card>
             </div>
-
-            {(updateItemMutation.error ||
-              uploadAssetMutation.error ||
-              approveMutation.error ||
-              rejectMutation.error ||
-              deleteItemMutation.error ||
-              repurposeMutation.error ||
-              queueQuery.error) ? (
-              <div className="mb-4">
-                <Alert tone="error">
-                  {errorMessage(
-                    updateItemMutation.error ??
-                      uploadAssetMutation.error ??
-                      approveMutation.error ??
-                      rejectMutation.error ??
-                      deleteItemMutation.error ??
-                      repurposeMutation.error ??
-                      queueQuery.error
-                  )}
-                </Alert>
-              </div>
-            ) : null}
-
-            <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[320px_minmax(0,1fr)]">
-              <div>
-                <QueueList items={queueItems} selectedId={selectedItemId} onSelect={selectItem} />
-              </div>
-              <QueueEditor
-                key={selectedItem?.id ?? "empty"}
-                item={selectedItem}
-                body={editorBody}
-                assetsJson={editorAssets}
-                saving={updateItemMutation.isPending}
-                uploading={uploadAssetMutation.isPending}
-                acting={
-                  approveMutation.isPending ||
-                  rejectMutation.isPending ||
-                  deleteItemMutation.isPending ||
-                  repurposeMutation.isPending
-                }
-                onBody={updateEditorBody}
-                onUploadAsset={(file) => {
-                  if (selectedItem) uploadAssetMutation.mutate({ item: selectedItem, file });
-                }}
-                onSave={() => {
-                  if (selectedItem) updateItemMutation.mutate(selectedItem);
-                }}
-                onApprove={() => {
-                  if (selectedItem) approveMutation.mutate(selectedItem.id);
-                }}
-                onReject={() => {
-                  if (selectedItem) rejectMutation.mutate(selectedItem.id);
-                }}
-                onSchedule={() => {
-                  if (selectedItem) setScheduleItem(selectedItem);
-                }}
-                onRepurpose={(targets) => {
-                  if (selectedItem) repurposeMutation.mutate({ id: selectedItem.id, targets });
-                }}
-                onDelete={() => {
-                  if (selectedItem) deleteItemMutation.mutate(selectedItem.id);
-                }}
+          ) : (
+            <div id="content-calendar-panel" role="tabpanel" aria-labelledby="content-calendar-tab">
+              <CalendarPanel
+                items={calendarItems}
+                loading={calendarQuery.isLoading}
+                cancelingId={cancelScheduleMutation.isPending ? cancelScheduleMutation.variables ?? null : null}
+                onCancel={(id) => cancelScheduleMutation.mutate(id)}
+                onSelectItem={openContentItem}
               />
             </div>
-          </Card>
-
-          <CalendarPanel
-            items={calendarItems}
-            loading={calendarQuery.isLoading}
-            cancelingId={cancelScheduleMutation.isPending ? cancelScheduleMutation.variables ?? null : null}
-            onCancel={(id) => cancelScheduleMutation.mutate(id)}
-          />
+          )}
         </div>
       </section>
 
@@ -1375,10 +1492,14 @@ export default function ContentWorkspacePage() {
           date={scheduleDate}
           time={scheduleTime}
           saving={scheduleMutation.isPending}
-          error={scheduleMutation.error}
+          error={scheduleMutation.error ?? (normalize(scheduleItem.platform) === "facebook" ? publishTargetsQuery.error : null)}
+          targets={publishTargetsQuery.data ?? []}
+          targetsLoading={publishTargetsQuery.isLoading}
+          selectedTargetId={scheduleMetaAssetId}
           onMode={setScheduleMode}
           onDate={setScheduleDate}
           onTime={setScheduleTime}
+          onTarget={setScheduleMetaAssetId}
           onClose={() => setScheduleItem(null)}
           onSubmit={() => scheduleMutation.mutate(scheduleItem)}
         />

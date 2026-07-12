@@ -60,7 +60,14 @@ public sealed record ContentQueueResponse(
     int Page,
     int PageSize);
 
-public sealed record ScheduleContentItemRequest(DateTimeOffset? ScheduledAt);
+public sealed record ScheduleContentItemRequest(DateTimeOffset? ScheduledAt, Guid? MetaAssetId = null);
+
+public sealed record ContentPublishTargetDto(
+    Guid Id,
+    string Platform,
+    string ExternalId,
+    string Name,
+    bool IsDefault);
 
 public sealed record ContentScheduleDto(
     Guid Id,
@@ -71,7 +78,11 @@ public sealed record ContentScheduleDto(
     string Status,
     string? PostUrl,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    Guid? MetaAssetId,
+    int? LikeCount = null,
+    int? CommentCount = null,
+    DateTimeOffset? EngagementSyncedAt = null);
 
 public sealed record ContentCalendarItemDto(
     Guid ScheduleId,
@@ -81,7 +92,10 @@ public sealed record ContentCalendarItemDto(
     string Body,
     DateTimeOffset ScheduledAt,
     DateTimeOffset? PostedAt,
-    string? PostUrl);
+    string? PostUrl,
+    Guid? MetaAssetId,
+    int? LikeCount = null,
+    int? CommentCount = null);
 
 public sealed record ContentCalendarResponse(IReadOnlyList<ContentCalendarItemDto> Items);
 
