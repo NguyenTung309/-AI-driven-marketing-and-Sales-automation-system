@@ -56,6 +56,8 @@ public sealed class LocalRunDocumentationTests
         runner.Should().NotContain("localhost:5000");
         runner.Should().NotContain("localhost:5001");
         runner.Should().Contain("--dry-run");
+        runner.Should().MatchRegex(
+            @"(?ms)^:apply_meta_migration\r?$.*?SET QUOTED_IDENTIFIER ON;.*?SET ARITHABORT ON;.*?0055_meta_facebook_login_for_business\.sql");
 
         var viteConfig = File.ReadAllText(Path.Combine(root, "src", "frontend", "clawbot-web", "vite.config.ts"));
         viteConfig.Should().Contain("port: 15876");

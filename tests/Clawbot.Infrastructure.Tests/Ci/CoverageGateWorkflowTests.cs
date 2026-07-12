@@ -146,7 +146,7 @@ public sealed class CoverageGateWorkflowTests
         script.Should().Contain("ANTHROPIC_API_KEY");
         script.Should().Contain("EMBEDDING_API_KEY");
         script.Should().Contain("CONTENT_LLM_API_KEY");
-        script.Should().Contain("META_ACCESS_TOKEN");
+        script.Should().Contain("tenant-managed in the encrypted admin UI");
         script.Should().Contain("TIKTOK_ACCESS_TOKEN");
         script.Should().Contain("CONTENT_PUBLISHER_BASE_URL");
 
@@ -176,9 +176,14 @@ public sealed class CoverageGateWorkflowTests
             "Embedding__ApiKey",
             "CONTENT_LLM_API_KEY",
             "Content__Llm__ApiKey",
-            "META_ACCESS_TOKEN",
-            "Ads__Meta__AccessToken",
-            "META_PAGE_ID",
+            "Meta__Graph__AppId",
+            "Meta__Graph__AppSecret",
+            "Meta__Graph__ConfigurationId",
+            "Meta__Graph__AuthorizationMode",
+            "Meta__Graph__WebhookVerifyToken",
+            "Meta__Graph__RedirectUri",
+            "Meta__Graph__FrontendReturnUrl",
+            "Meta__Graph__ApiVersion",
             "TIKTOK_ACCESS_TOKEN",
             "Ads__TikTok__AccessToken",
             "TIKTOK_ADVERTISER_ID",
@@ -206,8 +211,6 @@ public sealed class CoverageGateWorkflowTests
                 ["Anthropic__ApiKey"] = "anthropic-key",
                 ["Embedding__ApiKey"] = "embedding-key",
                 ["Content__Llm__ApiKey"] = "content-llm-key",
-                ["Ads__Meta__AccessToken"] = "meta-token",
-                ["META_PAGE_ID"] = "meta-page-123",
                 ["Ads__TikTok__AccessToken"] = "tiktok-token",
                 ["Ads__TikTok__AdvertiserId"] = "advertiser-123",
                 ["Content__Publisher__Endpoint"] = "https://publisher.example/api/posts",
@@ -224,7 +227,7 @@ public sealed class CoverageGateWorkflowTests
         result.Stdout.Should().NotMatchRegex(@"ANTHROPIC_API_KEY\s+MISSING");
         result.Stdout.Should().NotMatchRegex(@"EMBEDDING_API_KEY\s+MISSING");
         result.Stdout.Should().NotMatchRegex(@"CONTENT_LLM_API_KEY\s+MISSING");
-        result.Stdout.Should().NotMatchRegex(@"META_ACCESS_TOKEN\s+MISSING");
+        result.Stdout.Should().NotContain("Meta__Graph__", "Meta App readiness is managed through the encrypted admin UI");
         result.Stdout.Should().NotMatchRegex(@"TIKTOK_ACCESS_TOKEN\s+MISSING");
         result.Stdout.Should().NotMatchRegex(@"TIKTOK_ADVERTISER_ID\s+MISSING");
         result.Stdout.Should().NotMatchRegex(@"CONTENT_PUBLISHER_BASE_URL\s+MISSING");
@@ -348,6 +351,28 @@ public sealed class CoverageGateWorkflowTests
         workflow.IndexOf("name: Frontend Build", StringComparison.Ordinal)
             .Should()
             .BeLessThan(workflow.IndexOf("name: Unit Tests (no Docker)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Gateway_allows_meta_oauth_callback_without_a_clawbot_jwt()
+    {
+        var root = FindRepositoryRoot();
+        var gatewayConfig = File.ReadAllText(Path.Combine(root, "src", "gateway", "Clawbot.Gateway", "appsettings.json"));
+        using var json = System.Text.Json.JsonDocument.Parse(gatewayConfig);
+        var route = json.RootElement
+            .GetProperty("ReverseProxy")
+            .GetProperty("Routes")
+            .GetProperty("meta-oauth-callback");
+
+        route.GetProperty("Match").GetProperty("Path").GetString().Should().Be("/api/admin/meta/callback");
+        route.GetProperty("AuthorizationPolicy").GetString().Should().Be("anonymous");
+
+        var webhookRoute = json.RootElement
+            .GetProperty("ReverseProxy")
+            .GetProperty("Routes")
+            .GetProperty("meta-business-integration-webhook");
+        webhookRoute.GetProperty("Match").GetProperty("Path").GetString().Should().Be("/webhooks/meta/business-integration");
+        webhookRoute.GetProperty("AuthorizationPolicy").GetString().Should().Be("anonymous");
     }
 
     private static string FindRepositoryRoot()

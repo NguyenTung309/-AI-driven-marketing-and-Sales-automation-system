@@ -205,3 +205,45 @@ export async function getKbAccuracy(): Promise<readonly KbAccuracySummary[]> {
   const response = await apiClient.get<readonly KbAccuracySummary[]>("/api/kb/accuracy");
   return response.data;
 }
+
+// ai-self-learning-memory: đề xuất tri thức do job chưng cất đêm sinh ra, chờ duyệt hoặc đã tự duyệt.
+export interface KbSuggestion {
+  readonly id: string;
+  readonly op: "add" | "update" | "merge";
+  readonly targetKbModuleId: string | null;
+  readonly targetModuleName: string | null;
+  readonly title: string;
+  readonly contentMd: string;
+  readonly rationale: string;
+  readonly evidenceJson: string;
+  readonly reviewerVerdict: "approve" | "reject" | "needs_human" | null;
+  readonly reviewerNotes: string | null;
+  readonly accuracyBefore: number | null;
+  readonly accuracyAfter: number | null;
+  readonly status: "pending" | "approved" | "rejected";
+  readonly approvalMode: "auto" | "human" | null;
+  readonly rejectedReason: string | null;
+  readonly createdAt: string;
+  readonly decidedAt: string | null;
+}
+
+export interface KbSuggestionEvidence {
+  readonly conversationId: string;
+  readonly snippetRedacted: string;
+  readonly signal: string;
+}
+
+export async function listKbSuggestions(status?: string): Promise<readonly KbSuggestion[]> {
+  const response = await apiClient.get<readonly KbSuggestion[]>("/api/kb/suggestions", {
+    params: status ? { status } : undefined,
+  });
+  return response.data;
+}
+
+export async function approveKbSuggestion(id: string, contentMd?: string): Promise<void> {
+  await apiClient.post(`/api/kb/suggestions/${id}/approve`, { contentMd: contentMd ?? null });
+}
+
+export async function rejectKbSuggestion(id: string, reason: string): Promise<void> {
+  await apiClient.post(`/api/kb/suggestions/${id}/reject`, { reason });
+}

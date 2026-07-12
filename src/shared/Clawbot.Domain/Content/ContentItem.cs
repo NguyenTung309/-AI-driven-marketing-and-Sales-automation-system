@@ -70,6 +70,17 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
         UpdatedAt = at;
     }
 
+    // Review-gate: đóng dấu chữ ký reviewer-agent lên item ĐÃ 'scheduled' mà KHÔNG đổi status — gỡ deadlock
+    // "scheduled nhưng chưa ký" (publish job giữ, Review từng từ chối status scheduled). Gọi ApproveByAgent ở
+    // đây sẽ revert về 'approved' và hủy lịch, nên tách riêng: chỉ gắn chữ ký, giữ nguyên 'scheduled'.
+    public void AttachAgentSignoff(Guid agentDefinitionId, DateTimeOffset at)
+    {
+        if (agentDefinitionId == Guid.Empty) throw new ArgumentException("agent definition id required", nameof(agentDefinitionId));
+        ApprovedByAgentId = agentDefinitionId;
+        ApprovedAt = at;
+        UpdatedAt = at;
+    }
+
     public void Reject(DateTimeOffset at, string? reason = null)
     {
         Status = "rejected";

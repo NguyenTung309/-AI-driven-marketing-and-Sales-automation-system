@@ -28,7 +28,7 @@ public sealed partial class AdsDaypartPauseJob(
                 if (connector is null)
                     continue;
 
-                var applied = await connector.ApplyActionAsync(campaign.ExternalCampaignId, "pause", null, ct).ConfigureAwait(false);
+                var applied = await connector.ApplyActionAsync(campaign.TenantId, campaign.ExternalCampaignId, "pause", null, ct).ConfigureAwait(false);
                 if (applied)
                 {
                     campaign.MarkDaypartPaused(true, clock.UtcNow);

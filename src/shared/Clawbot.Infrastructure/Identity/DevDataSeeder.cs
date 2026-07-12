@@ -118,6 +118,72 @@ public static partial class DevDataSeeder
 
             IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'ai_auto_reply_enabled') IS NULL
                 ALTER TABLE dbo.conversations ADD ai_auto_reply_enabled BIT NOT NULL CONSTRAINT DF_conversations_ai_auto_reply_enabled DEFAULT 1;
+
+            IF OBJECT_ID(N'dbo.meta_connections', N'U') IS NULL AND OBJECT_ID(N'dbo.tenants', N'U') IS NOT NULL
+                CREATE TABLE dbo.meta_connections (
+                    id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_meta_connections PRIMARY KEY,
+                    tenant_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.tenants(id),
+                    client_business_id NVARCHAR(128) NOT NULL,
+                    system_user_id NVARCHAR(128) NOT NULL,
+                    token_type NVARCHAR(64) NOT NULL,
+                    access_token_encrypted NVARCHAR(MAX) NOT NULL,
+                    granted_scopes_json NVARCHAR(MAX) NOT NULL,
+                    expires_at DATETIMEOFFSET NULL,
+                    data_access_expires_at DATETIMEOFFSET NULL,
+                    last_validated_at DATETIMEOFFSET NULL,
+                    status NVARCHAR(32) NOT NULL,
+                    last_error NVARCHAR(1024) NULL,
+                    created_at DATETIMEOFFSET NOT NULL,
+                    updated_at DATETIMEOFFSET NOT NULL,
+                    CONSTRAINT UQ_meta_connections_tenant UNIQUE (tenant_id));
+
+            IF OBJECT_ID(N'dbo.meta_assets', N'U') IS NULL AND OBJECT_ID(N'dbo.meta_connections', N'U') IS NOT NULL
+                CREATE TABLE dbo.meta_assets (
+                    id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_meta_assets PRIMARY KEY,
+                    tenant_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.tenants(id),
+                    connection_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.meta_connections(id) ON DELETE CASCADE,
+                    asset_type NVARCHAR(32) NOT NULL,
+                    external_id NVARCHAR(128) NOT NULL,
+                    name NVARCHAR(256) NOT NULL,
+                    tasks_json NVARCHAR(MAX) NOT NULL,
+                    access_token_encrypted NVARCHAR(MAX) NOT NULL,
+                    is_default BIT NOT NULL DEFAULT 0,
+                    is_active BIT NOT NULL DEFAULT 1,
+                    last_synced_at DATETIMEOFFSET NOT NULL,
+                    created_at DATETIMEOFFSET NOT NULL,
+                    updated_at DATETIMEOFFSET NOT NULL,
+                    CONSTRAINT UQ_meta_assets_tenant_type_external UNIQUE (tenant_id, asset_type, external_id));
+
+            IF OBJECT_ID(N'dbo.meta_oauth_states', N'U') IS NULL AND OBJECT_ID(N'dbo.users', N'U') IS NOT NULL
+                CREATE TABLE dbo.meta_oauth_states (
+                    id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_meta_oauth_states PRIMARY KEY,
+                    tenant_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.tenants(id),
+                    user_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.users(id),
+                    state_hash NVARCHAR(64) NOT NULL CONSTRAINT UQ_meta_oauth_states_hash UNIQUE,
+                    expires_at DATETIMEOFFSET NOT NULL,
+                    consumed_at DATETIMEOFFSET NULL,
+                    created_at DATETIMEOFFSET NOT NULL);
+
+            IF OBJECT_ID(N'dbo.content_schedule', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.content_schedule', N'meta_asset_id') IS NULL
+                ALTER TABLE dbo.content_schedule ADD meta_asset_id UNIQUEIDENTIFIER NULL;
+
+            IF OBJECT_ID(N'dbo.content_schedule', N'U') IS NOT NULL
+               AND OBJECT_ID(N'dbo.meta_assets', N'U') IS NOT NULL
+               AND COL_LENGTH(N'dbo.content_schedule', N'meta_asset_id') IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM sys.foreign_keys
+                   WHERE name = N'FK_content_schedule_meta_assets'
+                     AND parent_object_id = OBJECT_ID(N'dbo.content_schedule'))
+                ALTER TABLE dbo.content_schedule ADD CONSTRAINT FK_content_schedule_meta_assets
+                    FOREIGN KEY (meta_asset_id) REFERENCES dbo.meta_assets(id) ON DELETE SET NULL;
+
+            IF OBJECT_ID(N'dbo.content_schedule', N'U') IS NOT NULL
+               AND COL_LENGTH(N'dbo.content_schedule', N'meta_asset_id') IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM sys.indexes
+                   WHERE name = N'IX_content_schedule_meta_asset_id'
+                     AND object_id = OBJECT_ID(N'dbo.content_schedule'))
+                CREATE INDEX IX_content_schedule_meta_asset_id ON dbo.content_schedule(meta_asset_id);
             """, ct);
 
     // EnsureCreated only builds the model (the tenant query filter is an unexecuted

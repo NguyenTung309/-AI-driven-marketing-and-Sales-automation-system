@@ -46,7 +46,7 @@ public sealed partial class AdsCreativeRotationJob(
 
                 var connector = connectorResolver.Resolve(campaign.Platform);
                 if (connector is not null)
-                    await connector.ApplyActionAsync(campaign.ExternalCampaignId, "rotate", null, ct).ConfigureAwait(false);
+                    await connector.ApplyActionAsync(campaign.TenantId, campaign.ExternalCampaignId, "rotate", null, ct).ConfigureAwait(false);
 
                 LogRotated(logger, fatigued.Id, replacement.Id, campaign.Id);
                 await db.SaveChangesAsync(ct).ConfigureAwait(false);

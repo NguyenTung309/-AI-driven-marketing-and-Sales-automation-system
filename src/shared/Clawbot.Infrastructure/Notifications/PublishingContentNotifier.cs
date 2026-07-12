@@ -22,7 +22,7 @@ public sealed class PublishingContentNotifier(
             Title: $"Content publish failed on {evt.Platform}",
             Severity: "warning",
             Body: evt.Reason,
-            Link: "/content"), ct).ConfigureAwait(false);
+            Link: $"/content?tab=queue&itemId={evt.ContentItemId}"), ct).ConfigureAwait(false);
     }
 
     public async Task NotifyAnalyticsAlertAsync(Guid tenantId, AnalyticsAlertEvent evt, CancellationToken ct = default)

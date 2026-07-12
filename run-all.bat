@@ -44,12 +44,13 @@ if "%DRY_RUN%"=="1" (
     echo Would run: docker compose --env-file deploy\.env -f deploy\docker-compose.yml up -d sqlserver redis rabbitmq qdrant minio postgres metabase searxng
     echo Would stop old app processes listening on ports 15873, 15874, 15875, 15876
     echo Would apply deploy\seed\*.sql for tenant %SEED_TENANT_SLUG% when --seed is passed.
+    echo Would ensure migration 0055 Meta Facebook Login for Business schema is applied.
     echo Would apply one-shot data patches from deploy\fix_contact_overwrite.sql, guarded by dbo.data_patches.
     echo Would run: dotnet restore Clawbot.sln
     echo Would run: dotnet build Clawbot.sln --no-restore
     echo Would run: npm ci in src\frontend\clawbot-web when node_modules is missing
-    echo Would start AgentService with ASPNETCORE_URLS=http://localhost:15875 and shared Encryption__Base64Key
-    echo Would start API with ASPNETCORE_URLS=http://localhost:15874, AgentService__Url=http://localhost:15875, shared Jwt__SigningKey, and shared Encryption__Base64Key
+    echo Would start AgentService with ASPNETCORE_URLS=http://localhost:15875, shared Encryption__Base64Key, and optional Meta__Graph__* fallback from deploy\.env
+    echo Would start API with ASPNETCORE_URLS=http://localhost:15874, AgentService__Url=http://localhost:15875, shared Jwt__SigningKey/Encryption__Base64Key, and UI-managed Meta config with optional deploy\.env fallback
     echo Would start Gateway with ASPNETCORE_URLS=http://localhost:15873 and shared Jwt__SigningKey
     echo Would start frontend with npm run dev at http://localhost:15876
     exit /b 0
@@ -79,6 +80,16 @@ if not exist "%ENV_FILE%" (
 )
 
 call :read_env_value MSSQL_SA_PASSWORD
+call :read_env_value Meta__Graph__AppId
+call :read_env_value Meta__Graph__AppSecret
+call :read_env_value Meta__Graph__ConfigurationId
+call :read_env_value Meta__Graph__AuthorizationMode
+call :read_env_value Meta__Graph__WebhookVerifyToken
+call :read_env_value Meta__Graph__RedirectUri
+call :read_env_value Meta__Graph__FrontendReturnUrl
+call :read_env_value Meta__Graph__ApiVersion
+call :read_env_value Ads__Meta__Enabled
+call :read_env_value Ads__Meta__WebhookSecret
 
 echo [INFO] Checking Docker daemon...
 docker info >nul 2>nul
@@ -108,6 +119,8 @@ call :wait_for_clawbot_db
 if errorlevel 1 exit /b 1
 
 call :apply_migrations_if_needed
+if errorlevel 1 exit /b 1
+call :apply_meta_migration
 if errorlevel 1 exit /b 1
 
 call :apply_data_patches
@@ -304,6 +317,18 @@ docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD
 if errorlevel 1 exit /b 1
 rem Review-gate (P1-P4) columns — lenh rieng vi dong tren da sat tran 8191 ky tu cua cmd.exe
 docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF COL_LENGTH(N'dbo.tenants', N'require_content_review') IS NULL ALTER TABLE dbo.tenants ADD require_content_review BIT NOT NULL CONSTRAINT DF_tenants_require_content_review DEFAULT 0; IF COL_LENGTH(N'dbo.content_items', N'created_by_agent_id') IS NULL ALTER TABLE dbo.content_items ADD created_by_agent_id UNIQUEIDENTIFIER NULL; IF COL_LENGTH(N'dbo.content_items', N'rejected_reason') IS NULL ALTER TABLE dbo.content_items ADD rejected_reason NVARCHAR(1024) NULL; IF COL_LENGTH(N'dbo.messages', N'status') IS NULL ALTER TABLE dbo.messages ADD status NVARCHAR(32) NOT NULL CONSTRAINT DF_messages_status DEFAULT N'sent'; IF COL_LENGTH(N'dbo.tenants', N'require_chat_reply_approval') IS NULL ALTER TABLE dbo.tenants ADD require_chat_reply_approval BIT NOT NULL CONSTRAINT DF_tenants_require_chat_reply_approval DEFAULT 0; IF COL_LENGTH(N'dbo.content_items', N'desired_publish_at') IS NULL ALTER TABLE dbo.content_items ADD desired_publish_at DATETIMEOFFSET NULL; IF COL_LENGTH(N'dbo.content_items', N'last_review_alert_at') IS NULL ALTER TABLE dbo.content_items ADD last_review_alert_at DATETIMEOFFSET NULL; IF COL_LENGTH(N'dbo.inboxes', N'sender_id') IS NULL ALTER TABLE dbo.inboxes ADD sender_id NVARCHAR(128) NULL;"
+if errorlevel 1 exit /b 1
+rem Engagement counts (0059_content_schedule_engagement) — lenh rieng, giu duoi tran 8191 ky tu cua cmd.exe
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF COL_LENGTH(N'dbo.content_schedule', N'like_count') IS NULL ALTER TABLE dbo.content_schedule ADD like_count INT NULL; IF COL_LENGTH(N'dbo.content_schedule', N'comment_count') IS NULL ALTER TABLE dbo.content_schedule ADD comment_count INT NULL; IF COL_LENGTH(N'dbo.content_schedule', N'engagement_synced_at') IS NULL ALTER TABLE dbo.content_schedule ADD engagement_synced_at DATETIMEOFFSET NULL;"
+if errorlevel 1 exit /b 1
+rem AI tu hoc (0056_kb_suggestions) — lenh rieng, giu duoi tran 8191 ky tu cua cmd.exe
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF OBJECT_ID(N'dbo.kb_suggestions', N'U') IS NULL CREATE TABLE dbo.kb_suggestions (id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_kb_suggestions PRIMARY KEY, tenant_id UNIQUEIDENTIFIER NOT NULL, op NVARCHAR(16) NOT NULL, target_kb_module_id UNIQUEIDENTIFIER NULL, title NVARCHAR(256) NOT NULL, content_md NVARCHAR(MAX) NOT NULL, rationale NVARCHAR(MAX) NULL, evidence_json NVARCHAR(MAX) NULL, dedup_hash NVARCHAR(64) NOT NULL, reviewer_verdict NVARCHAR(16) NULL, reviewer_notes NVARCHAR(MAX) NULL, accuracy_before DECIMAL(5,2) NULL, accuracy_after DECIMAL(5,2) NULL, status NVARCHAR(16) NOT NULL CONSTRAINT DF_kb_suggestions_status DEFAULT 'pending', approval_mode NVARCHAR(8) NULL, rejected_reason NVARCHAR(1024) NULL, decided_by UNIQUEIDENTIFIER NULL, created_at DATETIMEOFFSET NOT NULL, decided_at DATETIMEOFFSET NULL, CONSTRAINT UQ_kb_suggestions_tenant_dedup UNIQUE (tenant_id, dedup_hash)); IF OBJECT_ID(N'dbo.kb_suggestions', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_kb_suggestions_tenant_id_status' AND object_id = OBJECT_ID(N'dbo.kb_suggestions')) CREATE INDEX IX_kb_suggestions_tenant_id_status ON dbo.kb_suggestions (tenant_id, status); IF COL_LENGTH(N'dbo.tenants', N'require_kb_human_review') IS NULL ALTER TABLE dbo.tenants ADD require_kb_human_review BIT NOT NULL CONSTRAINT DF_tenants_require_kb_human_review DEFAULT 0;"
+if errorlevel 1 exit /b 1
+rem AI tu hoc Lop 2 (0057_contact_memories) — lenh rieng, giu duoi tran 8191 ky tu cua cmd.exe
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF OBJECT_ID(N'dbo.contact_memories', N'U') IS NULL CREATE TABLE dbo.contact_memories (id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_contact_memories PRIMARY KEY, tenant_id UNIQUEIDENTIFIER NOT NULL, contact_id UNIQUEIDENTIFIER NOT NULL, fact NVARCHAR(1024) NOT NULL, category NVARCHAR(32) NOT NULL, confidence DECIMAL(3,2) NOT NULL CONSTRAINT DF_contact_memories_confidence DEFAULT 0.5, source_conversation_id UNIQUEIDENTIFIER NULL, is_active BIT NOT NULL CONSTRAINT DF_contact_memories_is_active DEFAULT 1, superseded_by_id UNIQUEIDENTIFIER NULL, created_at DATETIMEOFFSET NOT NULL, updated_at DATETIMEOFFSET NOT NULL); IF OBJECT_ID(N'dbo.contact_memories', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_contact_memories_tenant_id_contact_id_is_active' AND object_id = OBJECT_ID(N'dbo.contact_memories')) CREATE INDEX IX_contact_memories_tenant_id_contact_id_is_active ON dbo.contact_memories (tenant_id, contact_id, is_active); IF COL_LENGTH(N'dbo.conversations', N'memory_extracted_at') IS NULL ALTER TABLE dbo.conversations ADD memory_extracted_at DATETIMEOFFSET NULL;"
+if errorlevel 1 exit /b 1
+rem AI tu hoc Lop 3 (0058_agent_memories) — lenh rieng, giu duoi tran 8191 ky tu cua cmd.exe
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF OBJECT_ID(N'dbo.agent_memories', N'U') IS NULL CREATE TABLE dbo.agent_memories (id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_agent_memories PRIMARY KEY, tenant_id UNIQUEIDENTIFIER NOT NULL, agent_code NVARCHAR(64) NOT NULL, fact NVARCHAR(1024) NOT NULL, category NVARCHAR(32) NOT NULL CONSTRAINT DF_agent_memories_category DEFAULT 'mistake', confidence DECIMAL(3,2) NOT NULL CONSTRAINT DF_agent_memories_confidence DEFAULT 0.5, is_active BIT NOT NULL CONSTRAINT DF_agent_memories_is_active DEFAULT 1, superseded_by_id UNIQUEIDENTIFIER NULL, created_at DATETIMEOFFSET NOT NULL, updated_at DATETIMEOFFSET NOT NULL); IF OBJECT_ID(N'dbo.agent_memories', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agent_memories_tenant_id_agent_code_is_active' AND object_id = OBJECT_ID(N'dbo.agent_memories')) CREATE INDEX IX_agent_memories_tenant_id_agent_code_is_active ON dbo.agent_memories (tenant_id, agent_code, is_active);"
 exit /b %errorlevel%
 
 :incomplete_schema
@@ -337,6 +362,11 @@ if errorlevel 1 (
     exit /b 1
 )
 exit /b 0
+
+:apply_meta_migration
+echo [INFO] Ensuring Meta Facebook Login for Business schema...
+(echo SET QUOTED_IDENTIFIER ON;& echo SET ARITHABORT ON;& type "%ROOT%deploy\migrations\0055_meta_facebook_login_for_business.sql") | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
+exit /b %errorlevel%
 
 :ensure_seed_tenant
 if not "%RUN_SEEDS%"=="1" exit /b 0

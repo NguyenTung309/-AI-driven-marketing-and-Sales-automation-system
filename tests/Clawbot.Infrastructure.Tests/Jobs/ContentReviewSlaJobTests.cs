@@ -33,7 +33,7 @@ public sealed class ContentReviewSlaJobTests
         await job.RunAsync(CancellationToken.None); // pass 2: không re-alert
 
         await publisher.Received(1).PublishAsync(
-            Arg.Is<NotificationRequest>(n => n.Type == "content_review_pending" && n.UserId == creator && n.TenantId == fx.TenantId),
+            Arg.Is<NotificationRequest>(n => n.Type == "content_review_pending" && n.UserId == creator && n.TenantId == fx.TenantId && n.Link == $"/content?tab=queue&itemId={item.Id}"),
             Arg.Any<CancellationToken>());
         fx.Db.ChangeTracker.Clear();
         (await fx.Db.ContentItems.IgnoreQueryFilters().SingleAsync()).LastReviewAlertAt.Should().NotBeNull();
@@ -59,10 +59,10 @@ public sealed class ContentReviewSlaJobTests
         await job.RunAsync(CancellationToken.None); // pass 2: không re-escalate
 
         await publisher.Received(1).PublishAsync(
-            Arg.Is<NotificationRequest>(n => n.Type == "content_review_overdue" && n.UserId == lead1),
+            Arg.Is<NotificationRequest>(n => n.Type == "content_review_overdue" && n.UserId == lead1 && n.Link == $"/content?tab=queue&itemId={item.Id}"),
             Arg.Any<CancellationToken>());
         await publisher.Received(1).PublishAsync(
-            Arg.Is<NotificationRequest>(n => n.Type == "content_review_overdue" && n.UserId == lead2),
+            Arg.Is<NotificationRequest>(n => n.Type == "content_review_overdue" && n.UserId == lead2 && n.Link == $"/content?tab=queue&itemId={item.Id}"),
             Arg.Any<CancellationToken>());
         // QĐ4: không auto-approve — item giữ nguyên, chỉ notify.
         fx.Db.ChangeTracker.Clear();

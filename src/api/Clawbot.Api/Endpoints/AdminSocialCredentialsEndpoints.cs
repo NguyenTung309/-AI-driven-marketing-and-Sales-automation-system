@@ -31,12 +31,10 @@ public sealed record UpdateSocialCredentialRequest(
     string? OaId = null,
     string? OaAccessToken = null);
 
-// Admin management for publish-channel credentials (Facebook page / Zalo OA). One encrypted
-// social_credentials row per (tenant, provider); GraphSocialPublisher resolves the same rows via
-// EfSocialCredentialResolver, falling back to appsettings GraphPublisherOptions when no row exists.
+// Zalo OA credentials remain manually managed here. Facebook publishing uses Meta OAuth endpoints.
 public static class AdminSocialCredentialsEndpoints
 {
-    private static readonly string[] Providers = ["facebook", "zalo"];
+    private static readonly string[] Providers = ["zalo"];
     private const int MaxFieldChars = 512;
     private const int MaxEndpointChars = 2048;
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
@@ -92,7 +90,7 @@ public static class AdminSocialCredentialsEndpoints
         var tenant = tenants.Require();
         var normalized = provider.Trim().ToLowerInvariant();
         if (!Providers.Contains(normalized))
-            return Error(http, StatusCodes.Status400BadRequest, "admin.social_provider_invalid", "provider must be facebook or zalo.");
+            return Error(http, StatusCodes.Status400BadRequest, "admin.social_provider_invalid", "provider must be zalo; Facebook uses Meta OAuth.");
         if (body.Endpoint is not null && !string.IsNullOrWhiteSpace(body.Endpoint) && !IsValidHttpsUrl(body.Endpoint))
             return Error(http, StatusCodes.Status400BadRequest, "admin.social_endpoint_invalid", "endpoint must be an absolute https URL.");
         if (TooLong(body.PageId) || TooLong(body.PageAccessToken) || TooLong(body.OaId) || TooLong(body.OaAccessToken))

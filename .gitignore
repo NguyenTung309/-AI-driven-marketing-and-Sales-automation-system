@@ -31,3 +31,6 @@ appsettings*.Local.json
 decoded.txt
 /package.json
 /package-lock.json
+
+# Scratch build output (verify/run steps)
+.tmp/

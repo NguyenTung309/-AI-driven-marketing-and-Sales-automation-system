@@ -129,6 +129,30 @@ public sealed class ChannelInboundMessageConsumerTests
     }
 
     [Fact]
+    public async Task Consume_SkipsAutoReply_WhenPendingDraftAwaitsApproval()
+    {
+        // Approval mode: 1 AI draft đang chờ duyệt (pending_approval) thì tin khách kế tiếp KHÔNG
+        // được đẻ thêm draft — tránh xếp chồng nhiều reply pending cho cùng hội thoại.
+        using var fx = new TestAppDb();
+        var conv = Conversation.Open(fx.TenantId, "zalo", "page1:conv1", Now);
+        conv.AppendMessage("out", "agent", "draft chờ duyệt", "text", Now, status: "pending_approval");
+        fx.Db.Conversations.Add(conv);
+        await fx.Db.SaveChangesAsync();
+
+        var ingestor = Substitute.For<IChannelMessageIngestor>();
+        ingestor.IngestAsync(Arg.Any<Guid>(), Arg.Any<ChannelMessage>(), Arg.Any<CancellationToken>())
+            .Returns(new IngestResult(conv.Id, Guid.NewGuid(), false));
+        var gateway = Substitute.For<IChatAutoReplyGateway>();
+
+        var sut = new ChannelInboundMessageConsumer(ingestor, fx.Db, Substitute.For<IInboxNotifier>(), gateway,
+            NullLogger<ChannelInboundMessageConsumer>.Instance);
+        await sut.Consume(Context(fx.TenantId, Msg()));
+
+        await gateway.DidNotReceive().ReplyAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<string>(),
+            Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Consume_SkipsAutoReply_WhenIngestDeduplicated()
     {
         // Idempotency (review-gate P2): MassTransit redelivery của cùng inbound → ingest dedup

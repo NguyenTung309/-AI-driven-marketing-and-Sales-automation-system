@@ -387,7 +387,7 @@ export default function ChannelManagementPage() {
             </select>
           </label>
           <label className="block">
-            <span className="mb-1 block text-label-sm font-semibold text-secondary">Page Access Token</span>
+            <span className="mb-1 block text-label-sm font-semibold text-secondary">Pancake Page Access Token</span>
             <input
               type="password"
               className="w-full rounded border border-outline bg-surface-container-lowest px-3 py-2 text-body-md"
@@ -453,7 +453,7 @@ export default function ChannelManagementPage() {
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-label-sm font-semibold text-secondary">Page Access Token</span>
+            <span className="mb-1 block text-label-sm font-semibold text-secondary">Pancake Page Access Token</span>
             <input
               type="password"
               className="w-full rounded border border-outline bg-surface-container-lowest px-3 py-2 text-body-md"

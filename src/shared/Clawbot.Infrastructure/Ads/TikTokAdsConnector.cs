@@ -15,7 +15,7 @@ public sealed partial class TikTokAdsConnector(
 
     private readonly TikTokAdsOptions _options = options.Value;
 
-    public async Task<AdsMetricSnapshot?> FetchMetricsAsync(string externalCampaignId, CancellationToken ct = default)
+    public async Task<AdsMetricSnapshot?> FetchMetricsAsync(Guid tenantId, string externalCampaignId, CancellationToken ct = default)
     {
         if (!_options.Enabled || string.IsNullOrWhiteSpace(_options.AccessToken))
             return null;
@@ -42,7 +42,7 @@ public sealed partial class TikTokAdsConnector(
         }, ct).ConfigureAwait(false);
     }
 
-    public async Task<bool> ApplyActionAsync(string externalCampaignId, string action, decimal? newBudget, CancellationToken ct = default)
+    public async Task<bool> ApplyActionAsync(Guid tenantId, string externalCampaignId, string action, decimal? newBudget, CancellationToken ct = default)
     {
         if (!_options.Enabled || string.IsNullOrWhiteSpace(_options.AccessToken))
             return false;
@@ -87,10 +87,10 @@ public sealed partial class TikTokAdsConnector(
         }, ct).ConfigureAwait(false);
     }
 
-    public Task<string?> BuildLookalikeAsync(IReadOnlyList<string> seedContactKeys, CancellationToken ct = default) =>
+    public Task<string?> BuildLookalikeAsync(Guid tenantId, IReadOnlyList<string> seedContactKeys, CancellationToken ct = default) =>
         Task.FromResult<string?>(null);
 
-    public Task<bool> BuildRemarketingAsync(string audienceName, IReadOnlyList<string> contactKeys, CancellationToken ct = default) =>
+    public Task<bool> BuildRemarketingAsync(Guid tenantId, string audienceName, IReadOnlyList<string> contactKeys, CancellationToken ct = default) =>
         Task.FromResult(false);
 
     [LoggerMessage(EventId = 5403, Level = LogLevel.Warning, Message = "TikTok ads metrics fetch failed for campaign {CampaignId}")]

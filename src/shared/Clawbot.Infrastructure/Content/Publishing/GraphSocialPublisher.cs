@@ -1,25 +1,18 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using Clawbot.Infrastructure.Integrations.Meta;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Clawbot.Infrastructure.Content.Publishing;
 
-// SPEC-16 P2-8: publisher that calls FB Graph POST /{page_id}/feed + Zalo OA article API with a page token,
-// replacing the generic webhook publisher_not_configured stub. Channel credentials (FB app, Zalo OA) are read
-// from options now (PublisherOptions-style); Module M-1 moves them to encrypted DB storage with per-page tokens.
-//
-// ponytail: external dep guard — this is scaffolded + unit-tested against a fake HTTP handler. Real publish
-// requires FB app id/secret + pages_manage_posts permission (app review, long lead) and a Zalo OA token, which
-// the user must provision. The shape is correct against the FB Graph /feed contract and Zalo OA article API.
+// Facebook publishing uses the tenant Meta OAuth connection and its encrypted per-Page token.
+// Zalo keeps the encrypted credential resolver; legacy Facebook options remain fallback-only.
 public sealed class GraphPublisherOptions
 {
     public const string SectionName = "Content:GraphPublisher";
 
-    public GraphChannelOptions Facebook { get; init; } = new()
-    {
-        Endpoint = "https://graph.facebook.com/v21.0",
-    };
+    public GraphChannelOptions Facebook { get; init; } = new();
     public GraphChannelOptions Zalo { get; init; } = new();
 }
 
@@ -38,13 +31,18 @@ public sealed partial class GraphSocialPublisher(
     HttpClient http,
     IOptions<GraphPublisherOptions> options,
     ISocialCredentialResolver? credentialResolver = null,
-    ILogger<GraphSocialPublisher>? logger = null) : ISocialPublisher
+    ILogger<GraphSocialPublisher>? logger = null,
+    IMetaIntegrationService? metaIntegration = null,
+    IMetaGraphClient? metaGraph = null) : ISocialPublisher
 {
+    private const string FacebookEndpoint = "https://graph.facebook.com/v25.0";
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _http = http;
     private readonly GraphPublisherOptions _options = options.Value;
     private readonly ISocialCredentialResolver? _credentialResolver = credentialResolver;
     private readonly ILogger<GraphSocialPublisher> _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<GraphSocialPublisher>.Instance;
+    private readonly IMetaIntegrationService? _metaIntegration = metaIntegration;
+    private readonly IMetaGraphClient? _metaGraph = metaGraph;
 
     public async Task<PublishResult> PublishAsync(PublishRequest request, CancellationToken ct = default)
     {
@@ -62,13 +60,20 @@ public sealed partial class GraphSocialPublisher(
     // falling back to options only when no DB credential exists, so prod creds never live in appsettings.json]
     private async Task<PublishResult> PublishFacebookAsync(PublishRequest request, CancellationToken ct)
     {
+        if (_metaIntegration is not null && _metaGraph is not null)
+        {
+            var page = await _metaIntegration.ResolvePageAsync(request.TenantId, request.MetaAssetId, ct).ConfigureAwait(false);
+            if (page is not null)
+                return await PublishFacebookWithMetaAsync(request, page, ct).ConfigureAwait(false);
+        }
+
         var fb = await ResolveChannelAsync(request.TenantId, "facebook", ct).ConfigureAwait(false);
-        if (fb is null || !fb.Enabled || string.IsNullOrWhiteSpace(fb.Endpoint) || string.IsNullOrWhiteSpace(fb.PageAccessToken) || string.IsNullOrWhiteSpace(fb.PageId))
+        if (fb is null || !fb.Enabled || string.IsNullOrWhiteSpace(fb.PageAccessToken) || string.IsNullOrWhiteSpace(fb.PageId))
             return new PublishResult(false, null, "facebook_not_configured");
 
         var imageUrl = FirstImageUrl(request.AssetsJson);
         var path = imageUrl is null ? "feed" : "photos";
-        var url = $"{fb.Endpoint.TrimEnd('/')}/{Uri.EscapeDataString(fb.PageId)}/{path}";
+        var url = $"{FacebookEndpoint}/{Uri.EscapeDataString(fb.PageId)}/{path}";
         var fields = imageUrl is null
             ? new Dictionary<string, string>
             {
@@ -91,10 +96,13 @@ public sealed partial class GraphSocialPublisher(
                 return new PublishResult(false, null, $"facebook_http_{(int)resp.StatusCode}:{Truncate(body)}");
 
             using var doc = JsonDocument.Parse(body);
-            if (!doc.RootElement.TryGetProperty("id", out var idEl) || idEl.ValueKind != JsonValueKind.String)
+            var idEl = doc.RootElement.TryGetProperty("post_id", out var postIdEl)
+                ? postIdEl
+                : (doc.RootElement.TryGetProperty("id", out var fallbackId) ? fallbackId : default);
+            if (idEl.ValueKind != JsonValueKind.String)
                 return new PublishResult(false, null, "facebook_response_missing_id");
             var postId = idEl.GetString()!;
-            var postUrl = $"https://www.facebook.com/{fb.PageId}/posts/{ExtractPostId(postId)}";
+            var postUrl = $"https://www.facebook.com/{postId}";
             LogPublished(_logger, "facebook", request.TenantId, request.ContentItemId, postUrl);
             return new PublishResult(true, postUrl, null);
         }
@@ -102,6 +110,84 @@ public sealed partial class GraphSocialPublisher(
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (OperationCanceledException) { return new PublishResult(false, null, "facebook_timeout"); }
         catch (JsonException ex) { return new PublishResult(false, null, $"facebook_parse:{ex.Message}"); }
+    }
+
+    private async Task<PublishResult> PublishFacebookWithMetaAsync(
+        PublishRequest request,
+        MetaPageCredential page,
+        CancellationToken ct)
+    {
+        var imageUrl = FirstImageUrl(request.AssetsJson);
+        try
+        {
+            var published = await _metaGraph!.PublishPageAsync(
+                request.TenantId,
+                page.PageId,
+                page.PageAccessToken,
+                request.Body,
+                imageUrl,
+                ct).ConfigureAwait(false);
+            LogPublished(_logger, "facebook", request.TenantId, request.ContentItemId, published.Permalink);
+            return new PublishResult(true, published.Permalink, null);
+        }
+        catch (MetaGraphException ex) when (ex.IsTokenError)
+        {
+            try
+            {
+                var refreshed = await _metaIntegration!.RefreshPageAsync(request.TenantId, request.MetaAssetId, ct).ConfigureAwait(false);
+                if (refreshed is null)
+                {
+                    await _metaIntegration.MarkReconnectRequiredAsync(request.TenantId, "meta_page_token_refresh_failed", ct).ConfigureAwait(false);
+                    return new PublishResult(false, null, "facebook_reconnect_required");
+                }
+
+                var published = await _metaGraph!.PublishPageAsync(
+                    request.TenantId,
+                    refreshed.PageId,
+                    refreshed.PageAccessToken,
+                    request.Body,
+                    imageUrl,
+                    ct).ConfigureAwait(false);
+                LogPublished(_logger, "facebook", request.TenantId, request.ContentItemId, published.Permalink);
+                return new PublishResult(true, published.Permalink, null);
+            }
+            catch (MetaGraphException refreshException) when (refreshException.IsTokenError)
+            {
+                await _metaIntegration!.MarkReconnectRequiredAsync(
+                    request.TenantId,
+                    $"meta_token_{refreshException.Code}_{refreshException.Subcode}",
+                    ct).ConfigureAwait(false);
+                return new PublishResult(false, null, "facebook_reconnect_required");
+            }
+            catch (MetaGraphException refreshException)
+            {
+                LogMetaPublishFailed(_logger, request.TenantId, request.ContentItemId, refreshException.Message, refreshException);
+                return new PublishResult(false, null, $"facebook_graph_{refreshException.Code ?? refreshException.HttpStatus ?? 0}");
+            }
+            catch (HttpRequestException refreshException)
+            {
+                LogMetaPublishFailed(_logger, request.TenantId, request.ContentItemId, refreshException.Message, refreshException);
+                return new PublishResult(false, null, "facebook_unavailable");
+            }
+        }
+        catch (MetaGraphException ex)
+        {
+            LogMetaPublishFailed(_logger, request.TenantId, request.ContentItemId, ex.Message, ex);
+            return new PublishResult(false, null, $"facebook_graph_{ex.Code ?? ex.HttpStatus ?? 0}");
+        }
+        catch (HttpRequestException ex)
+        {
+            LogMetaPublishFailed(_logger, request.TenantId, request.ContentItemId, ex.Message, ex);
+            return new PublishResult(false, null, "facebook_unavailable");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return new PublishResult(false, null, "facebook_timeout");
+        }
     }
 
     // EARS[WHEN publishing to Zalo THE SYSTEM SHALL resolve credentials from the encrypted DB store first, falling
@@ -174,7 +260,11 @@ public sealed partial class GraphSocialPublisher(
                 var type = asset.TryGetProperty("type", out var typeEl) ? typeEl.GetString() : "image";
                 if (!string.Equals(type, "image", StringComparison.OrdinalIgnoreCase)) continue;
                 if (asset.TryGetProperty("url", out var urlEl) && urlEl.ValueKind == JsonValueKind.String)
-                    return urlEl.GetString();
+                {
+                    var url = urlEl.GetString();
+                    if (!string.IsNullOrWhiteSpace(url))
+                        return url;
+                }
             }
         }
         catch (JsonException) { return null; }
@@ -185,16 +275,12 @@ public sealed partial class GraphSocialPublisher(
     private static string NormalizePlatform(string platform) =>
         (platform ?? string.Empty).Trim().ToLowerInvariant();
 
-    // FB /feed returns "{pageId}_{postId}"; the permalink uses just the postId.
-    private static string ExtractPostId(string composite)
-    {
-        var idx = composite.IndexOf('_');
-        return idx > 0 ? composite[(idx + 1)..] : composite;
-    }
-
     private static string Truncate(string s) =>
         string.IsNullOrEmpty(s) ? string.Empty : (s.Length > 200 ? s[..200] : s);
 
     [LoggerMessage(EventId = 5203, Level = LogLevel.Information, Message = "GraphSocialPublisher published {platform} content {contentItemId} tenant {tenantId}: {postUrl}")]
     private static partial void LogPublished(ILogger logger, string platform, Guid tenantId, Guid contentItemId, string postUrl);
+
+    [LoggerMessage(EventId = 5204, Level = LogLevel.Warning, Message = "Meta publish failed for content {ContentItemId} tenant {TenantId}: {Reason}")]
+    private static partial void LogMetaPublishFailed(ILogger logger, Guid tenantId, Guid contentItemId, string reason, Exception exception);
 }

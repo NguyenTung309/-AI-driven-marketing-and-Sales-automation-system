@@ -9,7 +9,7 @@ namespace Clawbot.Domain.Content;
 public sealed class SocialCredential : AggregateRoot<Guid>, ITenantOwned
 {
     public Guid TenantId { get; private set; }
-    public string Provider { get; private set; } = string.Empty;   // facebook | zalo
+    public string Provider { get; private set; } = string.Empty;   // meta | facebook | zalo
     public string? PageId { get; private set; }                    // optional: per-page credential (e.g. FB page token)
     public string CredentialsEncrypted { get; private set; } = string.Empty;
     public bool IsActive { get; private set; } = true;

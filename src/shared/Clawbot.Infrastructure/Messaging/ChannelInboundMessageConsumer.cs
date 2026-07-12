@@ -71,6 +71,25 @@ public sealed partial class ChannelInboundMessageConsumer(
             if (conv is null || !conv.AiAutoReplyEnabled || conv.Status != "open")
                 return;
 
+            // Đã có 1 AI draft chờ duyệt (pending_approval, chưa gửi) trong hội thoại này thì KHÔNG sinh
+            // thêm — người duyệt xử lý draft đó với ngữ cảnh mới nhất. Không có guard này, mỗi tin khách
+            // mới lại đẻ 1 reply pending, xếp chồng nhiều draft cho cùng 1 khách. Approve/reject đổi status
+            // khỏi pending_approval nên guard tự mở lại.
+            // ponytail: ConcurrentMessageLimit=1 khử chồng tuần tự 1 host; 2 host cùng nhận 2 tin 1 lúc vẫn
+            // có thể lọt 2 draft — thêm distributed lock/unique-index nếu race đó thành vấn đề thực.
+            var hasPendingDraft = await _db.Messages
+                .IgnoreQueryFilters()
+                .AnyAsync(m => m.ConversationId == conversationId
+                    && m.TenantId == msg.TenantId
+                    && m.Direction == "out"
+                    && m.Status == "pending_approval", ct)
+                .ConfigureAwait(false);
+            if (hasPendingDraft)
+            {
+                LogPendingDraftSkip(_logger, conversationId);
+                return;
+            }
+
             // Recent context, oldest-first, excluding the message just ingested.
             // ChatRequest.history is role-less; ChatAgent maps even/odd -> user/assistant, close enough for context.
             var history = await _db.Messages
@@ -106,6 +125,10 @@ public sealed partial class ChannelInboundMessageConsumer(
     [LoggerMessage(EventId = 9111, Level = LogLevel.Information,
         Message = "AI auto-reply sent for conversation {ConversationId}")]
     private static partial void LogAutoReplied(ILogger logger, Guid conversationId);
+
+    [LoggerMessage(EventId = 9113, Level = LogLevel.Information,
+        Message = "AI auto-reply skipped for conversation {ConversationId}: a pending_approval draft already awaits review")]
+    private static partial void LogPendingDraftSkip(ILogger logger, Guid conversationId);
 
     [LoggerMessage(EventId = 9112, Level = LogLevel.Warning,
         Message = "AI auto-reply failed for conversation {ConversationId}")]

@@ -15,6 +15,7 @@ using Clawbot.Infrastructure.Ads;
 using Clawbot.Infrastructure.Leads;
 using Clawbot.SharedKernel.Audit;
 using Clawbot.Infrastructure.Identity;
+using Clawbot.Infrastructure.Integrations.Meta;
 using Clawbot.Infrastructure.Multitenancy;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.Infrastructure.Resilience;
@@ -47,6 +48,9 @@ public static class DependencyInjection
         services.AddScoped<AuditSaveChangesInterceptor>();
         services.AddClawbotPiiRedactor(); // AuditSaveChangesInterceptor depends on IPiiRedactor.
         services.AddScoped<Messaging.DomainEventDispatchInterceptor>();
+        // ai-self-learning-memory Lớp 3: memory theo agent — ContentReviewer nạp "lỗi hay gặp" vào persona.
+        // Đăng ký ở đây để CẢ 2 host (API + AgentService) đều có; reviewer coi provider là optional.
+        services.AddScoped<Clawbot.Agents.Core.Learning.IAgentMemoryProvider, Clawbot.Infrastructure.Learning.EfAgentMemoryProvider>();
 
         services.AddDbContext<AppDbContext>((sp, opt) =>
         {
@@ -124,6 +128,17 @@ public static class DependencyInjection
         services.AddSingleton<IIntentClassifier, KeywordIntentClassifier>();
         services.AddScoped<ITenantAccessor, HttpTenantAccessor>();
         services.AddScoped<ITenantResolver, DemoTenantResolver>();
+
+        services.Configure<MetaGraphOptions>(cfg.GetSection(MetaGraphOptions.SectionName));
+        services.AddScoped<MetaGraphConfigurationStore>();
+        services.AddScoped<IMetaGraphConfigurationResolver>(sp => sp.GetRequiredService<MetaGraphConfigurationStore>());
+        services.AddScoped<IMetaAppConfigurationService>(sp => sp.GetRequiredService<MetaGraphConfigurationStore>());
+        services.AddHttpClient<IMetaGraphClient, MetaGraphClient>((sp, client) =>
+        {
+            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<MetaGraphOptions>>().Value;
+            client.Timeout = TimeSpan.FromSeconds(Math.Clamp(options.TimeoutSeconds, 5, 120));
+        }).RemoveAllLoggers();
+        services.AddScoped<IMetaIntegrationService, MetaIntegrationService>();
         services.Configure<EncryptionOptions>(cfg.GetSection("Encryption"));
         services.AddSingleton<IEncryptor, AesEncryptor>();
         // Per-(tenant, agent) LLM provider resolution (decrypts the bound LlmConfig at call time).
@@ -162,42 +177,28 @@ public static class DependencyInjection
         services.AddScoped<ICommentChannelAdapter>(sp =>
             sp.GetRequiredService<IChannelAdapter>() as ICommentChannelAdapter
             ?? throw new InvalidOperationException("ICommentChannelAdapter not available"));
-        // SPEC-16 P2-8: graph publisher (FB Graph /feed + Zalo OA) when GraphPublisher is enabled; otherwise the
-        // legacy generic webhook publisher (HttpSocialPublisher) stays the default for backward compatibility.
+        // Native Facebook/Zalo publishing is always available so DB-backed connections take effect without a restart.
         services.Configure<GraphPublisherOptions>(cfg.GetSection(GraphPublisherOptions.SectionName));
-        // SPEC-16 Module M-1: encrypted DB credential resolver for FB/Zalo (falls back to options in GraphSocialPublisher).
         services.AddScoped<ISocialCredentialResolver, EfSocialCredentialResolver>();
-        var graphPublisherOptions = cfg.GetSection(GraphPublisherOptions.SectionName).Get<GraphPublisherOptions>() ?? new GraphPublisherOptions();
-        var graphPublisherEnabled = graphPublisherOptions.Facebook.Enabled || graphPublisherOptions.Zalo.Enabled;
-        if (graphPublisherEnabled)
-        {
-            services.AddHttpClient<ISocialPublisher, GraphSocialPublisher>()
-                .AddPolicyHandler(HttpResiliencePolicies.Retry())
-                .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
-                .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(15)));
-        }
-        else
-        {
-            services.AddHttpClient<ISocialPublisher, HttpSocialPublisher>()
-                .AddPolicyHandler(HttpResiliencePolicies.Retry())
-                .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
-                .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
-        }
+        services.AddHttpClient<GraphSocialPublisher>()
+            .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
+            .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(15)));
+        services.AddHttpClient<HttpSocialPublisher>()
+            .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
+            .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
+        services.AddScoped<ISocialPublisher, RoutingSocialPublisher>();
 
         // Ads connectors
         services.Configure<MetaAdsOptions>(cfg.GetSection(MetaAdsOptions.SectionName));
         services.Configure<TikTokAdsOptions>(cfg.GetSection(TikTokAdsOptions.SectionName));
         services.AddSingleton<IAdsPlatformThrottle, AdsPlatformThrottle>();
-        services.AddHttpClient<IAdsPlatformConnector, MetaAdsConnector>()
-            .AddPolicyHandler(HttpResiliencePolicies.Retry())
-            .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
-            .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
+        services.AddScoped<IAdsPlatformConnector, MetaAdsConnector>();
         services.AddHttpClient<IAdsPlatformConnector, TikTokAdsConnector>()
             .AddPolicyHandler(HttpResiliencePolicies.Retry())
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
-        services.AddSingleton<IAdsConnectorResolver, AdsConnectorResolver>();
-        services.AddSingleton<AdsAgent>();
+        services.AddScoped<IAdsConnectorResolver, AdsConnectorResolver>();
+        services.AddScoped<AdsAgent>();
 
         // Vector store: Qdrant is the only supported backend now SQL Server doesn't carry pgvector.
         services.Configure<QdrantOptions>(cfg.GetSection(QdrantOptions.SectionName));

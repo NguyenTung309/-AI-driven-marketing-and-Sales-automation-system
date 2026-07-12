@@ -8,12 +8,14 @@ using Clawbot.Domain.Content;
 using Clawbot.Domain.Conversations;
 using Clawbot.Domain.Documents;
 using Clawbot.Domain.Experiments;
+using Clawbot.Domain.Integrations;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.Llm;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
+using Clawbot.Infrastructure.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -279,6 +281,58 @@ public sealed class KbTestCaseConfiguration : IEntityTypeConfiguration<KbTestCas
     }
 }
 
+public sealed class AgentMemoryConfiguration : IEntityTypeConfiguration<AgentMemory>
+{
+    public void Configure(EntityTypeBuilder<AgentMemory> builder)
+    {
+        builder.ToTable("agent_memories");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.AgentCode).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.Fact).HasMaxLength(1024).IsRequired();
+        builder.Property(x => x.Category).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.Confidence).HasPrecision(3, 2);
+        builder.HasIndex(x => new { x.TenantId, x.AgentCode, x.IsActive });
+    }
+}
+
+public sealed class ContactMemoryConfiguration : IEntityTypeConfiguration<Clawbot.Domain.Contacts.ContactMemory>
+{
+    public void Configure(EntityTypeBuilder<Clawbot.Domain.Contacts.ContactMemory> builder)
+    {
+        builder.ToTable("contact_memories");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Fact).HasMaxLength(1024).IsRequired();
+        builder.Property(x => x.Category).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.Confidence).HasPrecision(3, 2);
+        // Truy vấn nóng của ChatAgent: facts active của 1 khách, mới nhất trước.
+        builder.HasIndex(x => new { x.TenantId, x.ContactId, x.IsActive });
+    }
+}
+
+public sealed class KbSuggestionConfiguration : IEntityTypeConfiguration<KbSuggestion>
+{
+    public void Configure(EntityTypeBuilder<KbSuggestion> builder)
+    {
+        builder.ToTable("kb_suggestions");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Op).HasMaxLength(16).IsRequired();
+        builder.Property(x => x.Title).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.ContentMd).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.Rationale).HasColumnType("nvarchar(max)");
+        builder.Property(x => x.EvidenceJson).HasColumnType("nvarchar(max)");
+        builder.Property(x => x.DedupHash).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.ReviewerVerdict).HasMaxLength(16);
+        builder.Property(x => x.Status).HasMaxLength(16).IsRequired();
+        builder.Property(x => x.ApprovalMode).HasMaxLength(8);
+        builder.Property(x => x.RejectedReason).HasMaxLength(1024);
+        builder.Property(x => x.AccuracyBefore).HasPrecision(5, 2);
+        builder.Property(x => x.AccuracyAfter).HasPrecision(5, 2);
+        // Job đêm idempotent: chạy lại không nhân đôi đề xuất cùng câu-hỏi-chuẩn-hóa.
+        builder.HasIndex(x => new { x.TenantId, x.DedupHash }).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.Status });
+    }
+}
+
 public sealed class PancakeConfigConfiguration : IEntityTypeConfiguration<PancakeConfig>
 {
     public void Configure(EntityTypeBuilder<PancakeConfig> builder)
@@ -533,6 +587,11 @@ public sealed class ContentScheduleConfiguration : IEntityTypeConfiguration<Cont
         builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
         builder.Property(x => x.Status).HasMaxLength(32).IsRequired();
         builder.Property(x => x.PostUrl).HasMaxLength(512);
+        builder.HasOne<MetaAsset>()
+            .WithMany()
+            .HasForeignKey(x => x.MetaAssetId)
+            .OnDelete(DeleteBehavior.SetNull);
+        builder.HasIndex(x => x.MetaAssetId);
         builder.HasIndex(x => new { x.TenantId, x.ScheduledAt });
     }
 }
@@ -545,10 +604,75 @@ public sealed class SocialCredentialConfiguration : IEntityTypeConfiguration<Soc
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Provider).HasMaxLength(32).IsRequired();
         builder.Property(x => x.PageId).HasMaxLength(128);
-        builder.Property(x => x.CredentialsEncrypted).HasColumnName("credentials_encrypted").HasMaxLength(8000).IsRequired();
+        builder.Property(x => x.CredentialsEncrypted).HasColumnName("credentials_encrypted").IsRequired();
         // One active credential per (tenant, provider, page_id). Page_id included so a tenant can hold per-page FB tokens.
         builder.HasIndex(x => new { x.TenantId, x.Provider, x.PageId }).IsUnique();
         builder.HasQueryFilter(x => x.DeletedAt == null);
+    }
+}
+
+public sealed class MetaConnectionConfiguration : IEntityTypeConfiguration<MetaConnection>
+{
+    public void Configure(EntityTypeBuilder<MetaConnection> builder)
+    {
+        builder.ToTable("meta_connections");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.ClientBusinessId).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.SystemUserId).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.TokenType).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.AccessTokenEncrypted).HasColumnName("access_token_encrypted").IsRequired();
+        builder.Property(x => x.GrantedScopesJson).HasColumnName("granted_scopes_json").IsRequired();
+        builder.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.LastError).HasMaxLength(1024);
+        builder.HasOne<Tenant>()
+            .WithMany()
+            .HasForeignKey(x => x.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => x.TenantId).IsUnique();
+    }
+}
+
+public sealed class MetaAssetConfiguration : IEntityTypeConfiguration<MetaAsset>
+{
+    public void Configure(EntityTypeBuilder<MetaAsset> builder)
+    {
+        builder.ToTable("meta_assets");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.AssetType).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.ExternalId).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.Name).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.TasksJson).HasColumnName("tasks_json").IsRequired();
+        builder.Property(x => x.AccessTokenEncrypted).HasColumnName("access_token_encrypted").IsRequired();
+        builder.HasOne<Tenant>()
+            .WithMany()
+            .HasForeignKey(x => x.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<MetaConnection>()
+            .WithMany()
+            .HasForeignKey(x => x.ConnectionId)
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(x => x.ConnectionId);
+        builder.HasIndex(x => new { x.TenantId, x.AssetType, x.ExternalId }).IsUnique();
+    }
+}
+
+public sealed class MetaOAuthStateConfiguration : IEntityTypeConfiguration<MetaOAuthState>
+{
+    public void Configure(EntityTypeBuilder<MetaOAuthState> builder)
+    {
+        builder.ToTable("meta_oauth_states");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.StateHash).HasMaxLength(64).IsRequired();
+        builder.HasOne<Tenant>()
+            .WithMany()
+            .HasForeignKey(x => x.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AppUser>()
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => x.StateHash).IsUnique();
+        builder.HasIndex(x => x.ExpiresAt);
     }
 }
 

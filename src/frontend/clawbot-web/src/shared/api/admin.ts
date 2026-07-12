@@ -250,6 +250,8 @@ export interface TenantOrchestrationSettings {
   readonly requireContentReview: boolean;
   /** Manual-mode: mọi AI reply hold chờ người duyệt thay vì gửi tự động. */
   readonly requireChatReplyApproval: boolean;
+  /** AI tự học: bật = tri thức chưng cất luôn chờ người duyệt (tắt tự duyệt). */
+  readonly requireKbHumanReview: boolean;
 }
 
 export interface TenantOrchestrationUpdateResult {
@@ -257,6 +259,7 @@ export interface TenantOrchestrationUpdateResult {
   readonly monthlyCostCapUsd: number | null;
   readonly requireContentReview: boolean;
   readonly requireChatReplyApproval: boolean;
+  readonly requireKbHumanReview: boolean;
 }
 
 export async function getTenantOrchestration(): Promise<TenantOrchestrationSettings> {
@@ -267,7 +270,11 @@ export async function getTenantOrchestration(): Promise<TenantOrchestrationSetti
 export async function setTenantOrchestration(
   requireApproval: boolean,
   monthlyCostCapUsd?: number | null,
-  flags?: { readonly requireContentReview?: boolean; readonly requireChatReplyApproval?: boolean },
+  flags?: {
+    readonly requireContentReview?: boolean;
+    readonly requireChatReplyApproval?: boolean;
+    readonly requireKbHumanReview?: boolean;
+  },
 ): Promise<TenantOrchestrationUpdateResult> {
   const res = await apiClient.put<TenantOrchestrationUpdateResult>(
     "/api/admin/tenant/orchestration",
@@ -277,6 +284,7 @@ export async function setTenantOrchestration(
       // undefined = không gửi field -> BE giữ nguyên giá trị hiện tại
       requireContentReview: flags?.requireContentReview,
       requireChatReplyApproval: flags?.requireChatReplyApproval,
+      requireKbHumanReview: flags?.requireKbHumanReview,
     },
   );
   return res.data;
@@ -342,9 +350,8 @@ export interface CreateInboxRequest {
   readonly agentId?: string | null;
 }
 
-export async function createInbox(body: CreateInboxRequest): Promise<any> {
-  const res = await apiClient.post("/api/admin/inboxes", body);
-  return res.data;
+export async function createInbox(body: CreateInboxRequest): Promise<void> {
+  await apiClient.post("/api/admin/inboxes", body);
 }
 
 // SPEC-16 Module M-5: Pancake channel connect — list pages from a user token, then mint+store page tokens.
@@ -478,4 +485,91 @@ export async function updateSocialCredential(
     payload,
   );
   return res.data;
+}
+
+export interface MetaAsset {
+  readonly id: string;
+  readonly assetType: string;
+  readonly externalId: string;
+  readonly name: string;
+  readonly tasks: readonly string[];
+  readonly isDefault: boolean;
+  readonly isActive: boolean;
+  readonly lastSyncedAt: string;
+}
+
+export type MetaAuthorizationMode = "development_user" | "business_system_user";
+
+export interface MetaAppConfiguration {
+  readonly configured: boolean;
+  readonly businessWebhookConfigured: boolean;
+  readonly source: "database" | "environment";
+  readonly appId: string;
+  readonly configurationId: string;
+  readonly authorizationMode: MetaAuthorizationMode;
+  readonly hasAppSecret: boolean;
+  readonly hasWebhookVerifyToken: boolean;
+  readonly redirectUri: string;
+  readonly frontendReturnUrl: string;
+  readonly apiVersion: string;
+  readonly updatedAt?: string | null;
+}
+
+export interface MetaIntegrationStatus {
+  readonly configured: boolean;
+  readonly businessWebhookConfigured: boolean;
+  readonly appConfiguration: MetaAppConfiguration;
+  readonly connected: boolean;
+  readonly status: string;
+  readonly clientBusinessId: string;
+  readonly systemUserId: string;
+  readonly tokenType: "user" | "business_integration_system_user" | "";
+  readonly grantedScopes: readonly string[];
+  readonly expiresAt?: string | null;
+  readonly dataAccessExpiresAt?: string | null;
+  readonly lastValidatedAt?: string | null;
+  readonly lastError?: string | null;
+  readonly assets: readonly MetaAsset[];
+}
+
+export async function getMetaIntegrationStatus(): Promise<MetaIntegrationStatus> {
+  const res = await apiClient.get<MetaIntegrationStatus>("/api/admin/meta");
+  return res.data;
+}
+
+export async function updateMetaAppConfiguration(body: {
+  readonly appId: string;
+  readonly appSecret: string | null;
+  readonly configurationId: string;
+  readonly authorizationMode: MetaAuthorizationMode;
+  readonly webhookVerifyToken: string | null;
+  readonly redirectUri: string;
+  readonly frontendReturnUrl: string;
+}): Promise<MetaAppConfiguration> {
+  const res = await apiClient.put<MetaAppConfiguration>("/api/admin/meta/config", body);
+  return res.data;
+}
+
+export async function startMetaConnection(): Promise<{ readonly authorizationUrl: string; readonly expiresAt: string }> {
+  const res = await apiClient.post<{ readonly authorizationUrl: string; readonly expiresAt: string }>("/api/admin/meta/connect");
+  return res.data;
+}
+
+export async function syncMetaAssets(): Promise<MetaIntegrationStatus> {
+  const res = await apiClient.post<MetaIntegrationStatus>("/api/admin/meta/sync");
+  return res.data;
+}
+
+export async function validateMetaConnection(): Promise<MetaIntegrationStatus> {
+  const res = await apiClient.post<MetaIntegrationStatus>("/api/admin/meta/validate");
+  return res.data;
+}
+
+export async function setDefaultMetaAsset(assetId: string): Promise<MetaIntegrationStatus> {
+  const res = await apiClient.put<MetaIntegrationStatus>(`/api/admin/meta/assets/${encodeURIComponent(assetId)}/default`);
+  return res.data;
+}
+
+export async function disconnectMeta(): Promise<void> {
+  await apiClient.delete("/api/admin/meta");
 }

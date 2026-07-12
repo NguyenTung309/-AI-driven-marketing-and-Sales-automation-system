@@ -23,7 +23,7 @@ public sealed class DependencyInjectionTests
     }
 
     [Fact]
-    public void AddInfrastructure_keeps_webhook_publisher_when_graph_sections_disabled()
+    public void AddInfrastructure_registers_routing_publisher_when_graph_sections_disabled()
     {
         var cfg = TestConfig(new Dictionary<string, string?>
         {
@@ -35,11 +35,11 @@ public sealed class DependencyInjectionTests
         services.AddInfrastructure(cfg);
 
         using var provider = services.BuildServiceProvider();
-        provider.GetRequiredService<ISocialPublisher>().Should().BeOfType<HttpSocialPublisher>();
+        provider.GetRequiredService<ISocialPublisher>().Should().BeOfType<RoutingSocialPublisher>();
     }
 
     [Fact]
-    public void AddInfrastructure_uses_graph_publisher_when_any_graph_channel_enabled()
+    public void AddInfrastructure_registers_routing_publisher_when_graph_channel_enabled()
     {
         var cfg = TestConfig(new Dictionary<string, string?>
         {
@@ -50,7 +50,7 @@ public sealed class DependencyInjectionTests
         services.AddInfrastructure(cfg);
 
         using var provider = services.BuildServiceProvider();
-        provider.GetRequiredService<ISocialPublisher>().Should().BeOfType<GraphSocialPublisher>();
+        provider.GetRequiredService<ISocialPublisher>().Should().BeOfType<RoutingSocialPublisher>();
     }
 
     private static IConfiguration TestConfig(Dictionary<string, string?>? overrides = null)

@@ -72,7 +72,7 @@ public sealed partial class ContentReviewSlaJob(
                     "Bài đăng chờ agent review — sắp tới giờ đăng",
                     Severity: "warning",
                     Body: $"Bài {item.Platform} dự kiến đăng lúc {deadline:HH:mm dd/MM} (UTC) chưa có chữ ký review. Duyệt sớm để kịp lịch.",
-                    Link: "/content"), ct).ConfigureAwait(false);
+                    Link: $"/content?tab=queue&itemId={item.Id}"), ct).ConfigureAwait(false);
                 item.MarkReviewAlerted(now);
                 alerted++;
             }
@@ -81,12 +81,12 @@ public sealed partial class ContentReviewSlaJob(
                 var recipients = await escalationRecipients.ResolveAsync(item.TenantId, ct).ConfigureAwait(false);
                 if (recipients.Count == 0)
                 {
-                    await PublishOverdueAsync(item.TenantId, null, item.Platform, deadline, ct).ConfigureAwait(false);
+                    await PublishOverdueAsync(item.TenantId, null, item.Id, item.Platform, deadline, ct).ConfigureAwait(false);
                 }
                 else
                 {
                     foreach (var userId in recipients)
-                        await PublishOverdueAsync(item.TenantId, userId, item.Platform, deadline, ct).ConfigureAwait(false);
+                        await PublishOverdueAsync(item.TenantId, userId, item.Id, item.Platform, deadline, ct).ConfigureAwait(false);
                 }
                 item.MarkReviewAlerted(now);
                 alerted++;
@@ -100,13 +100,13 @@ public sealed partial class ContentReviewSlaJob(
         }
     }
 
-    private Task PublishOverdueAsync(Guid tenantId, Guid? userId, string platform, DateTimeOffset deadline, CancellationToken ct) =>
+    private Task PublishOverdueAsync(Guid tenantId, Guid? userId, Guid itemId, string platform, DateTimeOffset deadline, CancellationToken ct) =>
         publisher.PublishAsync(new NotificationRequest(
             tenantId, userId, "content_review_overdue",
             "Bài đăng TRỄ lịch vì chưa được review",
             Severity: "error",
             Body: $"Bài {platform} đã qua giờ đăng dự kiến ({deadline:HH:mm dd/MM} UTC) nhưng chưa có chữ ký review — bài đang bị giữ, cần duyệt hoặc từ chối ngay.",
-            Link: "/content"), ct);
+            Link: $"/content?tab=queue&itemId={itemId}"), ct);
 
     [LoggerMessage(EventId = 12101, Level = LogLevel.Debug,
         Message = "ContentReviewSla skipped: {Reason}")]

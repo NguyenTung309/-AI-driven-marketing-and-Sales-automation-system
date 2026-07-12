@@ -12,6 +12,7 @@ using Clawbot.Domain.Content;
 using Clawbot.Domain.Conversations;
 using Clawbot.Domain.Documents;
 using Clawbot.Domain.Experiments;
+using Clawbot.Domain.Integrations;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.Llm;
@@ -67,6 +68,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<KbVersion> KbVersions => Set<KbVersion>();
     public DbSet<SkillFile> SkillFiles => Set<SkillFile>();
     public DbSet<KbTestCase> KbTestCases => Set<KbTestCase>();
+    public DbSet<KbSuggestion> KbSuggestions => Set<KbSuggestion>();
+    public DbSet<ContactMemory> ContactMemories => Set<ContactMemory>();
+    public DbSet<AgentMemory> AgentMemories => Set<AgentMemory>();
 
     // Chat scenarios
     public DbSet<ChatScenario> ChatScenarios => Set<ChatScenario>();
@@ -97,6 +101,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<ContentItem> ContentItems => Set<ContentItem>();
     public DbSet<ContentSchedule> ContentSchedules => Set<ContentSchedule>();
     public DbSet<SocialCredential> SocialCredentials => Set<SocialCredential>();
+
+    // Meta business integrations
+    public DbSet<MetaConnection> MetaConnections => Set<MetaConnection>();
+    public DbSet<MetaAsset> MetaAssets => Set<MetaAsset>();
+    public DbSet<MetaOAuthState> MetaOAuthStates => Set<MetaOAuthState>();
 
     // Ads
     public DbSet<AdsCampaign> AdsCampaigns => Set<AdsCampaign>();

@@ -41,6 +41,10 @@ export interface ContentSchedule {
   readonly postUrl: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly metaAssetId: string | null;
+  readonly likeCount: number | null;
+  readonly commentCount: number | null;
+  readonly engagementSyncedAt: string | null;
 }
 
 export interface ContentCalendarItem {
@@ -52,6 +56,17 @@ export interface ContentCalendarItem {
   readonly scheduledAt: string;
   readonly postedAt: string | null;
   readonly postUrl: string | null;
+  readonly metaAssetId: string | null;
+  readonly likeCount: number | null;
+  readonly commentCount: number | null;
+}
+
+export interface ContentPublishTarget {
+  readonly id: string;
+  readonly platform: string;
+  readonly externalId: string;
+  readonly name: string;
+  readonly isDefault: boolean;
 }
 
 export interface ContentCalendarResponse {
@@ -216,6 +231,11 @@ export async function getContentQueue(params: ContentQueueParams = {}): Promise<
   return res.data;
 }
 
+export async function getContentItem(id: string): Promise<ContentItem> {
+  const res = await apiClient.get<ContentItem>(`/api/content/items/${id}`);
+  return res.data;
+}
+
 export async function updateContentItem(id: string, payload: UpdateContentItemPayload): Promise<ContentItem> {
   const res = await apiClient.put<ContentItem>(`/api/content/items/${id}`, payload);
   return res.data;
@@ -242,8 +262,13 @@ export async function rejectContentItem(id: string, reason?: string): Promise<Co
   return res.data;
 }
 
-export async function scheduleContentItem(id: string, scheduledAt: string | null): Promise<ContentSchedule> {
-  const res = await apiClient.post<ContentSchedule>(`/api/content/items/${id}/schedule`, { scheduledAt });
+export async function scheduleContentItem(id: string, scheduledAt: string | null, metaAssetId?: string | null): Promise<ContentSchedule> {
+  const res = await apiClient.post<ContentSchedule>(`/api/content/items/${id}/schedule`, { scheduledAt, metaAssetId: metaAssetId ?? null });
+  return res.data;
+}
+
+export async function getContentPublishTargets(platform: string): Promise<readonly ContentPublishTarget[]> {
+  const res = await apiClient.get<readonly ContentPublishTarget[]>("/api/content/publish-targets", { params: { platform } });
   return res.data;
 }
 

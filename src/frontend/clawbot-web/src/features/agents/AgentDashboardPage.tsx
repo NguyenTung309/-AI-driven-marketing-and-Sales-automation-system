@@ -6,6 +6,7 @@ import { Alert } from "@/shared/ui/Alert";
 import { Button } from "@/shared/ui/Button";
 import { Card } from "@/shared/ui/Card";
 import { MetricCard } from "@/shared/ui/MetricCard";
+import { Modal } from "@/shared/ui/Modal";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import { WorkflowNode } from "@/shared/ui/WorkflowNode";
 import { operationalPhaseLabel, toSafeOperationalText } from "@/shared/utils/userText";
@@ -424,15 +425,17 @@ export default function AgentDashboardPage() {
       setNotice({ tone: "error", message: `Đổi chế độ duyệt thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
   });
   // Review-gate P3: 2 flag tenant — agent review bài đăng + duyệt tay AI reply.
+  // ai-self-learning-memory: requireKbHumanReview (bật = tắt AI tự duyệt tri thức).
   const requireContentReview = approvalQuery.data?.requireContentReview ?? false;
   const requireChatReplyApproval = approvalQuery.data?.requireChatReplyApproval ?? false;
+  const requireKbHumanReview = approvalQuery.data?.requireKbHumanReview ?? false;
   const reviewFlagMutation = useMutation({
-    mutationFn: (flags: { requireContentReview?: boolean; requireChatReplyApproval?: boolean }) =>
+    mutationFn: (flags: { requireContentReview?: boolean; requireChatReplyApproval?: boolean; requireKbHumanReview?: boolean }) =>
       setTenantOrchestration(requireApproval, monthlyCostCapUsd, flags),
     onSuccess: async (res) => {
       setNotice({
         tone: "success",
-        message: `Đã cập nhật: agent review bài đăng ${res.requireContentReview ? "BẬT" : "tắt"}, duyệt tay AI reply ${res.requireChatReplyApproval ? "BẬT" : "tắt"}.`,
+        message: `Đã cập nhật: agent review bài đăng ${res.requireContentReview ? "BẬT" : "tắt"}, duyệt tay AI reply ${res.requireChatReplyApproval ? "BẬT" : "tắt"}, AI tự duyệt tri thức ${res.requireKbHumanReview ? "tắt" : "BẬT"}.`,
       });
       await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
     },
@@ -524,6 +527,7 @@ export default function AgentDashboardPage() {
   const definitionsQuery = useQuery({ queryKey: ["orchestration-v2", "agents"], queryFn: listOrchestrationV2Agents });
   const canManageOrchestration = useAuthStore((s) => s.permissions).includes("orchestration:manage");
   const [subAgentDialogOpen, setSubAgentDialogOpen] = useState(false);
+  const [approvalConfigOpen, setApprovalConfigOpen] = useState(false);
   const [editingSubAgent, setEditingSubAgent] = useState<OrchestrationV2Agent | null>(null);
   // B7: onboarding lần đầu — tự ẩn vĩnh viễn khi user đóng hoặc khi đã có phiên chạy.
   const [onboardingDismissed, setOnboardingDismissed] = useState(
@@ -543,7 +547,7 @@ export default function AgentDashboardPage() {
     );
 
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ readonly tone: "success" | "error"; readonly message: string } | null>(null);
+  const [notice, setNotice] = useState<{ readonly tone: "success" | "error" | "info"; readonly message: string } | null>(null);
   // Toast tự ẩn sau 8 giây thay vì treo vĩnh viễn.
   useEffect(() => {
     if (!notice) return;
@@ -722,46 +726,17 @@ export default function AgentDashboardPage() {
             </RouterLink>
           ) : null}
           <button
-            aria-pressed={requireApproval}
-            className={[
-              "flex items-center gap-2 rounded-lg border px-3 py-2 text-body-md font-semibold transition-colors disabled:opacity-60",
-              requireApproval ? "border-warning bg-warning/10 text-warning" : "border-success bg-success/10 text-success",
-            ].join(" ")}
-            disabled={approvalMutation.isPending || approvalQuery.isLoading}
-            onClick={() => approvalMutation.mutate(!requireApproval)}
-            title="Bật: mọi phiên điều phối phải được người duyệt trước khi chạy, và mọi công cụ rủi ro cao (đăng bài, quảng cáo, trả lời khách) đều bị chặn. Tắt: phiên tự chạy và tự thực thi hành động."
+            className="flex items-center gap-2 rounded-lg border border-outline bg-surface-container-lowest px-3 py-2 text-body-md font-semibold text-secondary transition-colors hover:bg-surface-container-low disabled:opacity-60"
+            disabled={approvalQuery.isLoading}
+            onClick={() => setApprovalConfigOpen(true)}
+            title="Cấu hình các chế độ duyệt: điều phối, review bài đăng, duyệt tay AI reply, tự duyệt tri thức."
             type="button"
           >
-            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{requireApproval ? "approval" : "bolt"}</span>
-            {requireApproval ? "Duyệt thủ công mọi phiên" : "Tự động hoàn toàn"}
-          </button>
-          <button
-            aria-pressed={requireContentReview}
-            className={[
-              "flex items-center gap-2 rounded-lg border px-3 py-2 text-body-md font-semibold transition-colors disabled:opacity-60",
-              requireContentReview ? "border-warning bg-warning/10 text-warning" : "border-outline bg-surface-container-lowest text-secondary",
-            ].join(" ")}
-            disabled={reviewFlagMutation.isPending || approvalQuery.isLoading}
-            onClick={() => reviewFlagMutation.mutate({ requireContentReview: !requireContentReview })}
-            title="Bật: bài đăng chỉ được publish khi có chữ ký duyệt của agent review (kể cả bài người đã duyệt tay). Tắt: đăng theo luồng duyệt thường."
-            type="button"
-          >
-            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">fact_check</span>
-            {requireContentReview ? "Agent review bài đăng: BẬT" : "Agent review bài đăng: tắt"}
-          </button>
-          <button
-            aria-pressed={requireChatReplyApproval}
-            className={[
-              "flex items-center gap-2 rounded-lg border px-3 py-2 text-body-md font-semibold transition-colors disabled:opacity-60",
-              requireChatReplyApproval ? "border-warning bg-warning/10 text-warning" : "border-outline bg-surface-container-lowest text-secondary",
-            ].join(" ")}
-            disabled={reviewFlagMutation.isPending || approvalQuery.isLoading}
-            onClick={() => reviewFlagMutation.mutate({ requireChatReplyApproval: !requireChatReplyApproval })}
-            title="Bật: mọi tin AI trả lời khách bị giữ lại chờ người duyệt trong Hội thoại (không tự gửi). Tin sale gõ tay không bị ảnh hưởng. Tắt: AI gửi tự động qua gate review."
-            type="button"
-          >
-            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">how_to_reg</span>
-            {requireChatReplyApproval ? "Duyệt tay AI reply: BẬT" : "Duyệt tay AI reply: tắt"}
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">tune</span>
+            Cấu hình duyệt
+            <span className="ml-1 rounded-full bg-primary/10 px-2 py-0.5 text-label-sm font-bold text-primary">
+              {[requireApproval, requireContentReview, requireChatReplyApproval, requireKbHumanReview].filter(Boolean).length}/4
+            </span>
           </button>
         </div>
       </div>
@@ -1174,6 +1149,60 @@ export default function AgentDashboardPage() {
         open={subAgentDialogOpen}
       />
 
+      <Modal
+        open={approvalConfigOpen}
+        onClose={() => setApprovalConfigOpen(false)}
+        title="Cấu hình duyệt"
+        maxWidthClass="max-w-xl"
+      >
+        <div className="flex flex-col">
+          <ApprovalToggleRow
+            icon={requireApproval ? "approval" : "bolt"}
+            title="Chế độ điều phối"
+            description="Bật: mọi phiên điều phối phải được người duyệt trước khi chạy, và mọi công cụ rủi ro cao (đăng bài, quảng cáo, trả lời khách) đều bị chặn. Tắt: phiên tự chạy và tự thực thi hành động."
+            enabled={requireApproval}
+            enabledLabel="Duyệt thủ công mọi phiên"
+            disabledLabel="Tự động hoàn toàn"
+            tone="warning"
+            disabled={approvalMutation.isPending || approvalQuery.isLoading}
+            onToggle={() => approvalMutation.mutate(!requireApproval)}
+          />
+          <ApprovalToggleRow
+            icon="fact_check"
+            title="Agent review bài đăng"
+            description="Bật: bài đăng chỉ được publish khi có chữ ký duyệt của agent review (kể cả bài người đã duyệt tay). Tắt: đăng theo luồng duyệt thường."
+            enabled={requireContentReview}
+            enabledLabel="BẬT"
+            disabledLabel="Tắt"
+            tone="warning"
+            disabled={reviewFlagMutation.isPending || approvalQuery.isLoading}
+            onToggle={() => reviewFlagMutation.mutate({ requireContentReview: !requireContentReview })}
+          />
+          <ApprovalToggleRow
+            icon="how_to_reg"
+            title="Duyệt tay AI reply"
+            description="Bật: mọi tin AI trả lời khách bị giữ lại chờ người duyệt trong Hội thoại (không tự gửi). Tin sale gõ tay không bị ảnh hưởng. Tắt: AI gửi tự động qua gate review."
+            enabled={requireChatReplyApproval}
+            enabledLabel="BẬT"
+            disabledLabel="Tắt"
+            tone="warning"
+            disabled={reviewFlagMutation.isPending || approvalQuery.isLoading}
+            onToggle={() => reviewFlagMutation.mutate({ requireChatReplyApproval: !requireChatReplyApproval })}
+          />
+          <ApprovalToggleRow
+            icon="school"
+            title="AI tự duyệt tri thức"
+            description="Bật: tri thức AI chưng cất từ hội thoại được tự đưa vào kho khi đạt chuẩn kép (reviewer duyệt + accuracy không giảm); không đạt vẫn chờ người. Tắt: mọi tri thức mới chờ người duyệt."
+            enabled={!requireKbHumanReview}
+            enabledLabel="BẬT"
+            disabledLabel="Tắt"
+            tone="primary"
+            disabled={reviewFlagMutation.isPending || approvalQuery.isLoading}
+            onToggle={() => reviewFlagMutation.mutate({ requireKbHumanReview: !requireKbHumanReview })}
+          />
+        </div>
+      </Modal>
+
       {configAgent ? (
         <AgentConfigDrawer
           agent={configAgent}
@@ -1194,5 +1223,54 @@ export default function AgentDashboardPage() {
         />
       ) : null}
     </AppShell>
+  );
+}
+
+interface ApprovalToggleRowProps {
+  readonly icon: string;
+  readonly title: string;
+  readonly description: string;
+  readonly enabled: boolean;
+  readonly enabledLabel: string;
+  readonly disabledLabel: string;
+  readonly tone: "warning" | "primary";
+  readonly disabled: boolean;
+  readonly onToggle: () => void;
+}
+
+function ApprovalToggleRow({
+  icon,
+  title,
+  description,
+  enabled,
+  enabledLabel,
+  disabledLabel,
+  tone,
+  disabled,
+  onToggle,
+}: ApprovalToggleRowProps) {
+  const onClass = tone === "primary" ? "border-primary bg-primary/10 text-primary" : "border-warning bg-warning/10 text-warning";
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-outline py-4 last:border-0">
+      <div className="flex gap-3">
+        <span aria-hidden="true" className="material-symbols-outlined text-[22px] text-on-surface-variant">{icon}</span>
+        <div>
+          <p className="text-body-md font-semibold text-on-surface">{title}</p>
+          <p className="mt-1 text-body-sm text-on-surface-variant">{description}</p>
+        </div>
+      </div>
+      <button
+        aria-pressed={enabled}
+        className={[
+          "shrink-0 whitespace-nowrap rounded-lg border px-3 py-2 text-body-sm font-semibold transition-colors disabled:opacity-60",
+          enabled ? onClass : "border-outline bg-surface-container-lowest text-secondary",
+        ].join(" ")}
+        disabled={disabled}
+        onClick={onToggle}
+        type="button"
+      >
+        {enabled ? enabledLabel : disabledLabel}
+      </button>
+    </div>
   );
 }

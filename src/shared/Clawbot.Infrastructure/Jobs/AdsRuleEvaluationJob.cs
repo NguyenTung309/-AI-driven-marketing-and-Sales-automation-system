@@ -54,7 +54,7 @@ public sealed partial class AdsRuleEvaluationJob(
                         var action = AdsAction.Create(tenantId, campaign.Id, decision.RuleId, decision.Action, decision.Note, now);
                         _db.AdsActions.Add(action);
 
-                        await _agent.ApplyActionAsync(campaign.Platform, campaign.ExternalCampaignId, decision.Action, null, ct).ConfigureAwait(false);
+                        await _agent.ApplyActionAsync(tenantId, campaign.Platform, campaign.ExternalCampaignId, decision.Action, null, ct).ConfigureAwait(false);
 
                         if (decision.Action == "pause")
                             campaign.Pause(now);

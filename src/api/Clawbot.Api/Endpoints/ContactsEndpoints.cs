@@ -23,7 +23,63 @@ public static class ContactsEndpoints
         grp.MapGet("/{id:guid}/export.json", ExportDataAsync);
         grp.MapPost("/merge", MergeContactsAsync);
 
+        // ai-self-learning-memory Lớp 2: facts AI ghi nhớ về khách (panel phải hội thoại).
+        grp.MapGet("/{id:guid}/memories", ListMemoriesAsync);
+        grp.MapDelete("/{id:guid}/memories", DeleteAllMemoriesAsync);
+        grp.MapDelete("/{id:guid}/memories/{memoryId:guid}", DeleteMemoryAsync);
+
         return grp;
+    }
+
+    public sealed record ContactMemoryDto(
+        Guid Id, string Fact, string Category, decimal Confidence, DateTimeOffset UpdatedAt);
+
+    private static async Task<IResult> ListMemoriesAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var memories = await db.ContactMemories
+            .Where(m => m.TenantId == tenantId && m.ContactId == id && m.IsActive)
+            .OrderByDescending(m => m.UpdatedAt)
+            .Select(m => new ContactMemoryDto(m.Id, m.Fact, m.Category, m.Confidence, m.UpdatedAt))
+            .ToListAsync(ct).ConfigureAwait(false);
+        return Results.Ok(memories);
+    }
+
+    // Xóa theo yêu cầu khách: xóa CỨNG toàn bộ (kể cả bản superseded) — quyền được quên.
+    private static async Task<IResult> DeleteAllMemoriesAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var removed = await db.ContactMemories
+            .Where(m => m.TenantId == tenantId && m.ContactId == id)
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        return Results.Ok(new { removed });
+    }
+
+    // Gỡ 1 fact sai: hạ cờ (supersede không thay thế) — giữ vết cho debug, khác xóa cứng toàn bộ.
+    private static async Task<IResult> DeleteMemoryAsync(
+        Guid id,
+        Guid memoryId,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var memory = await db.ContactMemories
+            .FirstOrDefaultAsync(m => m.Id == memoryId && m.TenantId == tenantId && m.ContactId == id, ct)
+            .ConfigureAwait(false);
+        if (memory is null) return Results.NotFound();
+        if (memory.IsActive) memory.Supersede(null, clock.UtcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.NoContent();
     }
 
     private static async Task<IResult> ExportDataAsync(

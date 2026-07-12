@@ -101,19 +101,19 @@ public sealed class AdsLookalikeRefreshJobTests
         public string Platform { get; } = platform;
         public List<int> SeedCalls { get; } = [];
 
-        public Task<AdsMetricSnapshot?> FetchMetricsAsync(string externalCampaignId, CancellationToken ct = default) =>
+        public Task<AdsMetricSnapshot?> FetchMetricsAsync(Guid tenantId, string externalCampaignId, CancellationToken ct = default) =>
             Task.FromResult<AdsMetricSnapshot?>(null);
 
-        public Task<bool> ApplyActionAsync(string externalCampaignId, string action, decimal? newBudget, CancellationToken ct = default) =>
+        public Task<bool> ApplyActionAsync(Guid tenantId, string externalCampaignId, string action, decimal? newBudget, CancellationToken ct = default) =>
             Task.FromResult(false);
 
-        public Task<string?> BuildLookalikeAsync(IReadOnlyList<string> seedContactKeys, CancellationToken ct = default)
+        public Task<string?> BuildLookalikeAsync(Guid tenantId, IReadOnlyList<string> seedContactKeys, CancellationToken ct = default)
         {
             SeedCalls.Add(seedContactKeys.Count);
             return Task.FromResult(audienceId);
         }
 
-        public Task<bool> BuildRemarketingAsync(string audienceName, IReadOnlyList<string> contactKeys, CancellationToken ct = default) =>
+        public Task<bool> BuildRemarketingAsync(Guid tenantId, string audienceName, IReadOnlyList<string> contactKeys, CancellationToken ct = default) =>
             Task.FromResult(false);
     }
 
