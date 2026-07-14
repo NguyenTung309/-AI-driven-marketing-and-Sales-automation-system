@@ -2,13 +2,16 @@ using System.IO.Compression;
 using System.Text;
 using Microsoft.Net.Http.Headers;
 using Clawbot.Api.Auth;
+using Clawbot.Api.Jobs;
 using Clawbot.Agents.Core.Chat;
+using Clawbot.Agents.Core.Docs;
 using Clawbot.Agents.Core.Kb;
 using Clawbot.Api.Contracts.KnowledgeBase;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Jobs;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Microsoft.EntityFrameworkCore;
@@ -330,40 +333,60 @@ public static class KbEndpoints
     // Bulk upload: extract each file, let the LLM pick (or create) the KB module, save a version.
     // autoDeploy=true (default) also deploys + embeds; failures are per-file, one bad file
     // doesn't block the rest.
+    // Phân loại + nạp KB từ file tải lên: LLM đọc từng file rồi chọn/ tạo module, deploy + embed.
+    // File KHÔNG nhét vào payload job (dữ liệu khách thô) — đẩy lên object storage (MinIO/local),
+    // payload chỉ mang key. Job đọc lại file từ storage.
     private static async Task<IResult> ClassifyUploadAsync(
         IFormFileCollection files,
         bool? autoDeploy,
-        AppDbContext db,
+        bool? autoTest,
         ITenantAccessor tenants,
-        IClock clock,
         IDocumentTextExtractor extractor,
-        KbAutoClassifyService classifier,
-        KbDeployService deployService,
-        ILoggerFactory loggerFactory,
+        IDocumentStorage storage,
+        IJobLauncher jobs,
+        HttpContext http,
         CancellationToken ct)
     {
         if (files is null || files.Count == 0) return Results.BadRequest("file_required");
         if (files.Count > MaxClassifyFiles) return Results.BadRequest("too_many_files");
 
         var tenantId = tenants.Require().TenantId;
-        var deploy = autoDeploy ?? true;
-        var modules = await db.KbModules
-            .Where(m => m.TenantId == tenantId && m.DeletedAt == null)
-            .ToListAsync(ct);
-        var logger = loggerFactory.CreateLogger("KbUpload");
-
-        var results = new List<KbClassifiedFileDto>(files.Count);
+        var staged = new List<KbStagedUpload>(files.Count);
         foreach (var file in files)
         {
-            ct.ThrowIfCancellationRequested();
-            results.Add(await ClassifyOneAsync(file, deploy, tenantId, modules, db, clock, extractor, classifier, deployService, logger, ct));
+            if (file.Length == 0) return Results.BadRequest("file_required");
+            if (file.Length > MaxUploadBytes) return Results.BadRequest("file_too_large");
+
+            var extractName = await ResolveUploadFileNameAsync(file, extractor, ct).ConfigureAwait(false);
+            if (extractName is null) return Results.BadRequest("unsupported_format");
+
+            using var buffer = new MemoryStream();
+            await using (var source = file.OpenReadStream())
+            {
+                await source.CopyToAsync(buffer, ct).ConfigureAwait(false);
+            }
+
+            var key = $"kb-uploads/{tenantId:D}/{Guid.NewGuid():N}{Path.GetExtension(extractName)}";
+            await storage.SaveAsync(buffer.ToArray(), key, file.ContentType, ct).ConfigureAwait(false);
+
+            var displayName = string.IsNullOrWhiteSpace(file.FileName) ? "(không tên)" : file.FileName;
+            staged.Add(new KbStagedUpload(key, displayName, extractName));
         }
 
-        return Results.Ok(new KbClassifyUploadResponse(results));
+        var jobId = await jobs.LaunchAsync(
+            KbClassifyUploadJobHandler.JobType,
+            $"Phân loại và nạp {staged.Count} tệp vào kho tri thức",
+            new KbClassifyUploadJobPayload(staged, autoDeploy ?? true, autoTest ?? true),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
+
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
     }
 
-    private static async Task<KbClassifiedFileDto> ClassifyOneAsync(
-        IFormFile file,
+    internal static async Task<KbClassifiedFileDto> ClassifyOneAsync(
+        byte[] content,
+        string fileName,
+        string uploadFileName,
         bool deploy,
         Guid tenantId,
         List<KbModule> modules,
@@ -375,20 +398,13 @@ public static class KbEndpoints
         ILogger logger,
         CancellationToken ct)
     {
-        var fileName = string.IsNullOrWhiteSpace(file.FileName) ? "(không tên)" : file.FileName;
         static KbClassifiedFileDto Fail(string name, string error) =>
             new(name, false, error, null, null, null, false, 0d, null, null, false);
-
-        if (file.Length == 0) return Fail(fileName, "file_required");
-        if (file.Length > MaxUploadBytes) return Fail(fileName, "file_too_large");
-
-        var uploadFileName = await ResolveUploadFileNameAsync(file, extractor, ct).ConfigureAwait(false);
-        if (uploadFileName is null) return Fail(fileName, "unsupported_format");
 
         ExtractedDocument extracted;
         try
         {
-            await using var stream = file.OpenReadStream();
+            using var stream = new MemoryStream(content);
             extracted = await extractor.ExtractAsync(stream, uploadFileName, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -611,92 +627,80 @@ public static class KbEndpoints
             new KbTestCaseDto(test.Id, test.Question, test.ExpectedAnswer, test.IsActive));
     }
 
-    private const int MaxGeneratedCases = 10;
-
     // Auto-author Q&A test cases from the latest KB content (draft or deployed) so operators don't
     // have to hand-write the whole accuracy suite. Skips questions already present (case-insensitive).
+    // Sinh test case bằng LLM — chạy ngầm; điều kiện (module + có nội dung) kiểm ngay.
     private static async Task<IResult> GenerateTestCasesAsync(
         Guid id,
         AppDbContext db,
         ITenantAccessor tenants,
-        IClock clock,
-        KbTestRunnerService testRunner,
+        IJobLauncher jobs,
         GenerateKbTestCasesRequest? req,
+        HttpContext http,
         CancellationToken ct)
     {
         var tenantId = tenants.Require().TenantId;
-        var owns = await db.KbModules.AnyAsync(m => m.Id == id && m.TenantId == tenantId, ct);
-        if (!owns) return Results.NotFound();
+        var module = await db.KbModules.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId, ct);
+        if (module is null) return Results.NotFound();
 
-        var count = Math.Clamp(req?.Count ?? 5, 1, MaxGeneratedCases);
+        var hasContent = await db.KbVersions.AnyAsync(v => v.KbModuleId == id, ct);
+        if (!hasContent) return Results.BadRequest("no_content");
 
-        var latest = await db.KbVersions
-            .Where(v => v.KbModuleId == id)
-            .OrderByDescending(v => v.Version)
-            .Select(v => v.ContentMd)
-            .FirstOrDefaultAsync(ct);
-        if (string.IsNullOrWhiteSpace(latest)) return Results.BadRequest("no_content");
+        // Không truyền count -> null -> job tự tính số case theo độ dài tài liệu (phủ tối đa).
+        // Có count -> tôn trọng lựa chọn người dùng, kẹp trong [1, ManualMaxCases].
+        int? count = req?.Count is > 0
+            ? Math.Clamp(req.Count.Value, 1, KbTestingOrchestrator.ManualMaxCases)
+            : null;
+        var title = count is int c
+            ? $"Sinh {c} test case cho KB {module.Code}"
+            : $"Sinh test case cho KB {module.Code} (tự động phủ theo tài liệu)";
+        var jobId = await jobs.LaunchAsync(
+            KbGenerateTestCasesJobHandler.JobType,
+            title,
+            new KbGenerateTestCasesJobPayload(id, count),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
 
-        var generated = await testRunner.GenerateCasesAsync(tenantId, latest, count, ct);
-        if (generated.Count == 0) return Results.BadRequest("generation_failed");
-
-        var existing = await db.KbTestCases
-            .Where(t => t.KbModuleId == id)
-            .Select(t => t.Question)
-            .ToListAsync(ct);
-        var seen = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
-
-        var created = new List<KbTestCaseDto>();
-        foreach (var g in generated)
-        {
-            if (!seen.Add(g.Question)) continue;
-            var test = KbTestCase.Create(id, g.Question, g.ExpectedAnswer, clock.UtcNow);
-            db.KbTestCases.Add(test);
-            created.Add(new KbTestCaseDto(test.Id, test.Question, test.ExpectedAnswer, test.IsActive));
-        }
-        await db.SaveChangesAsync(ct);
-
-        return Results.Ok(created);
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
     }
 
+    // Chạy test KB ngầm: mỗi case là 1 lượt hỏi agent, chục case là vài phút — không giữ HTTP request.
+    // Điều kiện chạy (module tồn tại, có bản deployed, có case) kiểm ngay để lỗi trả về liền.
     private static async Task<IResult> RunTestAsync(
         Guid id,
         AppDbContext db,
         ITenantAccessor tenants,
-        IClock clock,
-        KbTestRunnerService testRunner,
+        IJobLauncher jobs,
+        HttpContext http,
         CancellationToken ct)
     {
         var tenantId = tenants.Require().TenantId;
         var owns = await db.KbModules.FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId, ct);
         if (owns is null) return Results.NotFound();
 
-        var deployedVersion = await db.KbVersions
-            .Where(v => v.KbModuleId == id && v.Status == "deployed")
-            .OrderByDescending(v => v.Version)
-            .FirstOrDefaultAsync(ct);
-        if (deployedVersion is null) return Results.BadRequest("no_deployed_version");
+        var hasDeployedVersion = await db.KbVersions
+            .AnyAsync(v => v.KbModuleId == id && v.Status == "deployed", ct);
+        if (!hasDeployedVersion) return Results.BadRequest("no_deployed_version");
 
-        var cases = await db.KbTestCases
-            .Where(t => t.KbModuleId == id && t.IsActive)
-            .ToListAsync(ct);
-        if (cases.Count == 0) return Results.BadRequest("no_test_cases");
+        var hasCases = await db.KbTestCases.AnyAsync(t => t.KbModuleId == id && t.IsActive, ct);
+        if (!hasCases) return Results.BadRequest("no_test_cases");
 
-        var results = new List<KbTestCaseResult>();
-        foreach (var testCase in cases)
-        {
-            results.Add(await testRunner.EvaluateAsync(tenantId, owns.Code, testCase, ct));
-        }
+        var jobId = await jobs.LaunchAsync(
+            KbTestJobHandler.JobType,
+            $"Chạy test KB: {owns.Code}",
+            new KbTestJobPayload(id),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
 
-        var passedCount = results.Count(r => r.Passed);
-        var score = decimal.Round(100m * passedCount / results.Count, 2);
-
-        deployedVersion.RecordAccuracy(score);
-        await db.SaveChangesAsync(ct);
-
-        return Results.Ok(new KbTestRunResult(deployedVersion.Id, deployedVersion.Version,
-            results.Count, passedCount, score, results));
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
     }
+
+    private static Guid? CurrentUserId(HttpContext http) =>
+        Guid.TryParse(http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id)
+        && id != Guid.Empty
+            ? id
+            : null;
 
     private static async Task<IResult> AccuracyDashboardAsync(
         AppDbContext db,

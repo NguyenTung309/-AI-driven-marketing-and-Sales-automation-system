@@ -23,7 +23,8 @@ public sealed record NotificationBridgePayload(
     string Title,
     string? Body,
     string? Link,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    int OccurrenceCount = 1);
 
 /// <summary>
 /// Notification publisher for processes without a SignalR hub (AgentService): persists the row,
@@ -45,16 +46,15 @@ public sealed class RedisBridgeNotificationPublisher(
         using (var scope = scopeFactory.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            notification = Notification.Create(
-                request.TenantId, request.UserId, request.Type, request.Title,
-                DateTimeOffset.UtcNow, request.Severity, request.Body, request.Link);
-            db.Notifications.Add(notification);
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            notification = await NotificationGrouping
+                .UpsertAsync(db, request, DateTimeOffset.UtcNow, ct)
+                .ConfigureAwait(false);
         }
 
         var payload = new NotificationBridgePayload(
             request.TenantId, request.UserId, notification.Id, notification.Type,
-            notification.Severity, notification.Title, notification.Body, notification.Link, notification.CreatedAt);
+            notification.Severity, notification.Title, notification.Body, notification.Link,
+            notification.CreatedAt, notification.OccurrenceCount);
         try
         {
             await redis.GetSubscriber()

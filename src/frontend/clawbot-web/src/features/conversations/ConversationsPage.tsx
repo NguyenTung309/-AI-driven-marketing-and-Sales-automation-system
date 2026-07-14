@@ -120,20 +120,6 @@ function errorMessage(error: unknown): string {
   return toUserFriendlyError(error, "Không thể kết nối dữ liệu. Vui lòng thử lại.");
 }
 
-function realtimeLabel(state: ReturnType<typeof useInboxRealtime>): string {
-  if (state === "connected") return "Cập nhật tức thì đang kết nối";
-  if (state === "reconnecting") return "Đang nối lại cập nhật tức thì";
-  if (state === "connecting") return "Đang mở cập nhật tức thì";
-  if (state === "disabled") return "Đang chờ quyền truy cập";
-  return "Cập nhật tức thì gián đoạn";
-}
-
-function realtimeTone(state: ReturnType<typeof useInboxRealtime>) {
-  if (state === "connected") return "success";
-  if (state === "connecting" || state === "reconnecting") return "warning";
-  return "neutral";
-}
-
 interface FilterChipProps {
   readonly active: boolean;
   readonly label: string;
@@ -146,15 +132,16 @@ function FilterChip({ active, label, icon, onClick }: FilterChipProps) {
     <button
       type="button"
       onClick={onClick}
+      title={label}
       className={[
-        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-label-sm font-semibold transition-colors",
+        "inline-flex max-w-[12rem] shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-label-sm font-semibold transition-colors",
         active
           ? "border-primary/20 bg-primary/10 text-primary"
           : "border-outline bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container-low",
       ].join(" ")}
     >
-      {icon ? <span aria-hidden="true" className="material-symbols-outlined text-[14px]">{icon}</span> : null}
-      {label}
+      {icon ? <span aria-hidden="true" className="material-symbols-outlined text-[14px] shrink-0">{icon}</span> : null}
+      <span className="truncate">{label}</span>
     </button>
   );
 }
@@ -295,7 +282,7 @@ function MessageBubble({ message, contactAvatarUrl, contactDisplayName, onApprov
             {message.content}
           </div>
         ) : (
-          <p className="whitespace-pre-wrap text-body-md text-on-surface">{message.content}</p>
+          <p className="whitespace-pre-wrap break-words text-body-md text-on-surface">{message.content}</p>
         )}
         <span className={`mt-1 block text-label-sm ${message.status === "pending_approval" ? "font-semibold text-warning" : message.status === "blocked" ? "font-semibold text-error" : "text-on-surface-variant"} ${outbound ? "text-right" : ""}`}>
           {formatTime(message.sentAt)}
@@ -377,7 +364,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
 
   if (isLoading) {
     return (
-      <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
+      <section className="flex h-full min-h-[480px] min-w-0 flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
         <div className="m-auto text-body-md text-on-surface-variant">Đang tải hội thoại...</div>
       </section>
     );
@@ -385,7 +372,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
 
   if (error) {
     return (
-      <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
+      <section className="flex h-full min-h-[480px] min-w-0 flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
         <div className="m-auto max-w-md text-center">
           <span aria-hidden="true" className="material-symbols-outlined text-[40px] text-error">error</span>
           <p className="mt-3 text-body-md text-on-surface">{errorMessage(error)}</p>
@@ -396,7 +383,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
 
   if (!conversation) {
     return (
-      <section className="flex h-full min-h-[480px] flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
+      <section className="flex h-full min-h-[480px] min-w-0 flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
         <div className="m-auto max-w-md text-center">
           <span aria-hidden="true" className="material-symbols-outlined text-[44px] text-on-surface-variant">forum</span>
           <h2 className="mt-3 text-headline-sm">Chưa có hội thoại</h2>
@@ -409,7 +396,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
   }
 
   return (
-    <section className="flex h-full min-h-[480px] flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
+    <section className="flex h-full min-h-[480px] min-w-0 flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
       {conversation.status === "escalated" ? (
         <div className="flex items-center justify-between bg-warning px-gutter py-2 text-label-lg font-semibold text-white">
           <span className="flex items-center gap-2">
@@ -419,32 +406,32 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
         </div>
       ) : null}
 
-      <header className="flex shrink-0 items-center justify-between border-b border-outline bg-white p-gutter">
-        <div className="flex items-center gap-3">
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-outline bg-white p-4">
+        <div className="flex min-w-0 items-center gap-3">
           <div
-            className={`flex size-10 items-center justify-center rounded-full border text-sm font-bold ${platformClasses(
+            className={`flex size-10 shrink-0 items-center justify-center rounded-full border text-sm font-bold ${platformClasses(
               conversation.platform
             )}`}
           >
             {platformMark(conversation.platform)}
           </div>
-          <div>
+          <div className="min-w-0">
             <h2 className="flex items-center gap-2 text-headline-sm">
-              {customerName(conversation)}
-              <span className="rounded bg-surface-container px-2 py-0.5 text-label-sm font-semibold text-secondary">
+              <span className="truncate">{customerName(conversation)}</span>
+              <span className="shrink-0 rounded bg-surface-container px-2 py-0.5 text-label-sm font-semibold text-secondary">
                 {platformLabel(conversation.platform)}
               </span>
             </h2>
-            <p className="text-label-sm text-on-surface-variant">
+            <p className="truncate text-label-sm text-on-surface-variant" title={conversation.externalThreadId || undefined}>
               Mã hội thoại: {conversation.externalThreadId || "chưa có"} · {conversationBadge(conversation).label}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           {/* Cong tac "AI dang chat": bat/tat auto-reply cho rieng hoi thoai nay */}
           <label className="flex cursor-pointer select-none items-center gap-2 text-label-sm font-semibold text-secondary">
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">smart_toy</span>
-            AI đang chat
+            <span className="hidden sm:inline">AI đang chat</span>
             <button
               type="button"
               role="switch"
@@ -469,7 +456,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
         </div>
       </header>
 
-      <div ref={messagesRef} className="flex-1 space-y-4 overflow-y-auto bg-surface p-gutter">
+      <div ref={messagesRef} className="flex-1 space-y-3 overflow-y-auto bg-surface p-4">
         {conversation.messages.length === 0 ? (
           <div className="rounded-lg border border-dashed border-outline bg-white p-6 text-center text-body-md text-on-surface-variant">
             Chưa có tin nhắn trong hội thoại này.
@@ -489,7 +476,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
         )}
       </div>
 
-      <footer className="shrink-0 border-t border-outline bg-white p-gutter">
+      <footer className="shrink-0 border-t border-outline bg-white p-3">
         <div className="mb-2 flex flex-wrap gap-2">
           <button
             type="button"
@@ -513,8 +500,8 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
             onKeyDown={(event) => {
               if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) onSubmit();
             }}
-            rows={2}
-            className="max-h-32 min-h-[44px] flex-1 resize-none bg-transparent py-2 text-body-md text-on-surface outline-none"
+            rows={1}
+            className="max-h-32 min-h-[40px] flex-1 resize-none bg-transparent py-2 text-body-md text-on-surface outline-none"
             placeholder="Nhập tin nhắn hỗ trợ..."
           />
           <button
@@ -553,7 +540,7 @@ function ContextPanel({
   const avatarUrl = conversation?.contactAvatarUrl ?? null;
   const showAvatar = Boolean(avatarUrl && failedAvatarUrl !== avatarUrl);
   return (
-    <aside className="flex min-h-0 flex-col gap-gutter overflow-y-auto overflow-x-hidden xl:h-full">
+    <aside className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto overflow-x-hidden xl:h-full">
       <Card>
         <h3 className="mb-4 text-label-caps uppercase text-secondary">Thông tin khách hàng</h3>
         <div className="text-center">
@@ -649,7 +636,8 @@ export default function ConversationsPage() {
 
   const meQuery = useQuery({ queryKey: ["me"], queryFn: getMe });
   const meId = meQuery.data?.sub ?? null;
-  const realtimeState = useInboxRealtime(Boolean(meQuery.data));
+  // Vẫn mở kết nối realtime để tin nhắn/hội thoại tự cập nhật; chỉ bỏ pill hiển thị trạng thái kết nối.
+  useInboxRealtime(Boolean(meQuery.data));
 
   const channelsQuery = useQuery({
     queryKey: ["inbox", "channels"],
@@ -767,47 +755,43 @@ export default function ConversationsPage() {
     <AppShell title="Hội thoại đa kênh" noPadding>
       {/* Flex-fill khít viewport (không calc cứng): header shrink-0, khối 3 cột chiếm phần còn lại.
           Dưới xl: cuộn cả trang như cũ; từ xl: khóa trong màn hình, từng cột tự cuộn. */}
-      <div className="flex h-full min-h-0 flex-col overflow-y-auto p-stack-lg xl:overflow-hidden">
+      <div className="flex h-full min-h-0 flex-col overflow-y-auto p-3 sm:p-4 xl:overflow-hidden">
       {notice ? (
         <div className="fixed right-4 top-20 z-[90] w-[min(360px,calc(100vw-32px))]">
           <Alert tone={notice.tone}>{notice.message}</Alert>
         </div>
       ) : null}
 
-      <div className="mb-gutter grid shrink-0 grid-cols-1 gap-gutter lg:grid-cols-4">
-        <Card className="lg:col-span-3">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h1 className="text-headline-md">Hộp thư tập trung</h1>
-              <p className="mt-1 text-body-md text-on-surface-variant">
-                Ưu tiên hội thoại nóng, cập nhật tức thì và thao tác trực tiếp với khách hàng.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusPill tone={realtimeTone(realtimeState)}>{realtimeLabel(realtimeState)}</StatusPill>
-              <StatusPill tone={conversationsQuery.isError ? "error" : "success"}>
-                {conversationsQuery.isError ? "Mất kết nối dữ liệu" : `${conversationsQuery.data?.total ?? 0} hội thoại`}
-              </StatusPill>
-            </div>
+      {/* Header gọn 1 hàng: tiêu đề trái, cụm chỉ số + tổng số phải — nhường tối đa chiều cao cho 3 cột. */}
+      <Card className="mb-3 shrink-0 !p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-headline-sm">Hộp thư tập trung</h1>
+            <p className="mt-0.5 hidden truncate text-label-sm text-on-surface-variant sm:block">
+              Ưu tiên hội thoại nóng, cập nhật tức thì và thao tác trực tiếp với khách hàng.
+            </p>
           </div>
-        </Card>
-        <Card>
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <div>
-              <p className="text-telemetry-data text-primary">{openCount}</p>
-              <p className="text-label-sm text-on-surface-variant">Đang mở</p>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <div className="flex items-center gap-5 text-center">
+              <div>
+                <p className="text-headline-md font-bold leading-none text-primary">{openCount}</p>
+                <p className="mt-1 text-label-sm text-on-surface-variant">Đang mở</p>
+              </div>
+              <div>
+                <p className="text-headline-md font-bold leading-none text-warning">{escalatedCount}</p>
+                <p className="mt-1 text-label-sm text-on-surface-variant">Cần hỗ trợ</p>
+              </div>
+              <div>
+                <p className="text-headline-md font-bold leading-none text-tertiary">{mineCount}</p>
+                <p className="mt-1 text-label-sm text-on-surface-variant">Của tôi</p>
+              </div>
             </div>
-            <div>
-              <p className="text-telemetry-data text-warning">{escalatedCount}</p>
-              <p className="text-label-sm text-on-surface-variant">Cần hỗ trợ</p>
-            </div>
-            <div>
-              <p className="text-telemetry-data text-tertiary">{mineCount}</p>
-              <p className="text-label-sm text-on-surface-variant">Của tôi</p>
-            </div>
+            <StatusPill tone={conversationsQuery.isError ? "error" : "success"}>
+              {conversationsQuery.isError ? "Mất kết nối dữ liệu" : `${conversationsQuery.data?.total ?? 0} hội thoại`}
+            </StatusPill>
           </div>
-        </Card>
-      </div>
+        </div>
+      </Card>
 
       {actionError ? (
         <div className="mb-gutter shrink-0 rounded-lg border border-error/30 bg-error/10 p-4 text-body-md text-error">
@@ -815,17 +799,20 @@ export default function ConversationsPage() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-gutter xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(280px,1fr)_minmax(480px,2fr)_minmax(280px,1fr)]">
-        <aside className="flex min-h-[480px] flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest xl:h-full xl:min-h-0">
-          <div className="shrink-0 border-b border-outline p-gutter">
-            <h2 className="mb-stack-md text-headline-sm">Danh sách hội thoại</h2>
+      {/* Cột co giãn theo viewport: minmax(0,fr) + min-w-0 để không bao giờ tràn ngang;
+          minimum nhỏ vừa đủ (220/300/240) để 3 cột vẫn lọt trên laptop 1280px sau khi trừ sidebar. */}
+      <div className="grid grid-cols-1 gap-3 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(220px,0.9fr)_minmax(300px,1.7fr)_minmax(240px,1fr)]">
+        <aside className="flex min-h-[480px] min-w-0 flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest xl:h-full xl:min-h-0">
+          <div className="shrink-0 border-b border-outline p-4">
+            <h2 className="mb-3 text-headline-sm">Danh sách hội thoại</h2>
             <Input
               icon="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Tìm tên, SĐT, mã hội thoại..."
             />
-            <div className="mt-stack-md flex flex-wrap gap-2">
+            {/* Bộ lọc trạng thái cuộn ngang 1 hàng thay vì xuống nhiều dòng, đỡ ăn chiều cao danh sách. */}
+            <div className="mt-3 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
               {STATUS_FILTERS.map((item) => (
                 <FilterChip
                   key={item.value}
@@ -839,7 +826,7 @@ export default function ConversationsPage() {
                 />
               ))}
             </div>
-            <div className="mt-stack-sm flex flex-wrap gap-2">
+            <div className="mt-2 flex flex-wrap gap-2">
               <FilterChip
                 active={inboxIdFilter === "all"}
                 label="Tất cả kênh"

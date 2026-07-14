@@ -154,6 +154,9 @@ public sealed class QuestPdfDocumentRenderer : IDocumentRenderer
 public interface IDocumentStorage
 {
     Task<string> SaveAsync(byte[] content, string fileName, string? contentType = null, CancellationToken ct = default);
+
+    /// <summary>Đọc lại object đã lưu theo đúng fileName lúc save. Dùng cho job nền đọc file user vừa tải lên.</summary>
+    Task<byte[]> ReadAsync(string fileName, CancellationToken ct = default);
 }
 
 /// <summary>Options for <see cref="LocalDocumentStorage"/>. Bound from config section <c>Docs:Storage</c>.</summary>
@@ -190,5 +193,15 @@ public sealed class LocalDocumentStorage : IDocumentStorage
 
         var baseUrl = _options.PublicBaseUrl.TrimEnd('/');
         return string.Create(CultureInfo.InvariantCulture, $"{baseUrl}/{safeName}");
+    }
+
+    public async Task<byte[]> ReadAsync(string fileName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+            throw new ArgumentException("fileName required", nameof(fileName));
+
+        // Cùng cách rút gọn tên như SaveAsync để key có dấu "/" vẫn đọc lại đúng file.
+        var fullPath = Path.Combine(_options.BaseDirectory, Path.GetFileName(fileName));
+        return await File.ReadAllBytesAsync(fullPath, ct).ConfigureAwait(false);
     }
 }

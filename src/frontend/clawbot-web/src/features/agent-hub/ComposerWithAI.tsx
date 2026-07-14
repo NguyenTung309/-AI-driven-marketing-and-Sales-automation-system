@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { generateSaleAssistDraft } from "@/shared/api/saleAssist";
+import { generateSaleAssistDraft, type SaleAssistDraftResponse } from "@/shared/api/saleAssist";
+import { useJobRun } from "@/features/jobs/useJobRun";
 import { checkTone } from "./toneWarning";
 
 interface Props {
@@ -12,27 +13,26 @@ export default function ComposerWithAI({ conversationId, onSend, disabled }: Pro
   const [text, setText] = useState("");
   const [ghost, setGhost] = useState("");
   const [toneWarning, setToneWarning] = useState<string | null>(null);
-  const draftVersionRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Gợi ý nháp chạy ngầm qua job (backend khoá idempotency theo hội thoại nên gõ liên tục
+  // dùng lại đúng job đang chạy, không đẻ hàng chục job).
+  const draftRun = useJobRun<SaleAssistDraftResponse>({
+    onResult: (draft) => setGhost(draft.draftText.trim()),
+  });
+  const startDraft = draftRun.start;
 
   useEffect(() => {
     if (!conversationId || text.length < 3 || text.length > 200) {
       setGhost("");
       return;
     }
-    const version = ++draftVersionRef.current;
-    const timer = setTimeout(async () => {
-      try {
-        const draft = await generateSaleAssistDraft(conversationId);
-        if (draftVersionRef.current === version) {
-          setGhost(draft.draftText.trim());
-        }
-      } catch {
-        // ignore
-      }
+    const timer = setTimeout(() => {
+      void startDraft(() => generateSaleAssistDraft(conversationId));
     }, 400);
     return () => clearTimeout(timer);
-  }, [text, conversationId]);
+  }, [text, conversationId, startDraft]);
+
 
   function acceptGhost() {
     if (ghost) {

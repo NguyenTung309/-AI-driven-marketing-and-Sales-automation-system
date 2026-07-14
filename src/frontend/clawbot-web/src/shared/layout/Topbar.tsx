@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { logout } from "@/shared/api/auth";
-import { getUnreadNotificationCount, type AppNotification } from "@/shared/api/notifications";
+import { getUnreadNotificationCount, markNotificationRead, type AppNotification } from "@/shared/api/notifications";
+import { listJobs } from "@/shared/api/jobs";
 import { useAuthStore } from "@/shared/auth/authStore";
 import { useNotificationsRealtime } from "@/features/notifications/useNotificationsRealtime";
 import { NAV_ITEMS, NAV_SYSTEM, type NavItem } from "./nav";
@@ -52,6 +53,25 @@ export function Topbar({ title }: TopbarProps) {
   });
   const unreadCount = data?.count ?? 0;
 
+  // Việc AI chạy ngầm của tenant — badge dẫn thẳng vào dialog job center ở /agents.
+  const { data: activeJobs } = useQuery({
+    queryKey: ["jobs", "active"],
+    queryFn: () => listJobs("active"),
+    retry: false,
+    refetchInterval: 15_000,
+  });
+  const activeJobCount = activeJobs?.items.length ?? 0;
+
+  // Thông báo phải bấm được: điều hướng tới link đích rồi đánh dấu đã đọc.
+  function handleToastClick(notification: AppNotification) {
+    if (!notification.link) return;
+    setToast(null);
+    navigate(notification.link);
+    void markNotificationRead(notification.id).then(() => {
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    });
+  }
+
   async function handleLogout() {
     try {
       await logout();
@@ -67,7 +87,12 @@ export function Topbar({ title }: TopbarProps) {
   return (
     <header className="fixed right-0 top-0 z-10 flex h-[64px] w-full items-center justify-between border-b border-surface-variant bg-surface px-4 text-on-surface md:w-[calc(100%-260px)] md:px-gutter">
       {toast ? (
-        <div className="fixed left-1/2 top-[72px] z-50 -translate-x-1/2 rounded-lg border border-outline bg-surface-container-lowest px-4 py-2 shadow-2xl">
+        <button
+          className="fixed left-1/2 top-[72px] z-[120] max-w-[min(90vw,26rem)] -translate-x-1/2 rounded-lg border border-outline bg-surface-container-lowest px-4 py-2 text-left shadow-2xl transition-colors hover:bg-surface-container-low disabled:cursor-default"
+          disabled={!toast.link}
+          onClick={() => handleToastClick(toast)}
+          type="button"
+        >
           <div className="flex items-center gap-2">
             <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-primary">notifications</span>
             <div className="min-w-0">
@@ -75,7 +100,7 @@ export function Topbar({ title }: TopbarProps) {
               {toast.body ? <p className="truncate text-label-sm text-on-surface-variant">{toast.body}</p> : null}
             </div>
           </div>
-        </div>
+        </button>
       ) : null}
       <div className="flex min-w-0 items-center gap-3">
         <details className="relative md:hidden">
@@ -121,6 +146,20 @@ export function Topbar({ title }: TopbarProps) {
             </span>
           ) : null}
         </NavLink>
+
+        {activeJobCount > 0 ? (
+          <NavLink
+            aria-label={`${activeJobCount} việc đang chạy`}
+            className="relative flex size-9 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-low"
+            title="Việc AI đang chạy ngầm"
+            to="/agents?jobs=open"
+          >
+            <span aria-hidden="true" className="material-symbols-outlined text-[22px]">pending_actions</span>
+            <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-4 text-on-primary">
+              {activeJobCount > 9 ? "9+" : activeJobCount}
+            </span>
+          </NavLink>
+        ) : null}
 
         <details className="relative">
           <summary

@@ -5,6 +5,7 @@ using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Time;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
+using Clawbot.SharedKernel.Notifications;
 using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Infrastructure.Jobs;
@@ -16,6 +17,7 @@ public sealed partial class AgentMemoryDistillationJob(
     AgentMistakeExtractor extractor,
     IPiiRedactor pii,
     IClock clock,
+    INotificationPublisher publisher,
     ILogger<AgentMemoryDistillationJob> logger)
 {
     private const string ReviewerAgentCode = "reviewer-agent";
@@ -104,6 +106,16 @@ public sealed partial class AgentMemoryDistillationJob(
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         LogCompleted(logger, tenantId, ops.Count);
+        // AI tự học: người phải thấy nó học được gì, không thì "tự học" là hộp đen.
+        await publisher.PublishAsync(new NotificationRequest(
+            tenantId,
+            UserId: null,
+            Type: "agent_memory_learned",
+            Title: "Agent đã rút ra bài học mới",
+            Severity: "info",
+            Body: $"Từ lý do từ chối nội dung: {ops.Count} bài học cho reviewer-agent.",
+            Link: "/agents",
+            GroupKey: "agent.memory.learned"), ct).ConfigureAwait(false);
     }
 
     private async Task<string> RedactAsync(string text, CancellationToken ct) =>

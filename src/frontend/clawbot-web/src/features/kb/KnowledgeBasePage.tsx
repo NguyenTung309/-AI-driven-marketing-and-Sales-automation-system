@@ -31,6 +31,7 @@ import {
   type KbVersion,
   type KbVersionDiff,
 } from "@/shared/api/kb";
+import { useJobWatcher } from "@/features/jobs/useJobWatcher";
 import { KbAutoClassifyModal } from "./KbAutoClassifyModal";
 import { KbSuggestionsPanel } from "./KbSuggestionsPanel";
 import { ModuleFormModal, QaModal, type ModuleDialogMode } from "./KnowledgeBaseDialogs";
@@ -197,21 +198,31 @@ export default function KnowledgeBasePage() {
     },
   });
 
+  // Sinh test case bằng LLM — chạy ngầm, xong thì danh sách case tự làm mới.
+  const [generateJobId, setGenerateJobId] = useState<string | null>(null);
   const generateMutation = useMutation({
     mutationFn: () => generateKbTestCases(selectedModule?.id ?? ""),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["kb", selectedModule?.id, "test-cases"] });
-    },
+    onSuccess: (job) => setGenerateJobId(job.jobId),
+  });
+  useJobWatcher(generateJobId, async (job) => {
+    setGenerateJobId(null);
+    if (job.status !== "succeeded") return;
+    await queryClient.invalidateQueries({ queryKey: ["kb", selectedModule?.id, "test-cases"] });
   });
 
+  // Chạy test KB ngầm: mỗi case là 1 lượt hỏi agent — kết quả tổng về qua job + thông báo.
+  const [testJobId, setTestJobId] = useState<string | null>(null);
   const testMutation = useMutation({
     mutationFn: () => runKbTest(selectedModule?.id ?? ""),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["kb", "accuracy"] }),
-        queryClient.invalidateQueries({ queryKey: ["kb", selectedModule?.id, "versions"] }),
-      ]);
-    },
+    onSuccess: (job) => setTestJobId(job.jobId),
+  });
+  const testJob = useJobWatcher(testJobId, async (job) => {
+    setTestJobId(null);
+    if (job.status !== "succeeded") return;
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["kb", "accuracy"] }),
+      queryClient.invalidateQueries({ queryKey: ["kb", selectedModule?.id, "versions"] }),
+    ]);
   });
 
   const diffMutation = useMutation({
@@ -351,7 +362,7 @@ export default function KnowledgeBasePage() {
           onSave={(content) => saveVersionMutation.mutate(content)}
           onUpload={(file) => uploadMutation.mutate(file)}
           saving={saveVersionMutation.isPending}
-          testPending={testMutation.isPending}
+          testPending={testMutation.isPending || Boolean(testJobId)}
           uploading={uploadMutation.isPending}
           version={selectedVersion}
         />
@@ -378,7 +389,7 @@ export default function KnowledgeBasePage() {
       <QaModal
         adding={addTestCaseMutation.isPending}
         cases={testCases}
-        generating={generateMutation.isPending}
+        generating={generateMutation.isPending || Boolean(generateJobId)}
         loading={testCasesQuery.isLoading}
         module={selectedModule}
         onAdd={(question, answer) => addTestCaseMutation.mutate({ question, answer })}
@@ -386,8 +397,8 @@ export default function KnowledgeBasePage() {
         onGenerate={() => generateMutation.mutate()}
         onRun={() => testMutation.mutate()}
         open={qaOpen}
-        testResult={testMutation.data ?? null}
-        testing={testMutation.isPending}
+        testSummary={testJob?.status === "succeeded" ? testJob.resultSummary : null}
+        testing={testMutation.isPending || Boolean(testJobId)}
       />
       <Modal
         footer={

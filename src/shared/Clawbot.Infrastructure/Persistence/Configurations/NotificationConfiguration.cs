@@ -14,6 +14,8 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
         builder.Property(x => x.Severity).HasMaxLength(10).IsRequired();
         builder.Property(x => x.Title).HasMaxLength(256).IsRequired();
         builder.Property(x => x.Link).HasMaxLength(256);
+        builder.Property(x => x.GroupKey).HasMaxLength(128);
         builder.HasIndex(x => new { x.TenantId, x.UserId, x.IsRead, x.CreatedAt });
+        builder.HasIndex(x => new { x.TenantId, x.UserId, x.GroupKey, x.IsRead });
     }
 }

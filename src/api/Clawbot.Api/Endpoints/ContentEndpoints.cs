@@ -7,11 +7,13 @@ using Clawbot.Agents.Contracts.Research;
 using Clawbot.Agents.Core.Docs;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Content;
+using Clawbot.Api.Jobs;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Content;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.Infrastructure.Integrations.Meta;
 using Clawbot.SharedKernel.Content;
+using Clawbot.SharedKernel.Jobs;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Grpc.Core;
@@ -168,52 +170,53 @@ public static class ContentEndpoints
         return Results.NoContent();
     }
 
+    // Sinh nội dung chạy ngầm: validate + resolve brief tại đây (nhanh, lỗi trả 400 ngay),
+    // phần gọi agent đẩy sang job — user nhận thông báo kèm link tới bài vừa sinh.
     private static async Task<IResult> GenerateItemAsync(
         GenerateContentItemRequest body,
         AppDbContext db,
-        ITenantAccessor tenants,
-        ContentAgent.ContentAgentClient grpc,
+        IJobLauncher jobs,
         HttpContext http,
         CancellationToken ct)
     {
-        var tenant = tenants.Require();
         var resolved = await ResolveGenerateInputAsync(body, db, http, ct).ConfigureAwait(false);
         if (resolved.Error is not null)
             return resolved.Error;
 
-        try
-        {
-            var resp = await grpc.GenerateAsync(new ContentRequest
-            {
-                TenantId = tenant.TenantId.ToString(),
-                BriefId = resolved.BriefId?.ToString() ?? string.Empty,
-                Channel = resolved.Platform,
-                Brief = resolved.Brief,
-            }, cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
+        var jobId = await jobs.LaunchAsync(
+            ContentGenerateJobHandler.JobType,
+            $"Sinh nội dung {resolved.Platform}",
+            new ContentGenerateJobPayload(resolved.BriefId, resolved.Platform, resolved.Brief),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
 
-            var item = await LoadItemAsync(Guid.Parse(resp.ContentId), db, ct).ConfigureAwait(false);
-            return Results.Ok(new GenerateContentItemResponse(item is null ? [] : [item]));
-        }
-        catch (RpcException ex)
-        {
-            return MapGrpcError(ex, http);
-        }
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
     }
 
+    private static Guid? CurrentUserId(HttpContext http) =>
+        Guid.TryParse(http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id)
+        && id != Guid.Empty
+            ? id
+            : null;
+
+    // Sinh prompt ảnh chạy ngầm — kết quả nằm ở tóm tắt của job (mở từ thông báo).
     private static async Task<IResult> GenerateImagePromptAsync(
         GenerateImagePromptRequest body,
-        Clawbot.Api.Services.ContentImagePromptService service,
+        IJobLauncher jobs,
         HttpContext http,
         CancellationToken ct)
     {
-        try
-        {
-            return Results.Ok(await service.GenerateAsync(body, ct).ConfigureAwait(false));
-        }
-        catch (ArgumentException ex)
-        {
-            return Error(http, StatusCodes.Status400BadRequest, "content.image_prompt_invalid", ex.Message);
-        }
+        if (string.IsNullOrWhiteSpace(body.Brief))
+            return Error(http, StatusCodes.Status400BadRequest, "content.image_prompt_invalid", "brief required.");
+
+        var jobId = await jobs.LaunchAsync(
+            ContentImagePromptJobHandler.JobType,
+            "Sinh prompt ảnh cho bài đăng",
+            new ContentImagePromptJobPayload(body),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
+
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
     }
 
     private static async Task<IResult> QueueAsync(
@@ -400,36 +403,26 @@ public static class ContentEndpoints
         Guid id,
         RepurposeContentItemRequest body,
         AppDbContext db,
-        ITenantAccessor tenants,
-        ContentAgent.ContentAgentClient grpc,
+        IJobLauncher jobs,
         HttpContext http,
         CancellationToken ct)
     {
-        var tenant = tenants.Require();
         if (body.TargetPlatforms.Count == 0 || body.TargetPlatforms.Any(string.IsNullOrWhiteSpace))
             return Error(http, StatusCodes.Status400BadRequest, "content.repurpose_invalid", "targetPlatforms required.");
 
-        try
-        {
-            var req = new RepurposeRequest
-            {
-                TenantId = tenant.TenantId.ToString(),
-                ContentId = id.ToString(),
-            };
-            req.TargetChannels.AddRange(body.TargetPlatforms);
-            var resp = await grpc.RepurposeAsync(req, cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
+        var exists = await db.ContentItems.AsNoTracking()
+            .AnyAsync(i => i.Id == id && i.DeletedAt == null, ct).ConfigureAwait(false);
+        if (!exists)
+            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
 
-            var ids = resp.Variants
-                .Select(v => Guid.TryParse(v.ContentId, out var parsed) ? parsed : Guid.Empty)
-                .Where(parsed => parsed != Guid.Empty)
-                .ToList();
-            var items = await LoadItemsAsync(ids, db, ct).ConfigureAwait(false);
-            return Results.Ok(new GenerateContentItemResponse(items));
-        }
-        catch (RpcException ex)
-        {
-            return MapGrpcError(ex, http);
-        }
+        var jobId = await jobs.LaunchAsync(
+            ContentRepurposeJobHandler.JobType,
+            $"Chuyển thể bài sang {body.TargetPlatforms.Count} nền tảng",
+            new ContentRepurposeJobPayload(id, body.TargetPlatforms),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
+
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
     }
 
     private static async Task<IResult> ScheduleItemAsync(
@@ -627,43 +620,31 @@ public static class ContentEndpoints
     }
 
     private static async Task<IResult> ScanTrendsAsync(
-        ResearchAgent.ResearchAgentClient grpc,
+        IJobLauncher jobs,
         ITenantAccessor tenants,
-        IContentNotifier notifier,
         IClock clock,
         [FromQuery] string? week,
         HttpContext http,
         CancellationToken ct)
     {
-        var tenant = tenants.Require();
+        _ = tenants.Require();
         var weekOf = ContentTrendBriefFormatter.CurrentWeekOf(clock.UtcNow);
-        if (!string.IsNullOrWhiteSpace(week))
+        if (!string.IsNullOrWhiteSpace(week)
+            && !ContentTrendBriefFormatter.TryNormalizeWeekOf(week, out weekOf))
         {
-            if (!ContentTrendBriefFormatter.TryNormalizeWeekOf(week, out weekOf))
-                return Error(http, StatusCodes.Status400BadRequest, "content.week_invalid", "week must use ISO format yyyy-Www.");
+            return Error(http, StatusCodes.Status400BadRequest, "content.week_invalid", "week must use ISO format yyyy-Www.");
         }
 
-        try
-        {
-            var response = await grpc.WeeklyTrendsAsync(
-                new TrendRequest
-                {
-                    TenantId = tenant.TenantId.ToString(),
-                    WeekOf = weekOf,
-                },
-                cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
-            var trends = response.Trends.Select(t => ToTrendDto(t, weekOf)).ToList();
-            await notifier.NotifyTrendScanAsync(
-                tenant.TenantId,
-                new ContentTrendScanEvent(tenant.TenantId, trends.Count, clock.UtcNow),
-                ct).ConfigureAwait(false);
+        var jobId = await jobs.LaunchAsync(
+            ContentTrendScanJobHandler.JobType,
+            $"Quét xu hướng tuần {weekOf}",
+            new ContentTrendScanJobPayload(weekOf),
+            CurrentUserId(http),
+            // 1 tuần chỉ cần 1 lần quét đang chạy — bấm 2 lần trả lại đúng job cũ.
+            idempotencyKey: $"trends:{weekOf}",
+            ct: ct).ConfigureAwait(false);
 
-            return Results.Ok(new TrendScanResponse(trends));
-        }
-        catch (RpcException ex)
-        {
-            return MapGrpcError(ex, http);
-        }
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
     }
 
     private static async Task<GenerateInput> ResolveGenerateInputAsync(

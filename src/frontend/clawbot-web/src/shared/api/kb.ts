@@ -1,4 +1,5 @@
 import { apiClient } from "./client";
+import type { JobAccepted } from "./jobs";
 
 export interface KbModule {
   readonly id: string;
@@ -152,11 +153,24 @@ export interface KbClassifyUploadResponse {
   readonly results: readonly KbClassifiedFile[];
 }
 
-export async function classifyUploadKb(files: readonly File[], autoDeploy: boolean): Promise<KbClassifyUploadResponse> {
+// Chạy ngầm: file đẩy lên object storage, job đọc lại — trả jobId ngay.
+// autoTest: sau khi phân loại thì tự sinh test case + chấm độ chính xác cho các nhóm vừa nạp.
+// onUploadProgress (tùy chọn) nhận % tải lên 0..100 để UI vẽ thanh tiến trình thật.
+export async function classifyUploadKb(
+  files: readonly File[],
+  autoDeploy: boolean,
+  autoTest: boolean,
+  onUploadProgress?: (percent: number) => void,
+): Promise<JobAccepted> {
   const form = new FormData();
   for (const file of files) form.append("files", file, file.name);
-  const response = await apiClient.post<KbClassifyUploadResponse>("/api/kb/classify-upload", form, {
-    params: { autoDeploy },
+  const response = await apiClient.post<JobAccepted>("/api/kb/classify-upload", form, {
+    params: { autoDeploy, autoTest },
+    onUploadProgress: onUploadProgress
+      ? (event) => {
+          if (event.total) onUploadProgress(Math.round((event.loaded / event.total) * 100));
+        }
+      : undefined,
   });
   return response.data;
 }
@@ -189,15 +203,16 @@ export async function addKbTestCase(moduleId: string, question: string, expected
   return response.data;
 }
 
-export async function generateKbTestCases(moduleId: string, count = 5): Promise<readonly KbTestCase[]> {
-  const response = await apiClient.post<readonly KbTestCase[]>(`/api/kb/modules/${moduleId}/test-cases/generate`, {
-    count,
+// Không truyền count -> backend tự tính số case theo độ dài tài liệu (phủ tối đa).
+export async function generateKbTestCases(moduleId: string, count?: number): Promise<JobAccepted> {
+  const response = await apiClient.post<JobAccepted>(`/api/kb/modules/${moduleId}/test-cases/generate`, {
+    count: count ?? null,
   });
   return response.data;
 }
 
-export async function runKbTest(moduleId: string): Promise<KbTestRunResult> {
-  const response = await apiClient.post<KbTestRunResult>(`/api/kb/modules/${moduleId}/test`);
+export async function runKbTest(moduleId: string): Promise<JobAccepted> {
+  const response = await apiClient.post<JobAccepted>(`/api/kb/modules/${moduleId}/test`);
   return response.data;
 }
 

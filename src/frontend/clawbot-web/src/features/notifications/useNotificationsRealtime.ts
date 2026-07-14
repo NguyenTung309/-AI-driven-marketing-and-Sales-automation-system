@@ -22,6 +22,7 @@ function eventToNotification(evt: NotificationEvent): AppNotification {
     isRead: false,
     readAt: null,
     createdAt: evt.createdAt,
+    occurrenceCount: evt.occurrenceCount ?? 1,
   };
 }
 
@@ -51,7 +52,14 @@ export function useNotificationsRealtime(enabled: boolean, onNotification?: (n: 
       const nextNotification = eventToNotification(evt);
 
       queryClient.setQueriesData<NotificationListResponse>({ queryKey: ["notifications", "list"] }, (old) => {
-        if (!old || old.items.some((item) => item.id === evt.id)) return old;
+        if (!old) return old;
+        // Thông báo gom nhóm quay lại với cùng id: cập nhật dòng cũ (số đếm mới), không chèn dòng mới.
+        if (old.items.some((item) => item.id === evt.id)) {
+          return {
+            ...old,
+            items: old.items.map((item) => (item.id === evt.id ? { ...item, ...nextNotification, isRead: item.isRead } : item)),
+          };
+        }
         return {
           ...old,
           total: old.total + 1,
@@ -63,8 +71,9 @@ export function useNotificationsRealtime(enabled: boolean, onNotification?: (n: 
         old ? { count: old.count + 1 } : old
       );
 
-      // SPEC-16 P3-5: surface the notification as a transient toast so the user sees it on any page.
-      cbRef.current?.(nextNotification);
+      // Toast chỉ nổi khi server cho phép push: nhóm việc máy móc (đổi giá thầu, auto-reply) vào feed
+      // nhưng không rung chuông. Cảnh báo lỗi luôn có push=true.
+      if (evt.push !== false) cbRef.current?.(nextNotification);
     });
 
     connection.onreconnecting(() => setConnectionState("reconnecting"));

@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Notifications;
+using Hangfire;
 using Microsoft.AspNetCore.SignalR;
 using StackExchange.Redis;
 
@@ -83,11 +85,18 @@ public sealed partial class RedisNotificationRelay(
                 payload.Body,
                 payload.Link,
                 payload.CreatedAt,
+                payload.OccurrenceCount,
+                Push = NotificationDeliveryPolicy.IsAlwaysPushed(payload.Severity)
+                    || NotificationDeliveryPolicy.DefaultPush(payload.Type),
             };
             var target = payload.UserId is { } userId
                 ? hub.Clients.Group(NotificationHub.UserGroup(userId))
                 : hub.Clients.Group(NotificationHub.TenantGroup(payload.TenantId));
             await target.SendAsync("notification", message).ConfigureAwait(false);
+
+            // Thông báo do AgentService sinh (chạy khác host, không có Hangfire client) —
+            // web push enqueue tại đây, nơi có Hangfire.
+            BackgroundJob.Enqueue<WebPushDispatchJob>(j => j.SendAsync(payload.Id, CancellationToken.None));
         }
         catch (JsonException ex)
         {

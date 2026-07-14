@@ -1,10 +1,12 @@
 using Clawbot.Agents.Contracts.SaleAssist;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.SaleAssist;
+using Clawbot.Api.Jobs;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Jobs;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Microsoft.EntityFrameworkCore;
@@ -34,56 +36,60 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
         return app;
     }
 
-    // SaleAssist-4: dynamic, contextual upsell for one conversation (hot-gated + Claude).
+    // 3 việc LLM của trợ lý sale (upsell / soạn nháp / tóm tắt) đều chạy ngầm qua job:
+    // thấy được trong "Việc đang chạy", huỷ được, lỗi thì báo. Không bắn thông báo lúc xong —
+    // sale đang mở hội thoại và nhìn màn hình chờ (NotifyOnSuccess=false ở handler).
     private static async Task<IResult> UpsellAsync(
         Guid conversationId,
+        IJobLauncher jobs,
         ITenantAccessor tenants,
-        SaleAssistAgent.SaleAssistAgentClient grpc,
+        HttpContext http,
         CancellationToken ct)
     {
-        var tenant = tenants.Require();
+        _ = tenants.Require();
         if (conversationId == Guid.Empty) return Results.BadRequest(new { error = "conversationId required" });
 
-        try
-        {
-            var resp = await grpc.UpsellAsync(new UpsellRequest
-            {
-                TenantId = tenant.TenantId.ToString(),
-                ConversationId = conversationId.ToString(),
-            }, cancellationToken: ct);
-
-            return Results.Ok(new SaleAssistUpsellResponse(resp.Eligible, resp.Suggestion, resp.Reason, resp.LeadScore));
-        }
-        catch (Exception ex)
-        {
-            return Results.Ok(new SaleAssistUpsellResponse(false, "Không thể tải gợi ý upsell.", "Lỗi kết nối AgentService: " + ex.Message, 0));
-        }
+        return await LaunchAsync(jobs, http, SaleAssistUpsellJobHandler.JobType, "Gợi ý upsell", conversationId, ct)
+            .ConfigureAwait(false);
     }
 
     private static async Task<IResult> DraftAsync(
         SaleAssistDraftRequest body,
+        IJobLauncher jobs,
         ITenantAccessor tenants,
-        SaleAssistAgent.SaleAssistAgentClient grpc,
+        HttpContext http,
         CancellationToken ct)
     {
-        var tenant = tenants.Require();
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        try
-        {
-            var resp = await grpc.DraftAsync(new DraftRequest
-            {
-                TenantId = tenant.TenantId.ToString(),
-                ConversationId = body.ConversationId.ToString(),
-                SaleUserId = string.Empty,
-            }, cancellationToken: ct);
-            sw.Stop();
-            return Results.Ok(new SaleAssistDraftResponse(resp.DraftText, resp.SuggestedAction, resp.LeadScore, sw.ElapsedMilliseconds));
-        }
-        catch (Exception ex)
-        {
-            return Results.BadRequest(new { error = "agent_service_error", message = "Không thể kết nối AgentService để tạo câu trả lời nháp: " + ex.Message });
-        }
+        _ = tenants.Require();
+        if (body.ConversationId == Guid.Empty) return Results.BadRequest(new { error = "conversationId required" });
+
+        // Composer gợi ý nháp theo nhịp gõ: khoá idempotency theo hội thoại để 1 loạt gõ chỉ dùng
+        // đúng job đang chạy, không đẻ hàng chục job.
+        return await LaunchAsync(jobs, http, SaleAssistDraftJobHandler.JobType, "Soạn câu trả lời nháp",
+            body.ConversationId, ct, idempotencyKey: $"saleassist.draft:{body.ConversationId}")
+            .ConfigureAwait(false);
     }
+
+    private static async Task<IResult> LaunchAsync(
+        IJobLauncher jobs, HttpContext http, string type, string title, Guid conversationId, CancellationToken ct,
+        string? idempotencyKey = null)
+    {
+        var jobId = await jobs.LaunchAsync(
+            type,
+            title,
+            new SaleAssistConversationJobPayload(conversationId),
+            CurrentUserId(http),
+            idempotencyKey,
+            ct).ConfigureAwait(false);
+
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
+    }
+
+    private static Guid? CurrentUserId(HttpContext http) =>
+        Guid.TryParse(http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id)
+        && id != Guid.Empty
+            ? id
+            : null;
 
     private static async Task<IResult> DraftFeedbackAsync(
         SaleAssistDraftFeedbackRequest body,
@@ -108,26 +114,16 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
 
     private static async Task<IResult> SummarizeAsync(
         SaleAssistSummaryRequest body,
+        IJobLauncher jobs,
         ITenantAccessor tenants,
-        SaleAssistAgent.SaleAssistAgentClient grpc,
+        HttpContext http,
         CancellationToken ct)
     {
-        var tenant = tenants.Require();
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        try
-        {
-            var resp = await grpc.SummarizeAsync(new SummarizeRequest
-            {
-                TenantId = tenant.TenantId.ToString(),
-                ConversationId = body.ConversationId.ToString(),
-            }, cancellationToken: ct);
-            sw.Stop();
-            return Results.Ok(new SaleAssistSummaryResponse(resp.Summary, sw.ElapsedMilliseconds));
-        }
-        catch (Exception ex)
-        {
-            return Results.BadRequest(new { error = "agent_service_error", message = "Không thể kết nối AgentService để tóm tắt cuộc hội thoại: " + ex.Message });
-        }
+        _ = tenants.Require();
+        if (body.ConversationId == Guid.Empty) return Results.BadRequest(new { error = "conversationId required" });
+
+        return await LaunchAsync(jobs, http, SaleAssistSummaryJobHandler.JobType, "Tóm tắt hội thoại", body.ConversationId, ct)
+            .ConfigureAwait(false);
     }
 
     private static async Task<IResult> ListQuickRepliesAsync(AppDbContext db, ITenantAccessor tenants, CancellationToken ct)

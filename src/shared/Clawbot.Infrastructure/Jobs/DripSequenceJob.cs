@@ -5,6 +5,7 @@ using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Time;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
+using Clawbot.SharedKernel.Notifications;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -16,6 +17,7 @@ public sealed partial class DripSequenceJob(
     AppDbContext db,
     IChannelAdapter adapter,
     IClock clock,
+    INotificationPublisher publisher,
     ILogger<DripSequenceJob> logger,
     IToxicityFilter? toxicity = null,
     IOptions<ToxicityOptions>? toxicityOptions = null)
@@ -118,6 +120,16 @@ public sealed partial class DripSequenceJob(
 
                 await adapter.SendAsync(conversation.ExternalThreadId, body, ct).ConfigureAwait(false);
                 conversation.AppendMessage("out", "agent", body, "text", now);
+                // AI tự nhắn khách: gom nhóm (hàng chục tin/ngày) — 1 dòng "x12", không phải 12 dòng.
+                await publisher.PublishAsync(new NotificationRequest(
+                    conversation.TenantId,
+                    UserId: null,
+                    Type: "drip_sent",
+                    Title: "AI đã gửi tin nhắn chăm sóc theo kịch bản",
+                    Severity: "info",
+                    Body: $"Bước {currentStepIdx + 1} qua {step.Channel}.",
+                    Link: "/inbox",
+                    GroupKey: "drip.sent"), ct).ConfigureAwait(false);
 
                 // Advance to next step
                 var nextStepIdx = currentStepIdx + 1;

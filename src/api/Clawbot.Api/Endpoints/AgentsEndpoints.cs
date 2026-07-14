@@ -2,11 +2,13 @@ using System.Text.Json;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Orchestrator;
 using Clawbot.Api.Auth;
+using Clawbot.Api.Jobs;
 using Clawbot.Api.Middleware;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Domain.Agents;
 using Clawbot.Infrastructure.Auth;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Jobs;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Microsoft.AspNetCore.Mvc;
@@ -219,15 +221,15 @@ public static class AgentsEndpoints
         return Results.Ok(ToSettings(agent, await LoadAllowedToolsAsync(db, code, ct)));
     }
 
+    // Chạy thử agent = 1 lượt LLM thật -> đưa vào job (thấy được, huỷ được). Không bắn thông báo
+    // lúc xong: user đang ngồi trong sandbox chờ câu trả lời (NotifyOnSuccess=false ở handler).
     private static async Task<IResult> SandboxAsync(
         string code,
         AgentSandboxRequest req,
         AppDbContext db,
         ITenantAccessor tenants,
-        IClock clock,
-        IPiiRedactor pii,
-        IClaudeChatClient chatClient,
-        ILlmCallScope llmScope,
+        IJobLauncher jobs,
+        HttpContext http,
         CancellationToken ct = default)
     {
         var tenant = tenants.Require();
@@ -236,33 +238,22 @@ public static class AgentsEndpoints
         var agent = await db.AgentConfigs.FirstOrDefaultAsync(a => a.Code == code, ct);
         if (agent is null) return Results.NotFound();
 
-        var now = clock.UtcNow;
-        var redactedMessage = (await pii.RedactAsync(req.Message.Trim(), ct).ConfigureAwait(false)).RedactedText;
         var config = ReadRuntimeConfig(agent.ConfigJson);
-        var session = AgentSession.Start(tenant.TenantId, agent.Id, null, "Agent configuration sandbox", now);
-        session.AppendTrace("sandbox", agent.DisplayName, "input", redactedMessage, now);
+        var jobId = await jobs.LaunchAsync(
+            AgentSandboxJobHandler.JobType,
+            $"Chạy thử agent {agent.DisplayName}",
+            new AgentSandboxJobPayload(agent.Id, agent.Code, config.SystemPrompt, req.Message.Trim()),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
 
-        ClaudeReply reply;
-        try
-        {
-            using var _ = llmScope.Begin(tenant.TenantId, agent.Code, now);
-            // Sandbox phai boc guardrail giong chat that de "Chay thu" phan anh dung hanh vi production.
-            var systemPrompt = Clawbot.Agents.Core.AgentPromptDefaults.Compose(config.SystemPrompt);
-            reply = await chatClient.CompleteAsync(systemPrompt, Array.Empty<ChatTurn>(), redactedMessage, ct).ConfigureAwait(false);
-        }
-        catch (LlmConfigNotConfiguredException)
-        {
-            return Results.BadRequest(new { error = "llm_config_not_configured" });
-        }
-
-        var redactedReply = (await pii.RedactAsync(reply.Text, ct).ConfigureAwait(false)).RedactedText;
-        session.AppendTrace("sandbox", agent.DisplayName, "reply", redactedReply, now.AddMilliseconds(1));
-        session.Finish(now.AddMilliseconds(2));
-        db.AgentSessions.Add(session);
-
-        await db.SaveChangesAsync(ct);
-        return Results.Ok(new AgentSandboxResponse(session.Id, reply.Text, now.AddMilliseconds(1)));
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
     }
+
+    private static Guid? CurrentUserId(HttpContext http) =>
+        Guid.TryParse(http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id)
+        && id != Guid.Empty
+            ? id
+            : null;
 
     private static Task<IResult> EnableAsync(string code, AppDbContext db, ITenantAccessor tenants, CancellationToken ct = default)
         => SetStatusAsync(code, true, db, tenants, ct);

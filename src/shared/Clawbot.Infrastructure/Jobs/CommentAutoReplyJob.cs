@@ -3,6 +3,7 @@ using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Time;
 using Microsoft.EntityFrameworkCore;
+using Clawbot.SharedKernel.Notifications;
 using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Infrastructure.Jobs;
@@ -11,6 +12,7 @@ public sealed partial class CommentAutoReplyJob(
     AppDbContext db,
     IIntentClassifier intent,
     IClock clock,
+    INotificationPublisher publisher,
     ILogger<CommentAutoReplyJob> logger,
     ICommentChannelAdapter? commentAdapter = null)
 {
@@ -119,6 +121,16 @@ public sealed partial class CommentAutoReplyJob(
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         LogCommentAutoReplySent(logger, conversation.Id, inbound.ParentPostId ?? string.Empty, detected.Label);
+        // AI trả lời comment khách: gom nhóm theo ngày làm việc — sale mở feed thấy "x8" là biết mức độ.
+        await publisher.PublishAsync(new NotificationRequest(
+            conversation.TenantId,
+            UserId: null,
+            Type: "comment_auto_reply",
+            Title: "AI đã tự trả lời bình luận khách",
+            Severity: "info",
+            Body: $"Ý định: {detected.Label}. Mở hộp thư để xem hội thoại.",
+            Link: "/inbox",
+            GroupKey: "comment.autoreply"), ct).ConfigureAwait(false);
     }
 
     [LoggerMessage(EventId = 9201, Level = LogLevel.Information,

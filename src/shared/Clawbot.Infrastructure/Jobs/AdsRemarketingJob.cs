@@ -2,6 +2,7 @@ using Clawbot.Agents.Core.Ads;
 using Clawbot.Infrastructure.Persistence;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
+using Clawbot.SharedKernel.Notifications;
 using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Infrastructure.Jobs;
@@ -9,6 +10,7 @@ namespace Clawbot.Infrastructure.Jobs;
 public sealed partial class AdsRemarketingJob(
     AppDbContext db,
     IAdsConnectorResolver connectorResolver,
+    INotificationPublisher publisher,
     ILogger<AdsRemarketingJob> logger)
 {
     [DisableConcurrentExecution(timeoutInSeconds: 1800)]
@@ -47,6 +49,18 @@ public sealed partial class AdsRemarketingJob(
                     tenantId, $"cold-leads-{platform}", coldLeads, ct).ConfigureAwait(false);
 
                 LogRemarketing(logger, platform, coldLeads.Count, success);
+                if (success)
+                {
+                    await publisher.PublishAsync(new NotificationRequest(
+                        tenantId,
+                        UserId: null,
+                        Type: "ads_remarketing",
+                        Title: "AI đã cập nhật tệp remarketing",
+                        Severity: "info",
+                        Body: $"{platform}: đồng bộ {coldLeads.Count} khách nguội vào tệp remarketing.",
+                        Link: "/ads",
+                        GroupKey: "ads.remarketing"), ct).ConfigureAwait(false);
+                }
             }
             catch (Exception ex)
             {

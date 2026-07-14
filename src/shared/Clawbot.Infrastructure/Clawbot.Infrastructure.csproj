@@ -26,6 +26,7 @@
     <PackageReference Include="Hangfire.AspNetCore" />
     <PackageReference Include="Hangfire.SqlServer" />
     <PackageReference Include="Minio" />
+    <PackageReference Include="Lib.Net.Http.WebPush" />
     <PackageReference Include="DocumentFormat.OpenXml" />
     <PackageReference Include="PdfPig" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />

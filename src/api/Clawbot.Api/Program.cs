@@ -99,6 +99,25 @@ builder.Services.AddClawbotRateLimiting();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IInboxNotifier, SignalRInboxNotifier>();
 builder.Services.AddScoped<INotificationPublisher, Clawbot.Api.Hubs.DbNotificationPublisher>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobRealtime, Clawbot.Api.Hubs.SignalRJobRealtime>();
+// Handler cho từng loại việc chạy ngầm — JobRunner resolve theo Type. Thêm luồng mới = thêm 1 dòng ở đây.
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentGenerateJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.DocsGenerateJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.DocsKitJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.KbTestJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.KbGenerateTestCasesJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentRepurposeJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentTrendScanJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentImagePromptJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.AdsEvaluateJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.AdsLookalikeJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.KbClassifyUploadJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.OrchestrationPlanSuggestionsJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.SaleAssistDraftJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.SaleAssistSummaryJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.SaleAssistUpsellJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.AgentSandboxJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.LeadCreateWithSkillsJobHandler>();
 // Relay notifications published on Redis by AgentService (run failed / pending approval) into NotificationHub.
 builder.Services.AddHostedService<Clawbot.Api.Hubs.RedisNotificationRelay>();
 // B5: cost summary cho điểm phê duyệt — cùng ledger với cost guard của orchestrator.
@@ -126,6 +145,7 @@ builder.Services.AddScoped<ConversationExportService>();
 builder.Services.AddScoped<InboxSearchService>();
 builder.Services.AddScoped<IUserInboxResolver, UserInboxResolver>();
 builder.Services.AddScoped<KbTestRunnerService>();
+builder.Services.AddScoped<KbTestingOrchestrator>();
 builder.Services.AddScoped<KbAutoClassifyService>();
 builder.Services.AddScoped<LeadCsvService>();
 builder.Services.AddScoped<Clawbot.Agents.Core.Skills.Content.IImagePromptGenerator, Clawbot.Agents.Core.Skills.Content.ClaudeImagePromptGenerator>();
@@ -303,6 +323,8 @@ app.MapTenantBranding();
 app.MapAdminUsers();
 app.MapProfile();
 app.MapNotifications();
+app.MapNotificationPreferences();
+app.MapJobs();
 app.MapAgents();
 app.MapOrchestrationV2();
 app.MapLlmConfigs();
@@ -318,6 +340,10 @@ app.MapHangfireDashboard("/hangfire", new DashboardOptions
     Authorization = [new HangfireAdminFilter()],
 });
 
+// Mọi job nền hết retry mà fail đều bắn thông báo (gom nhóm theo loại job) — không còn lỗi im lặng.
+GlobalJobFilters.Filters.Add(new Clawbot.Infrastructure.Jobs.JobFailureNotificationFilter(
+    app.Services.GetRequiredService<IServiceScopeFactory>(),
+    app.Services.GetRequiredService<ILogger<Clawbot.Infrastructure.Jobs.JobFailureNotificationFilter>>()));
 HangfireModule.ScheduleClawbotJobs(app.Services);
 
 await RbacSeeder.SeedAsync(app.Services).ConfigureAwait(false);

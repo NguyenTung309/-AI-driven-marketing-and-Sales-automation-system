@@ -62,6 +62,8 @@ public static partial class RbacSeeder
         ("orchestration:run", [Admin, SalesLead, Marketer]),
         ("orchestration:approve", [Admin, SalesLead]),
         ("orchestration:manage", [Admin]),
+        ("jobs:view", All),
+        ("jobs:manage", [Admin, SalesLead, Marketer]),
         ("rbac:manage", [Admin]),
         ("users:manage", [Admin]),
         ("users:pancake-token:manage", [Admin, SalesLead]),

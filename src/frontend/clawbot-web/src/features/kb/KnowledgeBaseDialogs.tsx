@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Alert } from "@/shared/ui/Alert";
 import { Modal } from "@/shared/ui/Modal";
-import type { CreateKbModulePayload, KbModule, KbTestCase, KbTestRunResult } from "@/shared/api/kb";
+import type { CreateKbModulePayload, KbModule, KbTestCase } from "@/shared/api/kb";
 
 export type ModuleDialogMode = "create" | "edit" | null;
 
@@ -100,7 +100,7 @@ export function QaModal({
   adding,
   generating,
   testing,
-  testResult,
+  testSummary,
   onClose,
   onAdd,
   onGenerate,
@@ -113,7 +113,8 @@ export function QaModal({
   readonly adding: boolean;
   readonly generating: boolean;
   readonly testing: boolean;
-  readonly testResult: KbTestRunResult | null;
+  /** Tóm tắt kết quả từ job chạy ngầm (điểm + số case đạt); null = chưa chạy lần nào. */
+  readonly testSummary: string | null;
   readonly onClose: () => void;
   readonly onAdd: (question: string, answer: string) => void;
   readonly onGenerate: () => void;
@@ -144,12 +145,7 @@ export function QaModal({
       title={`Kiểm tra hỏi đáp · ${module?.code ?? ""}`}
     >
       <div className="max-h-[58vh] space-y-4 overflow-y-auto pr-1">
-        {testResult ? (
-          <Alert tone={testResult.accuracyPercent >= 85 ? "success" : "warning"}>
-            Bản {testResult.version}: đạt {testResult.passedCases}/{testResult.totalCases} câu, độ chính xác{" "}
-            <strong>{testResult.accuracyPercent}%</strong>.
-          </Alert>
-        ) : null}
+        {testSummary ? <Alert tone="info">{testSummary}</Alert> : null}
 
         <div className="space-y-3 rounded-lg border border-outline bg-surface-container-low p-4">
           <label className="block">

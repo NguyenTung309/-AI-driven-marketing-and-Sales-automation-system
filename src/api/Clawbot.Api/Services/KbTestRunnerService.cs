@@ -14,9 +14,20 @@ internal sealed class KbTestRunnerService(IRagRetriever rag, IClaudeChatClient c
 {
     private const string AgentCode = "chat-agent";
 
-    // ponytail: cap content fed to the generator; KB docs can be large and we only need enough
-    // grounding to author realistic Q&A. Raise if long docs miss their tail topics.
-    private const int MaxGeneratePromptChars = 8000;
+    // ponytail: trần nội dung nạp cho bộ sinh Q&A. Nâng từ 8k -> 24k để tài liệu dài không mất phần đuôi
+    // (bộ test phải phủ được cả tài liệu). Vẫn kẹp để không nổ token trên tài liệu cực lớn.
+    private const int MaxGeneratePromptChars = 24000;
+
+    // Sinh theo lô nhỏ: mỗi lượt chỉ xin ~8 câu để output không quá dài — xin nhiều câu trong 1 lượt
+    // làm output vượt giới hạn và provider báo "stream reported failure". Nhiều lô gộp lại vẫn phủ tốt.
+    private const int GenerateBatchSize = 8;
+
+    // Số câu đã tạo liệt kê ngược cho lô sau tránh trùng — kẹp để prompt không phình.
+    private const int MaxAvoidListed = 24;
+
+    private const string GenerateSystemPrompt =
+        "You are a QA engineer building test cases for a knowledge base. " +
+        "Only use facts present in the provided content.";
 
     private readonly IRagRetriever _rag = rag;
     private readonly IClaudeChatClient _claude = claude;
@@ -30,26 +41,68 @@ internal sealed class KbTestRunnerService(IRagRetriever rag, IClaudeChatClient c
         int count,
         CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(contentMd)) return [];
+        if (string.IsNullOrWhiteSpace(contentMd) || count <= 0) return [];
 
         using var _llm = _llmScope.Begin(tenantId, AgentCode);
         var content = contentMd.Length > MaxGeneratePromptChars
             ? contentMd[..MaxGeneratePromptChars]
             : contentMd;
 
-        var prompt = $"Knowledge base content:\n{content}\n\n" +
+        var collected = new List<KbGeneratedCase>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var maxBatches = (count + GenerateBatchSize - 1) / GenerateBatchSize + 3;
+
+        // Gộp nhiều lô nhỏ + bỏ trùng, hướng lô sau tránh câu đã có. Dừng khi đủ số lượng,
+        // 2 lô liền không ra câu mới, hoặc chạm trần số lô (chặn lặp vô hạn).
+        for (int attempt = 0, emptyStreak = 0; collected.Count < count && emptyStreak < 2 && attempt < maxBatches; attempt++)
+        {
+            var batch = Math.Min(GenerateBatchSize, count - collected.Count);
+            IReadOnlyList<KbGeneratedCase> parsed;
+            try
+            {
+                var reply = await _claude.CompleteAsync(
+                    GenerateSystemPrompt, Array.Empty<ChatTurn>(),
+                    BuildGeneratePrompt(content, batch, collected), ct).ConfigureAwait(false);
+                parsed = ParseGeneratedCases(reply.Text);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Một lô hỏng (vd lỗi stream) không nên xoá sạch thành quả — dừng, trả phần đã sinh được.
+                break;
+            }
+
+            var fresh = 0;
+            foreach (var c in parsed)
+            {
+                if (!seen.Add(c.Question)) continue;
+                collected.Add(c);
+                fresh++;
+                if (collected.Count >= count) break;
+            }
+            emptyStreak = fresh == 0 ? emptyStreak + 1 : 0;
+        }
+
+        return collected;
+    }
+
+    private static string BuildGeneratePrompt(string content, int count, List<KbGeneratedCase> already)
+    {
+        var avoid = string.Empty;
+        if (already.Count > 0)
+        {
+            var recent = already.Skip(Math.Max(0, already.Count - MaxAvoidListed)).Select(a => $"- {a.Question}");
+            avoid = "\n\nCác câu hỏi ĐÃ tạo (KHÔNG lặp lại — hãy hỏi về dữ kiện/khía cạnh KHÁC):\n" + string.Join('\n', recent);
+        }
+
+        return $"Knowledge base content:\n{content}\n\n" +
             $"Generate {count} realistic customer questions a sales/support agent would receive, " +
             "each with the correct answer grounded ONLY in the content above. " +
-            "Vary the topics. Use the same language as the content. " +
-            "Reply with ONLY a JSON array: " +
-            "[{\"question\":\"...\",\"expectedAnswer\":\"...\"}]";
-
-        var reply = await _claude.CompleteAsync(
-            "You are a QA engineer building test cases for a knowledge base. " +
-            "Only use facts present in the provided content.",
-            Array.Empty<ChatTurn>(), prompt, ct).ConfigureAwait(false);
-
-        return ParseGeneratedCases(reply.Text);
+            "COVERAGE IS THE GOAL: spread the questions across the ENTIRE document so they touch as many " +
+            "DISTINCT facts, sections and details as possible — do NOT cluster them on the opening section, " +
+            "and do NOT ask two questions about the same fact. Include specifics (numbers, prices, dates, " +
+            "conditions, exceptions) when the content has them. Use the same language as the content." +
+            avoid +
+            "\nReply with ONLY a JSON array: [{\"question\":\"...\",\"expectedAnswer\":\"...\"}]";
     }
 
     public static IReadOnlyList<KbGeneratedCase> ParseGeneratedCases(string responseText)

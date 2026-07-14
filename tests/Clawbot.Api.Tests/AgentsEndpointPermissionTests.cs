@@ -16,13 +16,14 @@ public sealed class AgentsEndpointPermissionTests
         source.Should().Contain("grp.MapPost(\"/{code}/sandbox\", SandboxAsync).RequirePermission(\"agent.manage\")");
     }
 
+    // Sandbox đã chuyển sang job nền (AgentSandboxJobHandler) — 2 test dưới soi đúng file đó.
     [Fact]
     public void Sandbox_trace_redacts_user_message_before_persisting()
     {
-        var source = File.ReadAllText(FindRepoFile("src", "api", "Clawbot.Api", "Endpoints", "AgentsEndpoints.cs"));
+        var source = File.ReadAllText(FindRepoFile("src", "api", "Clawbot.Api", "Jobs", "AgentSandboxJobHandler.cs"));
 
         source.Should().Contain("IPiiRedactor pii");
-        source.Should().Contain("redactedMessage = (await pii.RedactAsync(req.Message.Trim(), ct)");
+        source.Should().Contain("redactedMessage = (await pii.RedactAsync(payload.Message, ct)");
         source.Should().Contain("AppendTrace(\"sandbox\", agent.DisplayName, \"input\", redactedMessage");
         source.Should().Contain("redactedReply = (await pii.RedactAsync(reply.Text, ct)");
         source.Should().Contain("AppendTrace(\"sandbox\", agent.DisplayName, \"reply\", redactedReply");
@@ -31,14 +32,23 @@ public sealed class AgentsEndpointPermissionTests
     [Fact]
     public void Sandbox_uses_real_llm_client_with_agent_scope()
     {
-        var source = File.ReadAllText(FindRepoFile("src", "api", "Clawbot.Api", "Endpoints", "AgentsEndpoints.cs"));
+        var source = File.ReadAllText(FindRepoFile("src", "api", "Clawbot.Api", "Jobs", "AgentSandboxJobHandler.cs"));
 
         source.Should().Contain("IClaudeChatClient chatClient");
         source.Should().Contain("ILlmCallScope llmScope");
-        source.Should().Contain("llmScope.Begin(tenant.TenantId, agent.Code, now)");
+        source.Should().Contain("llmScope.Begin(ctx.TenantId, agent.Code, now)");
         // 5cee084 (agent prompt system) doi bien config.SystemPrompt -> systemPrompt (compose guardrail truoc khi goi)
         source.Should().Contain("chatClient.CompleteAsync(systemPrompt, Array.Empty<ChatTurn>(), redactedMessage, ct)");
         source.Should().NotContain("BuildSandboxReply");
+    }
+
+    // Việc tương tác (chạy thử agent) không được bắn thông báo mỗi lần: user đang ngồi nhìn màn hình chờ.
+    [Fact]
+    public void Sandbox_job_does_not_notify_on_success()
+    {
+        var source = File.ReadAllText(FindRepoFile("src", "api", "Clawbot.Api", "Jobs", "AgentSandboxJobHandler.cs"));
+
+        source.Should().Contain("public bool NotifyOnSuccess => false;");
     }
 
     [Fact]

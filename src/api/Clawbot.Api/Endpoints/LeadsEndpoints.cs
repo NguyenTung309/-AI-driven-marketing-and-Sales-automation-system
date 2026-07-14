@@ -4,11 +4,13 @@ using Clawbot.Agents.Core.Lead;
 using Clawbot.Agents.Core.Skills.Ops;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Leads;
+using Clawbot.Api.Jobs;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Leads;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Jobs;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Microsoft.AspNetCore.Mvc;
@@ -172,11 +174,14 @@ public static class LeadsEndpoints
                 dupes.Select(d => new LeadDedupHitDto(d.LeadId, d.ContactId, d.Reason, d.Confidence)).ToList()));
     }
 
+    // Tạo lead có chấm điểm/enrich/dedup bằng agent (LLM) -> job. Contact phải tồn tại: kiểm ngay
+    // để lỗi nhập liệu trả 400 tức thì, phần agent mới đẩy sang nền.
     private static async Task<IResult> CreateWithSkillsAsync(
         CreateLeadRequest body,
         AppDbContext db,
         ITenantAccessor tenants,
-        LeadAgent.LeadAgentClient leadClient,
+        IJobLauncher jobs,
+        HttpContext http,
         CancellationToken ct)
     {
         var tenant = tenants.Require();
@@ -192,32 +197,27 @@ public static class LeadsEndpoints
         if (contact is null)
             return Results.NotFound(new { error = "contact not found" });
 
-        var grpcRequest = new LeadCreateWithSkillsRequest
-        {
-            TenantId = tenant.TenantId.ToString("D"),
-            ContactId = body.ContactId.ToString("D"),
-            DisplayName = contact.DisplayName ?? string.Empty,
-            Phone = body.Phone ?? string.Empty,
-            Email = body.Email ?? string.Empty,
-            SourcePlatform = body.SourcePlatform,
-            Locale = contact.Locale ?? string.Empty,
-            Country = string.Empty,
-        };
+        var jobId = await jobs.LaunchAsync(
+            LeadCreateWithSkillsJobHandler.JobType,
+            $"Tạo lead: {contact.DisplayName}",
+            new LeadCreateWithSkillsJobPayload(
+                body.ContactId,
+                contact.DisplayName ?? string.Empty,
+                body.Phone,
+                body.Email,
+                body.SourcePlatform,
+                contact.Locale ?? string.Empty),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
 
-        var grpcResponse = await leadClient.CreateWithSkillsAsync(grpcRequest, cancellationToken: ct).ConfigureAwait(false);
-
-        var result = new CreateWithSkillsResult(
-            Guid.Parse(grpcResponse.LeadId),
-            grpcResponse.SpamFlagged,
-            grpcResponse.SpamReason,
-            grpcResponse.Timezone,
-            grpcResponse.EnrichmentCompany,
-            grpcResponse.PossibleDup,
-            grpcResponse.DedupCandidates.Select(c => new LeadDedupCandidateDto(
-                Guid.Parse(c.ContactId), c.Similarity)).ToList());
-
-        return Results.Created($"/api/leads/{result.LeadId}", result);
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
     }
+
+    private static Guid? CurrentUserId(HttpContext http) =>
+        Guid.TryParse(http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id)
+        && id != Guid.Empty
+            ? id
+            : null;
 
     private static async Task<IResult> RecordActivityAsync(
         Guid id,

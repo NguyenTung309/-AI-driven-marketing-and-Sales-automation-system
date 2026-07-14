@@ -4,6 +4,7 @@ using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Time;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
+using Clawbot.SharedKernel.Notifications;
 using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Infrastructure.Jobs;
@@ -12,6 +13,7 @@ public sealed partial class AdsCreativeRotationJob(
     AppDbContext db,
     IAdsConnectorResolver connectorResolver,
     IClock clock,
+    INotificationPublisher publisher,
     ILogger<AdsCreativeRotationJob> logger)
 {
     [DisableConcurrentExecution(timeoutInSeconds: 1800)]
@@ -49,6 +51,15 @@ public sealed partial class AdsCreativeRotationJob(
                     await connector.ApplyActionAsync(campaign.TenantId, campaign.ExternalCampaignId, "rotate", null, ct).ConfigureAwait(false);
 
                 LogRotated(logger, fatigued.Id, replacement.Id, campaign.Id);
+                await publisher.PublishAsync(new NotificationRequest(
+                    campaign.TenantId,
+                    UserId: null,
+                    Type: "ads_creative_rotation",
+                    Title: "AI đã xoay vòng creative quảng cáo",
+                    Severity: "info",
+                    Body: $"Chiến dịch {campaign.ExternalCampaignId}: thay creative đã \"mỏi\" bằng bản dự phòng.",
+                    Link: "/ads",
+                    GroupKey: "ads.creative.rotation"), ct).ConfigureAwait(false);
                 await db.SaveChangesAsync(ct).ConfigureAwait(false);
             }
             catch (Exception ex)
