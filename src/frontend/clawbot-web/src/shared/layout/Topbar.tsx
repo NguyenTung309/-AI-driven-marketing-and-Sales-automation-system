@@ -88,7 +88,7 @@ export function Topbar({ title }: TopbarProps) {
     <header className="fixed right-0 top-0 z-10 flex h-[64px] w-full items-center justify-between border-b border-surface-variant bg-surface px-4 text-on-surface md:w-[calc(100%-260px)] md:px-gutter">
       {toast ? (
         <button
-          className="fixed left-1/2 top-[72px] z-50 max-w-[min(90vw,26rem)] -translate-x-1/2 rounded-lg border border-outline bg-surface-container-lowest px-4 py-2 text-left shadow-2xl transition-colors hover:bg-surface-container-low disabled:cursor-default"
+          className="fixed left-1/2 top-[72px] z-[120] max-w-[min(90vw,26rem)] -translate-x-1/2 rounded-lg border border-outline bg-surface-container-lowest px-4 py-2 text-left shadow-2xl transition-colors hover:bg-surface-container-low disabled:cursor-default"
           disabled={!toast.link}
           onClick={() => handleToastClick(toast)}
           type="button"

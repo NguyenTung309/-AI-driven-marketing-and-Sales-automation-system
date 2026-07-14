@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Api.Endpoints;
@@ -19,6 +20,13 @@ public sealed class OrchestrationPlanSuggestionsJobHandler(
 {
     public const string JobType = "orchestration.plan-suggestions";
 
+    // Frontend (/agents) JSON.parse ResultSummary và đọc field camelCase (result.items...); dùng Web defaults
+    // để ra camelCase + UnsafeRelaxedJsonEscaping để tiếng Việt không bị escape thành \uXXXX.
+    private static readonly JsonSerializerOptions ResultJson = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
     public string Type => JobType;
 
     public async Task<JobResult> RunAsync(JobContext ctx, CancellationToken ct)
@@ -27,8 +35,10 @@ public sealed class OrchestrationPlanSuggestionsJobHandler(
             .BuildPlanSuggestionsAsync(ctx.TenantId, db, chatClient, llmScope, clock, loggerFactory, ct)
             .ConfigureAwait(false);
 
+        // Link riêng (?planResult=) để "Mở kết quả" mở thẳng dialog checklist — khác ?job= (chỉ mở Job Center),
+        // tránh dialog tự bung khi người dùng mới chỉ chọn job trong Job Center.
         return new JobResult(
-            $"/agents?job={ctx.JobId}",
-            JsonSerializer.Serialize(suggestions));
+            $"/agents?planResult={ctx.JobId}",
+            JsonSerializer.Serialize(suggestions, ResultJson));
     }
 }

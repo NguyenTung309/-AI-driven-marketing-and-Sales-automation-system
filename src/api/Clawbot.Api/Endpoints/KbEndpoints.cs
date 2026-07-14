@@ -339,6 +339,7 @@ public static class KbEndpoints
     private static async Task<IResult> ClassifyUploadAsync(
         IFormFileCollection files,
         bool? autoDeploy,
+        bool? autoTest,
         ITenantAccessor tenants,
         IDocumentTextExtractor extractor,
         IDocumentStorage storage,
@@ -375,7 +376,7 @@ public static class KbEndpoints
         var jobId = await jobs.LaunchAsync(
             KbClassifyUploadJobHandler.JobType,
             $"Phân loại và nạp {staged.Count} tệp vào kho tri thức",
-            new KbClassifyUploadJobPayload(staged, autoDeploy ?? true),
+            new KbClassifyUploadJobPayload(staged, autoDeploy ?? true, autoTest ?? true),
             CurrentUserId(http),
             ct: ct).ConfigureAwait(false);
 
@@ -626,8 +627,6 @@ public static class KbEndpoints
             new KbTestCaseDto(test.Id, test.Question, test.ExpectedAnswer, test.IsActive));
     }
 
-    private const int MaxGeneratedCases = 10;
-
     // Auto-author Q&A test cases from the latest KB content (draft or deployed) so operators don't
     // have to hand-write the whole accuracy suite. Skips questions already present (case-insensitive).
     // Sinh test case bằng LLM — chạy ngầm; điều kiện (module + có nội dung) kiểm ngay.
@@ -648,10 +647,17 @@ public static class KbEndpoints
         var hasContent = await db.KbVersions.AnyAsync(v => v.KbModuleId == id, ct);
         if (!hasContent) return Results.BadRequest("no_content");
 
-        var count = Math.Clamp(req?.Count ?? 5, 1, MaxGeneratedCases);
+        // Không truyền count -> null -> job tự tính số case theo độ dài tài liệu (phủ tối đa).
+        // Có count -> tôn trọng lựa chọn người dùng, kẹp trong [1, ManualMaxCases].
+        int? count = req?.Count is > 0
+            ? Math.Clamp(req.Count.Value, 1, KbTestingOrchestrator.ManualMaxCases)
+            : null;
+        var title = count is int c
+            ? $"Sinh {c} test case cho KB {module.Code}"
+            : $"Sinh test case cho KB {module.Code} (tự động phủ theo tài liệu)";
         var jobId = await jobs.LaunchAsync(
             KbGenerateTestCasesJobHandler.JobType,
-            $"Sinh {count} test case cho KB {module.Code}",
+            title,
             new KbGenerateTestCasesJobPayload(id, count),
             CurrentUserId(http),
             ct: ct).ConfigureAwait(false);

@@ -57,7 +57,8 @@ public sealed class KbTestRunnerServiceTests
         result.Should().ContainSingle();
         result[0].Question.Should().Be("Học phí HSK3?");
         claude.CapturedPrompt.Should().Contain("9,840,000đ");
-        claude.CapturedPrompt.Should().Contain("3 realistic customer questions");
+        // Sinh theo lô: mỗi lượt xin một số câu (batch) — không còn cố định = count.
+        claude.CapturedPrompt.Should().Contain("realistic customer questions");
     }
 
     [Fact]

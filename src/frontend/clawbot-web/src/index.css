@@ -166,3 +166,23 @@ body {
   font-feature-settings: "liga";
   -webkit-font-feature-settings: "liga";
 }
+
+/* Thanh tiến trình không xác định %: dải sáng chạy qua lại (dùng khi job chưa báo % cụ thể). */
+@keyframes progress-indeterminate {
+  0% {
+    left: -35%;
+    right: 100%;
+  }
+  60%,
+  100% {
+    left: 100%;
+    right: -35%;
+  }
+}
+
+.progress-indeterminate-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  animation: progress-indeterminate 1.15s cubic-bezier(0.65, 0.02, 0.35, 1) infinite;
+}

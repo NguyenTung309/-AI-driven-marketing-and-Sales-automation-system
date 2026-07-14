@@ -4,6 +4,7 @@ export * from "./StatusPill";
 export * from "./MetricCard";
 export * from "./ToggleSwitch";
 export * from "./Input";
+export * from "./FileDropzone";
 export * from "./DataTable";
 export * from "./WorkflowNode";
 export * from "./Modal";

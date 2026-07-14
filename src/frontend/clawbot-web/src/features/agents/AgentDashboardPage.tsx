@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
@@ -30,7 +30,7 @@ import { PlanSuggestionsDialog } from "./PlanSuggestionsDialog";
 import { JobCenterDialog } from "@/features/jobs/JobCenterDialog";
 import { useJobWatcher } from "@/features/jobs/useJobWatcher";
 import { useJobRun } from "@/features/jobs/useJobRun";
-import { listJobs } from "@/shared/api/jobs";
+import { getJob, listJobs, type BackgroundJob } from "@/shared/api/jobs";
 import { listLlmConfigs, type LlmConfig } from "@/shared/api/llmConfigs";
 import { getTenantOrchestration, setTenantOrchestration } from "@/shared/api/admin";
 import {
@@ -468,8 +468,9 @@ export default function AgentDashboardPage() {
     onError: (error) =>
       setNotice({ tone: "error", message: `Quét đề xuất kế hoạch thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
   });
-  useJobWatcher(planJobId, (job) => {
-    setPlanJobId(null);
+  // Đọc kết quả job kế hoạch (JSON trong resultSummary) -> mở dialog checklist, hoặc báo lý do nếu trống.
+  // Dùng chung cho job vừa chạy xong (useJobWatcher) và deep-link "Mở kết quả" (?job=).
+  const handlePlanJobResult = useCallback((job: BackgroundJob) => {
     if (job.status === "failed") {
       setNotice({ tone: "error", message: job.error ?? "Quét đề xuất kế hoạch thất bại." });
       return;
@@ -484,7 +485,7 @@ export default function AgentDashboardPage() {
       return;
     }
 
-    if (result.items.length === 0) {
+    if (!result.items || result.items.length === 0) {
       setNotice({
         tone: "info",
         message: result.skippedDuplicates > 0
@@ -494,6 +495,11 @@ export default function AgentDashboardPage() {
       return;
     }
     setPlanSuggestions(result);
+  }, []);
+
+  useJobWatcher(planJobId, (job) => {
+    setPlanJobId(null);
+    handlePlanJobResult(job);
   });
   const applyPlansMutation = useMutation({
     mutationFn: async (selected: readonly OrchestrationPlanSuggestion[]) => {
@@ -601,6 +607,35 @@ export default function AgentDashboardPage() {
       },
       { replace: true },
     );
+
+  // Chỉ nút "Mở kết quả" của job kế hoạch điều hướng tới ?planResult={id} (param riêng, tách khỏi ?job=
+  // vốn chỉ mở Job Center). Nạp job rồi mở dialog checklist; chọn job trong Job Center KHÔNG tự bung dialog.
+  const planResultJobId = searchParams.get("planResult");
+  useEffect(() => {
+    if (!planResultJobId) return;
+    let cancelled = false;
+    void getJob(planResultJobId)
+      .then((job) => {
+        if (!cancelled) handlePlanJobResult(job);
+      })
+      .catch(() => {
+        // Lỗi mạng/không tìm thấy job -> bỏ qua; người dùng có thể mở lại từ Job Center.
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setSearchParams(
+          (params) => {
+            params.delete("planResult");
+            return params;
+          },
+          { replace: true },
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [planResultJobId, handlePlanJobResult, setSearchParams]);
+
   const activeJobsQuery = useQuery({
     queryKey: ["jobs", "active"],
     queryFn: () => listJobs("active"),
