@@ -8,7 +8,8 @@ namespace Clawbot.Infrastructure.Jobs;
 
 public static class HangfireModule
 {
-    private static readonly string[] QueueNames = { "default", "retention", "kpi", "content", "ads" };
+    // "ai": job LLM chạy vài phút — để chung "default" là nghẽn cả retention/kpi khi có 1 lô sinh tài liệu.
+    private static readonly string[] QueueNames = { "default", "retention", "kpi", "content", "ads", "ai" };
 
     public static IServiceCollection AddClawbotJobs(this IServiceCollection services, IConfiguration cfg)
     {
@@ -81,6 +82,18 @@ public static class HangfireModule
         services.AddScoped<Clawbot.Agents.Core.Learning.AgentMistakeExtractor>();
         services.AddScoped<AgentMemoryDistillationJob>();
         services.AddScoped<KbCompressionJob>();
+        // Nền "chạy ngầm — thông báo — click xem trạng thái": launcher + runner dùng chung cho mọi job do user kích.
+        // Handler (IJobHandler) đăng ký ở host API cùng chỗ với endpoint sinh ra nó.
+        services.AddScoped<Clawbot.SharedKernel.Jobs.IJobLauncher, HangfireJobLauncher>();
+        services.AddScoped<JobRunner>();
+        // Web Push: thiếu VAPID key thì WebPushDispatchJob tự thoát — feed + chuông vẫn chạy.
+        services.Configure<Clawbot.Infrastructure.Notifications.WebPushOptions>(
+            cfg.GetSection(Clawbot.Infrastructure.Notifications.WebPushOptions.SectionName));
+        // Typed client thôi: KHÔNG bọc thêm AddScoped(sp => sp.GetRequiredService<PushServiceClient>())
+        // — đăng ký sau đè lên chính nó, resolve là đệ quy vô hạn. VAPID truyền theo từng lần gửi.
+        services.AddHttpClient<Lib.Net.Http.WebPush.PushServiceClient>();
+        services.AddScoped<WebPushDispatchJob>();
+        services.AddScoped<UnreadFailureEmailJob>();
         return services;
     }
 
@@ -112,6 +125,11 @@ public static class HangfireModule
             "kpi",
             j => j.RunAsync(CancellationToken.None),
             Cron.Daily(0, 30));
+        recurring.AddOrUpdate<UnreadFailureEmailJob>(
+            "unread-failure-email",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            "*/15 * * * *");
         recurring.AddOrUpdate<RefreshTokenCleanupJob>(
             "refresh-token-cleanup",
             "default",

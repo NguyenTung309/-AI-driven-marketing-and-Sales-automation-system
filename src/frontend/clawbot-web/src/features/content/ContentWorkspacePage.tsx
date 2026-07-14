@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, Modal, StatusPill, type StatusTone } from "@/shared/ui";
+import { useJobWatcher } from "@/features/jobs/useJobWatcher";
 import { TrendSettingsDialog } from "./TrendSettingsDialog";
 import { platformClasses } from "@/shared/theme/colors";
 import { toUserFriendlyError } from "@/shared/utils/userText";
@@ -1129,21 +1130,29 @@ export default function ContentWorkspacePage() {
     },
   });
 
+  // Sinh nội dung chạy ngầm: không giữ màn hình, xong sẽ có thông báo kèm link tới bài.
+  const [generateJobId, setGenerateJobId] = useState<string | null>(null);
   const generateMutation = useMutation({
     mutationFn: () =>
       selectedBriefId
         ? generateContentItems({ briefId: selectedBriefId, platform: briefPlatform })
         : generateContentItems({ platform: briefPlatform, briefText: briefText.trim() }),
-    onSuccess: async (response) => {
-      const first = response.items[0];
-      if (first) {
-        setSelectedItemId(first.id);
-        setEditorDraft({ itemId: first.id, body: first.body, assetsJson: first.assetsJson || "[]" });
-        openContentItem(first.id);
-      }
-      setNotice({ tone: "success", message: `Đã sinh ${response.items.length || 1} bài nháp từ agent nội dung.` });
-      await queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
+    onSuccess: (job) => {
+      setGenerateJobId(job.jobId);
+      setNotice({
+        tone: "info",
+        message: "Agent đang sinh nội dung ở chế độ nền. Xong sẽ có thông báo — bấm vào là mở đúng bài.",
+      });
     },
+  });
+  useJobWatcher(generateJobId, (job) => {
+    setGenerateJobId(null);
+    if (job.status === "succeeded") {
+      setNotice({ tone: "success", message: "Đã sinh xong bài nháp, xem trong hàng đợi." });
+      void queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
+    } else if (job.status === "failed") {
+      setNotice({ tone: "error", message: job.error ?? "Sinh nội dung thất bại." });
+    }
   });
 
   const updateItemMutation = useMutation({
@@ -1209,12 +1218,22 @@ export default function ContentWorkspacePage() {
     },
   });
 
+  const [repurposeJobId, setRepurposeJobId] = useState<string | null>(null);
   const repurposeMutation = useMutation({
     mutationFn: ({ id, targets }: { readonly id: string; readonly targets: readonly string[] }) => repurposeContentItem(id, targets),
-    onSuccess: async (response) => {
-      setNotice({ tone: "success", message: `Đã tạo ${response.items.length} biến thể nội dung.` });
-      await queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
+    onSuccess: (job) => {
+      setRepurposeJobId(job.jobId);
+      setNotice({ tone: "info", message: "Đang chuyển thể nội dung ở chế độ nền. Xong sẽ có thông báo." });
     },
+  });
+  useJobWatcher(repurposeJobId, (job) => {
+    setRepurposeJobId(null);
+    if (job.status === "succeeded") {
+      setNotice({ tone: "success", message: job.resultSummary ?? "Đã tạo xong biến thể nội dung." });
+      void queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
+    } else if (job.status === "failed") {
+      setNotice({ tone: "error", message: job.error ?? "Chuyển thể nội dung thất bại." });
+    }
   });
 
   const scheduleMutation = useMutation({
@@ -1246,14 +1265,24 @@ export default function ContentWorkspacePage() {
     },
   });
 
+  const [scanJobId, setScanJobId] = useState<string | null>(null);
   const scanMutation = useMutation({
     mutationFn: () => scanContentTrends(),
-    onSuccess: async () => {
-      setNotice({ tone: "success", message: "Đã quét xu hướng mới từ agent nghiên cứu." });
+    onSuccess: (job) => {
+      setScanJobId(job.jobId);
+      setNotice({ tone: "info", message: "Agent nghiên cứu đang quét xu hướng ở chế độ nền." });
+    },
+  });
+  useJobWatcher(scanJobId, (job) => {
+    setScanJobId(null);
+    if (job.status === "succeeded") {
+      setNotice({ tone: "success", message: job.resultSummary ?? "Đã quét xong xu hướng." });
       // Scan luon ghi vao tuan hien tai -> nhay ve tuan nay de thay ket qua moi
       setTrendWeek(currentWeek);
-      await queryClient.invalidateQueries({ queryKey: ["content", "trends"] });
-    },
+      void queryClient.invalidateQueries({ queryKey: ["content", "trends"] });
+    } else if (job.status === "failed") {
+      setNotice({ tone: "error", message: job.error ?? "Quét xu hướng thất bại." });
+    }
   });
 
   const [trendSettingsOpen, setTrendSettingsOpen] = useState(false);

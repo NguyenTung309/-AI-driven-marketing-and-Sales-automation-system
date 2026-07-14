@@ -14,6 +14,7 @@ import {
 } from "@/shared/api/profile";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { TwoFactorSetupDialog } from "./TwoFactorSetupDialog";
+import { NotificationSettingsCard } from "./NotificationSettingsCard";
 
 type ProfileTab = "info" | "permissions" | "security";
 
@@ -438,6 +439,10 @@ export default function ProfilePage() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="mt-gutter">
+        <NotificationSettingsCard />
       </div>
 
       <ChangePasswordDialog

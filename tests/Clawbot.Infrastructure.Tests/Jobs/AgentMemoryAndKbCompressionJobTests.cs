@@ -35,7 +35,7 @@ public sealed class AgentMemoryAndKbCompressionJobTests
         """);
         var job = new AgentMemoryDistillationJob(
             fx.Db, new AgentMistakeExtractor(chat, new NoopLlmScope()), IdentityPii(), FixedClock(),
-            NullLogger<AgentMemoryDistillationJob>.Instance);
+            Substitute.For<INotificationPublisher>(), NullLogger<AgentMemoryDistillationJob>.Instance);
 
         await job.RunAsync();
 
@@ -59,7 +59,7 @@ public sealed class AgentMemoryAndKbCompressionJobTests
             $$"""{"ops":[{"op":"update","factId":"{{old.Id}}","fact":"Hay bịa giá và lịch khai giảng","category":"mistake","confidence":0.9}]}""");
         var job = new AgentMemoryDistillationJob(
             fx.Db, new AgentMistakeExtractor(chat, new NoopLlmScope()), IdentityPii(), FixedClock(),
-            NullLogger<AgentMemoryDistillationJob>.Instance);
+            Substitute.For<INotificationPublisher>(), NullLogger<AgentMemoryDistillationJob>.Instance);
 
         await job.RunAsync();
 

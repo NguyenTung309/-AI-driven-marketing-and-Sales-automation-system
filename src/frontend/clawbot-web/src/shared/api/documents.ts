@@ -1,4 +1,5 @@
 import { apiClient } from "./client";
+import type { JobAccepted } from "./jobs";
 
 export interface DocumentTemplate {
   readonly id: string;
@@ -79,13 +80,13 @@ export async function listGeneratedDocuments(): Promise<readonly GeneratedDocume
   return res.data;
 }
 
-export async function generateDocument(payload: GenerateDocumentPayload): Promise<GenerateDocumentResponse> {
-  const res = await apiClient.post<GenerateDocumentResponse>("/api/docs/generate", payload);
+export async function generateDocument(payload: GenerateDocumentPayload): Promise<JobAccepted> {
+  const res = await apiClient.post<JobAccepted>("/api/docs/generate", payload);
   return res.data;
 }
 
-export async function generateDocumentKit(payload: GenerateDocumentKitPayload): Promise<GenerateDocumentKitResponse> {
-  const res = await apiClient.post<GenerateDocumentKitResponse>("/api/docs/generate-kit", payload);
+export async function generateDocumentKit(payload: GenerateDocumentKitPayload): Promise<JobAccepted> {
+  const res = await apiClient.post<JobAccepted>("/api/docs/generate-kit", payload);
   return res.data;
 }
 

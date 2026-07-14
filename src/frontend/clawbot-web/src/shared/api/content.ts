@@ -1,4 +1,5 @@
 import { apiClient } from "./client";
+import type { JobAccepted } from "./jobs";
 
 export interface ContentBrief {
   readonly id: string;
@@ -166,8 +167,9 @@ export async function getContentTrends(week?: string): Promise<TrendScanResponse
   return res.data;
 }
 
-export async function scanContentTrends(week?: string): Promise<TrendScanResponse> {
-  const res = await apiClient.post<TrendScanResponse>("/api/content/trends/scan", null, { params: cleanParams({ week }) });
+// Chạy ngầm: trả jobId; kết quả xu hướng về qua thông báo + realtime.
+export async function scanContentTrends(week?: string): Promise<JobAccepted> {
+  const res = await apiClient.post<JobAccepted>("/api/content/trends/scan", null, { params: cleanParams({ week }) });
   return res.data;
 }
 
@@ -216,13 +218,14 @@ export async function updateTrendSettings(payload: UpdateTrendSettingsPayload): 
   return res.data;
 }
 
-export async function generateContentItems(payload: GenerateContentItemPayload): Promise<{ readonly items: readonly ContentItem[] }> {
-  const res = await apiClient.post<{ readonly items: readonly ContentItem[] }>("/api/content/items/generate", payload);
+// Chạy ngầm: trả jobId, kết quả về qua thông báo (link tới bài trong hàng đợi).
+export async function generateContentItems(payload: GenerateContentItemPayload): Promise<JobAccepted> {
+  const res = await apiClient.post<JobAccepted>("/api/content/items/generate", payload);
   return res.data;
 }
 
-export async function generateImagePrompt(payload: GenerateImagePromptPayload): Promise<GenerateImagePromptResponse> {
-  const res = await apiClient.post<GenerateImagePromptResponse>("/api/content/image-prompts", payload);
+export async function generateImagePrompt(payload: GenerateImagePromptPayload): Promise<JobAccepted> {
+  const res = await apiClient.post<JobAccepted>("/api/content/image-prompts", payload);
   return res.data;
 }
 
@@ -272,8 +275,8 @@ export async function getContentPublishTargets(platform: string): Promise<readon
   return res.data;
 }
 
-export async function repurposeContentItem(id: string, targetPlatforms: readonly string[]): Promise<{ readonly items: readonly ContentItem[] }> {
-  const res = await apiClient.post<{ readonly items: readonly ContentItem[] }>(`/api/content/items/${id}/repurpose`, {
+export async function repurposeContentItem(id: string, targetPlatforms: readonly string[]): Promise<JobAccepted> {
+  const res = await apiClient.post<JobAccepted>(`/api/content/items/${id}/repurpose`, {
     targetPlatforms,
   });
   return res.data;

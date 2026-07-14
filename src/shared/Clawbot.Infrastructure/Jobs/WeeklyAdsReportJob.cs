@@ -1,4 +1,5 @@
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Notifications;
 using Clawbot.SharedKernel.Time;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +10,7 @@ namespace Clawbot.Infrastructure.Jobs;
 public sealed partial class WeeklyAdsReportJob(
     AppDbContext db,
     IClock clock,
+    INotificationPublisher publisher,
     ILogger<WeeklyAdsReportJob> logger)
 {
     [DisableConcurrentExecution(timeoutInSeconds: 1800)]
@@ -39,6 +41,14 @@ public sealed partial class WeeklyAdsReportJob(
             var avgCpl = metrics.Where(m => m.Cpl > 0).Select(m => m.Cpl ?? 0).DefaultIfEmpty(0).Average();
 
             LogWeeklyReport(logger, tenantId, group.Count(), totalSpend, avgCpl, actions);
+            await publisher.PublishAsync(new NotificationRequest(
+                tenantId,
+                UserId: null,
+                Type: "ads_weekly_report",
+                Title: "Báo cáo quảng cáo tuần",
+                Severity: "info",
+                Body: $"{group.Count()} chiến dịch, chi {totalSpend:N0}, CPL trung bình {avgCpl:N0}, agent đã thực hiện {actions} hành động.",
+                Link: "/ads"), ct).ConfigureAwait(false);
         }
     }
 

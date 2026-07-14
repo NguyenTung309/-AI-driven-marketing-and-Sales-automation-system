@@ -10,6 +10,15 @@ public sealed class PublishingContentNotifier(
     public async Task NotifyTrendScanAsync(Guid tenantId, ContentTrendScanEvent evt, CancellationToken ct = default)
     {
         await realtime.NotifyTrendScanAsync(tenantId, evt, ct).ConfigureAwait(false);
+        // Trước đây chỉ đẩy SignalR: user không mở web lúc quét là mất luôn kết quả.
+        await publisher.PublishAsync(new NotificationRequest(
+            TenantId: tenantId,
+            UserId: null,
+            Type: "content_trend_scan",
+            Title: "Đã quét xong xu hướng nội dung",
+            Severity: "info",
+            Body: $"Tìm được {evt.TrendCount} xu hướng mới.",
+            Link: "/content?tab=trends"), ct).ConfigureAwait(false);
     }
 
     public async Task NotifyPublishFailedAsync(Guid tenantId, ContentPublishFailedEvent evt, CancellationToken ct = default)

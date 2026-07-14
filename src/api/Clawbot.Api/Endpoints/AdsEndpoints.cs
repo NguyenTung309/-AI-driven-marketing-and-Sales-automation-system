@@ -1,9 +1,11 @@
 using Clawbot.Agents.Contracts.Ads;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Ads;
+using Clawbot.Api.Jobs;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Ads;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Jobs;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Grpc.Core;
@@ -125,60 +127,49 @@ public static class AdsEndpoints
         return Results.Ok(actions);
     }
 
+    // Đánh giá campaign chạy ngầm: agent có thể tạm dừng/tăng ngân sách — user nhận thông báo việc đã làm.
     private static async Task<IResult> EvaluateCampaignAsync(
-        Guid id, AdsEvaluateRequestDto body, AdsAgent.AdsAgentClient client, AppDbContext db,
-        ITenantAccessor tenants, IClock clock, HttpContext http, CancellationToken ct)
+        Guid id, AdsEvaluateRequestDto body, IJobLauncher jobs, AppDbContext db,
+        ITenantAccessor tenants, HttpContext http, CancellationToken ct)
     {
-        var tenant = tenants.Require();
+        _ = tenants.Require();
         var campaign = await db.AdsCampaigns.FirstOrDefaultAsync(c => c.Id == id, ct).ConfigureAwait(false);
         if (campaign is null)
             return Error(http, 404, "ads.campaign_not_found", "Campaign not found.");
 
-        try
-        {
-            var response = await client.EvaluateAsync(new AdsEvaluateRequest
-            {
-                TenantId = tenant.TenantId.ToString(),
-                Platform = body.Platform,
-                CampaignId = id.ToString(),
-            }, cancellationToken: ct).ConfigureAwait(false);
+        var jobId = await jobs.LaunchAsync(
+            AdsEvaluateJobHandler.JobType,
+            $"Đánh giá campaign {campaign.ExternalCampaignId}",
+            new AdsEvaluateJobPayload(id, body.Platform),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
 
-            var result = new AdsEvaluateResponseDto(
-                response.Actions.Select(a => new AdsActionExecutedDto(
-                    string.IsNullOrEmpty(a.RuleId) ? null : Guid.Parse(a.RuleId),
-                    a.ActionTaken,
-                    a.Note)).ToList());
-            return Results.Ok(result);
-        }
-        catch (RpcException ex)
-        {
-            return Error(http, 502, "ads.evaluate_failed", ex.Status.Detail ?? "Agent evaluation failed.");
-        }
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
     }
 
     private static async Task<IResult> BuildLookalikeAsync(
-        AdsLookalikeRequestDto body, AdsAgent.AdsAgentClient client,
+        AdsLookalikeRequestDto body, IJobLauncher jobs,
         ITenantAccessor tenants, HttpContext http, CancellationToken ct)
     {
-        var tenant = tenants.Require();
+        _ = tenants.Require();
         if (body.SeedContactKeys.Count == 0)
             return Error(http, 400, "ads.lookalike_invalid", "seed_contact_keys required.");
 
-        try
-        {
-            var response = await client.BuildLookalikeAsync(new AdsLookalikeRequest
-            {
-                TenantId = tenant.TenantId.ToString(),
-                Platform = body.Platform,
-            }, cancellationToken: ct).ConfigureAwait(false);
+        var jobId = await jobs.LaunchAsync(
+            AdsLookalikeJobHandler.JobType,
+            $"Dựng tệp lookalike {body.Platform}",
+            new AdsLookalikeJobPayload(body.Platform),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
 
-            return Results.Ok(new AdsLookalikeResponseDto(response.AudienceId, response.Created));
-        }
-        catch (RpcException ex)
-        {
-            return Error(http, 502, "ads.lookalike_failed", ex.Status.Detail ?? "Lookalike build failed.");
-        }
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
     }
+
+    private static Guid? CurrentUserId(HttpContext http) =>
+        Guid.TryParse(http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id)
+        && id != Guid.Empty
+            ? id
+            : null;
 
     internal static AdsRuleDto ToDto(AdsRule r) => new(
         r.Id, r.Platform, r.Metric, r.Comparator, r.Threshold, r.Action, r.IsActive, r.CreatedAt, r.UpdatedAt);

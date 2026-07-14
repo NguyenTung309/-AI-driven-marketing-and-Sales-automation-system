@@ -1,4 +1,5 @@
 import { apiClient } from "./client";
+import type { JobAccepted } from "./jobs";
 
 export interface KbModule {
   readonly id: string;
@@ -152,10 +153,11 @@ export interface KbClassifyUploadResponse {
   readonly results: readonly KbClassifiedFile[];
 }
 
-export async function classifyUploadKb(files: readonly File[], autoDeploy: boolean): Promise<KbClassifyUploadResponse> {
+// Chạy ngầm: file đẩy lên object storage, job đọc lại — trả jobId ngay.
+export async function classifyUploadKb(files: readonly File[], autoDeploy: boolean): Promise<JobAccepted> {
   const form = new FormData();
   for (const file of files) form.append("files", file, file.name);
-  const response = await apiClient.post<KbClassifyUploadResponse>("/api/kb/classify-upload", form, {
+  const response = await apiClient.post<JobAccepted>("/api/kb/classify-upload", form, {
     params: { autoDeploy },
   });
   return response.data;
@@ -189,15 +191,15 @@ export async function addKbTestCase(moduleId: string, question: string, expected
   return response.data;
 }
 
-export async function generateKbTestCases(moduleId: string, count = 5): Promise<readonly KbTestCase[]> {
-  const response = await apiClient.post<readonly KbTestCase[]>(`/api/kb/modules/${moduleId}/test-cases/generate`, {
+export async function generateKbTestCases(moduleId: string, count = 5): Promise<JobAccepted> {
+  const response = await apiClient.post<JobAccepted>(`/api/kb/modules/${moduleId}/test-cases/generate`, {
     count,
   });
   return response.data;
 }
 
-export async function runKbTest(moduleId: string): Promise<KbTestRunResult> {
-  const response = await apiClient.post<KbTestRunResult>(`/api/kb/modules/${moduleId}/test`);
+export async function runKbTest(moduleId: string): Promise<JobAccepted> {
+  const response = await apiClient.post<JobAccepted>(`/api/kb/modules/${moduleId}/test`);
   return response.data;
 }
 

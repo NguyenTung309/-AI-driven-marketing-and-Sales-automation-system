@@ -4,6 +4,7 @@ using Clawbot.Domain.Leads;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Time;
+using Clawbot.SharedKernel.Notifications;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -33,6 +34,7 @@ public sealed class DripSequenceJobTests
             fx.Db,
             adapter,
             new FixedClock(Now),
+            Substitute.For<INotificationPublisher>(),
             NullLogger<DripSequenceJob>.Instance);
 
         await sut.RunAsync(CancellationToken.None);
@@ -69,7 +71,7 @@ public sealed class DripSequenceJobTests
         fx.Db.AddRange(contact, lead, conversation, sequence, enrollment);
         await fx.Db.SaveChangesAsync();
         var adapter = new CapturingChannelAdapter();
-        var sut = new DripSequenceJob(fx.Db, adapter, new FixedClock(Now), NullLogger<DripSequenceJob>.Instance);
+        var sut = new DripSequenceJob(fx.Db, adapter, new FixedClock(Now), Substitute.For<INotificationPublisher>(), NullLogger<DripSequenceJob>.Instance);
 
         await sut.RunAsync(CancellationToken.None);
 
@@ -98,7 +100,7 @@ public sealed class DripSequenceJobTests
         var toxicity = Substitute.For<Clawbot.Agents.Core.Skills.Nlp.IToxicityFilter>();
         toxicity.IsBlockedAsync(Arg.Any<string>(), Arg.Any<float>(), Arg.Any<CancellationToken>())
             .Returns(true);
-        var sut = new DripSequenceJob(fx.Db, adapter, new FixedClock(Now), NullLogger<DripSequenceJob>.Instance, toxicity);
+        var sut = new DripSequenceJob(fx.Db, adapter, new FixedClock(Now), Substitute.For<INotificationPublisher>(), NullLogger<DripSequenceJob>.Instance, toxicity);
 
         await sut.RunAsync(CancellationToken.None);
 

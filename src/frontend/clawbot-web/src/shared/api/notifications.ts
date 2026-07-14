@@ -12,6 +12,8 @@ export interface AppNotification {
   readonly isRead: boolean;
   readonly readAt: string | null;
   readonly createdAt: string;
+  /** Số sự kiện đã gom vào dòng này (kiểu Facebook). 1 = sự kiện lẻ. */
+  readonly occurrenceCount?: number;
 }
 
 export interface NotificationListResponse {
@@ -29,6 +31,9 @@ export interface NotificationEvent {
   readonly body: string | null;
   readonly link: string | null;
   readonly createdAt: string;
+  readonly occurrenceCount?: number;
+  /** false = chỉ vào feed, không nổi toast (nhóm việc máy móc hoặc user đã tắt). */
+  readonly push?: boolean;
 }
 
 export interface ListNotificationsParams {

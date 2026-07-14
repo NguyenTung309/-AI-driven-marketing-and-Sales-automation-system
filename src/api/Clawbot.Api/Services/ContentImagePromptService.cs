@@ -25,12 +25,20 @@ public sealed class ContentImagePromptService(
     private readonly ILlmCallScope _llmScope = llmScope;
     private readonly ITenantAccessor _tenants = tenants;
 
+    // Đường HTTP: tenant lấy từ request context.
+    public Task<GenerateImagePromptResponse> GenerateAsync(
+        GenerateImagePromptRequest request,
+        CancellationToken ct = default) =>
+        GenerateAsync(_tenants.Require().TenantId, request, ct);
+
+    // Đường job nền: KHÔNG có HTTP context nên ITenantAccessor.Require() sẽ throw — tenant phải truyền vào.
     public async Task<GenerateImagePromptResponse> GenerateAsync(
+        Guid tenantId,
         GenerateImagePromptRequest request,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        using var _llm = _llmScope.Begin(_tenants.Require().TenantId, AgentCode);
+        using var _llm = _llmScope.Begin(tenantId, AgentCode);
 
         var brief = request.Brief?.Trim();
         if (string.IsNullOrWhiteSpace(brief))

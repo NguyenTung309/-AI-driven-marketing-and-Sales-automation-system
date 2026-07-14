@@ -18,6 +18,14 @@ public sealed class Notification : Entity<Guid>, ITenantOwned
     public DateTimeOffset? ReadAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
+    // Gom nhóm kiểu Facebook: sự kiện cùng GroupKey chưa đọc thì cộng dồn vào 1 dòng thay vì đẻ dòng mới.
+    public string? GroupKey { get; private set; }
+    public int OccurrenceCount { get; private set; } = 1;
+    public DateTimeOffset? LastOccurredAt { get; private set; }
+
+    /// <summary>Đã gửi email dự phòng (cảnh báo lỗi chưa ai đọc) — chặn gửi lặp.</summary>
+    public DateTimeOffset? EmailSentAt { get; private set; }
+
     private Notification() { }
 
     public static Notification Create(
@@ -28,7 +36,8 @@ public sealed class Notification : Entity<Guid>, ITenantOwned
         DateTimeOffset createdAt,
         string severity = "info",
         string? body = null,
-        string? link = null) =>
+        string? link = null,
+        string? groupKey = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -41,7 +50,20 @@ public sealed class Notification : Entity<Guid>, ITenantOwned
             Link = link,
             IsRead = false,
             CreatedAt = createdAt,
+            GroupKey = groupKey,
+            OccurrenceCount = 1,
+            LastOccurredAt = createdAt,
         };
+
+    /// <summary>Cùng nhóm, chưa đọc: cộng dồn thay vì tạo dòng mới. Body lấy theo sự kiện mới nhất.</summary>
+    public void Bump(DateTimeOffset at, string? body)
+    {
+        OccurrenceCount++;
+        LastOccurredAt = at;
+        if (!string.IsNullOrEmpty(body)) Body = body;
+    }
+
+    public void MarkEmailSent(DateTimeOffset at) => EmailSentAt = at;
 
     public void MarkRead(DateTimeOffset at)
     {

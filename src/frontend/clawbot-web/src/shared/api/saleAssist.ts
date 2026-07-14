@@ -1,4 +1,5 @@
 import { apiClient } from "./client";
+import type { JobAccepted } from "./jobs";
 
 export interface SaleAssistDraftResponse {
   readonly draftText: string;
@@ -80,8 +81,10 @@ export interface UpdateQuickReplyPayload {
   readonly platforms?: string | null;
 }
 
-export async function generateSaleAssistDraft(conversationId: string): Promise<SaleAssistDraftResponse> {
-  const res = await apiClient.post<SaleAssistDraftResponse>("/api/sale-assist/draft", { conversationId });
+// 3 việc LLM dưới đây chạy ngầm qua job (thấy được ở "Việc đang chạy", huỷ được, lỗi có thông báo).
+// Kết quả nằm trong resultSummary của job — dùng useJobRun<T>() để lấy về ngay tại panel.
+export async function generateSaleAssistDraft(conversationId: string): Promise<JobAccepted> {
+  const res = await apiClient.post<JobAccepted>("/api/sale-assist/draft", { conversationId });
   return res.data;
 }
 
@@ -90,8 +93,8 @@ export async function recordSaleAssistDraftFeedback(payload: SaleAssistDraftFeed
   return res.data;
 }
 
-export async function summarizeSaleAssistConversation(conversationId: string): Promise<SaleAssistSummaryResponse> {
-  const res = await apiClient.post<SaleAssistSummaryResponse>("/api/sale-assist/summary", { conversationId });
+export async function summarizeSaleAssistConversation(conversationId: string): Promise<JobAccepted> {
+  const res = await apiClient.post<JobAccepted>("/api/sale-assist/summary", { conversationId });
   return res.data;
 }
 
@@ -131,8 +134,8 @@ export async function getSaleAssistDailySummary(): Promise<SaleAssistDailySummar
   return res.data;
 }
 
-export async function getSaleAssistUpsell(conversationId: string): Promise<SaleAssistUpsellResponse> {
-  const res = await apiClient.get<SaleAssistUpsellResponse>("/api/sale-assist/upsell", { params: { conversationId } });
+export async function getSaleAssistUpsell(conversationId: string): Promise<JobAccepted> {
+  const res = await apiClient.get<JobAccepted>("/api/sale-assist/upsell", { params: { conversationId } });
   return res.data;
 }
 

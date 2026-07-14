@@ -4,9 +4,11 @@ using Clawbot.Domain.Conversations;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Time;
+using Clawbot.SharedKernel.Notifications;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 
 namespace Clawbot.Infrastructure.Tests.Jobs;
 
@@ -134,7 +136,8 @@ public sealed class CommentAutoReplyJobTests
         await fx.Db.SaveChangesAsync();
         var sut = new CommentAutoReplyJob(
             fx.Db, new FixedIntentClassifier("ask_price", 0.75f),
-            new FixedClock(Now.AddSeconds(10)), NullLogger<CommentAutoReplyJob>.Instance,
+            new FixedClock(Now.AddSeconds(10)), Substitute.For<INotificationPublisher>(),
+            NullLogger<CommentAutoReplyJob>.Instance,
             commentAdapter: null);
 
         await sut.RunAsync(fx.TenantId, inbound.Id, CancellationToken.None);
@@ -145,7 +148,8 @@ public sealed class CommentAutoReplyJobTests
 
     private static CommentAutoReplyJob BuildJob(TestAppDb fx, FakeCommentAdapter adapter) =>
         new(fx.Db, new FixedIntentClassifier("ask_price", 0.75f),
-            new FixedClock(Now.AddSeconds(10)), NullLogger<CommentAutoReplyJob>.Instance, adapter);
+            new FixedClock(Now.AddSeconds(10)), Substitute.For<INotificationPublisher>(),
+            NullLogger<CommentAutoReplyJob>.Instance, adapter);
 
     private sealed class FakeCommentAdapter : ICommentChannelAdapter
     {

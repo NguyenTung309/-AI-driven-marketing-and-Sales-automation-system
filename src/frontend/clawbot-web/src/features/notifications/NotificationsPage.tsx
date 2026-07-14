@@ -123,6 +123,12 @@ function NotificationRow({
         </div>
         <h3 className={notification.isRead ? "text-body-md font-semibold text-on-surface-variant" : "text-body-md font-bold"}>
           {notification.title}
+          {(notification.occurrenceCount ?? 1) > 1 ? (
+            // Gom nhóm: 5 lần AI chỉnh quảng cáo = 1 dòng "x5", không phải 5 dòng.
+            <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-label-sm font-bold text-primary">
+              x{notification.occurrenceCount}
+            </span>
+          ) : null}
         </h3>
         {notification.body ? <p className="mt-1 line-clamp-2 text-body-md text-on-surface-variant">{notification.body}</p> : null}
       </div>

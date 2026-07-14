@@ -63,4 +63,18 @@ public sealed class MinioDocumentStorage : IDocumentStorage
             .WithObject(fileName)
             .WithExpiry(ExpirySeconds)).ConfigureAwait(false);
     }
+
+    public async Task<byte[]> ReadAsync(string fileName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+            throw new ArgumentException("fileName required", nameof(fileName));
+
+        using var ms = new MemoryStream();
+        await _client.GetObjectAsync(new GetObjectArgs()
+            .WithBucket(_bucket)
+            .WithObject(fileName)
+            .WithCallbackStream(stream => stream.CopyTo(ms)), ct).ConfigureAwait(false);
+
+        return ms.ToArray();
+    }
 }

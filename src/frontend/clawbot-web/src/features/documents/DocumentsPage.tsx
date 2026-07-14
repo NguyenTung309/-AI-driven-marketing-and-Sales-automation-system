@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, StatusPill, type StatusTone } from "@/shared/ui";
+import { useJobWatcher } from "@/features/jobs/useJobWatcher";
 import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
   createDocumentTemplate,
@@ -575,6 +576,8 @@ export default function DocumentsPage() {
     },
   });
 
+  // Sinh tài liệu chạy ngầm: theo dõi job để tự làm mới danh sách khi xong.
+  const [generateJobId, setGenerateJobId] = useState<string | null>(null);
   const generateMutation = useMutation({
     mutationFn: () => {
       const vars = parseVars(varsText);
@@ -585,14 +588,9 @@ export default function DocumentsPage() {
         sentVia: sentVia || null,
       });
     },
-    onSuccess: async (response) => {
-      setSelectedDocId(response.documentId);
-      setPreviewMode("document");
-      setNotice({
-        tone: "success",
-        message: sentVia === "email" ? "Đã tạo tài liệu và gửi email." : "Đã tạo tài liệu.",
-      });
-      await queryClient.invalidateQueries({ queryKey: ["documents", "generated"] });
+    onSuccess: (job) => {
+      setGenerateJobId(job.jobId);
+      setNotice({ tone: "info", message: "Đang tạo tài liệu ở chế độ nền. Xong sẽ có thông báo." });
     },
   });
 
@@ -605,18 +603,21 @@ export default function DocumentsPage() {
         sentVia: sentVia || null,
       });
     },
-    onSuccess: async (response) => {
-      const first = response.documents[0];
-      if (first) {
-        setSelectedDocId(first.documentId);
-        setPreviewMode("document");
-      }
-      setNotice({
-        tone: "success",
-        message: `Đã tạo bộ ${response.documents.length} tài liệu.`,
-      });
-      await queryClient.invalidateQueries({ queryKey: ["documents", "generated"] });
+    onSuccess: (job) => {
+      setGenerateJobId(job.jobId);
+      setNotice({ tone: "info", message: "Đang tạo bộ tài liệu ở chế độ nền. Xong sẽ có thông báo." });
     },
+  });
+
+  // Job nào cũng chỉ cần 1 watcher: sinh 1 doc hay cả bộ đều đổ về danh sách tài liệu.
+  useJobWatcher(generateJobId, (job) => {
+    setGenerateJobId(null);
+    if (job.status === "succeeded") {
+      setNotice({ tone: "success", message: job.resultSummary ?? "Đã tạo xong tài liệu." });
+      void queryClient.invalidateQueries({ queryKey: ["documents", "generated"] });
+    } else if (job.status === "failed") {
+      setNotice({ tone: "error", message: job.error ?? "Tạo tài liệu thất bại." });
+    }
   });
 
   function selectTemplate(template: DocumentTemplate) {

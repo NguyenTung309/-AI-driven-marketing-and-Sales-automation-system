@@ -2,52 +2,9 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Alert } from "@/shared/ui/Alert";
 import { Modal } from "@/shared/ui/Modal";
-import { StatusPill } from "@/shared/ui/StatusPill";
 import { toUserFriendlyError } from "@/shared/utils/userText";
-import { classifyUploadKb, KB_UPLOAD_ACCEPT, type KbClassifiedFile } from "@/shared/api/kb";
-
-const ERROR_LABELS: Readonly<Record<string, string>> = {
-  file_required: "Tệp rỗng",
-  file_too_large: "Tệp vượt quá 10MB",
-  unsupported_format: "Định dạng không hỗ trợ",
-  extraction_failed: "Không đọc được nội dung tệp",
-  llm_not_configured: "Chưa cấu hình LLM cho tenant",
-  classification_failed: "Agent không phân loại được",
-  deploy_failed: "Đã lưu bản nháp nhưng triển khai thất bại",
-};
-
-function errorLabel(code: string | null): string {
-  if (!code) return "Lỗi không xác định";
-  return ERROR_LABELS[code] ?? code;
-}
-
-interface ResultRowProps {
-  readonly item: KbClassifiedFile;
-}
-
-function ResultRow({ item }: ResultRowProps) {
-  return (
-    <li className="flex flex-col gap-1 rounded border border-outline px-3 py-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <span aria-hidden="true" className={`material-symbols-outlined text-[18px] ${item.success ? "text-primary" : "text-error"}`}>
-          {item.success ? "check_circle" : "error"}
-        </span>
-        <span className="text-body-md font-bold text-secondary">{item.fileName}</span>
-        {item.success && item.moduleName ? (
-          <span className="text-body-md text-on-surface-variant">
-            → {item.moduleName} ({item.moduleCode})
-          </span>
-        ) : null}
-        {item.isNewModule ? <StatusPill tone="warning">Nhóm mới</StatusPill> : null}
-        {item.success ? (
-          <StatusPill tone={item.deployed ? "success" : "neutral"}>{item.deployed ? "Đã triển khai" : "Bản nháp"}</StatusPill>
-        ) : null}
-      </div>
-      {item.error ? <p className="text-body-sm text-error">{errorLabel(item.error)}</p> : null}
-      {item.reason ? <p className="text-body-sm text-on-surface-variant">{item.reason}</p> : null}
-    </li>
-  );
-}
+import { classifyUploadKb, KB_UPLOAD_ACCEPT } from "@/shared/api/kb";
+import { useJobWatcher } from "@/features/jobs/useJobWatcher";
 
 interface KbAutoClassifyModalProps {
   readonly open: boolean;
@@ -59,14 +16,21 @@ export function KbAutoClassifyModal({ open, onClose, onDone }: KbAutoClassifyMod
   const [files, setFiles] = useState<readonly File[]>([]);
   const [autoDeploy, setAutoDeploy] = useState(true);
 
+  // Nạp tri thức chạy ngầm: file đã lên object storage, job đọc lại và phân loại từng tệp.
+  const [jobId, setJobId] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: () => classifyUploadKb(files, autoDeploy),
-    onSuccess: onDone,
+    onSuccess: (job) => setJobId(job.jobId),
   });
-  const results = mutation.data?.results ?? null;
+  const job = useJobWatcher(jobId, () => {
+    setJobId(null);
+    onDone();
+  });
+  const running = mutation.isPending || Boolean(jobId);
 
   const close = () => {
     setFiles([]);
+    setJobId(null);
     mutation.reset();
     onClose();
   };
@@ -84,11 +48,11 @@ export function KbAutoClassifyModal({ open, onClose, onDone }: KbAutoClassifyMod
           </button>
           <button
             className="rounded bg-primary px-4 py-2 text-body-md font-bold text-white hover:bg-primary-hover disabled:opacity-50"
-            disabled={files.length === 0 || mutation.isPending}
+            disabled={files.length === 0 || running}
             onClick={() => mutation.mutate()}
             type="button"
           >
-            {mutation.isPending ? "Agent đang phân loại…" : "Tải lên & phân loại"}
+            {running ? "Agent đang phân loại…" : "Tải lên & phân loại"}
           </button>
         </>
       }
@@ -115,13 +79,17 @@ export function KbAutoClassifyModal({ open, onClose, onDone }: KbAutoClassifyMod
         {mutation.error ? (
           <Alert tone="error">{toUserFriendlyError(mutation.error, "Không phân loại được tài liệu. Vui lòng thử lại.")}</Alert>
         ) : null}
-        {results ? (
-          <ul className="flex max-h-80 list-none flex-col gap-2 overflow-y-auto p-0">
-            {results.map((item, index) => (
-              <ResultRow item={item} key={`${item.fileName}-${index}`} />
-            ))}
-          </ul>
+        {job && (job.status === "queued" || job.status === "running") ? (
+          <Alert tone="info">
+            {job.progressNote ?? "Đang xử lý ở chế độ nền…"} Có thể đóng cửa sổ này — xong sẽ có thông báo.
+          </Alert>
         ) : null}
+        {job?.status === "succeeded" && job.resultSummary ? (
+          <Alert tone="success">
+            <span className="whitespace-pre-wrap">{job.resultSummary}</span>
+          </Alert>
+        ) : null}
+        {job?.status === "failed" ? <Alert tone="error">{job.error ?? "Nạp tri thức thất bại."}</Alert> : null}
       </div>
     </Modal>
   );

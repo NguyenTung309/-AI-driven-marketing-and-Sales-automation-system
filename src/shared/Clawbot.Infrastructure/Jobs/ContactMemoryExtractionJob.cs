@@ -7,6 +7,7 @@ using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Time;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
+using Clawbot.SharedKernel.Notifications;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -21,6 +22,7 @@ public sealed partial class ContactMemoryExtractionJob(
     IPiiRedactor pii,
     IClock clock,
     IOptions<LearningOptions> options,
+    INotificationPublisher publisher,
     ILogger<ContactMemoryExtractionJob> logger)
 {
     private static readonly TimeSpan IdleWindow = TimeSpan.FromMinutes(15);
@@ -54,6 +56,16 @@ public sealed partial class ContactMemoryExtractionJob(
                 await ExtractForConversationAsync(conversation.TenantId, conversation.Id, conversation.ContactId, now, ct)
                     .ConfigureAwait(false);
                 processed++;
+                // Gom nhóm: mỗi đêm hàng chục hội thoại — 1 dòng "x24", không phải 24 dòng.
+                await publisher.PublishAsync(new NotificationRequest(
+                    conversation.TenantId,
+                    UserId: null,
+                    Type: "contact_memory_learned",
+                    Title: "AI đã ghi nhớ thông tin khách hàng",
+                    Severity: "info",
+                    Body: "Trích từ hội thoại đã kết thúc — xem trong hồ sơ khách.",
+                    Link: "/inbox",
+                    GroupKey: "contact.memory.learned"), ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

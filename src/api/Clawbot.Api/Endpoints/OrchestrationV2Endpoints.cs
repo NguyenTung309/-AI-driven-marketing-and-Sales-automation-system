@@ -1,10 +1,12 @@
 using Clawbot.Agents.Contracts.Orchestrator;
 using Clawbot.Agents.Core.Orchestrator;
 using Clawbot.Api.Auth;
+using Clawbot.Api.Jobs;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Agents;
 using Clawbot.Infrastructure.Auth;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Jobs;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Grpc.Core;
@@ -447,17 +449,42 @@ public static partial class OrchestrationV2Endpoints
 
     // "Tự động xây dựng kế hoạch": quét snapshot dữ liệu tenant -> LLM (binding orchestrator) đề xuất
     // 3-6 kế hoạch định kỳ -> lọc trùng với schedules hiện có (LLM được nhắc tránh + BE lọc lại lần cuối).
+    // "Tự động xây dựng kế hoạch" chạy ngầm: LLM quét snapshot mất 10-40s — không giữ HTTP request,
+    // và việc này hiện trong dialog "Việc đang chạy" như mọi tác vụ AI khác.
     private static async Task<IResult> SuggestPlansAsync(
-        AppDbContext db,
+        IJobLauncher jobs,
         ITenantAccessor tenants,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var jobId = await jobs.LaunchAsync(
+            OrchestrationPlanSuggestionsJobHandler.JobType,
+            "Tự động xây dựng kế hoạch",
+            payload: null,
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
+
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
+    }
+
+    private static Guid? CurrentUserId(HttpContext http) =>
+        Guid.TryParse(http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id)
+        && id != Guid.Empty
+            ? id
+            : null;
+
+    // Dùng chung cho job "orchestration.plan-suggestions". Tenant truyền tường minh: chạy trong
+    // Hangfire thì KHÔNG có HTTP context để ITenantAccessor đọc.
+    internal static async Task<OrchestrationPlanSuggestionsResponse> BuildPlanSuggestionsAsync(
+        Guid tenantId,
+        AppDbContext db,
         Clawbot.Agents.Core.Chat.IClaudeChatClient chatClient,
         Clawbot.Agents.Core.Chat.ILlmCallScope llmScope,
         IClock clock,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
-        var tenant = tenants.Require();
-        var tenantId = tenant.TenantId;
 
         // Snapshot gọn — chỉ số liệu tổng hợp, không kéo nội dung (khỏi dính PII).
         var leadsByStage = await db.Leads.IgnoreQueryFilters().AsNoTracking()
@@ -528,7 +555,7 @@ public static partial class OrchestrationV2Endpoints
             }
             catch (Clawbot.Agents.Core.Chat.LlmConfigNotConfiguredException)
             {
-                return Results.BadRequest(new { error = "llm_config_not_configured" });
+                throw new InvalidOperationException("Chưa cấu hình LLM cho orchestrator.");
             }
 
             parsed = ParseSuggestions(replyText);
@@ -543,13 +570,9 @@ public static partial class OrchestrationV2Endpoints
 
         if (parsed.Count == 0)
         {
-            var preview = replyText.Length > 300 ? replyText[..300] + "..." : replyText;
-            return Results.UnprocessableEntity(new
-            {
-                error = "suggestion_parse_failed",
-                message = "Orchestrator không trả về đề xuất hợp lệ sau 2 lần thử — thử lại hoặc kiểm tra cấu hình model.",
-                detail = string.IsNullOrWhiteSpace(preview) ? "(model trả về rỗng — nghi hết token output; bỏ trống 'Số token tối đa' trong cấu hình LLM)" : preview,
-            });
+            throw new InvalidOperationException(
+                "Orchestrator không trả về đề xuất hợp lệ sau 2 lần thử — thử lại hoặc kiểm tra cấu hình model "
+                + "(model trả rỗng thường là hết token output: bỏ trống 'Số token tối đa').");
         }
 
         // Lọc trùng lần cuối: tên chuẩn hóa trùng, hoặc goal giao tokens >= 60% với kế hoạch đã có.
@@ -570,7 +593,7 @@ public static partial class OrchestrationV2Endpoints
             items.Add(suggestion);
         }
 
-        return Results.Ok(new OrchestrationPlanSuggestionsResponse(items, skipped));
+        return new OrchestrationPlanSuggestionsResponse(items, skipped);
     }
 
     internal static List<OrchestrationPlanSuggestionDto> ParseSuggestions(string text)

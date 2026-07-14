@@ -3,6 +3,7 @@ using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Time;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
+using Clawbot.SharedKernel.Notifications;
 using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Infrastructure.Jobs;
@@ -11,6 +12,7 @@ public sealed partial class AdsDaypartPauseJob(
     AppDbContext db,
     IAdsConnectorResolver connectorResolver,
     IClock clock,
+    INotificationPublisher publisher,
     ILogger<AdsDaypartPauseJob> logger)
 {
     [DisableConcurrentExecution(timeoutInSeconds: 600)]
@@ -35,6 +37,16 @@ public sealed partial class AdsDaypartPauseJob(
                     campaign.Pause(clock.UtcNow);
                     await db.SaveChangesAsync(ct).ConfigureAwait(false);
                     LogDaypartPaused(logger, campaign.Id);
+            // Việc máy móc lặp lại hằng ngày: gom nhóm theo ngày để chuông không kêu từng chiến dịch.
+            await publisher.PublishAsync(new NotificationRequest(
+                campaign.TenantId,
+                UserId: null,
+                Type: "ads_daypart",
+                Title: "AI đã tạm dừng quảng cáo theo khung giờ",
+                Severity: "info",
+                Body: $"Chiến dịch {campaign.ExternalCampaignId} tạm dừng ngoài khung giờ hiệu quả.",
+                Link: "/ads",
+                GroupKey: $"ads.daypart.pause:{clock.UtcNow:yyyyMMdd}"), ct).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)

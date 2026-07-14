@@ -81,7 +81,7 @@ public static class AdminJobsEndpoints
             .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapGet("", ListAsync).RequirePermission("system:config");
-        grp.MapPost("/recurring/{id}/trigger", TriggerRecurring).RequirePermission("system:config");
+        grp.MapPost("/recurring/{id}/trigger", TriggerRecurringAsync).RequirePermission("system:config");
         grp.MapPost("/schedules/{id:guid}/pause", PauseScheduleAsync).RequirePermission("system:config");
         grp.MapPost("/schedules/{id:guid}/activate", ActivateScheduleAsync).RequirePermission("system:config");
         grp.MapPost("/schedules/{id:guid}/run-now", RunScheduleNowAsync).RequirePermission("system:config");
@@ -120,14 +120,54 @@ public static class AdminJobsEndpoints
         return Results.Ok(new AdminJobsResponse(recurring, schedules));
     }
 
-    private static IResult TriggerRecurring(string id, IRecurringJobManager recurring)
+    // Trigger tay job định kỳ: Hangfire chạy ngay, nhưng người bấm cần chỗ xem nó ra sao —
+    // ghi 1 dòng background_jobs để lịch sử "ai bấm, lúc nào" hiện trong dialog Việc đang chạy.
+    private static async Task<IResult> TriggerRecurringAsync(
+        string id,
+        IRecurringJobManager recurring,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(id))
             return Results.BadRequest(new { error = "job_id_required" });
 
-        recurring.Trigger(id.Trim());
-        return Results.Accepted($"/api/admin/jobs", new { status = "triggered", id });
+        var tenant = tenants.Require();
+        var jobId = id.Trim();
+        var description = JobMeta.TryGetValue(jobId, out var meta) && !string.IsNullOrEmpty(meta.Description)
+            ? meta.Description
+            : jobId;
+
+        // Dòng này ghi nhận HÀNH ĐỘNG KÍCH (ai bấm, lúc nào), KHÔNG phải kết quả job chạy —
+        // Hangfire chạy job gốc chứ không qua JobRunner nên ở đây không theo dõi được tiến độ.
+        // Tiêu đề + tóm tắt nói rõ điều đó để không ai đọc nhầm "succeeded" thành "job đã chạy xong".
+        var record = Clawbot.Domain.Jobs.BackgroundJob.Queue(
+            tenant.TenantId,
+            CurrentUserId(http),
+            $"recurring.trigger.{jobId}",
+            $"Đã kích chạy: {description}",
+            payloadJson: null,
+            clock.UtcNow);
+        record.MarkRunning(clock.UtcNow);
+        record.MarkSucceeded(
+            "/system",
+            "Đã đưa job định kỳ vào hàng đợi. Đây là ghi nhận thao tác kích, không phải kết quả chạy — "
+                + "job chạy lỗi sẽ có thông báo cảnh báo riêng.",
+            clock.UtcNow);
+        db.BackgroundJobs.Add(record);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        recurring.Trigger(jobId);
+        return Results.Accepted("/api/admin/jobs", new { status = "triggered", id = jobId, jobId = record.Id });
     }
+
+    private static Guid? CurrentUserId(HttpContext http) =>
+        Guid.TryParse(http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id)
+        && id != Guid.Empty
+            ? id
+            : null;
 
     private static async Task<IResult> PauseScheduleAsync(Guid id, AppDbContext db, ITenantAccessor tenants, IClock clock, CancellationToken ct)
     {

@@ -1,4 +1,5 @@
 import { apiClient } from "./client";
+import type { JobAccepted } from "./jobs";
 
 export interface OrchestrationV2Agent {
   readonly id: string;
@@ -208,8 +209,9 @@ export interface OrchestrationPlanSuggestionsResponse {
   readonly skippedDuplicates: number;
 }
 
-export async function suggestOrchestrationPlans(): Promise<OrchestrationPlanSuggestionsResponse> {
-  const res = await apiClient.post<OrchestrationPlanSuggestionsResponse>("/api/orchestration/v2/plan-suggestions");
+// Chạy ngầm: trả jobId; kết quả (checklist) nằm trong resultSummary của job dưới dạng JSON.
+export async function suggestOrchestrationPlans(): Promise<JobAccepted> {
+  const res = await apiClient.post<JobAccepted>("/api/orchestration/v2/plan-suggestions");
   return res.data;
 }
 

@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Modal, StatusPill, ToggleSwitch } from "@/shared/ui";
 import { toUserFriendlyError } from "@/shared/utils/userText";
+import { useJobRun } from "@/features/jobs/useJobRun";
 import { getTenantOrchestration, setTenantOrchestration } from "@/shared/api/admin";
 import {
   createQuickReply,
@@ -265,30 +266,32 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
     queryFn: getSaleAssistDailySummary,
     staleTime: 60_000,
   });
-  const upsellQuery = useQuery({
-    queryKey: ["sale-assist", "upsell", conversationId],
-    queryFn: () => getSaleAssistUpsell(conversationId ?? ""),
-    enabled: Boolean(conversationId),
-    staleTime: 60_000,
-  });
+  // 3 việc LLM (upsell / nháp / tóm tắt) chạy ngầm qua job — thấy được ở "Việc đang chạy", huỷ được.
+  // Kết quả đổ thẳng vào panel (job không bắn thông báo: sale đang ngồi nhìn màn hình chờ).
+  const upsellRun = useJobRun<SaleAssistUpsellResponse>();
+  const upsellStart = upsellRun.start;
+  useEffect(() => {
+    if (!conversationId) return;
+    void upsellStart(() => getSaleAssistUpsell(conversationId));
+  }, [conversationId, upsellStart]);
   const upsellSuggestionsQuery = useQuery({
     queryKey: ["sale-assist", "upsell-suggestions"],
     queryFn: getSaleAssistUpsellSuggestions,
     staleTime: 60_000,
   });
 
-  const draftMutation = useMutation({
-    mutationFn: generateSaleAssistDraft,
-    onSuccess: (response, id) => {
-      setDraftState({ conversationId: id, response, text: response.draftText });
+  const draftRun = useJobRun<SaleAssistDraftResponse>({
+    onResult: (response) => {
+      if (!conversationId) return;
+      setDraftState({ conversationId, response, text: response.draftText });
       onNotify?.("AI đã tạo bản nháp, đang chờ sale duyệt.", "success");
     },
   });
 
-  const summaryMutation = useMutation({
-    mutationFn: summarizeSaleAssistConversation,
-    onSuccess: (response, id) => {
-      setSummaryState({ conversationId: id, response });
+  const summaryRun = useJobRun<SaleAssistSummaryResponse>({
+    onResult: (response) => {
+      if (!conversationId) return;
+      setSummaryState({ conversationId, response });
       onNotify?.("Đã cập nhật tóm tắt hội thoại.", "success");
     },
   });
@@ -331,9 +334,9 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
   );
   const busySavingQuickReply = createMutation.isPending || updateMutation.isPending;
   const dialogError = createMutation.error ?? updateMutation.error;
-  const activeError = draftMutation.error ?? summaryMutation.error ?? upsellQuery.error ?? quickRepliesQuery.error;
+  const activeError = draftRun.error ?? summaryRun.error ?? upsellRun.error ?? quickRepliesQuery.error;
   const summary = isDailySummary(dailySummaryQuery.data) ? dailySummaryQuery.data : null;
-  const upsell = isUpsell(upsellQuery.data) ? upsellQuery.data : null;
+  const upsell = isUpsell(upsellRun.data) ? upsellRun.data : null;
   const upsellSuggestions = isUpsellSuggestions(upsellSuggestionsQuery.data) ? upsellSuggestionsQuery.data : null;
 
   function submitQuickReply(form: QuickReplyFormState) {
@@ -413,23 +416,23 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
           <Button
             type="button"
             onClick={() => {
-              if (conversationId) draftMutation.mutate(conversationId);
+              if (conversationId) void draftRun.start(() => generateSaleAssistDraft(conversationId));
             }}
-            disabled={!conversationId || draftMutation.isPending}
+            disabled={!conversationId || draftRun.running}
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">auto_awesome</span>
-            {draftMutation.isPending ? "Đang tạo..." : "Tạo nháp AI"}
+            {draftRun.running ? "Đang tạo..." : "Tạo nháp AI"}
           </Button>
           <Button
             type="button"
             variant="outline"
             onClick={() => {
-              if (conversationId) summaryMutation.mutate(conversationId);
+              if (conversationId) void summaryRun.start(() => summarizeSaleAssistConversation(conversationId));
             }}
-            disabled={!conversationId || summaryMutation.isPending}
+            disabled={!conversationId || summaryRun.running}
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">summarize</span>
-            {summaryMutation.isPending ? "Đang tóm tắt..." : "Tóm tắt"}
+            {summaryRun.running ? "Đang tóm tắt..." : "Tóm tắt"}
           </Button>
         </div>
 

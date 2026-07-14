@@ -27,6 +27,10 @@ import {
   type OrchestrationV2Agent,
 } from "@/shared/api/orchestrationV2";
 import { PlanSuggestionsDialog } from "./PlanSuggestionsDialog";
+import { JobCenterDialog } from "@/features/jobs/JobCenterDialog";
+import { useJobWatcher } from "@/features/jobs/useJobWatcher";
+import { useJobRun } from "@/features/jobs/useJobRun";
+import { listJobs } from "@/shared/api/jobs";
 import { listLlmConfigs, type LlmConfig } from "@/shared/api/llmConfigs";
 import { getTenantOrchestration, setTenantOrchestration } from "@/shared/api/admin";
 import {
@@ -37,6 +41,7 @@ import {
   getAgentTraces,
   listAgents,
   runAgentSandbox,
+  type AgentSandboxResponse,
   updateAgentSettings,
   type AgentCostItem,
   type AgentListItem,
@@ -402,6 +407,13 @@ function TerminalLog({
 
 export default function AgentDashboardPage() {
   const queryClient = useQueryClient();
+  const [notice, setNotice] = useState<{ readonly tone: "success" | "error" | "info"; readonly message: string } | null>(null);
+  // Toast tự ẩn sau 8 giây thay vì treo vĩnh viễn.
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 8_000);
+    return () => clearTimeout(timer);
+  }, [notice]);
   const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: listAgents });
   const costQuery = useQuery({ queryKey: ["analytics", "agent-cost"], queryFn: getAgentCost, staleTime: 60_000 });
   const agents = agentsQuery.data?.items ?? EMPTY_AGENTS;
@@ -444,22 +456,44 @@ export default function AgentDashboardPage() {
   });
   // "Tự động xây dựng kế hoạch": orchestrator quét hệ thống -> dialog checklist -> tạo schedules đã chọn.
   const [planSuggestions, setPlanSuggestions] = useState<OrchestrationPlanSuggestionsResponse | null>(null);
+  // Quét kế hoạch chạy ngầm: hiện trong dialog "Việc đang chạy" như mọi tác vụ AI khác.
+  // Kết quả là checklist (không có trang riêng) nên job trả JSON trong resultSummary, đọc lại ở đây.
+  const [planJobId, setPlanJobId] = useState<string | null>(null);
   const suggestPlansMutation = useMutation({
     mutationFn: suggestOrchestrationPlans,
-    onSuccess: (res) => {
-      if (res.items.length === 0) {
-        setNotice({
-          tone: "info",
-          message: res.skippedDuplicates > 0
-            ? `Không còn kế hoạch mới để đề xuất — ${res.skippedDuplicates} đề xuất trùng kế hoạch sẵn có.`
-            : "Orchestrator chưa tìm được kế hoạch phù hợp — thử lại sau khi hệ thống có thêm dữ liệu.",
-        });
-        return;
-      }
-      setPlanSuggestions(res);
+    onSuccess: (job) => {
+      setPlanJobId(job.jobId);
+      setNotice({ tone: "info", message: "Orchestrator đang quét hệ thống ở chế độ nền. Xong sẽ có thông báo." });
     },
     onError: (error) =>
       setNotice({ tone: "error", message: `Quét đề xuất kế hoạch thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
+  });
+  useJobWatcher(planJobId, (job) => {
+    setPlanJobId(null);
+    if (job.status === "failed") {
+      setNotice({ tone: "error", message: job.error ?? "Quét đề xuất kế hoạch thất bại." });
+      return;
+    }
+    if (job.status !== "succeeded" || !job.resultSummary) return;
+
+    let result: OrchestrationPlanSuggestionsResponse;
+    try {
+      result = JSON.parse(job.resultSummary) as OrchestrationPlanSuggestionsResponse;
+    } catch {
+      setNotice({ tone: "error", message: "Không đọc được kết quả đề xuất kế hoạch." });
+      return;
+    }
+
+    if (result.items.length === 0) {
+      setNotice({
+        tone: "info",
+        message: result.skippedDuplicates > 0
+          ? `Không còn kế hoạch mới để đề xuất — ${result.skippedDuplicates} đề xuất trùng kế hoạch sẵn có.`
+          : "Orchestrator chưa tìm được kế hoạch phù hợp — thử lại sau khi hệ thống có thêm dữ liệu.",
+      });
+      return;
+    }
+    setPlanSuggestions(result);
   });
   const applyPlansMutation = useMutation({
     mutationFn: async (selected: readonly OrchestrationPlanSuggestion[]) => {
@@ -546,14 +580,35 @@ export default function AgentDashboardPage() {
       { replace: true },
     );
 
+  // Job center: mở bằng ?jobs=open (nút/chuông) hoặc ?job={id} (deep link từ thông báo).
+  const selectedJobId = searchParams.get("job");
+  const jobCenterOpen = Boolean(selectedJobId) || searchParams.get("jobs") === "open";
+  const openJobCenter = (jobId?: string) =>
+    setSearchParams(
+      (params) => {
+        if (jobId) params.set("job", jobId);
+        else params.set("jobs", "open");
+        return params;
+      },
+      { replace: true },
+    );
+  const closeJobCenter = () =>
+    setSearchParams(
+      (params) => {
+        params.delete("job");
+        params.delete("jobs");
+        return params;
+      },
+      { replace: true },
+    );
+  const activeJobsQuery = useQuery({
+    queryKey: ["jobs", "active"],
+    queryFn: () => listJobs("active"),
+    refetchInterval: 15_000,
+  });
+  const activeJobCount = activeJobsQuery.data?.items.length ?? 0;
+
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ readonly tone: "success" | "error" | "info"; readonly message: string } | null>(null);
-  // Toast tự ẩn sau 8 giây thay vì treo vĩnh viễn.
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(null), 8_000);
-    return () => clearTimeout(timer);
-  }, [notice]);
   const [configAgentCode, setConfigAgentCode] = useState<string | null>(null);
   const [configTab, setConfigTab] = useState<AgentConfigTab>("prompt");
   const [settingsDraft, setSettingsDraft] = useState<Partial<UpdateAgentSettingsPayload>>({});
@@ -632,9 +687,10 @@ export default function AgentDashboardPage() {
       setNotice({ tone: "error", message: `Lưu cấu hình thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
   });
 
-  const sandboxMutation = useMutation({
-    mutationFn: ({ code, message }: { readonly code: string; readonly message: string }) => runAgentSandbox(code, message),
-    onSuccess: async (response) => {
+  // Chạy thử agent = 1 lượt LLM thật -> job (hiện trong "Việc đang chạy", huỷ được).
+  // Không bắn thông báo lúc xong: user đang ngồi trong sandbox chờ câu trả lời.
+  const sandboxRun = useJobRun<AgentSandboxResponse>({
+    onResult: (response) => {
       setSandboxMessages((current) => [
         ...current,
         {
@@ -644,12 +700,12 @@ export default function AgentDashboardPage() {
           time: formatDateTime(response.sentAt),
         },
       ]);
-      await queryClient.invalidateQueries({ queryKey: ["agents", configAgentCode, "traces"] });
+      void queryClient.invalidateQueries({ queryKey: ["agents", configAgentCode, "traces"] });
     },
-    onError: () => {
+    onError: (message) => {
       setSandboxMessages((current) => [
         ...current,
-        { id: `sandbox-error-${Date.now()}`, side: "bot", text: "Không thể chạy thử. Vui lòng kiểm tra quyền truy cập hoặc thử lại sau.", time: nowLabel() },
+        { id: `sandbox-error-${current.length}`, side: "bot", text: message, time: nowLabel() },
       ]);
     },
   });
@@ -676,7 +732,7 @@ export default function AgentDashboardPage() {
     if (!message) return;
     setSandboxMessages((current) => [...current, { id: `sandbox-user-${Date.now()}`, side: "user", text: message, time: nowLabel() }]);
     setSandboxInput("");
-    sandboxMutation.mutate({ code: configAgentCode, message });
+    void sandboxRun.start(() => runAgentSandbox(configAgentCode, message));
   }
 
   const visibleOrchestrator = agents.find(isOrchestrator) ?? null;
@@ -709,16 +765,30 @@ export default function AgentDashboardPage() {
         <div className="flex flex-wrap items-center gap-3">
           {agentsQuery.isError ? <StatusPill tone="error">Mất kết nối dữ liệu</StatusPill> : null}
           <button
+            className="flex items-center gap-2 rounded-lg border border-outline bg-surface-container-lowest px-3 py-2 text-body-md font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+            onClick={() => openJobCenter()}
+            title="Mọi tác vụ AI đang chạy ngầm: tiến độ, kết quả, lỗi."
+            type="button"
+          >
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">pending_actions</span>
+            Việc đang chạy
+            {activeJobCount > 0 ? (
+              <span className="ml-1 rounded-full bg-primary/10 px-2 py-0.5 text-label-sm font-bold text-primary">
+                {activeJobCount}
+              </span>
+            ) : null}
+          </button>
+          <button
             className="flex items-center gap-2 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-body-md font-semibold text-primary transition-colors hover:bg-primary/20 disabled:opacity-60"
-            disabled={suggestPlansMutation.isPending || applyPlansMutation.isPending}
+            disabled={suggestPlansMutation.isPending || Boolean(planJobId) || applyPlansMutation.isPending}
             onClick={() => suggestPlansMutation.mutate()}
             title="Orchestrator quét dữ liệu hệ thống (lead, hội thoại, nội dung, kế hoạch sẵn có) và đề xuất các kế hoạch định kỳ mới chưa trùng."
             type="button"
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">
-              {suggestPlansMutation.isPending ? "hourglass_top" : "checklist"}
+              {suggestPlansMutation.isPending || planJobId ? "hourglass_top" : "checklist"}
             </span>
-            {suggestPlansMutation.isPending ? "Đang quét hệ thống..." : "Tự động xây dựng kế hoạch"}
+            {suggestPlansMutation.isPending || planJobId ? "Đang quét hệ thống..." : "Tự động xây dựng kế hoạch"}
           </button>
           {pendingApprovalCount > 0 ? (
             <RouterLink title="Mở hàng đợi phê duyệt" to="/agents/runs">
@@ -745,6 +815,14 @@ export default function AgentDashboardPage() {
         <div className="mb-gutter">
           <Alert tone={notice.tone}>{notice.message}</Alert>
         </div>
+      ) : null}
+
+      {jobCenterOpen ? (
+        <JobCenterDialog
+          selectedId={selectedJobId}
+          onClose={closeJobCenter}
+          onSelect={(id) => (id ? openJobCenter(id) : closeJobCenter())}
+        />
       ) : null}
 
       {planSuggestions ? (
@@ -1216,7 +1294,7 @@ export default function AgentDashboardPage() {
           onTabChange={setConfigTab}
           sandboxInput={sandboxInput}
           sandboxMessages={sandboxMessages}
-          sandboxPending={sandboxMutation.isPending}
+          sandboxPending={sandboxRun.running}
           saving={settingsMutation.isPending}
           settingsLoading={settingsQuery.isLoading}
           tab={configTab}

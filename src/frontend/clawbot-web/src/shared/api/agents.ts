@@ -1,4 +1,5 @@
 import { apiClient } from "./client";
+import type { JobAccepted } from "./jobs";
 
 export type AgentStatus = "running" | "stopped" | "error" | string;
 
@@ -134,8 +135,8 @@ export async function updateAgentSettings(code: string, payload: UpdateAgentSett
   return res.data;
 }
 
-export async function runAgentSandbox(code: string, message: string): Promise<AgentSandboxResponse> {
-  const res = await apiClient.post<AgentSandboxResponse>(`/api/agents/${encodeURIComponent(code)}/sandbox`, { message });
+export async function runAgentSandbox(code: string, message: string): Promise<JobAccepted> {
+  const res = await apiClient.post<JobAccepted>(`/api/agents/${encodeURIComponent(code)}/sandbox`, { message });
   return res.data;
 }
 

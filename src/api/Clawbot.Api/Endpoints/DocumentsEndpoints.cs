@@ -1,10 +1,12 @@
 using Clawbot.Agents.Contracts.Docs;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Documents;
+using Clawbot.Api.Jobs;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.Domain.Documents;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Jobs;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Grpc.Core;
@@ -71,82 +73,56 @@ public static class DocumentsEndpoints
         return Results.Redirect(doc.FileUrl);
     }
 
+    // Sinh tài liệu chạy ngầm — trả jobId ngay, thông báo khi xong (link /documents).
     private static async Task<IResult> GenerateAsync(
         GenerateDocumentRequest body,
         ITenantAccessor tenants,
-        DocsAgent.DocsAgentClient grpc,
-        DocumentDeliveryService delivery,
+        IJobLauncher jobs,
+        HttpContext http,
         CancellationToken ct)
     {
-        var tenant = tenants.Require();
+        _ = tenants.Require();
         if (string.IsNullOrWhiteSpace(body.TemplateCode))
             return Results.BadRequest(new { error = "templateCode required" });
 
-        try
-        {
-            var response = await GenerateOneAsync(
-                tenant.TenantId,
-                body.TemplateCode,
-                body.ContactId,
-                body.Vars,
-                body.SentVia,
-                grpc,
-                delivery,
-                ct).ConfigureAwait(false);
-            return Results.Ok(response);
-        }
-        catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
-        {
-            return Results.NotFound(new { error = ex.Status.Detail });
-        }
-        catch (RpcException ex) when (ex.StatusCode == StatusCode.InvalidArgument)
-        {
-            return Results.BadRequest(new { error = ex.Status.Detail });
-        }
+        var jobId = await jobs.LaunchAsync(
+            DocsGenerateJobHandler.JobType,
+            $"Sinh tài liệu {body.TemplateCode.Trim()}",
+            new DocsGenerateJobPayload(body.TemplateCode.Trim(), body.ContactId, body.Vars, body.SentVia),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
+
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
     }
 
+    // Bộ tài liệu: luồng nặng nhất (nhiều doc/1 lần) — job có tiến độ theo từng doc.
     private static async Task<IResult> GenerateKitAsync(
         GenerateDocumentKitRequest body,
         ITenantAccessor tenants,
-        DocsAgent.DocsAgentClient grpc,
-        DocumentDeliveryService delivery,
+        IJobLauncher jobs,
+        HttpContext http,
         CancellationToken ct)
     {
-        var tenant = tenants.Require();
+        _ = tenants.Require();
         var templateCodes = NormalizeKitTemplateCodes(body.TemplateCodes);
         if (templateCodes.Length == 0)
             return Results.BadRequest(new { error = "templateCodes required" });
 
-        try
-        {
-            var documents = new List<GenerateDocumentResponse>(templateCodes.Length);
-            foreach (var templateCode in templateCodes)
-            {
-                documents.Add(await GenerateOneAsync(
-                    tenant.TenantId,
-                    templateCode,
-                    body.ContactId,
-                    body.Vars,
-                    body.SentVia,
-                    grpc,
-                    delivery,
-                    ct).ConfigureAwait(false));
-            }
+        var jobId = await jobs.LaunchAsync(
+            DocsKitJobHandler.JobType,
+            $"Sinh bộ {templateCodes.Length} tài liệu",
+            new DocsKitJobPayload(templateCodes, body.ContactId, body.Vars, body.SentVia),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
 
-            return Results.Ok(new GenerateDocumentKitResponse(
-                documents,
-                documents.Sum(d => d.SizeBytes),
-                documents.Sum(d => d.LatencyMs)));
-        }
-        catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
-        {
-            return Results.NotFound(new { error = ex.Status.Detail });
-        }
-        catch (RpcException ex) when (ex.StatusCode == StatusCode.InvalidArgument)
-        {
-            return Results.BadRequest(new { error = ex.Status.Detail });
-        }
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
     }
+
+    private static Guid? CurrentUserId(HttpContext http) =>
+        Guid.TryParse(http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id)
+        && id != Guid.Empty
+            ? id
+            : null;
 
     private static string[] NormalizeKitTemplateCodes(IReadOnlyList<string>? templateCodes)
     {
@@ -159,7 +135,7 @@ public static class DocumentsEndpoints
             .ToArray();
     }
 
-    private static async Task<GenerateDocumentResponse> GenerateOneAsync(
+    internal static async Task<GenerateDocumentResponse> GenerateOneAsync(
         Guid tenantId,
         string templateCode,
         Guid? contactId,

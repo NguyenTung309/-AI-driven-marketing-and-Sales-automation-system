@@ -6,6 +6,7 @@ using Clawbot.Domain.Conversations;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Learning;
 using Clawbot.SharedKernel.Time;
+using Clawbot.SharedKernel.Notifications;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -108,6 +109,7 @@ public sealed class ContactMemoryExtractionJobTests
                 pii,
                 clock,
                 Options.Create(new LearningOptions()),
+                Substitute.For<INotificationPublisher>(),
                 NullLogger<ContactMemoryExtractionJob>.Instance);
         }
 

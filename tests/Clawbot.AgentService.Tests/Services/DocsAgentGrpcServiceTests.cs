@@ -117,8 +117,14 @@ public sealed class DocsAgentGrpcServiceTests
         {
             _ = contentType;
             var hash = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
+            Saved[fileName] = content;
             return Task.FromResult($"https://docs.example/{fileName}?hash={hash}");
         }
+
+        public Dictionary<string, byte[]> Saved { get; } = [];
+
+        public Task<byte[]> ReadAsync(string fileName, CancellationToken ct = default) =>
+            Task.FromResult(Saved.TryGetValue(fileName, out var content) ? content : []);
     }
 
     private sealed class FixedClock(DateTimeOffset utcNow) : IClock
