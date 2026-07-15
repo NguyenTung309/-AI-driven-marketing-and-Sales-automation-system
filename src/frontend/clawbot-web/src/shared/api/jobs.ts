@@ -26,6 +26,8 @@ export interface JobAccepted {
 
 export interface JobListResponse {
   readonly items: readonly BackgroundJob[];
+  readonly nextCursor?: string | null;
+  readonly total?: number | null;
 }
 
 /** Sự kiện realtime từ hub "job" — chỉ mang phần thay đổi, không phải job đầy đủ. */
@@ -38,9 +40,18 @@ export interface JobEvent {
 
 export type JobFilter = "active" | JobStatus;
 
-export async function listJobs(filter?: JobFilter, mine = false): Promise<JobListResponse> {
+export async function listJobs(
+  filter?: JobFilter,
+  mine = false,
+  opts?: { cursor?: string | null; pageSize?: number },
+): Promise<JobListResponse> {
   const res = await apiClient.get<JobListResponse>("/api/jobs", {
-    params: { status: filter, mine: mine ? "true" : undefined },
+    params: {
+      status: filter,
+      mine: mine ? "true" : undefined,
+      cursor: opts?.cursor ?? undefined,
+      pageSize: opts?.pageSize,
+    },
   });
   return res.data;
 }

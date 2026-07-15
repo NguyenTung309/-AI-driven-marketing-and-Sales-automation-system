@@ -5,6 +5,7 @@ import { AppShell } from "@/shared/layout/AppShell";
 import { Alert } from "@/shared/ui/Alert";
 import { Card } from "@/shared/ui/Card";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
+import { InfiniteScrollSentinel, useDebounce, useInfiniteList } from "@/shared/ui";
 import {
   getLead,
   getLeadContext,
@@ -14,6 +15,7 @@ import {
   type LeadContext,
   type LeadContextActivity,
   type LeadListItem,
+  type LeadListResponse,
   type LeadStage,
 } from "@/shared/api/leads";
 import { toUserFriendlyError } from "@/shared/utils/userText";
@@ -136,33 +138,6 @@ function activityLabel(type: string): string {
   if (value.includes("chat") || value.includes("reply")) return "Tin nhắn";
   if (value.includes("price")) return "Xem bảng giá";
   return type || "Hoạt động";
-}
-
-function filterLeads(
-  leads: readonly LeadListItem[],
-  search: string,
-  source: string,
-  stage: string,
-  owner: OwnerFilter
-): readonly LeadListItem[] {
-  const searchValue = normalize(search);
-  return leads.filter((lead) => {
-    const sourceValue = sourceLabel(lead.sourcePlatform);
-    const matchesSearch =
-      !searchValue ||
-      lead.id.toLowerCase().includes(searchValue) ||
-      (lead.contactId ?? "").toLowerCase().includes(searchValue) ||
-      (lead.contactName ?? "").toLowerCase().includes(searchValue) ||
-      (lead.contactPhone ?? "").toLowerCase().includes(searchValue) ||
-      (lead.ownerDisplayName ?? "").toLowerCase().includes(searchValue) ||
-      sourceValue.toLowerCase().includes(searchValue) ||
-      stageLabel(lead.stage).toLowerCase().includes(searchValue);
-    const matchesSource = source === "all" || sourceValue === source;
-    const matchesStage = stage === "all" || normalize(lead.stage) === normalize(stage);
-    const matchesOwner =
-      owner === "all" || (owner === "assigned" && Boolean(lead.ownerUserId)) || (owner === "unassigned" && !lead.ownerUserId);
-    return matchesSearch && matchesSource && matchesStage && matchesOwner;
-  });
 }
 
 function exportLeadCsv(leads: readonly LeadListItem[]) {
@@ -538,10 +513,21 @@ export default function LeadsPage() {
     return () => window.clearTimeout(timeout);
   }, [notice]);
 
-  const leadsQuery = useQuery({
-    queryKey: ["leads", "list"],
-    queryFn: () => listLeads({ page: 1, pageSize: 200 }),
+  const debouncedSearch = useDebounce(search, 300);
+  const leadsList = useInfiniteList<LeadListItem, LeadListResponse>({
+    queryKey: ["leads", "list", stage, debouncedSearch, source, owner],
+    initialPageParam: 1,
+    queryFn: (pageParam) =>
+      listLeads({
+        page: typeof pageParam === "number" ? pageParam : 1,
+        pageSize: 50,
+        stage: stage === "all" ? undefined : stage,
+        q: debouncedSearch.trim() || undefined,
+        source: source === "all" ? undefined : source,
+        owner: owner === "all" ? undefined : owner,
+      }),
   });
+  const leadsQuery = leadsList.query;
   const forecastQuery = useQuery({
     queryKey: ["leads", "forecast"],
     queryFn: () => getLeadForecast(7),
@@ -558,10 +544,20 @@ export default function LeadsPage() {
     enabled: Boolean(selectedId),
   });
 
-  const leads = leadsQuery.data ?? EMPTY_LEADS;
-  const filteredLeads = useMemo(() => filterLeads(leads, search, source, stage, owner), [leads, search, source, stage, owner]);
+  const leads = leadsList.items.length ? leadsList.items : EMPTY_LEADS;
+  const leadsTotal = leadsList.total ?? leads.length;
+  // All filters (stage/q/source/owner) are server-side; list is already filtered.
+  const filteredLeads = leads;
   const selectedLead = useMemo(() => leads.find((lead) => lead.id === selectedId) ?? null, [leads, selectedId]);
-  const sourceOptions = useMemo(() => Array.from(new Set(leads.map((lead) => sourceLabel(lead.sourcePlatform)))).sort(), [leads]);
+  // Fixed catalog so dropdown is not truncated by loaded pages; merge extras + keep selection.
+  const sourceOptions = useMemo(() => {
+    const known = ["zalo", "facebook", "website"];
+    const fromRows = leads.map((lead) => lead.sourcePlatform).filter((v): v is string => Boolean(v?.trim()));
+    const selected = source !== "all" ? [source] : [];
+    return Array.from(new Set([...known, ...fromRows, ...selected])).sort((a, b) =>
+      sourceLabel(a).localeCompare(sourceLabel(b), "vi"),
+    );
+  }, [leads, source]);
   const hotLeads = leads.filter((lead) => normalize(lead.stage) === "hot");
   const unassignedLeads = leads.filter((lead) => !lead.ownerUserId);
   const avgScore = leads.length ? Math.round(leads.reduce((sum, lead) => sum + lead.score, 0) / leads.length) : 0;
@@ -612,7 +608,7 @@ export default function LeadsPage() {
       <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-4">
         <Card>
           <p className="text-label-caps uppercase text-on-surface-variant">Tổng lead</p>
-          <p className="mt-2 text-telemetry-data text-secondary">{leads.length.toLocaleString("vi-VN")}</p>
+          <p className="mt-2 text-telemetry-data text-secondary">{leadsTotal.toLocaleString("vi-VN")}</p>
           <p className="mt-1 text-label-sm text-on-surface-variant">Sắp xếp theo điểm AI</p>
         </Card>
         <Card>
@@ -661,7 +657,7 @@ export default function LeadsPage() {
                 <option value="all">Tất cả nguồn</option>
                 {sourceOptions.map((option) => (
                   <option key={option} value={option}>
-                    {option}
+                    {sourceLabel(option)}
                   </option>
                 ))}
               </select>
@@ -709,10 +705,15 @@ export default function LeadsPage() {
             />
             <div className="flex flex-col gap-3 border-t border-outline px-4 py-3 text-label-sm text-on-surface-variant sm:flex-row sm:items-center sm:justify-between">
               <span>
-                Hiển thị {filteredLeads.length.toLocaleString("vi-VN")} / {leads.length.toLocaleString("vi-VN")} leads
+                Đã tải {filteredLeads.length.toLocaleString("vi-VN")} / {leadsTotal.toLocaleString("vi-VN")} leads
               </span>
               <span>Cập nhật cuối: {formatDateTime(leads[0]?.lastActivityAt ?? leads[0]?.createdAt ?? null)}</span>
             </div>
+            <InfiniteScrollSentinel
+              hasNextPage={leadsList.hasNextPage}
+              isFetchingNextPage={leadsList.isFetchingNextPage}
+              onLoadMore={leadsList.fetchNextPage}
+            />
           </>
         ) : (
           <div className="p-card-padding text-body-md text-on-surface-variant">Không có lead phù hợp với bộ lọc hiện tại.</div>

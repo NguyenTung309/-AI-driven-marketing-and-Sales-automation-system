@@ -7,6 +7,7 @@ set "ENV_EXAMPLE=%ROOT%deploy\.env.example"
 set "COMPOSE_FILE=%ROOT%deploy\docker-compose.yml"
 set "FRONTEND_DIR=%ROOT%src\frontend\clawbot-web"
 set "MIGRATIONS_DIR=%ROOT%deploy\migrations"
+set "MIGRATION_BASELINE_NUMBER=67"
 set "MSSQL_SA_PASSWORD=Clawbot!2026"
 set "JWT_SIGNING_KEY=dev-only-jwt-signing-key-change-before-staging-0123456789"
 REM Must match Encryption:Base64Key in appsettings.json (API + AgentService) — services started
@@ -49,7 +50,7 @@ if "%DRY_RUN%"=="1" (
     echo Would run: docker compose --env-file deploy\.env -f deploy\docker-compose.yml up -d sqlserver redis rabbitmq qdrant minio postgres metabase searxng
     echo Would stop old app processes listening on ports 15873, 15874, 15875, 15876
     echo Would apply deploy\seed\*.sql for tenant %SEED_TENANT_SLUG% when --seed is passed.
-    echo Would ensure migration 0055 Meta Facebook Login for Business schema is applied.
+    echo Would create dbo.schema_migrations, baseline repaired migrations through 0067, and apply every pending deploy\migrations\*.sql file.
     echo Would apply one-shot data patches from deploy\fix_contact_overwrite.sql, guarded by dbo.data_patches.
     echo Would run: dotnet restore Clawbot.sln
     echo Would run: dotnet build Clawbot.sln --no-restore
@@ -264,6 +265,17 @@ echo [ERROR] Database clawbot did not come online in time.
 exit /b 1
 
 :apply_migrations_if_needed
+call :ensure_migration_ledger
+if errorlevel 1 exit /b 1
+call :detect_migration_history
+if errorlevel 1 exit /b 1
+if "%HAS_MIGRATION_HISTORY%"=="1" (
+    call :apply_pending_migrations
+    if errorlevel 1 exit /b 1
+    call :repair_runtime_columns
+    exit /b %errorlevel%
+)
+
 set "SCHEMA_CHECK=%TEMP%\clawbot_schema_check.txt"
 docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -h -1 -W -Q "SET NOCOUNT ON; SELECT CONCAT(CASE WHEN OBJECT_ID(N'dbo.tenants', N'U') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN OBJECT_ID(N'dbo.AspNetRoles', N'U') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.tenants', N'widget_greeting') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN OBJECT_ID(N'dbo.messages', N'U') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN OBJECT_ID(N'dbo.experiment_events', N'U') IS NULL OR OBJECT_ID(N'dbo.competitor_posts', N'U') IS NULL OR COL_LENGTH(N'dbo.generated_documents', N'expires_at') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_messages_external_id' AND object_id = OBJECT_ID(N'dbo.messages')) THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.users', N'phone_number') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.conversations', N'last_message_at') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.agents', N'llm_config_id') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.agent_sessions', N'requires_approval') IS NULL OR COL_LENGTH(N'dbo.agent_sessions', N'replan_count') IS NULL OR COL_LENGTH(N'dbo.agent_sessions', N'row_version') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.tenants', N'require_orchestration_approval') IS NULL THEN 0 ELSE 1 END, '|', CASE WHEN NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agent_sessions_tenant_status_started_at' AND object_id = OBJECT_ID(N'dbo.agent_sessions')) THEN 0 ELSE 1 END, '|', CASE WHEN COL_LENGTH(N'dbo.pancake_configs', N'auth_mode') IS NULL OR COL_LENGTH(N'dbo.pancake_configs', N'base_url') IS NULL OR COL_LENGTH(N'dbo.pancake_configs', N'send_path_template') IS NULL OR COL_LENGTH(N'dbo.pancake_configs', N'signature_algo') IS NULL OR COL_LENGTH(N'dbo.pancake_configs', N'signature_encoding') IS NULL OR COL_LENGTH(N'dbo.pancake_configs', N'signature_header') IS NULL THEN 0 ELSE 1 END)" > "%SCHEMA_CHECK%" 2>nul
 if errorlevel 1 (
@@ -307,8 +319,11 @@ if "%HAS_SCHEMA%"=="1" (
     if not "%HAS_RECENT_MIGRATIONS%"=="1" goto incomplete_schema
     call :repair_runtime_columns
     if errorlevel 1 exit /b 1
-    echo [INFO] Existing schema detected; skipping SQL migration replay.
-    echo [INFO] For a clean local DB, run: docker compose --env-file deploy\.env -f deploy\docker-compose.yml down -v
+    call :baseline_existing_migrations
+    if errorlevel 1 exit /b 1
+    call :apply_pending_migrations
+    if errorlevel 1 exit /b 1
+    echo [INFO] Existing schema repaired and migration history synchronized.
     exit /b 0
 )
 
@@ -345,6 +360,11 @@ docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD
 if errorlevel 1 exit /b 1
 rem AI tu hoc Lop 3 (0058_agent_memories) — lenh rieng, giu duoi tran 8191 ky tu cua cmd.exe
 docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF OBJECT_ID(N'dbo.agent_memories', N'U') IS NULL CREATE TABLE dbo.agent_memories (id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_agent_memories PRIMARY KEY, tenant_id UNIQUEIDENTIFIER NOT NULL, agent_code NVARCHAR(64) NOT NULL, fact NVARCHAR(1024) NOT NULL, category NVARCHAR(32) NOT NULL CONSTRAINT DF_agent_memories_category DEFAULT 'mistake', confidence DECIMAL(3,2) NOT NULL CONSTRAINT DF_agent_memories_confidence DEFAULT 0.5, is_active BIT NOT NULL CONSTRAINT DF_agent_memories_is_active DEFAULT 1, superseded_by_id UNIQUEIDENTIFIER NULL, created_at DATETIMEOFFSET NOT NULL, updated_at DATETIMEOFFSET NOT NULL); IF OBJECT_ID(N'dbo.agent_memories', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agent_memories_tenant_id_agent_code_is_active' AND object_id = OBJECT_ID(N'dbo.agent_memories')) CREATE INDEX IX_agent_memories_tenant_id_agent_code_is_active ON dbo.agent_memories (tenant_id, agent_code, is_active);"
+if errorlevel 1 exit /b 1
+rem Keyset pagination indexes (0067) — lenh rieng, giu duoi tran 8191 ky tu cua cmd.exe
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_conversations_tenant_last_message_id' AND object_id = OBJECT_ID(N'dbo.conversations')) CREATE INDEX IX_conversations_tenant_last_message_id ON dbo.conversations (tenant_id, last_message_at DESC, id DESC); IF OBJECT_ID(N'dbo.notifications', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_notifications_tenant_created_id' AND object_id = OBJECT_ID(N'dbo.notifications')) CREATE INDEX IX_notifications_tenant_created_id ON dbo.notifications (tenant_id, created_at DESC, id DESC); IF OBJECT_ID(N'dbo.background_jobs', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_background_jobs_tenant_created_id' AND object_id = OBJECT_ID(N'dbo.background_jobs')) CREATE INDEX IX_background_jobs_tenant_created_id ON dbo.background_jobs (tenant_id, created_at DESC, id DESC); IF OBJECT_ID(N'dbo.agent_sessions', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agent_sessions_tenant_started_id' AND object_id = OBJECT_ID(N'dbo.agent_sessions')) CREATE INDEX IX_agent_sessions_tenant_started_id ON dbo.agent_sessions (tenant_id, started_at DESC, id DESC); IF OBJECT_ID(N'dbo.audit_logs', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_audit_logs_tenant_occurred_id' AND object_id = OBJECT_ID(N'dbo.audit_logs')) CREATE INDEX IX_audit_logs_tenant_occurred_id ON dbo.audit_logs (tenant_id, occurred_at DESC, id DESC);"
+if errorlevel 1 exit /b 1
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF OBJECT_ID(N'dbo.generated_documents', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_generated_documents_tenant_created_id' AND object_id = OBJECT_ID(N'dbo.generated_documents')) CREATE INDEX IX_generated_documents_tenant_created_id ON dbo.generated_documents (tenant_id, created_at DESC, id DESC); IF OBJECT_ID(N'dbo.competitor_posts', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_competitor_posts_tenant_detected_id' AND object_id = OBJECT_ID(N'dbo.competitor_posts')) CREATE INDEX IX_competitor_posts_tenant_detected_id ON dbo.competitor_posts (tenant_id, detected_at DESC, id DESC); IF OBJECT_ID(N'dbo.ad_actions', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_ad_actions_tenant_executed_id' AND object_id = OBJECT_ID(N'dbo.ad_actions')) CREATE INDEX IX_ad_actions_tenant_executed_id ON dbo.ad_actions (tenant_id, executed_at DESC, id DESC); IF OBJECT_ID(N'dbo.content_items', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_content_items_tenant_updated_id' AND object_id = OBJECT_ID(N'dbo.content_items')) CREATE INDEX IX_content_items_tenant_updated_id ON dbo.content_items (tenant_id, updated_at DESC, id DESC);"
 exit /b %errorlevel%
 
 :incomplete_schema
@@ -381,7 +401,18 @@ exit /b 0
 
 :apply_meta_migration
 echo [INFO] Ensuring Meta Facebook Login for Business schema...
-(echo SET QUOTED_IDENTIFIER ON;& echo SET ARITHABORT ON;& type "%ROOT%deploy\migrations\0055_meta_facebook_login_for_business.sql") | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
+set "MIGRATION_FILE=0055_meta_facebook_login_for_business.sql"
+set "MIGRATION_SOURCE=%ROOT%deploy\migrations\%MIGRATION_FILE%"
+set "MIGRATION_SQL=%TEMP%\clawbot_meta_migration_%RANDOM%.sql"
+powershell -NoProfile -Command "$prefix = 'SET QUOTED_IDENTIFIER ON;' + [Environment]::NewLine + 'SET ARITHABORT ON;' + [Environment]::NewLine; [IO.File]::WriteAllText($env:MIGRATION_SQL, $prefix + [IO.File]::ReadAllText($env:MIGRATION_SOURCE), [Text.UTF8Encoding]::new($false))"
+if errorlevel 1 exit /b 1
+docker cp "%MIGRATION_SQL%" clawbot-sqlserver:/tmp/clawbot_meta_migration.sql >nul
+if errorlevel 1 (
+    del "%MIGRATION_SQL%" >nul 2>nul
+    exit /b 1
+)
+del "%MIGRATION_SQL%" >nul 2>nul
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -i /tmp/clawbot_meta_migration.sql
 exit /b %errorlevel%
 
 :ensure_seed_tenant
@@ -406,17 +437,106 @@ for %%F in (*.sql) do (
 popd >nul
 exit /b 0
 
-:replay_migrations
-echo [INFO] Applying SQL migrations from deploy\migrations...
+:ensure_migration_ledger
+echo [INFO] Ensuring migration history table...
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF OBJECT_ID(N'dbo.schema_migrations', N'U') IS NULL CREATE TABLE dbo.schema_migrations (filename NVARCHAR(260) NOT NULL CONSTRAINT PK_schema_migrations PRIMARY KEY, applied_at DATETIMEOFFSET NOT NULL);"
+exit /b %errorlevel%
+
+:detect_migration_history
+set "MIGRATION_HISTORY_CHECK=%TEMP%\clawbot_migration_history_%RANDOM%.txt"
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -h -1 -W -Q "SET NOCOUNT ON; SELECT COUNT(1) FROM dbo.schema_migrations;" > "%MIGRATION_HISTORY_CHECK%" 2>nul
+if errorlevel 1 (
+    del "%MIGRATION_HISTORY_CHECK%" >nul 2>nul
+    echo [ERROR] Could not inspect migration history.
+    exit /b 1
+)
+set "MIGRATION_HISTORY_COUNT=0"
+set /p MIGRATION_HISTORY_COUNT=<"%MIGRATION_HISTORY_CHECK%"
+del "%MIGRATION_HISTORY_CHECK%" >nul 2>nul
+set "HAS_MIGRATION_HISTORY=0"
+if not "%MIGRATION_HISTORY_COUNT%"=="0" set "HAS_MIGRATION_HISTORY=1"
+exit /b 0
+
+:baseline_existing_migrations
+echo [INFO] Baselining repaired migrations through %MIGRATION_BASELINE_NUMBER%...
 pushd "%MIGRATIONS_DIR%" >nul
 for %%F in (*.sql) do (
-    echo [SQL] %%F
-    (echo SET QUOTED_IDENTIFIER ON;& echo SET ARITHABORT ON;& type "%%F") | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
+    call :baseline_migration_file "%%F"
     if errorlevel 1 (
         popd >nul
-        echo [ERROR] Migration failed: %%F
         exit /b 1
     )
 )
 popd >nul
 exit /b 0
+
+:baseline_migration_file
+set "MIGRATION_PREFIX="
+for /f "tokens=1 delims=_" %%N in ("%~1") do set "MIGRATION_PREFIX=%%N"
+if not defined MIGRATION_PREFIX exit /b 0
+set /a MIGRATION_NUMBER=1%MIGRATION_PREFIX%-10000
+if %MIGRATION_NUMBER% GTR %MIGRATION_BASELINE_NUMBER% exit /b 0
+call :record_migration "%~1"
+exit /b %errorlevel%
+
+:apply_pending_migrations
+call :ensure_migration_ledger
+if errorlevel 1 exit /b 1
+pushd "%MIGRATIONS_DIR%" >nul
+for %%F in (*.sql) do (
+    call :apply_migration_file "%%F"
+    if errorlevel 1 (
+        popd >nul
+        exit /b 1
+    )
+)
+popd >nul
+exit /b 0
+
+:apply_migration_file
+set "MIGRATION_FILE=%~1"
+set "MIGRATION_CHECK=%TEMP%\clawbot_migration_%RANDOM%.txt"
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -h -1 -W -Q "SET NOCOUNT ON; SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.schema_migrations WHERE filename = N'%MIGRATION_FILE%') THEN 1 ELSE 0 END;" > "%MIGRATION_CHECK%" 2>nul
+if errorlevel 1 (
+    del "%MIGRATION_CHECK%" >nul 2>nul
+    echo [ERROR] Could not inspect migration: %MIGRATION_FILE%
+    exit /b 1
+)
+set "MIGRATION_APPLIED=0"
+set /p MIGRATION_APPLIED=<"%MIGRATION_CHECK%"
+del "%MIGRATION_CHECK%" >nul 2>nul
+if "%MIGRATION_APPLIED%"=="1" (
+    echo [SKIP] %MIGRATION_FILE%
+    exit /b 0
+)
+echo [SQL] %MIGRATION_FILE%
+set "MIGRATION_SOURCE=%CD%\%MIGRATION_FILE%"
+set "MIGRATION_SQL=%TEMP%\clawbot_migration_%RANDOM%.sql"
+powershell -NoProfile -Command "$prefix = 'SET QUOTED_IDENTIFIER ON;' + [Environment]::NewLine + 'SET ARITHABORT ON;' + [Environment]::NewLine; [IO.File]::WriteAllText($env:MIGRATION_SQL, $prefix + [IO.File]::ReadAllText($env:MIGRATION_SOURCE), [Text.UTF8Encoding]::new($false))"
+if errorlevel 1 (
+    echo [ERROR] Could not prepare migration: %MIGRATION_FILE%
+    exit /b 1
+)
+docker cp "%MIGRATION_SQL%" clawbot-sqlserver:/tmp/clawbot_migration.sql >nul
+if errorlevel 1 (
+    del "%MIGRATION_SQL%" >nul 2>nul
+    echo [ERROR] Could not copy migration into SQL Server: %MIGRATION_FILE%
+    exit /b 1
+)
+del "%MIGRATION_SQL%" >nul 2>nul
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -i /tmp/clawbot_migration.sql
+if errorlevel 1 (
+    echo [ERROR] Migration failed: %MIGRATION_FILE%
+    exit /b 1
+)
+call :record_migration "%MIGRATION_FILE%"
+exit /b %errorlevel%
+
+:record_migration
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET NOCOUNT ON; IF NOT EXISTS (SELECT 1 FROM dbo.schema_migrations WHERE filename = N'%~1') INSERT INTO dbo.schema_migrations (filename, applied_at) VALUES (N'%~1', SYSDATETIMEOFFSET());"
+exit /b %errorlevel%
+
+:replay_migrations
+echo [INFO] Applying SQL migrations from deploy\migrations...
+call :apply_pending_migrations
+exit /b %errorlevel%

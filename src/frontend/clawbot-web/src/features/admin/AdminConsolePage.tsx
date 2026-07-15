@@ -3,7 +3,16 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/shared/auth/authStore";
 import { AppShell } from "@/shared/layout/AppShell";
-import { Alert, Button, ConfirmDialog, StatusPill, type StatusTone } from "@/shared/ui";
+import {
+  Alert,
+  Button,
+  ConfirmDialog,
+  InfiniteScrollSentinel,
+  StatusPill,
+  useDebounce,
+  useInfiniteList,
+  type StatusTone,
+} from "@/shared/ui";
 import {
   createAdminUser,
   createApiKey,
@@ -12,6 +21,7 @@ import {
   deleteRole,
   getPancakeConfig,
   getPancakeWebhookUrl,
+  getSimpleUserList,
   getTenantBranding,
   listAdminUsers,
   listApiKeys,
@@ -23,21 +33,29 @@ import {
   revokeApiKey,
   setAdminUserActive,
   setRolePermissions,
+  unlinkInboxMember,
   updateAdminUser,
+  updateInboxMember,
+  updatePancakeChannel,
   updatePancakeConfig,
   updateTenantBranding,
   updateRole,
   type AdminUser,
   type ApiKeyItem,
+  type PancakeChannelInfo,
   type AuditLog,
   type CreatedApiKey,
+  type PagedResponse,
   type Permission,
   type Role,
+  type SimpleUser,
+  type UpdatePancakeChannelRequest,
 } from "@/shared/api/admin";
 import { AdminAuditTab } from "./AdminAuditTab";
 import { AdminIntegrationsTab } from "./AdminIntegrationsTab";
 import { AdminJobsTab } from "./AdminJobsTab";
 import { AdminKeyModal } from "./AdminKeyModal";
+import { AdminPancakeChannelModal, type PancakeChannelTarget } from "./AdminPancakeChannelModal";
 import { AdminKeysTab } from "./AdminKeysTab";
 import { AdminRoleModal, type RoleModalMode } from "./AdminRoleModal";
 import { AdminRolesTab } from "./AdminRolesTab";
@@ -48,14 +66,13 @@ import {
   DEFAULT_BRANDING_FORM,
   DEFAULT_PANCAKE_FORM,
   errorMessage,
-  MetricTile,
   parseScopes,
-  TabButton,
   type AdminKeyFormState,
   type AdminRoleFormState,
   type AdminUserFormState,
   type ConfirmTarget,
 } from "./adminHelpers";
+import { MetricTile, TabButton } from "./adminUi";
 
 type AdminTab = "users" | "roles" | "keys" | "integrations" | "audit" | "jobs";
 
@@ -64,17 +81,21 @@ const EMPTY_ROLES: readonly Role[] = [];
 const EMPTY_PERMISSIONS: readonly Permission[] = [];
 const EMPTY_KEYS: readonly ApiKeyItem[] = [];
 const EMPTY_AUDIT_LOGS: readonly AuditLog[] = [];
+const EMPTY_SIMPLE_USERS: readonly SimpleUser[] = [];
 
 export default function AdminConsolePage() {
   const queryClient = useQueryClient();
   const authPermissions = useAuthStore((s) => s.permissions);
   const canManageUsers = authPermissions.includes("admin.system");
   const canManagePancakeToken = canManageUsers || authPermissions.includes("users:pancake-token:manage");
+  const canManageInboxOwners = authPermissions.includes("admin:inboxes");
   const [tab, setTab] = useState<AdminTab>("users");
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [userModal, setUserModal] = useState<UserModalMode>(null);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
+  const [channelTarget, setChannelTarget] = useState<PancakeChannelTarget | null>(null);
+  const [isChannelUnlinkConfirmOpen, setIsChannelUnlinkConfirmOpen] = useState(false);
   const [userForm, setUserForm] = useState<AdminUserFormState>({
     displayName: "",
     email: "",
@@ -98,10 +119,18 @@ export default function AdminConsolePage() {
   const [pancakeDraft, setPancakeDraft] = useState<Partial<typeof DEFAULT_PANCAKE_FORM>>({});
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
 
-  const usersQuery = useQuery({
-    queryKey: ["admin", "users", search],
-    queryFn: () => listAdminUsers({ q: search || undefined, page: 1, pageSize: 50 }),
+  const debouncedSearch = useDebounce(search, 300);
+  const usersList = useInfiniteList<AdminUser, PagedResponse<AdminUser>>({
+    queryKey: ["admin", "users", debouncedSearch],
+    initialPageParam: 1,
+    queryFn: (pageParam) =>
+      listAdminUsers({
+        q: debouncedSearch || undefined,
+        page: typeof pageParam === "number" ? pageParam : 1,
+        pageSize: 50,
+      }),
   });
+  const usersQuery = usersList.query;
   const rolesQuery = useQuery({
     queryKey: ["admin", "roles"],
     queryFn: listRoles,
@@ -111,6 +140,11 @@ export default function AdminConsolePage() {
     queryKey: ["admin", "permissions"],
     queryFn: listPermissions,
     enabled: canManageUsers,
+  });
+  const ownerOptionsQuery = useQuery({
+    queryKey: ["admin", "users-simple"],
+    queryFn: getSimpleUserList,
+    enabled: Boolean(channelTarget) && canManageInboxOwners,
   });
   const apiKeysQuery = useQuery({
     queryKey: ["admin", "api-keys"],
@@ -132,17 +166,24 @@ export default function AdminConsolePage() {
     queryFn: getPancakeWebhookUrl,
     enabled: tab === "integrations",
   });
-  const auditQuery = useQuery({
+  const auditList = useInfiniteList<AuditLog, PagedResponse<AuditLog>>({
     queryKey: ["admin", "audit-logs"],
-    queryFn: () => listAuditLogs({ page: 1, pageSize: 50 }),
+    initialPageParam: 1,
+    queryFn: (pageParam) =>
+      listAuditLogs({
+        page: typeof pageParam === "number" ? pageParam : 1,
+        pageSize: 50,
+      }),
     enabled: tab === "audit",
   });
+  const auditQuery = auditList.query;
 
-  const users = usersQuery.data?.items ?? EMPTY_USERS;
+  const users = usersList.items.length ? usersList.items : EMPTY_USERS;
   const roles = rolesQuery.data ?? EMPTY_ROLES;
   const permissions = permissionsQuery.data ?? EMPTY_PERMISSIONS;
+  const ownerOptions = ownerOptionsQuery.data ?? EMPTY_SIMPLE_USERS;
   const apiKeys = apiKeysQuery.data ?? EMPTY_KEYS;
-  const auditLogs = auditQuery.data?.items ?? EMPTY_AUDIT_LOGS;
+  const auditLogs = auditList.items.length ? auditList.items : EMPTY_AUDIT_LOGS;
   const effectiveSelectedRoleId = selectedRoleId ?? roles[0]?.id ?? null;
   const rolePermissionsQuery = useQuery({
     queryKey: ["admin", "role-permissions", effectiveSelectedRoleId],
@@ -261,6 +302,38 @@ export default function AdminConsolePage() {
       setNotice(userModal === "create" ? "Đã tạo người dùng mới." : "Đã cập nhật người dùng.");
       invalidateAdmin();
     },
+  });
+
+  const channelMetadataMutation = useMutation({
+    mutationFn: ({ inboxId, body }: { readonly inboxId: string; readonly body: UpdatePancakeChannelRequest }) =>
+      updatePancakeChannel(inboxId, body),
+    onSuccess: () => {
+      setChannelTarget(null);
+      setNotice("Đã cập nhật thông tin kênh.");
+      invalidateAdmin();
+    },
+  });
+
+  const channelOwnerMutation = useMutation({
+    mutationFn: ({ inboxId, agentId }: { readonly inboxId: string; readonly agentId: string }) =>
+      updateInboxMember(inboxId, agentId),
+    onSuccess: () => {
+      setChannelTarget(null);
+      setNotice("Đã đổi người phụ trách kênh.");
+      invalidateAdmin();
+    },
+  });
+
+  const channelUnlinkMutation = useMutation({
+    mutationFn: ({ inboxId, agentId }: { readonly inboxId: string; readonly agentId: string }) =>
+      unlinkInboxMember(inboxId, agentId),
+    onSuccess: () => {
+      setIsChannelUnlinkConfirmOpen(false);
+      setChannelTarget(null);
+      setNotice("Đã gỡ người dùng khỏi kênh. Kênh vẫn được giữ lại.");
+      invalidateAdmin();
+    },
+    onError: () => setIsChannelUnlinkConfirmOpen(false),
   });
 
   const activeMutation = useMutation({
@@ -430,16 +503,26 @@ export default function AdminConsolePage() {
       password: "",
       isActive: user.isActive,
       roles: [],
-      pancakePageId: user.pancakeChannels?.[0]?.pageId ?? "",
-      // Ten kenh legacy = pageId -> de trong cho placeholder goi y nhap ten that
-      pancakeChannelName:
-        user.pancakeChannels?.[0] && user.pancakeChannels[0].name !== user.pancakeChannels[0].pageId
-          ? user.pancakeChannels[0].name
-          : "",
-      pancakePlatform: user.pancakeChannels?.[0]?.platform ?? "zalo",
+      pancakePageId: "",
+      pancakeChannelName: "",
+      pancakePlatform: "zalo",
       pancakeAccessToken: "",
     });
     setUserModal("edit");
+  }
+
+  function openManageChannel(user: AdminUser, channel: PancakeChannelInfo) {
+    channelMetadataMutation.reset();
+    channelOwnerMutation.reset();
+    channelUnlinkMutation.reset();
+    setIsChannelUnlinkConfirmOpen(false);
+    setChannelTarget({ userId: user.id, userDisplayName: user.displayName, channel });
+  }
+
+  function closeChannelModal() {
+    if (channelMetadataMutation.isPending || channelOwnerMutation.isPending || channelUnlinkMutation.isPending) return;
+    setIsChannelUnlinkConfirmOpen(false);
+    setChannelTarget(null);
   }
 
   function openCreateRole() {
@@ -471,6 +554,9 @@ export default function AdminConsolePage() {
   }
 
   const actionPending =
+    channelMetadataMutation.isPending ||
+    channelOwnerMutation.isPending ||
+    channelUnlinkMutation.isPending ||
     userMutation.isPending ||
     activeMutation.isPending ||
     resetPasswordMutation.isPending ||
@@ -535,18 +621,28 @@ export default function AdminConsolePage() {
       </div>
 
       {tab === "users" ? (
-        <AdminUsersTab
-          users={users}
-          search={search}
-          onSearchChange={setSearch}
-          canManageUsers={canManageUsers}
-          onCreateUser={openCreateUser}
-          onEditUser={openEditUser}
-          onToggleActive={(user) => activeMutation.mutate({ id: user.id, active: !user.isActive })}
-          activeMutationPending={activeMutation.isPending}
-          onResetPassword={(user) => setConfirmTarget({ kind: "resetPassword", id: user.id, label: user.displayName })}
-          resetPasswordPending={resetPasswordMutation.isPending}
-        />
+        <>
+          <AdminUsersTab
+            users={users}
+            search={search}
+            onSearchChange={setSearch}
+            canManageUsers={canManageUsers}
+            canManagePancakeToken={canManagePancakeToken}
+            canManageInboxOwners={canManageInboxOwners}
+            onCreateUser={openCreateUser}
+            onManageChannel={openManageChannel}
+            onEditUser={openEditUser}
+            onToggleActive={(user) => activeMutation.mutate({ id: user.id, active: !user.isActive })}
+            activeMutationPending={activeMutation.isPending}
+            onResetPassword={(user) => setConfirmTarget({ kind: "resetPassword", id: user.id, label: user.displayName })}
+            resetPasswordPending={resetPasswordMutation.isPending}
+          />
+          <InfiniteScrollSentinel
+            hasNextPage={usersList.hasNextPage}
+            isFetchingNextPage={usersList.isFetchingNextPage}
+            onLoadMore={usersList.fetchNextPage}
+          />
+        </>
       ) : null}
 
       {tab === "roles" ? (
@@ -601,7 +697,16 @@ export default function AdminConsolePage() {
         />
       ) : null}
 
-      {tab === "audit" ? <AdminAuditTab auditLogs={auditLogs} /> : null}
+      {tab === "audit" ? (
+        <>
+          <AdminAuditTab auditLogs={auditLogs} />
+          <InfiniteScrollSentinel
+            hasNextPage={auditList.hasNextPage}
+            isFetchingNextPage={auditList.isFetchingNextPage}
+            onLoadMore={auditList.fetchNextPage}
+          />
+        </>
+      ) : null}
 
       {tab === "jobs" ? <AdminJobsTab /> : null}
 
@@ -618,6 +723,28 @@ export default function AdminConsolePage() {
         error={userMutation.error}
         onClose={() => setUserModal(null)}
         onSubmit={() => userMutation.mutate()}
+      />
+
+      <AdminPancakeChannelModal
+        target={channelTarget}
+        canManagePancakeToken={canManagePancakeToken}
+        canManageInboxOwners={canManageInboxOwners}
+        ownerOptions={ownerOptions}
+        ownerOptionsLoading={ownerOptionsQuery.isLoading}
+        metadataPending={channelMetadataMutation.isPending}
+        ownerPending={channelOwnerMutation.isPending || channelUnlinkMutation.isPending}
+        metadataError={channelMetadataMutation.error}
+        ownerError={ownerOptionsQuery.error ?? channelOwnerMutation.error ?? channelUnlinkMutation.error}
+        onSaveMetadata={(body) => {
+          if (!channelTarget) return;
+          channelMetadataMutation.mutate({ inboxId: channelTarget.channel.inboxId, body });
+        }}
+        onChangeOwner={(agentId) => {
+          if (!channelTarget) return;
+          channelOwnerMutation.mutate({ inboxId: channelTarget.channel.inboxId, agentId });
+        }}
+        onRequestUnlink={() => setIsChannelUnlinkConfirmOpen(true)}
+        onClose={closeChannelModal}
       />
 
       <AdminRoleModal
@@ -648,6 +775,25 @@ export default function AdminConsolePage() {
         pending={confirmPending}
         onConfirm={handleConfirm}
         onCancel={() => setConfirmTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={isChannelUnlinkConfirmOpen && channelTarget !== null}
+        title="Gỡ người dùng khỏi kênh?"
+        message={
+          channelTarget
+            ? `${channelTarget.userDisplayName} sẽ không còn phụ trách kênh ${channelTarget.channel.name || channelTarget.channel.pageId}. Các hội thoại đang gán cho người này trong kênh sẽ được bỏ gán. Kênh không bị xóa.`
+            : ""
+        }
+        confirmLabel="Gỡ khỏi kênh"
+        pending={channelUnlinkMutation.isPending}
+        onConfirm={() => {
+          if (!channelTarget) return;
+          channelUnlinkMutation.mutate({ inboxId: channelTarget.channel.inboxId, agentId: channelTarget.userId });
+        }}
+        onCancel={() => {
+          if (!channelUnlinkMutation.isPending) setIsChannelUnlinkConfirmOpen(false);
+        }}
       />
 
       {actionPending ? (

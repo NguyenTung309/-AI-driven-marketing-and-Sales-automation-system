@@ -10,6 +10,7 @@ using Clawbot.SharedKernel.Jobs;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Grpc.Core;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
@@ -169,15 +170,25 @@ public static class DocumentsEndpoints
         return new GenerateDocumentResponse(documentId, resp.FileUrl, resp.FileHash, resp.SizeBytes, resp.LatencyMs);
     }
 
-    private static async Task<IResult> ListTemplatesAsync(AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
+    private static async Task<IResult> ListTemplatesAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
     {
         _ = tenants.Require();
-        var items = await db.DocumentTemplates.AsNoTracking()
-            .Where(t => t.DeletedAt == null)
+        if (page < 1) page = 1;
+        if (pageSize is < 1 or > 200) pageSize = 50;
+        var query = db.DocumentTemplates.AsNoTracking().Where(t => t.DeletedAt == null);
+        var total = await query.CountAsync(ct).ConfigureAwait(false);
+        var items = await query
             .OrderBy(t => t.Code)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(t => new DocumentTemplateDto(t.Id, t.Code, t.DocType, t.TemplateHtml, t.CreatedAt, t.UpdatedAt))
             .ToListAsync(ct).ConfigureAwait(false);
-        return Results.Ok(items);
+        return Results.Ok(new { items, total, page, pageSize });
     }
 
     private static async Task<IResult> CreateTemplateAsync(
@@ -242,15 +253,26 @@ public static class DocumentsEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> ListGeneratedAsync(AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
+    private static async Task<IResult> ListGeneratedAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
     {
         _ = tenants.Require();
-        var items = await db.GeneratedDocuments.AsNoTracking()
+        if (page < 1) page = 1;
+        if (pageSize is < 1 or > 200) pageSize = 50;
+        var query = db.GeneratedDocuments.AsNoTracking();
+        var total = await query.CountAsync(ct).ConfigureAwait(false);
+        var items = await query
             .OrderByDescending(d => d.CreatedAt)
-            .Take(100)
+            .ThenByDescending(d => d.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(d => new GeneratedDocumentDto(
                 d.Id, d.TemplateId, d.ContactId, d.FileUrl, d.FileHash, d.SentVia, d.SentAt, d.OpenedAt, d.CreatedAt, d.ExpiresAt))
             .ToListAsync(ct).ConfigureAwait(false);
-        return Results.Ok(items);
+        return Results.Ok(new { items, total, page, pageSize });
     }
 }

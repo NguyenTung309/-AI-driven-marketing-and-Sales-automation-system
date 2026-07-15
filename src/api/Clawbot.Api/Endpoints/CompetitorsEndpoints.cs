@@ -5,6 +5,7 @@ using Clawbot.Domain.Competitors;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
@@ -86,18 +87,31 @@ public static class CompetitorsEndpoints
     }
 
     private static async Task<IResult> ListPostsAsync(
-        AppDbContext db, ITenantAccessor tenants, Guid? sourceId, int? take, CancellationToken ct)
+        AppDbContext db,
+        ITenantAccessor tenants,
+        Guid? sourceId,
+        int? take,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
     {
         _ = tenants.Require();
-        var limit = Math.Clamp(take ?? 100, 1, 200);
+        // Backward compat: ?take=N still works as a soft cap for first page.
+        if (take is > 0) pageSize = Math.Clamp(take.Value, 1, 200);
+        else if (pageSize is < 1 or > 200) pageSize = 50;
+        if (page < 1) page = 1;
+
         var query = db.CompetitorPosts.AsNoTracking().AsQueryable();
         if (sourceId is not null) query = query.Where(p => p.SourceId == sourceId.Value);
 
+        var total = await query.CountAsync(ct).ConfigureAwait(false);
         var items = await query
             .OrderByDescending(p => p.DetectedAt)
-            .Take(limit)
+            .ThenByDescending(p => p.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(p => new CompetitorPostDto(p.Id, p.SourceId, p.Url, p.Title, p.Snippet, p.PublishedAt, p.DetectedAt))
             .ToListAsync(ct).ConfigureAwait(false);
-        return Results.Ok(items);
+        return Results.Ok(new { items, total, page, pageSize });
     }
 }

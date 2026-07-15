@@ -3,6 +3,8 @@ using Clawbot.Agents.Contracts.Lead;
 using Clawbot.Agents.Core.Lead;
 using Clawbot.Agents.Core.Skills.Ops;
 using Clawbot.Api.Auth;
+using Clawbot.Api.Common.Pagination;
+using Clawbot.Api.Contracts.Common;
 using Clawbot.Api.Contracts.Leads;
 using Clawbot.Api.Jobs;
 using Clawbot.Api.Middleware;
@@ -34,6 +36,7 @@ public static class LeadsEndpoints
         grp.MapPost("/{id:guid}/assign", AssignAsync).RequirePermission("leads:write");
         grp.MapGet("/forecast", ForecastAsync).RequirePermission("leads:read");
         grp.MapGet("/{id:guid}/context", ContextPanelAsync).RequirePermission("leads:read");
+        grp.MapPost("/rescore", RescoreAsync).RequirePermission("leads:write");
 
         var rules = app.MapGroup("/api/lead-scoring-rules")
             .RequirePermission("leads:write")
@@ -49,59 +52,69 @@ public static class LeadsEndpoints
     // One-click seed of the default education lead-scoring rules. Skips codes already present
     // so it is safe to re-run; returns how many rules were created.
     private static async Task<IResult> SeedDefaultRulesAsync(
-        AppDbContext db,
+        Clawbot.Infrastructure.Leads.LeadBatchRescorer rescorer,
         ITenantAccessor tenants,
-        IClock clock,
         CancellationToken ct)
     {
         var tenantId = tenants.Require().TenantId;
-        var existing = await db.LeadScoringRules
-            .Where(r => r.TenantId == tenantId)
-            .Select(r => r.EventCode)
-            .ToListAsync(ct).ConfigureAwait(false);
-        var have = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
-
-        var created = 0;
-        foreach (var spec in LeadScoringDefaults.Rules)
-        {
-            if (have.Contains(spec.EventCode)) continue;
-            var rule = LeadScoringRule.Create(tenantId, spec.EventCode, spec.Weight, platform: null, clock.UtcNow);
-            db.Entry(rule).Property("Description").CurrentValue = spec.Description;
-            db.LeadScoringRules.Add(rule);
-            created++;
-        }
-
-        if (created > 0) await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        var created = await rescorer.EnsureDefaultRulesAsync(tenantId, ct).ConfigureAwait(false);
         return Results.Ok(new { created, total = LeadScoringDefaults.Rules.Count });
+    }
+
+    // Batch rescore all tenant leads from inbound message history + scoring rules.
+    private static async Task<IResult> RescoreAsync(
+        Clawbot.Infrastructure.Leads.LeadBatchRescorer rescorer,
+        ITenantAccessor tenants,
+        [FromQuery] int topN = 5,
+        CancellationToken ct = default)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var result = await rescorer.RescoreTenantAsync(tenantId, topN, ct).ConfigureAwait(false);
+        return Results.Ok(result);
     }
 
     private static async Task<IResult> ListAsync(
         AppDbContext db,
         ITenantAccessor tenants,
         [FromQuery] string? stage,
+        [FromQuery] string? q,
+        [FromQuery] string? source,
+        [FromQuery] string? owner,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
     {
         _ = tenants.Require();
-        if (pageSize is < 1 or > 200) pageSize = 50;
-        if (page < 1) page = 1;
+        var req = PageRequest.Create(page, pageSize);
 
-        var q = db.Leads.AsNoTracking().Where(l => l.DeletedAt == null);
-        if (!string.IsNullOrEmpty(stage)) q = q.Where(l => l.Stage == stage);
+        var query = db.Leads.AsNoTracking().Where(l => l.DeletedAt == null);
+        if (!string.IsNullOrEmpty(stage)) query = query.Where(l => l.Stage == stage);
+        if (!string.IsNullOrWhiteSpace(source) && !string.Equals(source, "all", StringComparison.OrdinalIgnoreCase))
+            query = query.Where(l => l.SourcePlatform == source);
+        if (string.Equals(owner, "assigned", StringComparison.OrdinalIgnoreCase))
+            query = query.Where(l => l.OwnerUserId != null);
+        else if (string.Equals(owner, "unassigned", StringComparison.OrdinalIgnoreCase))
+            query = query.Where(l => l.OwnerUserId == null);
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var pattern = "%" + q.Trim().Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "%";
+            query = query.Where(l =>
+                db.Contacts.Any(c => c.Id == l.ContactId && (
+                    EF.Functions.Like(c.DisplayName, pattern) ||
+                    (c.Phone != null && EF.Functions.Like(c.Phone, pattern)) ||
+                    (c.Email != null && EF.Functions.Like(c.Email, pattern)))));
+        }
 
-        var rows = await q
+        var ordered = query
             .OrderByDescending(l => l.Score)
             .ThenByDescending(l => l.LastActivityAt ?? l.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
             .Select(l => new LeadDto(l.Id, l.ContactId, l.OwnerUserId, l.Score, l.Stage, l.SourcePlatform, l.LastActivityAt, l.CreatedAt,
                 db.Contacts.Where(c => c.Id == l.ContactId).Select(c => c.DisplayName).FirstOrDefault(),
                 db.Contacts.Where(c => c.Id == l.ContactId).Select(c => c.Phone).FirstOrDefault(),
-                db.Users.Where(u => u.Id == l.OwnerUserId).Select(u => u.DisplayName).FirstOrDefault()))
-            .ToListAsync(ct).ConfigureAwait(false);
+                db.Users.Where(u => u.Id == l.OwnerUserId).Select(u => u.DisplayName).FirstOrDefault()));
 
-        return Results.Ok(rows);
+        var result = await ordered.ToPagedResultAsync(req.Page, req.PageSize, ct: ct).ConfigureAwait(false);
+        return Results.Ok(result);
     }
 
     private static async Task<IResult> ExportCsvAsync(

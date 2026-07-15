@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using Clawbot.Api.Common.Pagination;
+using Clawbot.Api.Contracts.Common;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Notifications;
 using Clawbot.Infrastructure.Persistence;
@@ -53,28 +55,36 @@ public static class NotificationsEndpoints
         ITenantAccessor tenants,
         ClaimsPrincipal user,
         [FromQuery] bool? unread,
-        [FromQuery] int page = 1,
+        [FromQuery] string? cursor,
         [FromQuery] int pageSize = 30,
         CancellationToken ct = default)
     {
         var tenantId = tenants.Require().TenantId;
-        page = Math.Max(1, page);
-        pageSize = Math.Clamp(pageSize, 1, 100);
+        if (pageSize is < 1 or > 100) pageSize = 30;
 
         var userId = CurrentUser(user);
         var muted = await MutedTypesAsync(db, tenantId, userId, ct);
         var query = Visible(db, tenantId, userId, muted);
         if (unread == true) query = query.Where(n => !n.IsRead);
 
-        var total = await query.CountAsync(ct);
-        var items = await query
+        var key = KeysetQuery.Decode(cursor);
+        int? total = key is null ? await query.CountAsync(ct) : null;
+        if (key is not null)
+        {
+            var ts = key.Value.Ts;
+            var id = key.Value.Id;
+            query = query.Where(n => n.CreatedAt < ts || (n.CreatedAt == ts && n.Id < id));
+        }
+
+        var fetched = await query
             .OrderByDescending(n => n.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            .ThenByDescending(n => n.Id)
+            .Take(pageSize + 1)
             .Select(n => new { n.Id, n.Type, n.Severity, n.Title, n.Body, n.Link, n.IsRead, n.ReadAt, n.CreatedAt, n.OccurrenceCount })
             .ToListAsync(ct);
 
-        return Results.Ok(new { total, page, pageSize, items });
+        var (rows, nextCursor) = KeysetQuery.SliceWithCursor(fetched, pageSize, r => r.CreatedAt, r => r.Id);
+        return Results.Ok(new { items = rows, nextCursor, total });
     }
 
     private static async Task<IResult> UnreadCountAsync(

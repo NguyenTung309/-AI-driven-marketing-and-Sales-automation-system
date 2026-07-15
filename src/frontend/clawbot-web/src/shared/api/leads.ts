@@ -85,12 +85,22 @@ export interface LeadForecastResponse {
 
 export interface ListLeadsParams {
   readonly stage?: string;
+  readonly q?: string;
+  readonly source?: string;
+  readonly owner?: "assigned" | "unassigned" | string;
   readonly page?: number;
   readonly pageSize?: number;
 }
 
-export async function listLeads(params?: ListLeadsParams): Promise<readonly LeadListItem[]> {
-  const res = await apiClient.get<readonly LeadListItem[]>("/api/leads", { params });
+export interface LeadListResponse {
+  readonly items: readonly LeadListItem[];
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+}
+
+export async function listLeads(params?: ListLeadsParams): Promise<LeadListResponse> {
+  const res = await apiClient.get<LeadListResponse>("/api/leads", { params });
   return res.data;
 }
 

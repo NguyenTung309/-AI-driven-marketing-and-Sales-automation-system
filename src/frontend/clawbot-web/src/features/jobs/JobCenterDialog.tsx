@@ -1,8 +1,15 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/shared/ui";
-import { cancelJob, listJobs, retryJob, type BackgroundJob, type JobFilter } from "@/shared/api/jobs";
+import { Button, InfiniteScrollSentinel, useInfiniteList } from "@/shared/ui";
+import {
+  cancelJob,
+  listJobs,
+  retryJob,
+  type BackgroundJob,
+  type JobFilter,
+  type JobListResponse,
+} from "@/shared/api/jobs";
 import { useJobsRealtime } from "./useJobsRealtime";
 
 const TABS: readonly { readonly value: JobFilter; readonly label: string }[] = [
@@ -50,20 +57,30 @@ export function JobCenterDialog({ selectedId, onClose, onSelect }: JobCenterDial
 
   useJobsRealtime(true);
 
-  // Deep link tới job đã xong: nạp cả danh sách tab hiện tại lẫn toàn bộ để tìm job được trỏ tới.
-  const { data, isLoading } = useQuery({
-    queryKey: ["jobs", tab],
-    queryFn: () => listJobs(tab),
+  // Key riêng "center" — KHÔNG dùng chung ["jobs", tab] với useQuery đếm việc ở AgentDashboardPage:
+  // trộn useQuery + useInfiniteQuery cùng key khiến cache là InfiniteData {pages} nên data.items = undefined -> vỡ.
+  const jobsList = useInfiniteList<BackgroundJob, JobListResponse>({
+    queryKey: ["jobs", "center", tab],
+    queryFn: (pageParam) =>
+      listJobs(tab, false, {
+        cursor: typeof pageParam === "string" ? pageParam : null,
+        pageSize: 50,
+      }),
     // Dự phòng khi hub rớt: job đang chạy thì poll 3s.
-    refetchInterval: (query) => (query.state.data?.items.some(isActive) ? 3_000 : false),
+    refetchInterval: (q) => {
+      const pages = q.state.data?.pages ?? [];
+      const hasActive = pages.some((page) => page.items.some(isActive));
+      return hasActive ? 3_000 : false;
+    },
   });
+  const isLoading = jobsList.isLoading;
   const { data: pinned } = useQuery({
     queryKey: ["jobs", "all"],
     queryFn: () => listJobs(),
     enabled: Boolean(selectedId),
   });
 
-  const jobs = useMemo(() => data?.items ?? EMPTY_JOBS, [data]);
+  const jobs = useMemo(() => jobsList.items, [jobsList.items]);
   const selected = useMemo(() => {
     const pool = [...jobs, ...(pinned?.items ?? EMPTY_JOBS)];
     return pool.find((j) => j.id === selectedId) ?? jobs[0] ?? null;
@@ -124,34 +141,43 @@ export function JobCenterDialog({ selectedId, onClose, onSelect }: JobCenterDial
               ) : jobs.length === 0 ? (
                 <li className="px-4 py-6 text-body-md text-on-surface-variant">Không có việc nào.</li>
               ) : (
-                jobs.map((job) => (
-                  <li key={job.id}>
-                    <button
-                      className={[
-                        "flex w-full flex-col gap-1 border-b border-surface-variant px-4 py-3 text-left transition-colors",
-                        selected?.id === job.id ? "bg-primary/5" : "hover:bg-surface-container-low",
-                      ].join(" ")}
-                      onClick={() => onSelect(job.id)}
-                      type="button"
-                    >
-                      <span className="truncate text-body-md font-semibold text-on-surface">{job.title}</span>
-                      <span className="flex items-center gap-2">
-                        <span className={`rounded px-2 py-0.5 text-label-sm ${STATUS_CLASSES[job.status] ?? ""}`}>
-                          {STATUS_LABELS[job.status] ?? job.status}
+                <>
+                  {jobs.map((job) => (
+                    <li key={job.id}>
+                      <button
+                        className={[
+                          "flex w-full flex-col gap-1 border-b border-surface-variant px-4 py-3 text-left transition-colors",
+                          selected?.id === job.id ? "bg-primary/5" : "hover:bg-surface-container-low",
+                        ].join(" ")}
+                        onClick={() => onSelect(job.id)}
+                        type="button"
+                      >
+                        <span className="truncate text-body-md font-semibold text-on-surface">{job.title}</span>
+                        <span className="flex items-center gap-2">
+                          <span className={`rounded px-2 py-0.5 text-label-sm ${STATUS_CLASSES[job.status] ?? ""}`}>
+                            {STATUS_LABELS[job.status] ?? job.status}
+                          </span>
+                          <span className="truncate text-label-sm text-on-surface-variant">{job.type}</span>
                         </span>
-                        <span className="truncate text-label-sm text-on-surface-variant">{job.type}</span>
-                      </span>
-                      {isActive(job) ? (
-                        <span className="h-1 w-full overflow-hidden rounded bg-surface-container">
-                          <span
-                            className="block h-full rounded bg-primary transition-[width]"
-                            style={{ width: `${job.progress}%` }}
-                          />
-                        </span>
-                      ) : null}
-                    </button>
+                        {isActive(job) ? (
+                          <span className="h-1 w-full overflow-hidden rounded bg-surface-container">
+                            <span
+                              className="block h-full rounded bg-primary transition-[width]"
+                              style={{ width: `${job.progress}%` }}
+                            />
+                          </span>
+                        ) : null}
+                      </button>
+                    </li>
+                  ))}
+                  <li>
+                    <InfiniteScrollSentinel
+                      hasNextPage={jobsList.hasNextPage}
+                      isFetchingNextPage={jobsList.isFetchingNextPage}
+                      onLoadMore={jobsList.fetchNextPage}
+                    />
                   </li>
-                ))
+                </>
               )}
             </ul>
           </div>

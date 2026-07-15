@@ -1,6 +1,7 @@
 using System.Text;
 using System.Security.Claims;
 using Clawbot.Api.Auth;
+using Clawbot.Api.Common.Pagination;
 using Clawbot.Api.Contracts.Inbox;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
@@ -51,13 +52,18 @@ public static class InboxEndpoints
         [FromQuery] string? status,
         [FromQuery] string? platform,
         [FromQuery] Guid? inboxId,
+        [FromQuery] string? q,
+        [FromQuery] Guid? assignedTo,
+        [FromQuery] string? sort,
+        [FromQuery] string? cursor,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
     {
-        _ = tenants.Require();
-        if (pageSize is < 1 or > 200) pageSize = 50;
-        if (page < 1) page = 1;
+        var tenantId = tenants.Require().TenantId;
+        var req = PageRequest.Create(page, pageSize);
+        page = req.Page;
+        pageSize = req.PageSize;
 
         var inboxIds = await resolver.GetInboxIdsAsync(user, ct);
         var query = db.Conversations.AsNoTracking().AsQueryable();
@@ -67,40 +73,104 @@ public static class InboxEndpoints
         if (inboxId.HasValue) query = query.Where(c => c.InboxId == inboxId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(c => c.Status == status);
         if (!string.IsNullOrEmpty(platform)) query = query.Where(c => c.Platform == platform);
+        if (assignedTo.HasValue) query = query.Where(c => c.AssignedTo == assignedTo);
 
-        var total = await query.CountAsync(ct).ConfigureAwait(false);
+        // Server-side search (merged from /inbox/search path for unified list+filter+cursor).
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var pattern = "%" + EscapeLike(q.Trim()) + "%";
+            query = query.Where(c =>
+                EF.Functions.Like(c.ExternalThreadId, pattern) ||
+                db.Contacts.Any(contact =>
+                    contact.Id == c.ContactId &&
+                    (EF.Functions.Like(contact.DisplayName, pattern) ||
+                     (contact.Email != null && EF.Functions.Like(contact.Email, pattern)) ||
+                     (contact.Phone != null && EF.Functions.Like(contact.Phone, pattern)))) ||
+                c.Messages.Any(m =>
+                    EF.Functions.Like(m.Content, pattern) ||
+                    (m.OriginalContent != null && EF.Functions.Like(m.OriginalContent, pattern)) ||
+                    (m.RedactedContent != null && EF.Functions.Like(m.RedactedContent, pattern))));
+        }
 
-        var rows = await query
-            .OrderByDescending(c => db.Leads.Where(l => l.ContactId == c.ContactId).Max(l => (int?)l.Score) ?? 0)
-            .ThenByDescending(c => c.LastMessageAt ?? c.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(c => new
-            {
-                c.Id,
-                c.Platform,
-                c.ExternalThreadId,
-                c.Status,
-                c.ContactId,
-                c.AssignedTo,
-                c.LastMessageAt,
-                c.InboxId,
-                c.AiAutoReplyEnabled,
-                RowVersion = c.RowVersion ?? Array.Empty<byte>(),
-                LastMessage = c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault(),
-            })
+        // Default: keyset on last_message_at DESC, id DESC. Optional "lead_score" uses offset.
+        var useLeadScore = string.Equals(sort, "lead_score", StringComparison.OrdinalIgnoreCase);
+        if (useLeadScore)
+        {
+            var total = await query.CountAsync(ct).ConfigureAwait(false);
+            var scoreRows = await query
+                .OrderByDescending(c => db.Leads.Where(l => l.ContactId == c.ContactId).Max(l => (int?)l.Score) ?? 0)
+                .ThenByDescending(c => c.LastMessageAt ?? c.CreatedAt)
+                .ThenByDescending(c => c.Id)
+                .Skip(req.Skip)
+                .Take(pageSize)
+                .Select(c => new ConversationRow(
+                    c.Id, c.Platform, c.ExternalThreadId, c.Status, c.ContactId, c.AssignedTo,
+                    c.LastMessageAt, c.CreatedAt, c.InboxId, c.AiAutoReplyEnabled,
+                    c.RowVersion ?? Array.Empty<byte>(),
+                    c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault()))
+                .ToListAsync(ct).ConfigureAwait(false);
+
+            var scoreItems = await MapConversationItemsAsync(db, scoreRows, ct).ConfigureAwait(false);
+            return Results.Ok(new ConversationListResponse(scoreItems, total, page, pageSize));
+        }
+
+        // Keyset feed
+        var key = KeysetQuery.Decode(cursor);
+        int? totalCursor = key is null ? await query.CountAsync(ct).ConfigureAwait(false) : null;
+        if (key is not null)
+        {
+            var ts = key.Value.Ts;
+            var id = key.Value.Id;
+            query = query.Where(c =>
+                (c.LastMessageAt ?? c.CreatedAt) < ts ||
+                ((c.LastMessageAt ?? c.CreatedAt) == ts && c.Id < id));
+        }
+
+        var fetched = await query
+            .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
+            .ThenByDescending(c => c.Id)
+            .Take(pageSize + 1)
+            .Select(c => new ConversationRow(
+                c.Id, c.Platform, c.ExternalThreadId, c.Status, c.ContactId, c.AssignedTo,
+                c.LastMessageAt, c.CreatedAt, c.InboxId, c.AiAutoReplyEnabled,
+                c.RowVersion ?? Array.Empty<byte>(),
+                c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault()))
             .ToListAsync(ct).ConfigureAwait(false);
 
+        var (rows, nextCursor) = KeysetQuery.SliceWithCursor(
+            fetched, pageSize, r => r.LastMessageAt ?? r.CreatedAt, r => r.Id);
+        var items = await MapConversationItemsAsync(db, rows, ct).ConfigureAwait(false);
+        return Results.Ok(new ConversationCursorPage(items, nextCursor, totalCursor));
+    }
+
+    private sealed record ConversationRow(
+        Guid Id,
+        string Platform,
+        string ExternalThreadId,
+        string Status,
+        Guid? ContactId,
+        Guid? AssignedTo,
+        DateTimeOffset? LastMessageAt,
+        DateTimeOffset CreatedAt,
+        Guid? InboxId,
+        bool AiAutoReplyEnabled,
+        byte[] RowVersion,
+        string? LastMessage);
+
+    private static async Task<List<ConversationListItemDto>> MapConversationItemsAsync(
+        AppDbContext db,
+        List<ConversationRow> rows,
+        CancellationToken ct)
+    {
         var contactIds = rows.Where(r => r.ContactId.HasValue).Select(r => r.ContactId!.Value).Distinct().ToList();
         var contactNames = await db.Contacts.AsNoTracking()
             .Where(c => contactIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, c => c.DisplayName, ct).ConfigureAwait(false);
-
         var contactAvatars = await db.Contacts.AsNoTracking()
             .Where(c => contactIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, c => c.AvatarUrl, ct).ConfigureAwait(false);
 
-        var items = rows.Select(r => new ConversationListItemDto(
+        return rows.Select(r => new ConversationListItemDto(
             r.Id, r.Platform, r.ExternalThreadId, r.Status, r.ContactId,
             r.ContactId.HasValue && contactNames.TryGetValue(r.ContactId.Value, out var n) ? n : null,
             r.ContactId.HasValue && contactAvatars.TryGetValue(r.ContactId.Value, out var a) ? a : null,
@@ -110,9 +180,12 @@ public static class InboxEndpoints
             r.RowVersion,
             UnreadCount: 0,
             AiAutoReplyEnabled: r.AiAutoReplyEnabled)).ToList();
-
-        return Results.Ok(new ConversationListResponse(items, total, page, pageSize));
     }
+
+    private static string EscapeLike(string text) =>
+        text.Replace("[", "[[]", StringComparison.Ordinal)
+            .Replace("%", "[%]", StringComparison.Ordinal)
+            .Replace("_", "[_]", StringComparison.Ordinal);
 
     private static async Task<IResult> GetAsync(
         Guid id, AppDbContext db, ITenantAccessor tenants,

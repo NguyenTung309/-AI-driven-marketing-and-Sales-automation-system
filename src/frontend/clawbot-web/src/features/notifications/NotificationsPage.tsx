@@ -3,12 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Card } from "@/shared/ui/Card";
 import { StatusPill } from "@/shared/ui/StatusPill";
+import { InfiniteScrollSentinel, useInfiniteList } from "@/shared/ui";
 import {
   getUnreadNotificationCount,
   listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
   type AppNotification,
+  type NotificationListResponse,
   type NotificationSeverity,
 } from "@/shared/api/notifications";
 import { useNotificationsRealtime } from "./useNotificationsRealtime";
@@ -163,10 +165,16 @@ export default function NotificationsPage() {
   const queryClient = useQueryClient();
   const realtimeState = useNotificationsRealtime(true);
 
-  const listQuery = useQuery({
+  const list = useInfiniteList<AppNotification, NotificationListResponse>({
     queryKey: ["notifications", "list", tab],
-    queryFn: () => listNotifications({ unread: tab === "unread" ? true : undefined, page: 1, pageSize: 30 }),
+    queryFn: (pageParam) =>
+      listNotifications({
+        unread: tab === "unread" ? true : undefined,
+        cursor: typeof pageParam === "string" ? pageParam : null,
+        pageSize: 30,
+      }),
   });
+  const listQuery = list.query;
   const unreadQuery = useQuery({
     queryKey: ["notifications", "unread-count"],
     queryFn: getUnreadNotificationCount,
@@ -193,13 +201,13 @@ export default function NotificationsPage() {
     },
   });
 
-  const notifications = listQuery.data?.items ?? EMPTY_NOTIFICATIONS;
+  const notifications = list.items.length ? list.items : EMPTY_NOTIFICATIONS;
   const visibleNotifications = useMemo(
     () => notifications.filter((notification) => matchesTab(notification, tab)),
     [notifications, tab]
   );
   const unreadCount = unreadQuery.data?.count ?? notifications.filter((notification) => !notification.isRead).length;
-  const totalCount = listQuery.data?.total ?? notifications.length;
+  const totalCount = list.total ?? notifications.length;
   const lastNotification = notifications[0] ?? null;
 
   return (
@@ -290,6 +298,11 @@ export default function NotificationsPage() {
                   pending={markRead.isPending}
                 />
               ))}
+              <InfiniteScrollSentinel
+                hasNextPage={list.hasNextPage}
+                isFetchingNextPage={list.isFetchingNextPage}
+                onLoadMore={list.fetchNextPage}
+              />
             </div>
           ) : (
             <div className="flex min-h-72 flex-col items-center justify-center p-card-padding text-center">

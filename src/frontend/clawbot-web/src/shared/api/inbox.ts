@@ -58,6 +58,13 @@ export interface ConversationListResponse {
   readonly pageSize: number;
 }
 
+/** Cursor feed (default list sort last_message_at). */
+export interface ConversationCursorPage {
+  readonly items: readonly ConversationListItem[];
+  readonly nextCursor: string | null;
+  readonly total: number | null;
+}
+
 export interface InboxMessage {
   readonly id: string;
   readonly direction: string;
@@ -116,12 +123,22 @@ export interface ListConversationsParams {
   readonly inboxId?: string;
   readonly status?: string;
   readonly platform?: string;
+  readonly q?: string;
+  readonly assignedTo?: string;
+  /** Default keyset; pass "lead_score" for offset score sort. */
+  readonly sort?: "lead_score" | string;
+  readonly cursor?: string | null;
   readonly page?: number;
   readonly pageSize?: number;
 }
 
-export async function listConversations(params?: ListConversationsParams): Promise<ConversationListResponse> {
-  const res = await apiClient.get<ConversationListResponse>("/api/inbox/conversations", { params });
+export async function listConversations(
+  params?: ListConversationsParams,
+): Promise<ConversationCursorPage | ConversationListResponse> {
+  const res = await apiClient.get<ConversationCursorPage | ConversationListResponse>(
+    "/api/inbox/conversations",
+    { params },
+  );
   return res.data;
 }
 

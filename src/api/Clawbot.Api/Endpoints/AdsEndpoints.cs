@@ -88,14 +88,24 @@ public static class AdsEndpoints
     }
 
     private static async Task<IResult> ListCampaignsAsync(
-        AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
+        AppDbContext db,
+        ITenantAccessor tenants,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
     {
         _ = tenants.Require();
-        var campaigns = await db.AdsCampaigns.AsNoTracking()
+        if (page < 1) page = 1;
+        if (pageSize is < 1 or > 200) pageSize = 50;
+        var query = db.AdsCampaigns.AsNoTracking();
+        var total = await query.CountAsync(ct).ConfigureAwait(false);
+        var campaigns = await query
             .OrderByDescending(c => c.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(c => ToDto(c))
             .ToListAsync(ct).ConfigureAwait(false);
-        return Results.Ok(campaigns);
+        return Results.Ok(new { items = campaigns, total, page, pageSize });
     }
 
     private static async Task<IResult> UpdateTargetCplAsync(
@@ -112,19 +122,28 @@ public static class AdsEndpoints
     }
 
     private static async Task<IResult> ListActionsAsync(
-        AppDbContext db, ITenantAccessor tenants, [FromQuery] Guid? campaignId, CancellationToken ct)
+        AppDbContext db,
+        ITenantAccessor tenants,
+        [FromQuery] Guid? campaignId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
     {
         _ = tenants.Require();
+        if (page < 1) page = 1;
+        if (pageSize is < 1 or > 200) pageSize = 50;
         var query = db.AdsActions.AsNoTracking().AsQueryable();
         if (campaignId.HasValue)
             query = query.Where(a => a.CampaignId == campaignId.Value);
 
+        var total = await query.CountAsync(ct).ConfigureAwait(false);
         var actions = await query
             .OrderByDescending(a => a.ExecutedAt)
-            .Take(100)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(a => ToDto(a))
             .ToListAsync(ct).ConfigureAwait(false);
-        return Results.Ok(actions);
+        return Results.Ok(new { items = actions, total, page, pageSize });
     }
 
     // Đánh giá campaign chạy ngầm: agent có thể tạm dừng/tăng ngân sách — user nhận thông báo việc đã làm.

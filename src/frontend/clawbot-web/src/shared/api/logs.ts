@@ -48,11 +48,10 @@ export interface TaskRunAudit {
 }
 
 export interface TaskRunListResponse {
-  readonly total: number;
-  readonly page: number;
-  readonly pageSize: number;
-  readonly stats: TaskRunStats;
   readonly items: readonly TaskRunListItem[];
+  readonly nextCursor: string | null;
+  readonly total: number | null;
+  readonly stats: TaskRunStats;
 }
 
 export interface TaskRunDetailResponse {
@@ -62,24 +61,23 @@ export interface TaskRunDetailResponse {
 }
 
 export interface AuditLogListResponse {
-  readonly total: number;
-  readonly page: number;
-  readonly pageSize: number;
   readonly items: readonly TaskRunAudit[];
+  readonly nextCursor: string | null;
+  readonly total: number | null;
 }
 
 export interface ListTaskRunsParams {
   readonly agentCode?: string;
   readonly status?: string;
   readonly q?: string;
-  readonly page?: number;
+  readonly cursor?: string | null;
   readonly pageSize?: number;
 }
 
 export interface ListAuditParams {
   readonly action?: string;
   readonly resourceType?: string;
-  readonly page?: number;
+  readonly cursor?: string | null;
   readonly pageSize?: number;
 }
 
