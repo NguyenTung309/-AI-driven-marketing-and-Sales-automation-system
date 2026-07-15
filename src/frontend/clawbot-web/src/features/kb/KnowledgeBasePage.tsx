@@ -74,8 +74,11 @@ export default function KnowledgeBasePage() {
   const [activeTab, setActiveTab] = useState<"modules" | "suggestions">("modules");
 
   // Cùng queryKey với KbSuggestionsPanel -> React Query dùng chung cache, không fetch đôi. Chỉ để badge đếm.
-  const suggestionsQuery = useQuery({ queryKey: ["kb", "suggestions"], queryFn: () => listKbSuggestions() });
-  const pendingSuggestions = (suggestionsQuery.data ?? []).filter((s) => s.status === "pending").length;
+  const suggestionsQuery = useQuery({
+    queryKey: ["kb", "suggestions"],
+    queryFn: () => listKbSuggestions(undefined, { page: 1, pageSize: 100 }),
+  });
+  const pendingSuggestions = (suggestionsQuery.data?.items ?? []).filter((s) => s.status === "pending").length;
 
   const modulesQuery = useQuery({ queryKey: ["kb", "modules"], queryFn: listKbModules });
   const accuracyQuery = useQuery({ queryKey: ["kb", "accuracy"], queryFn: getKbAccuracy });

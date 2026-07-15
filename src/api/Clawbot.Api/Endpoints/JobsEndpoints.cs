@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using Clawbot.Api.Auth;
+using Clawbot.Api.Common.Pagination;
+using Clawbot.Api.Contracts.Common;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Jobs;
 using Clawbot.Infrastructure.Jobs;
@@ -7,6 +9,7 @@ using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Hangfire;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using JobEntity = Clawbot.Domain.Jobs.BackgroundJob;
 
@@ -31,8 +34,6 @@ public sealed record JobDto(
 // thông báo job_succeeded/job_failed deep-link về /agents?job={id} khi job không có trang nghiệp vụ riêng.
 public static class JobsEndpoints
 {
-    private const int PageSize = 50;
-
     public static IEndpointRouteBuilder MapJobs(this IEndpointRouteBuilder app)
     {
         var grp = app.MapGroup("/api/jobs")
@@ -47,9 +48,15 @@ public static class JobsEndpoints
     }
 
     private static async Task<IResult> ListAsync(
-        AppDbContext db, ITenantAccessor tenants, HttpContext http, CancellationToken ct)
+        AppDbContext db,
+        ITenantAccessor tenants,
+        HttpContext http,
+        [FromQuery] string? cursor,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
     {
         var tenant = tenants.Require();
+        if (pageSize is < 1 or > 200) pageSize = 50;
         var query = db.BackgroundJobs.AsNoTracking().Where(j => j.TenantId == tenant.TenantId);
 
         var status = http.Request.Query["status"].ToString();
@@ -67,13 +74,24 @@ public static class JobsEndpoints
             query = query.Where(j => j.UserId == uid);
         }
 
-        var items = await query
+        var key = KeysetQuery.Decode(cursor);
+        int? total = key is null ? await query.CountAsync(ct).ConfigureAwait(false) : null;
+        if (key is not null)
+        {
+            var ts = key.Value.Ts;
+            var id = key.Value.Id;
+            query = query.Where(j => j.CreatedAt < ts || (j.CreatedAt == ts && j.Id < id));
+        }
+
+        var fetched = await query
             .OrderByDescending(j => j.CreatedAt)
-            .Take(PageSize)
+            .ThenByDescending(j => j.Id)
+            .Take(pageSize + 1)
             .Select(j => ToDto(j))
             .ToListAsync(ct).ConfigureAwait(false);
 
-        return Results.Ok(new { items });
+        var (rows, nextCursor) = KeysetQuery.SliceWithCursor(fetched, pageSize, r => r.CreatedAt, r => r.Id);
+        return Results.Ok(new CursorPage<JobDto>(rows, nextCursor, total));
     }
 
     private static async Task<IResult> GetAsync(

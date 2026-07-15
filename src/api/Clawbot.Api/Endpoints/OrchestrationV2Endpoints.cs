@@ -10,6 +10,7 @@ using Clawbot.SharedKernel.Jobs;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Grpc.Core;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
@@ -122,9 +123,16 @@ public static partial class OrchestrationV2Endpoints
         }
     }
 
-    private static async Task<IResult> ListRunsAsync(AppDbContext db, ITenantAccessor tenants, HttpContext http, CancellationToken ct)
+    private static async Task<IResult> ListRunsAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        HttpContext http,
+        [FromQuery] string? cursor,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
     {
         var tenant = tenants.Require();
+        if (pageSize is < 1 or > 100) pageSize = 20;
         var showArchived = string.Equals(http.Request.Query["archived"], "true", StringComparison.OrdinalIgnoreCase);
         var query = db.AgentSessions.IgnoreQueryFilters().AsNoTracking()
             .Where(s => s.TenantId == tenant.TenantId)
@@ -139,11 +147,25 @@ public static partial class OrchestrationV2Endpoints
             if (Guid.TryParse(userId, out var uid) && uid != Guid.Empty)
                 query = query.Where(s => s.UserId == uid);
         }
-        var runs = await query.OrderByDescending(s => s.StartedAt)
-            .Take(20)
+
+        var key = Clawbot.Api.Common.Pagination.KeysetQuery.Decode(cursor);
+        int? total = key is null ? await query.CountAsync(ct).ConfigureAwait(false) : null;
+        if (key is not null)
+        {
+            var ts = key.Value.Ts;
+            var id = key.Value.Id;
+            query = query.Where(s => s.StartedAt < ts || (s.StartedAt == ts && s.Id < id));
+        }
+
+        var fetched = await query.OrderByDescending(s => s.StartedAt)
+            .ThenByDescending(s => s.Id)
+            .Take(pageSize + 1)
             .Select(s => new { sessionId = s.Id, s.Status, s.Goal, s.StartedAt, s.FinishedAt, s.UserId })
             .ToListAsync(ct).ConfigureAwait(false);
-        return Results.Ok(new { items = runs });
+
+        var (rows, nextCursor) = Clawbot.Api.Common.Pagination.KeysetQuery.SliceWithCursor(
+            fetched, pageSize, r => r.StartedAt, r => r.sessionId);
+        return Results.Ok(new { items = rows, nextCursor, total });
     }
 
     private static async Task<IResult> GetRunAsync(Guid id, AppDbContext db, ITenantAccessor tenants, Orchestrator.OrchestratorClient grpc, CancellationToken ct)

@@ -1,7 +1,15 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
-import { Alert, Button, Card, StatusPill, type StatusTone } from "@/shared/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  InfiniteScrollSentinel,
+  StatusPill,
+  useInfiniteList,
+  type StatusTone,
+} from "@/shared/ui";
 import { useJobWatcher } from "@/features/jobs/useJobWatcher";
 import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
@@ -13,6 +21,7 @@ import {
   listDocumentTemplates,
   listGeneratedDocuments,
   updateDocumentTemplate,
+  type DocumentListResponse,
   type DocumentTemplate,
   type GeneratedDocument,
 } from "@/shared/api/documents";
@@ -199,6 +208,33 @@ function TemplateList({
           <p className="mt-2 text-label-sm text-on-surface-variant">Cập nhật {formatDateTime(template.updatedAt)}</p>
         </button>
       ))}
+    </div>
+  );
+}
+
+function TemplateListWithScroll({
+  templates,
+  selectedId,
+  onSelect,
+  hasNextPage,
+  isFetchingNextPage,
+  onLoadMore,
+}: {
+  readonly templates: readonly DocumentTemplate[];
+  readonly selectedId: string | null;
+  readonly onSelect: (template: DocumentTemplate) => void;
+  readonly hasNextPage: boolean;
+  readonly isFetchingNextPage: boolean;
+  readonly onLoadMore: () => void;
+}) {
+  return (
+    <div>
+      <TemplateList templates={templates} selectedId={selectedId} onSelect={onSelect} />
+      <InfiniteScrollSentinel
+        hasNextPage={hasNextPage}
+        isFetchingNextPage={isFetchingNextPage}
+        onLoadMore={onLoadMore}
+      />
     </div>
   );
 }
@@ -537,10 +573,28 @@ export default function DocumentsPage() {
   const [previewMode, setPreviewMode] = useState<PreviewMode>("template");
   const [notice, setNotice] = useState<NoticeState | null>(null);
 
-  const templatesQuery = useQuery({ queryKey: ["documents", "templates"], queryFn: listDocumentTemplates });
-  const generatedQuery = useQuery({ queryKey: ["documents", "generated"], queryFn: listGeneratedDocuments });
-  const templates = Array.isArray(templatesQuery.data) ? templatesQuery.data : EMPTY_TEMPLATES;
-  const documents = Array.isArray(generatedQuery.data) ? generatedQuery.data : EMPTY_DOCUMENTS;
+  const templatesList = useInfiniteList<DocumentTemplate, DocumentListResponse<DocumentTemplate>>({
+    queryKey: ["documents", "templates"],
+    initialPageParam: 1,
+    queryFn: (pageParam) =>
+      listDocumentTemplates({
+        page: typeof pageParam === "number" ? pageParam : 1,
+        pageSize: 50,
+      }),
+  });
+  const generatedList = useInfiniteList<GeneratedDocument, DocumentListResponse<GeneratedDocument>>({
+    queryKey: ["documents", "generated"],
+    initialPageParam: 1,
+    queryFn: (pageParam) =>
+      listGeneratedDocuments({
+        page: typeof pageParam === "number" ? pageParam : 1,
+        pageSize: 50,
+      }),
+  });
+  const templatesQuery = templatesList.query;
+  const generatedQuery = generatedList.query;
+  const templates = templatesList.items.length ? templatesList.items : EMPTY_TEMPLATES;
+  const documents = generatedList.items.length ? generatedList.items : EMPTY_DOCUMENTS;
   const templatesById = useMemo(() => new Map<string, DocumentTemplate>(templates.map((template) => [template.id, template] as [string, DocumentTemplate])), [templates]);
   const selectedDocument = documents.find((doc) => doc.id === selectedDocId) ?? documents[0] ?? null;
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? null;
@@ -693,7 +747,14 @@ export default function DocumentsPage() {
               </div>
               <StatusPill tone="neutral">{templates.length}</StatusPill>
             </div>
-            <TemplateList templates={templates} selectedId={selectedTemplateId} onSelect={selectTemplate} />
+            <TemplateListWithScroll
+              templates={templates}
+              selectedId={selectedTemplateId}
+              onSelect={selectTemplate}
+              hasNextPage={templatesList.hasNextPage}
+              isFetchingNextPage={templatesList.isFetchingNextPage}
+              onLoadMore={templatesList.fetchNextPage}
+            />
           </Card>
 
           <TemplateEditor
@@ -750,15 +811,22 @@ export default function DocumentsPage() {
                 <Alert tone="error">{errorMessage(generatedQuery.error)}</Alert>
               </div>
             ) : (
-              <GeneratedList
-                documents={documents}
-                templatesById={templatesById}
-                selectedId={selectedDocument?.id ?? null}
-                onSelect={(doc) => {
-                  setSelectedDocId(doc.id);
-                  setPreviewMode("document");
-                }}
-              />
+              <>
+                <GeneratedList
+                  documents={documents}
+                  templatesById={templatesById}
+                  selectedId={selectedDocument?.id ?? null}
+                  onSelect={(doc) => {
+                    setSelectedDocId(doc.id);
+                    setPreviewMode("document");
+                  }}
+                />
+                <InfiniteScrollSentinel
+                  hasNextPage={generatedList.hasNextPage}
+                  isFetchingNextPage={generatedList.isFetchingNextPage}
+                  onLoadMore={generatedList.fetchNextPage}
+                />
+              </>
             )}
           </Card>
         </div>

@@ -1,5 +1,6 @@
-import { Alert, Button, Modal, StatusPill } from "@/shared/ui";
-import { adminFormErrorMessage, Field, inputClass, tempPasswordHint, tempPasswordPattern, type AdminUserFormState } from "./adminHelpers";
+import { Alert, Button, Modal } from "@/shared/ui";
+import { adminFormErrorMessage, inputClass, tempPasswordHint, tempPasswordPattern, type AdminUserFormState } from "./adminHelpers";
+import { Field } from "./adminUi";
 import type { AdminUser, Role } from "@/shared/api/admin";
 
 export type UserModalMode = "create" | "edit" | null;
@@ -33,7 +34,6 @@ export function AdminUserModal({
   onClose,
   onSubmit,
 }: AdminUserModalProps) {
-  const connectedChannel = editingUser?.pancakeChannels?.[0] ?? null;
   return (
     <Modal
       open={mode !== null}
@@ -105,15 +105,13 @@ export function AdminUserModal({
         ) : null}
         {canManagePancakeToken ? (
           <div className="space-y-3 rounded-lg border border-outline bg-surface p-3">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-label-sm font-semibold text-secondary">Kênh Pancake của nhân viên sale</p>
-              {editingUser ? (
-                <StatusPill tone={connectedChannel?.hasToken ? "success" : "warning"}>
-                  {connectedChannel
-                    ? connectedChannel.hasToken ? "Đã cấu hình" : "Thiếu token"
-                    : "Chưa có"}
-                </StatusPill>
-              ) : null}
+            <div>
+              <p className="text-label-sm font-semibold text-secondary">
+                {editingUser ? "Thêm kênh Pancake mới" : "Kênh Pancake ban đầu"}
+              </p>
+              <p className="mt-1 text-label-sm text-on-surface-variant">
+                Kênh hiện có được quản lý riêng trong danh sách người dùng. Các trường bên dưới chỉ dùng để thêm kênh.
+              </p>
             </div>
             <label className="block">
               <span className="mb-1 block text-label-sm text-on-surface-variant">Tên kênh (hiển thị)</span>
@@ -131,7 +129,7 @@ export function AdminUserModal({
                   className={inputClass}
                   value={userForm.pancakePageId}
                   onChange={(event) => onChange({ pancakePageId: event.target.value })}
-                  placeholder={connectedChannel?.pageId || "VD: 134970094277281958"}
+                  placeholder="VD: 134970094277281958"
                 />
               </label>
               <label className="block">
@@ -153,12 +151,11 @@ export function AdminUserModal({
                 type="password"
                 value={userForm.pancakeAccessToken}
                 onChange={(event) => onChange({ pancakeAccessToken: event.target.value })}
-                placeholder={connectedChannel?.hasToken ? "Đã lưu token, nhập để thay thế" : "Nhập page access token Pancake"}
+                placeholder="Nhập page access token Pancake cho kênh mới"
               />
             </label>
             <p className="text-label-sm text-on-surface-variant">
-              Mỗi kênh gồm 1 Page ID + 1 access token; token được mã hóa khi lưu và dùng chung cho nhận/gửi tin.
-              Sale này được gán phụ trách kênh, xem thêm ở trang Kênh giao tiếp.
+              Mỗi kênh gồm Page ID và token được mã hóa. Khi lưu, nhân viên này trở thành người phụ trách kênh mới.
             </p>
           </div>
         ) : null}

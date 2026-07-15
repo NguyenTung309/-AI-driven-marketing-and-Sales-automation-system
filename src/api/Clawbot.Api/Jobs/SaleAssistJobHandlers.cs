@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Clawbot.Agents.Contracts.SaleAssist;
 using Clawbot.Api.Contracts.SaleAssist;
@@ -6,6 +7,17 @@ using Clawbot.SharedKernel.Jobs;
 namespace Clawbot.Api.Jobs;
 
 public sealed record SaleAssistConversationJobPayload(Guid ConversationId);
+
+// Job handler nào nhét kết quả JSON vào ResultSummary để FE JSON.parse (đọc field camelCase: draftText, reply...)
+// PHẢI serialize bằng options này. Default JsonSerializer ra PascalCase (DraftText) -> FE đọc undefined -> vỡ panel.
+// UnsafeRelaxedJsonEscaping giữ tiếng Việt không bị escape \uXXXX.
+internal static class JobResultJson
+{
+    public static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+}
 
 // 3 việc trợ lý sale đều là LLM: soạn nháp, tóm tắt hội thoại, gợi ý upsell.
 // NotifyOnSuccess=false: sale đang mở hội thoại và nhìn màn hình chờ — kết quả đổ thẳng vào panel,
@@ -32,7 +44,7 @@ public sealed class SaleAssistDraftJobHandler(SaleAssistAgent.SaleAssistAgentCli
         }, cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
 
         var result = new SaleAssistDraftResponse(resp.DraftText, resp.SuggestedAction, resp.LeadScore, 0);
-        return new JobResult($"/inbox?conversation={payload.ConversationId}", JsonSerializer.Serialize(result));
+        return new JobResult($"/inbox?conversation={payload.ConversationId}", JsonSerializer.Serialize(result, JobResultJson.Web));
     }
 }
 
@@ -56,7 +68,7 @@ public sealed class SaleAssistSummaryJobHandler(SaleAssistAgent.SaleAssistAgentC
         }, cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
 
         var result = new SaleAssistSummaryResponse(resp.Summary, 0);
-        return new JobResult($"/inbox?conversation={payload.ConversationId}", JsonSerializer.Serialize(result));
+        return new JobResult($"/inbox?conversation={payload.ConversationId}", JsonSerializer.Serialize(result, JobResultJson.Web));
     }
 }
 
@@ -80,6 +92,6 @@ public sealed class SaleAssistUpsellJobHandler(SaleAssistAgent.SaleAssistAgentCl
         }, cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
 
         var result = new SaleAssistUpsellResponse(resp.Eligible, resp.Suggestion, resp.Reason, resp.LeadScore);
-        return new JobResult($"/inbox?conversation={payload.ConversationId}", JsonSerializer.Serialize(result));
+        return new JobResult($"/inbox?conversation={payload.ConversationId}", JsonSerializer.Serialize(result, JobResultJson.Web));
     }
 }

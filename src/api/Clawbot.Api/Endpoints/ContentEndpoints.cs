@@ -76,9 +76,13 @@ public static class ContentEndpoints
         ITenantAccessor tenants,
         [FromQuery] string? status,
         [FromQuery] string? platform,
-        CancellationToken ct)
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
     {
         _ = tenants.Require();
+        if (page < 1) page = 1;
+        if (pageSize is < 1 or > 200) pageSize = 50;
         var query = db.ContentBriefs.AsNoTracking()
             .Where(b => b.Status != "archived");
         if (!string.IsNullOrWhiteSpace(status))
@@ -86,12 +90,16 @@ public static class ContentEndpoints
         if (!string.IsNullOrWhiteSpace(platform))
             query = query.Where(b => b.Platform == platform);
 
+        var total = await query.CountAsync(ct).ConfigureAwait(false);
         var rows = await query
             .OrderByDescending(b => b.UpdatedAt)
+            .ThenByDescending(b => b.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(b => ToDto(b))
             .ToListAsync(ct).ConfigureAwait(false);
 
-        return Results.Ok(rows);
+        return Results.Ok(new { items = rows, total, page, pageSize });
     }
 
     private static async Task<IResult> GetBriefAsync(
@@ -224,12 +232,12 @@ public static class ContentEndpoints
         ITenantAccessor tenants,
         [FromQuery] string? status,
         [FromQuery] string? platform,
+        [FromQuery] string? cursor,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
     {
         _ = tenants.Require();
-        if (page < 1) page = 1;
         if (pageSize is < 1 or > 200) pageSize = 50;
 
         var query = db.ContentItems.AsNoTracking().Where(i => i.DeletedAt == null);
@@ -238,15 +246,41 @@ public static class ContentEndpoints
         if (!string.IsNullOrWhiteSpace(platform))
             query = query.Where(i => i.Platform == platform);
 
-        var total = await query.CountAsync(ct).ConfigureAwait(false);
-        var items = await query
+        // Keyset on UpdatedAt DESC, Id DESC when cursor present; offset still supported for compat.
+        if (cursor is not null || page <= 1)
+        {
+            var key = Clawbot.Api.Common.Pagination.KeysetQuery.Decode(cursor);
+            int? total = key is null ? await query.CountAsync(ct).ConfigureAwait(false) : null;
+            if (key is not null)
+            {
+                var ts = key.Value.Ts;
+                var id = key.Value.Id;
+                query = query.Where(i => i.UpdatedAt < ts || (i.UpdatedAt == ts && i.Id < id));
+            }
+
+            var fetched = await query
+                .OrderByDescending(i => i.UpdatedAt)
+                .ThenByDescending(i => i.Id)
+                .Take(pageSize + 1)
+                .Select(i => ToDto(i))
+                .ToListAsync(ct).ConfigureAwait(false);
+
+            var (rows, nextCursor) = Clawbot.Api.Common.Pagination.KeysetQuery.SliceWithCursor(
+                fetched, pageSize, r => r.UpdatedAt, r => r.Id);
+            return Results.Ok(new ContentQueueCursorPage(rows, nextCursor, total));
+        }
+
+        if (page < 1) page = 1;
+        var offsetTotal = await query.CountAsync(ct).ConfigureAwait(false);
+        var offsetItems = await query
             .OrderByDescending(i => i.UpdatedAt)
+            .ThenByDescending(i => i.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(i => ToDto(i))
             .ToListAsync(ct).ConfigureAwait(false);
 
-        return Results.Ok(new ContentQueueResponse(items, total, page, pageSize));
+        return Results.Ok(new ContentQueueResponse(offsetItems, offsetTotal, page, pageSize));
     }
 
     private static async Task<IResult> GetItemAsync(

@@ -27,9 +27,10 @@ export interface ContentItem {
 
 export interface ContentQueueResponse {
   readonly items: readonly ContentItem[];
-  readonly total: number;
-  readonly page: number;
-  readonly pageSize: number;
+  readonly total?: number | null;
+  readonly page?: number;
+  readonly pageSize?: number;
+  readonly nextCursor?: string | null;
 }
 
 export interface ContentSchedule {
@@ -124,6 +125,7 @@ export interface UpdateContentItemPayload {
 export interface ContentQueueParams {
   readonly status?: string;
   readonly platform?: string;
+  readonly cursor?: string | null;
   readonly page?: number;
   readonly pageSize?: number;
 }
@@ -143,9 +145,24 @@ function cleanParams(params: object): Record<string, string | number> {
   return cleaned;
 }
 
-export async function listContentBriefs(params: { readonly status?: string; readonly platform?: string } = {}): Promise<readonly ContentBrief[]> {
-  const res = await apiClient.get<readonly ContentBrief[]>("/api/content/briefs", { params: cleanParams(params) });
-  return res.data;
+export interface ContentBriefListResponse {
+  readonly items: readonly ContentBrief[];
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+}
+
+export async function listContentBriefs(
+  params: { readonly status?: string; readonly platform?: string; readonly page?: number; readonly pageSize?: number } = {},
+): Promise<ContentBriefListResponse> {
+  const res = await apiClient.get<ContentBriefListResponse | readonly ContentBrief[]>("/api/content/briefs", {
+    params: cleanParams(params),
+  });
+  const data = res.data as ContentBriefListResponse | readonly ContentBrief[];
+  if (Array.isArray(data)) {
+    return { items: data, total: data.length, page: 1, pageSize: data.length || 50 };
+  }
+  return data as ContentBriefListResponse;
 }
 
 export async function createContentBrief(payload: ContentBriefPayload): Promise<ContentBrief> {

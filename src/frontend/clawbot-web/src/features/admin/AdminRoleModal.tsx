@@ -1,5 +1,6 @@
 import { Alert, Button, Modal } from "@/shared/ui";
-import { errorMessage, Field, inputClass, type AdminRoleFormState } from "./adminHelpers";
+import { errorMessage, inputClass, type AdminRoleFormState } from "./adminHelpers";
+import { Field } from "./adminUi";
 
 export type RoleModalMode = "create" | "edit" | null;
 

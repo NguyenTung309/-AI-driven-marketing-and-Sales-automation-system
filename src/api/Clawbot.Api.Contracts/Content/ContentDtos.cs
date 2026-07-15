@@ -54,6 +54,11 @@ public sealed record RejectContentItemRequest(string? Reason);
 
 public sealed record RepurposeContentItemRequest(IReadOnlyList<string> TargetPlatforms);
 
+public sealed record ContentQueueCursorPage(
+    IReadOnlyList<ContentItemDto> Items,
+    string? NextCursor,
+    int? Total);
+
 public sealed record ContentQueueResponse(
     IReadOnlyList<ContentItemDto> Items,
     int Total,

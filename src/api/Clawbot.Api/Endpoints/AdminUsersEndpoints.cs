@@ -94,7 +94,7 @@ public static class AdminUsersEndpoints
             .Where(m => m.TenantId == tenantId && userIds.Contains(m.AgentId))
             .Join(db.Inboxes.IgnoreQueryFilters().Where(i => i.DeletedAt == null),
                 m => m.InboxId, i => i.Id,
-                (m, i) => new { m.AgentId, PageId = i.ExternalPageId, i.Name, i.Platform, HasToken = i.EncryptedAccessToken != null })
+                (m, i) => new { m.AgentId, InboxId = i.Id, PageId = i.ExternalPageId, i.Name, i.Platform, HasToken = i.EncryptedAccessToken != null })
             .ToListAsync(ct);
 
         var items = rows.Select(u => new
@@ -108,7 +108,7 @@ public static class AdminUsersEndpoints
             u.HasPancakeAccessToken,
             PancakeChannels = channels
                 .Where(c => c.AgentId == u.Id)
-                .Select(c => new { c.PageId, c.Name, c.Platform, c.HasToken })
+                .Select(c => new { c.InboxId, c.PageId, c.Name, c.Platform, c.HasToken })
                 .ToList(),
         }).ToList();
 

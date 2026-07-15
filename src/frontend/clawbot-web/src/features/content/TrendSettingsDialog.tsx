@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Input, Modal, ToggleSwitch } from "@/shared/ui";
 import { toUserFriendlyError } from "@/shared/utils/userText";
-import { getTrendSettings, updateTrendSettings } from "@/shared/api/content";
+import { getTrendSettings, updateTrendSettings, type TrendSettings } from "@/shared/api/content";
 
 const CADENCES = [
   { value: "off", label: "Tắt" },
@@ -19,6 +19,41 @@ interface TrendSettingsDialogProps {
   readonly onClose: () => void;
 }
 
+type FormState = {
+  geo: string;
+  googleEnabled: boolean;
+  youTubeEnabled: boolean;
+  youTubeApiKey: string;
+  clearYouTubeKey: boolean;
+  tikTokEnabled: boolean;
+  tikTokUrl: string;
+  cadence: string;
+};
+
+const DEFAULT_FORM: FormState = {
+  geo: "VN",
+  googleEnabled: true,
+  youTubeEnabled: true,
+  youTubeApiKey: "",
+  clearYouTubeKey: false,
+  tikTokEnabled: false,
+  tikTokUrl: "",
+  cadence: "off",
+};
+
+function formFromSettings(settings: TrendSettings): FormState {
+  return {
+    geo: settings.geo,
+    googleEnabled: settings.google.enabled,
+    youTubeEnabled: settings.youTube.enabled,
+    youTubeApiKey: "",
+    clearYouTubeKey: false,
+    tikTokEnabled: settings.tikTok.enabled,
+    tikTokUrl: settings.tikTok.url ?? "",
+    cadence: settings.schedule.cadence,
+  };
+}
+
 export function TrendSettingsDialog({ open, onClose }: TrendSettingsDialogProps) {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({
@@ -27,40 +62,27 @@ export function TrendSettingsDialog({ open, onClose }: TrendSettingsDialogProps)
     enabled: open,
   });
 
-  const [geo, setGeo] = useState("VN");
-  const [googleEnabled, setGoogleEnabled] = useState(true);
-  const [youTubeEnabled, setYouTubeEnabled] = useState(true);
-  const [youTubeApiKey, setYouTubeApiKey] = useState("");
-  const [clearYouTubeKey, setClearYouTubeKey] = useState(false);
-  const [tikTokEnabled, setTikTokEnabled] = useState(false);
-  const [tikTokUrl, setTikTokUrl] = useState("");
-  const [cadence, setCadence] = useState("off");
+  const [form, setForm] = useState<FormState>(DEFAULT_FORM);
+  const [hydratedSettings, setHydratedSettings] = useState<TrendSettings | null>(null);
 
   const settings = settingsQuery.data;
-  useEffect(() => {
-    if (!settings) return;
-    setGeo(settings.geo);
-    setGoogleEnabled(settings.google.enabled);
-    setYouTubeEnabled(settings.youTube.enabled);
-    setYouTubeApiKey("");
-    setClearYouTubeKey(false);
-    setTikTokEnabled(settings.tikTok.enabled);
-    setTikTokUrl(settings.tikTok.url ?? "");
-    setCadence(settings.schedule.cadence);
-  }, [settings]);
+  if (settings && settings !== hydratedSettings) {
+    setHydratedSettings(settings);
+    setForm(formFromSettings(settings));
+  }
 
   const saveMutation = useMutation({
     mutationFn: () =>
       updateTrendSettings({
-        geo: geo.trim() || null,
-        google: { enabled: googleEnabled },
+        geo: form.geo.trim() || null,
+        google: { enabled: form.googleEnabled },
         youTube: {
-          enabled: youTubeEnabled,
+          enabled: form.youTubeEnabled,
           // null = giữ key đã lưu; "" = xoá; giá trị mới = thay
-          apiKey: clearYouTubeKey ? "" : youTubeApiKey.trim() || null,
+          apiKey: form.clearYouTubeKey ? "" : form.youTubeApiKey.trim() || null,
         },
-        tikTok: { enabled: tikTokEnabled, url: tikTokUrl.trim() },
-        scheduleCadence: cadence,
+        tikTok: { enabled: form.tikTokEnabled, url: form.tikTokUrl.trim() },
+        scheduleCadence: form.cadence,
       }),
     onSuccess: async () => {
       await Promise.all([
@@ -102,8 +124,8 @@ export function TrendSettingsDialog({ open, onClose }: TrendSettingsDialogProps)
             </label>
             <Input
               id="trend-geo"
-              value={geo}
-              onChange={(event) => setGeo(event.target.value.toUpperCase())}
+              value={form.geo}
+              onChange={(event) => setForm((current) => ({ ...current, geo: event.target.value.toUpperCase() }))}
               maxLength={2}
               placeholder="VN"
             />
@@ -115,7 +137,10 @@ export function TrendSettingsDialog({ open, onClose }: TrendSettingsDialogProps)
                 <p className="text-body-md font-bold text-secondary">Google Trends</p>
                 <p className="text-label-sm text-on-surface-variant">RSS miễn phí, không cần key.</p>
               </div>
-              <ToggleSwitch checked={googleEnabled} onChange={setGoogleEnabled} />
+              <ToggleSwitch
+                checked={form.googleEnabled}
+                onChange={(checked) => setForm((current) => ({ ...current, googleEnabled: checked }))}
+              />
             </div>
 
             <div className="border-t border-outline pt-3">
@@ -126,15 +151,22 @@ export function TrendSettingsDialog({ open, onClose }: TrendSettingsDialogProps)
                     Cần API key (YouTube Data API v3, miễn phí 10.000 units/ngày).
                   </p>
                 </div>
-                <ToggleSwitch checked={youTubeEnabled} onChange={setYouTubeEnabled} />
+                <ToggleSwitch
+                  checked={form.youTubeEnabled}
+                  onChange={(checked) => setForm((current) => ({ ...current, youTubeEnabled: checked }))}
+                />
               </div>
               <div className="mt-2 space-y-2">
                 <Input
                   type="password"
-                  value={youTubeApiKey}
+                  value={form.youTubeApiKey}
                   onChange={(event) => {
-                    setYouTubeApiKey(event.target.value);
-                    if (event.target.value) setClearYouTubeKey(false);
+                    const value = event.target.value;
+                    setForm((current) => ({
+                      ...current,
+                      youTubeApiKey: value,
+                      clearYouTubeKey: value ? false : current.clearYouTubeKey,
+                    }));
                   }}
                   placeholder={settings?.youTube.hasApiKey ? "•••••• (đã lưu — nhập để thay)" : "Dán API key"}
                   autoComplete="off"
@@ -143,8 +175,8 @@ export function TrendSettingsDialog({ open, onClose }: TrendSettingsDialogProps)
                   <label className="flex items-center gap-2 text-label-sm text-on-surface-variant">
                     <input
                       type="checkbox"
-                      checked={clearYouTubeKey}
-                      onChange={(event) => setClearYouTubeKey(event.target.checked)}
+                      checked={form.clearYouTubeKey}
+                      onChange={(event) => setForm((current) => ({ ...current, clearYouTubeKey: event.target.checked }))}
                     />
                     Xóa key đã lưu
                   </label>
@@ -160,12 +192,15 @@ export function TrendSettingsDialog({ open, onClose }: TrendSettingsDialogProps)
                     Quét HTML tĩnh từ URL công khai (https). Trang render bằng JS sẽ không đọc được.
                   </p>
                 </div>
-                <ToggleSwitch checked={tikTokEnabled} onChange={setTikTokEnabled} />
+                <ToggleSwitch
+                  checked={form.tikTokEnabled}
+                  onChange={(checked) => setForm((current) => ({ ...current, tikTokEnabled: checked }))}
+                />
               </div>
               <div className="mt-2">
                 <Input
-                  value={tikTokUrl}
-                  onChange={(event) => setTikTokUrl(event.target.value)}
+                  value={form.tikTokUrl}
+                  onChange={(event) => setForm((current) => ({ ...current, tikTokUrl: event.target.value }))}
                   placeholder="https://..."
                 />
               </div>
@@ -176,7 +211,12 @@ export function TrendSettingsDialog({ open, onClose }: TrendSettingsDialogProps)
             <label className="mb-1 block text-body-md font-bold text-secondary" htmlFor="trend-cadence">
               Lịch quét tự động
             </label>
-            <select id="trend-cadence" className={SELECT_CLASS} value={cadence} onChange={(event) => setCadence(event.target.value)}>
+            <select
+              id="trend-cadence"
+              className={SELECT_CLASS}
+              value={form.cadence}
+              onChange={(event) => setForm((current) => ({ ...current, cadence: event.target.value }))}
+            >
               {CADENCES.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -184,7 +224,7 @@ export function TrendSettingsDialog({ open, onClose }: TrendSettingsDialogProps)
               ))}
             </select>
             <p className="mt-1 text-label-sm text-on-surface-variant">
-              {cadence === "off"
+              {form.cadence === "off"
                 ? "Hệ thống vẫn giữ quét nền hằng tuần mặc định."
                 : "Lưu xong sẽ chạy lần quét đầu tiên trong khoảng 1 phút."}
               {nextRunAt ? ` Lần chạy kế tiếp: ${new Date(nextRunAt).toLocaleString("vi-VN")}.` : ""}

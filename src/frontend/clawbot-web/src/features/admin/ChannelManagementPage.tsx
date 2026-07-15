@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Alert, Button, Card, Modal } from "@/shared/ui";
@@ -33,7 +33,7 @@ export default function ChannelManagementPage() {
   const queryClient = useQueryClient();
   const [editInboxId, setEditInboxId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null | undefined>(undefined);
   const [tokenInput, setTokenInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState(emptyForm);
@@ -59,11 +59,7 @@ export default function ChannelManagementPage() {
   const inboxes = inboxesQuery.data ?? [];
   const users = usersQuery.data ?? [];
 
-  useEffect(() => {
-    if (membersQuery.data) {
-      setSelectedAgentId(membersQuery.data.length > 0 ? membersQuery.data[0] : null);
-    }
-  }, [membersQuery.data]);
+  const effectiveAgentId = selectedAgentId === undefined ? (membersQuery.data?.[0] ?? null) : selectedAgentId;
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -71,7 +67,7 @@ export default function ChannelManagementPage() {
       if (tokenInput.trim()) {
         await updateInbox(editInboxId, tokenInput.trim());
       }
-      return updateInboxMember(editInboxId, selectedAgentId);
+      return updateInboxMember(editInboxId, effectiveAgentId);
     },
     onSuccess: () => {
       setEditInboxId(null);
@@ -135,6 +131,7 @@ export default function ChannelManagementPage() {
   function resetEdit(inbox: InboxItem) {
     setEditInboxId(inbox.id);
     setTokenInput("");
+    setSelectedAgentId(undefined);
   }
 
   return (
@@ -375,7 +372,7 @@ export default function ChannelManagementPage() {
             <span className="mb-1 block text-label-sm font-semibold text-secondary">Sale phụ trách</span>
             <select
               className="w-full rounded border border-outline bg-surface-container-lowest px-3 py-2 text-body-md"
-              value={selectedAgentId ?? ""}
+              value={effectiveAgentId ?? ""}
               onChange={(e) => setSelectedAgentId(e.target.value || null)}
             >
               <option value="">-- Chọn sale --</option>

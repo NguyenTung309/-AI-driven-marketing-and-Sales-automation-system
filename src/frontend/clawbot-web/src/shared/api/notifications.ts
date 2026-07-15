@@ -17,10 +17,9 @@ export interface AppNotification {
 }
 
 export interface NotificationListResponse {
-  readonly total: number;
-  readonly page: number;
-  readonly pageSize: number;
   readonly items: readonly AppNotification[];
+  readonly nextCursor: string | null;
+  readonly total: number | null;
 }
 
 export interface NotificationEvent {
@@ -38,7 +37,7 @@ export interface NotificationEvent {
 
 export interface ListNotificationsParams {
   readonly unread?: boolean;
-  readonly page?: number;
+  readonly cursor?: string | null;
   readonly pageSize?: number;
 }
 

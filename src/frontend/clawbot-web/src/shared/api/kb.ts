@@ -248,11 +248,29 @@ export interface KbSuggestionEvidence {
   readonly signal: string;
 }
 
-export async function listKbSuggestions(status?: string): Promise<readonly KbSuggestion[]> {
-  const response = await apiClient.get<readonly KbSuggestion[]>("/api/kb/suggestions", {
-    params: status ? { status } : undefined,
+export interface KbSuggestionListResponse {
+  readonly items: readonly KbSuggestion[];
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+}
+
+export async function listKbSuggestions(
+  status?: string,
+  params?: { readonly page?: number; readonly pageSize?: number },
+): Promise<KbSuggestionListResponse> {
+  const response = await apiClient.get<KbSuggestionListResponse | readonly KbSuggestion[]>("/api/kb/suggestions", {
+    params: {
+      status: status || undefined,
+      page: params?.page,
+      pageSize: params?.pageSize,
+    },
   });
-  return response.data;
+  const data = response.data as KbSuggestionListResponse | readonly KbSuggestion[];
+  if (Array.isArray(data)) {
+    return { items: data, total: data.length, page: 1, pageSize: data.length || 50 };
+  }
+  return data as KbSuggestionListResponse;
 }
 
 export async function approveKbSuggestion(id: string, contentMd?: string): Promise<void> {

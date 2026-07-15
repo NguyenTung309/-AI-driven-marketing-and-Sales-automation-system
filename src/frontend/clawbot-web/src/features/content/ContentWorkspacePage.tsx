@@ -2,7 +2,16 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/shared/layout/AppShell";
-import { Alert, Button, Card, Modal, StatusPill, type StatusTone } from "@/shared/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  InfiniteScrollSentinel,
+  Modal,
+  StatusPill,
+  useInfiniteList,
+  type StatusTone,
+} from "@/shared/ui";
 import { useJobWatcher } from "@/features/jobs/useJobWatcher";
 import { TrendSettingsDialog } from "./TrendSettingsDialog";
 import { platformClasses } from "@/shared/theme/colors";
@@ -31,6 +40,7 @@ import {
   type ContentCalendarItem,
   type ContentItem,
   type ContentPublishTarget,
+  type ContentQueueResponse,
   type Trend,
 } from "@/shared/api/content";
 
@@ -1032,16 +1042,17 @@ export default function ContentWorkspacePage() {
   const [notice, setNotice] = useState<NoticeState | null>(null);
 
   const briefsQuery = useQuery({ queryKey: ["content", "briefs"], queryFn: () => listContentBriefs() });
-  const queueQuery = useQuery({
+  const queueList = useInfiniteList<ContentItem, ContentQueueResponse>({
     queryKey: ["content", "queue", queueStatus, queuePlatform],
-    queryFn: () =>
+    queryFn: (pageParam) =>
       getContentQueue({
         status: queueStatus === "all" ? undefined : queueStatus,
         platform: queuePlatform === "all" ? undefined : queuePlatform,
-        page: 1,
-        pageSize: 80,
+        cursor: typeof pageParam === "string" ? pageParam : null,
+        pageSize: 40,
       }),
   });
+  const queueQuery = queueList.query;
   const calendarQuery = useQuery({
     queryKey: ["content", "calendar", calendarRange],
     queryFn: () => getContentCalendar(calendarRange),
@@ -1073,8 +1084,8 @@ export default function ContentWorkspacePage() {
     staleTime: 60_000,
   });
 
-  const briefs = Array.isArray(briefsQuery.data) ? briefsQuery.data : EMPTY_BRIEFS;
-  const queueItems = Array.isArray(queueQuery.data?.items) ? queueQuery.data.items : EMPTY_ITEMS;
+  const briefs = Array.isArray(briefsQuery.data?.items) ? briefsQuery.data.items : EMPTY_BRIEFS;
+  const queueItems = queueList.items.length ? queueList.items : EMPTY_ITEMS;
   const calendarItems = Array.isArray(calendarQuery.data?.items) ? calendarQuery.data.items : EMPTY_CALENDAR;
   const trends = Array.isArray(trendsQuery.data?.trends) ? trendsQuery.data.trends : EMPTY_TRENDS;
   const linkedItem = linkedItemQuery.data ?? null;
@@ -1363,7 +1374,7 @@ export default function ContentWorkspacePage() {
 
       <section className="mb-gutter grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
         <MetricTile icon="description" label="Yêu cầu đang mở" value={briefs.length} meta="Không tính yêu cầu đã lưu trữ" />
-        <MetricTile icon="rate_review" label="Chờ duyệt" value={draftCount} meta={`${queueQuery.data?.total ?? 0} bài trong hàng đợi`} />
+        <MetricTile icon="rate_review" label="Chờ duyệt" value={draftCount} meta={`${queueList.total ?? queueItems.length} bài trong hàng đợi`} />
         <MetricTile icon="verified" label="Sẵn sàng lịch" value={readyCount} meta="Bài đã được duyệt" />
         <MetricTile icon="event" label="Lịch 30 ngày" value={calendarItems.length} meta={`${trends.length} xu hướng đang lưu`} />
       </section>
@@ -1467,7 +1478,14 @@ export default function ContentWorkspacePage() {
               ) : null}
 
               <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[320px_minmax(0,1fr)]">
-                <QueueList items={displayedQueueItems} selectedId={selectedItem?.id ?? selectedItemId} onSelect={selectItem} />
+                <div className="min-w-0">
+                  <QueueList items={displayedQueueItems} selectedId={selectedItem?.id ?? selectedItemId} onSelect={selectItem} />
+                  <InfiniteScrollSentinel
+                    hasNextPage={queueList.hasNextPage}
+                    isFetchingNextPage={queueList.isFetchingNextPage}
+                    onLoadMore={queueList.fetchNextPage}
+                  />
+                </div>
                 {requestedItemId && linkedItemQuery.isLoading ? (
                   <div className="flex min-h-[520px] items-center justify-center rounded-lg border border-dashed border-outline bg-surface p-6 text-body-md text-on-surface-variant">Đang mở bài viết...</div>
                 ) : requestedItemId && linkedItemQuery.isError && !selectedItem ? (

@@ -1,5 +1,6 @@
 import { Alert, Button, Modal } from "@/shared/ui";
-import { errorMessage, Field, inputClass, type AdminKeyFormState } from "./adminHelpers";
+import { errorMessage, inputClass, type AdminKeyFormState } from "./adminHelpers";
+import { Field } from "./adminUi";
 
 interface AdminKeyModalProps {
   readonly open: boolean;

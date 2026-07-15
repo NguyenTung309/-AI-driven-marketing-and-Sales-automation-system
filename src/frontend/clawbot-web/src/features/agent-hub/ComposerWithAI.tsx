@@ -22,11 +22,11 @@ export default function ComposerWithAI({ conversationId, onSend, disabled }: Pro
   });
   const startDraft = draftRun.start;
 
+  const draftEligible = Boolean(conversationId) && text.length >= 3 && text.length <= 200;
+  const displayGhost = draftEligible ? ghost : "";
+
   useEffect(() => {
-    if (!conversationId || text.length < 3 || text.length > 200) {
-      setGhost("");
-      return;
-    }
+    if (!conversationId || text.length < 3 || text.length > 200) return;
     const timer = setTimeout(() => {
       void startDraft(() => generateSaleAssistDraft(conversationId));
     }, 400);
@@ -35,8 +35,8 @@ export default function ComposerWithAI({ conversationId, onSend, disabled }: Pro
 
 
   function acceptGhost() {
-    if (ghost) {
-      setText(ghost);
+    if (displayGhost) {
+      setText(displayGhost);
       setGhost("");
       textareaRef.current?.focus();
     }
@@ -81,7 +81,7 @@ export default function ComposerWithAI({ conversationId, onSend, disabled }: Pro
           disabled={!conversationId || disabled}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Tab" && ghost) {
+            if (e.key === "Tab" && displayGhost) {
               e.preventDefault();
               acceptGhost();
             } else if (e.key === "Escape") {
@@ -92,9 +92,9 @@ export default function ComposerWithAI({ conversationId, onSend, disabled }: Pro
             }
           }}
         />
-        {ghost ? (
+        {displayGhost ? (
           <div className="mt-1 rounded-md bg-surface-container px-2 py-1 text-label-sm text-on-surface-variant">
-            Tab để dùng gợi ý: <span className="italic">{ghost}</span>
+            Tab để dùng gợi ý: <span className="italic">{displayGhost}</span>
           </div>
         ) : null}
       </div>

@@ -20,21 +20,27 @@ import CommandPalette from "./CommandPalette";
 import SideDrawer from "./SideDrawer";
 import DailySummaryPopup from "./DailySummaryPopup";
 
+function readSummaryFromUrl(): boolean {
+  return new URLSearchParams(window.location.search).has("summary");
+}
+
 export default function AgentHubLayout() {
   const { channelId } = useParams<{ channelId?: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [sessionChannelId, setSessionChannelId] = useState(channelId);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
+  const [showSummary, setShowSummary] = useState(readSummaryFromUrl);
   const [tabs, setTabs] = useState<string[]>([]);
 
-  // Reset activeId + tabs when switching channels
-  useEffect(() => {
+  // Reset activeId + tabs when switching channels (adjust state during render).
+  if (sessionChannelId !== channelId) {
+    setSessionChannelId(channelId);
     setActiveId(null);
     setTabs([]);
-  }, [channelId]);
+  }
 
   const meQuery = useQuery({ queryKey: ["me"], queryFn: getMe });
   const meId = meQuery.data?.sub;
@@ -50,12 +56,6 @@ export default function AgentHubLayout() {
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, []);
-
-  // Detect daily summary from URL (/?summary=)
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.has("summary")) setShowSummary(true);
   }, []);
 
   // Load channel list if we have channelId (for header name)

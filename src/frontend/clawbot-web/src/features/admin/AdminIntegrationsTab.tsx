@@ -1,5 +1,6 @@
 import { Alert, Button, Card, StatusPill } from "@/shared/ui";
-import { errorMessage, Field, inputClass, type BrandingForm, type PancakeForm } from "./adminHelpers";
+import { errorMessage, inputClass, type BrandingForm, type PancakeForm } from "./adminHelpers";
+import { Field } from "./adminUi";
 import type { PancakeConfig, PancakeWebhookUrl } from "@/shared/api/admin";
 import { AdminSocialChannelsSection } from "./AdminSocialChannelsSection";
 

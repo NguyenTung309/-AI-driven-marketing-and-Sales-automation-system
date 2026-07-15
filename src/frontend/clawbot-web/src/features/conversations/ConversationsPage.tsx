@@ -1,10 +1,19 @@
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AxiosError } from "axios";
 import { AppShell } from "@/shared/layout/AppShell";
-import { Alert, Button, Card, Input, StatusPill } from "@/shared/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  InfiniteScrollSentinel,
+  Input,
+  StatusPill,
+  useDebounce,
+  useInfiniteList,
+} from "@/shared/ui";
 import { platformClasses } from "@/shared/theme/colors";
 import { getMe } from "@/shared/api/auth";
 import {
@@ -17,8 +26,10 @@ import {
   resolveConversation,
   sendConversationMessage,
   setConversationAi,
+  type ConversationCursorPage,
   type ConversationDetail,
   type ConversationListItem,
+  type ConversationListResponse,
   type ConversationStatus,
   type InboxMessage,
 } from "@/shared/api/inbox";
@@ -110,6 +121,11 @@ function isOutbound(message: InboxMessage): boolean {
   return message.direction === "out" || message.senderType === "user" || message.senderType === "agent";
 }
 
+// Tin nhắn hệ thống (vd cảnh báo hội thoại idle) — không thuộc bên nào, render căn giữa kiểu Zalo.
+function isSystemMessage(message: InboxMessage): boolean {
+  return message.senderType === "system" || message.direction === "system";
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof AxiosError) {
     if (error.response?.status === 404) return "Không tìm thấy hội thoại.";
@@ -134,7 +150,7 @@ function FilterChip({ active, label, icon, onClick }: FilterChipProps) {
       onClick={onClick}
       title={label}
       className={[
-        "inline-flex max-w-[12rem] shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-label-sm font-semibold transition-colors",
+        "inline-flex max-w-[9rem] shrink-0 items-center gap-1 rounded-full border px-2.5 py-0.5 text-label-sm font-semibold transition-colors",
         active
           ? "border-primary/20 bg-primary/10 text-primary"
           : "border-outline bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container-low",
@@ -159,22 +175,22 @@ function ConversationRow({ conversation, selected, onSelect }: ConversationRowPr
       type="button"
       onClick={onSelect}
       className={[
-        "relative w-full border-b border-surface-variant p-4 text-left transition-colors hover:bg-surface-container-low",
+        "relative w-full border-b border-surface-variant px-3 py-2.5 text-left transition-colors hover:bg-surface-container-low",
         selected ? "bg-primary/5" : "bg-surface-container-lowest",
       ].join(" ")}
     >
       {selected ? <span className="absolute left-0 top-0 h-full w-1 bg-primary" /> : null}
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2.5">
         {conversation.contactAvatarUrl ? (
           <img
             src={conversation.contactAvatarUrl}
             alt=""
-            className="size-10 rounded-full object-cover shrink-0"
+            className="size-9 rounded-full object-cover shrink-0"
             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
           />
         ) : (
           <div
-            className={`flex size-10 shrink-0 items-center justify-center rounded-lg border text-xs font-bold ${platformClasses(
+            className={`flex size-9 shrink-0 items-center justify-center rounded-lg border text-[11px] font-bold ${platformClasses(
               conversation.platform
             )}`}
           >
@@ -182,22 +198,22 @@ function ConversationRow({ conversation, selected, onSelect }: ConversationRowPr
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <div className="mb-1 flex items-start justify-between gap-2">
+          <div className="mb-0.5 flex items-start justify-between gap-2">
             <h3 className="truncate text-body-md font-bold text-on-surface">{name}</h3>
             <span className="shrink-0 text-label-sm text-on-surface-variant">
               {formatRelative(conversation.lastMessageAt)}
             </span>
           </div>
-          <p className="truncate text-body-md text-on-surface-variant">
+          <p className="truncate text-label-sm text-on-surface-variant">
             {conversation.lastMessagePreview || "Chưa có tin nhắn mới"}
           </p>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <StatusPill tone={conversationBadge(conversation).tone}>{conversationBadge(conversation).label}</StatusPill>
-            <span className="rounded bg-surface-container px-2 py-0.5 text-label-sm font-semibold text-secondary">
+            <span className="rounded bg-surface-container px-1.5 py-0.5 text-label-sm font-semibold text-secondary">
               {platformLabel(conversation.platform)}
             </span>
             {conversation.unreadCount > 0 ? (
-              <span className="rounded-full bg-primary px-2 py-0.5 text-label-sm font-bold text-on-primary">
+              <span className="rounded-full bg-primary px-1.5 py-0.5 text-label-sm font-bold text-on-primary">
                 {conversation.unreadCount}
               </span>
             ) : null}
@@ -205,6 +221,17 @@ function ConversationRow({ conversation, selected, onSelect }: ConversationRowPr
         </div>
       </div>
     </button>
+  );
+}
+
+// Nhãn hệ thống căn giữa, xám nhạt (kiểu Zalo) — dùng cho tin nhắn senderType/direction = "system".
+function SystemNotice({ content }: { readonly content: string }) {
+  return (
+    <div className="flex justify-center py-1">
+      <span className="max-w-[80%] rounded-full bg-surface-variant/60 px-3 py-1 text-center text-label-sm text-on-surface-variant">
+        {content}
+      </span>
+    </div>
   );
 }
 
@@ -341,9 +368,11 @@ interface ChatPanelProps {
   readonly onApproveDraft: (messageId: string) => void;
   readonly onRejectDraft: (messageId: string) => void;
   readonly draftActionBusy: boolean;
+  readonly onOpenContext?: () => void;
+  readonly contextOpen?: boolean;
 }
 
-function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSubmit, sending, onToggleAi, aiToggling, onApproveDraft, onRejectDraft, draftActionBusy }: ChatPanelProps) {
+function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSubmit, sending, onToggleAi, aiToggling, onApproveDraft, onRejectDraft, draftActionBusy, onOpenContext, contextOpen }: ChatPanelProps) {
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const conversationId = conversation?.id ?? null;
   const messageCount = conversation?.messages.length ?? 0;
@@ -364,7 +393,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
 
   if (isLoading) {
     return (
-      <section className="flex h-full min-h-[480px] min-w-0 flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
+      <section className="flex h-full min-h-[420px] min-w-0 flex-col rounded-lg border border-outline bg-surface-container-lowest lg:min-h-0">
         <div className="m-auto text-body-md text-on-surface-variant">Đang tải hội thoại...</div>
       </section>
     );
@@ -372,7 +401,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
 
   if (error) {
     return (
-      <section className="flex h-full min-h-[480px] min-w-0 flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
+      <section className="flex h-full min-h-[420px] min-w-0 flex-col rounded-lg border border-outline bg-surface-container-lowest lg:min-h-0">
         <div className="m-auto max-w-md text-center">
           <span aria-hidden="true" className="material-symbols-outlined text-[40px] text-error">error</span>
           <p className="mt-3 text-body-md text-on-surface">{errorMessage(error)}</p>
@@ -383,7 +412,7 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
 
   if (!conversation) {
     return (
-      <section className="flex h-full min-h-[480px] min-w-0 flex-col rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
+      <section className="flex h-full min-h-[420px] min-w-0 flex-col rounded-lg border border-outline bg-surface-container-lowest lg:min-h-0">
         <div className="m-auto max-w-md text-center">
           <span aria-hidden="true" className="material-symbols-outlined text-[44px] text-on-surface-variant">forum</span>
           <h2 className="mt-3 text-headline-sm">Chưa có hội thoại</h2>
@@ -396,9 +425,9 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
   }
 
   return (
-    <section className="flex h-full min-h-[480px] min-w-0 flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest xl:min-h-0">
+    <section className="flex h-full min-h-[420px] min-w-0 flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest lg:min-h-0">
       {conversation.status === "escalated" ? (
-        <div className="flex items-center justify-between bg-warning px-gutter py-2 text-label-lg font-semibold text-white">
+        <div className="flex items-center justify-between bg-warning px-3 py-1.5 text-label-sm font-semibold text-white sm:px-4 sm:text-label-lg">
           <span className="flex items-center gap-2">
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">warning</span>
             Hội thoại đang cần người hỗ trợ trực tiếp.
@@ -406,32 +435,32 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
         </div>
       ) : null}
 
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-outline bg-white p-4">
-        <div className="flex min-w-0 items-center gap-3">
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-outline bg-white px-3 py-2.5 sm:px-4">
+        <div className="flex min-w-0 items-center gap-2.5">
           <div
-            className={`flex size-10 shrink-0 items-center justify-center rounded-full border text-sm font-bold ${platformClasses(
+            className={`flex size-9 shrink-0 items-center justify-center rounded-full border text-sm font-bold ${platformClasses(
               conversation.platform
             )}`}
           >
             {platformMark(conversation.platform)}
           </div>
           <div className="min-w-0">
-            <h2 className="flex items-center gap-2 text-headline-sm">
+            <h2 className="flex items-center gap-1.5 text-headline-sm">
               <span className="truncate">{customerName(conversation)}</span>
-              <span className="shrink-0 rounded bg-surface-container px-2 py-0.5 text-label-sm font-semibold text-secondary">
+              <span className="hidden shrink-0 rounded bg-surface-container px-1.5 py-0.5 text-label-sm font-semibold text-secondary sm:inline">
                 {platformLabel(conversation.platform)}
               </span>
             </h2>
             <p className="truncate text-label-sm text-on-surface-variant" title={conversation.externalThreadId || undefined}>
-              Mã hội thoại: {conversation.externalThreadId || "chưa có"} · {conversationBadge(conversation).label}
+              {conversationBadge(conversation).label}
             </p>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2">
           {/* Cong tac "AI dang chat": bat/tat auto-reply cho rieng hoi thoai nay */}
-          <label className="flex cursor-pointer select-none items-center gap-2 text-label-sm font-semibold text-secondary">
+          <label className="flex cursor-pointer select-none items-center gap-1.5 text-label-sm font-semibold text-secondary" title="AI đang chat">
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">smart_toy</span>
-            <span className="hidden sm:inline">AI đang chat</span>
+            <span className="hidden lg:inline">AI</span>
             <button
               type="button"
               role="switch"
@@ -439,20 +468,36 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
               disabled={aiToggling}
               onClick={() => onToggleAi(!conversation.aiAutoReplyEnabled)}
               className={[
-                "relative h-6 w-11 rounded-full transition-colors",
+                "relative h-5 w-9 rounded-full transition-colors",
                 conversation.aiAutoReplyEnabled ? "bg-primary" : "bg-surface-variant",
                 aiToggling ? "opacity-60" : "",
               ].join(" ")}
             >
               <span
                 className={[
-                  "absolute top-0.5 size-5 rounded-full bg-white shadow transition-all",
-                  conversation.aiAutoReplyEnabled ? "left-[22px]" : "left-0.5",
+                  "absolute top-0.5 size-4 rounded-full bg-white shadow transition-all",
+                  conversation.aiAutoReplyEnabled ? "left-[18px]" : "left-0.5",
                 ].join(" ")}
               />
             </button>
           </label>
           <StatusPill tone={conversationBadge(conversation).tone}>{conversationBadge(conversation).label}</StatusPill>
+          {onOpenContext ? (
+            <button
+              type="button"
+              onClick={onOpenContext}
+              aria-pressed={contextOpen}
+              title="Thông tin khách hàng"
+              className={[
+                "inline-flex size-9 items-center justify-center rounded-lg border transition-colors 2xl:hidden",
+                contextOpen
+                  ? "border-primary/30 bg-primary/10 text-primary"
+                  : "border-outline text-secondary hover:bg-surface-container-low",
+              ].join(" ")}
+            >
+              <span aria-hidden="true" className="material-symbols-outlined text-[20px]">person</span>
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -462,38 +507,42 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
             Chưa có tin nhắn trong hội thoại này.
           </div>
         ) : (
-          conversation.messages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              contactAvatarUrl={conversation.contactAvatarUrl}
-              contactDisplayName={conversation.contactDisplayName}
-              onApproveDraft={onApproveDraft}
-              onRejectDraft={onRejectDraft}
-              draftActionBusy={draftActionBusy}
-            />
-          ))
+          conversation.messages.map((message, index) =>
+            isSystemMessage(message) ? (
+              <SystemNotice key={`sys-${index}-${message.sentAt}`} content={message.content} />
+            ) : (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                contactAvatarUrl={conversation.contactAvatarUrl}
+                contactDisplayName={conversation.contactDisplayName}
+                onApproveDraft={onApproveDraft}
+                onRejectDraft={onRejectDraft}
+                draftActionBusy={draftActionBusy}
+              />
+            )
+          )
         )}
       </div>
 
-      <footer className="shrink-0 border-t border-outline bg-white p-3">
-        <div className="mb-2 flex flex-wrap gap-2">
+      <footer className="shrink-0 border-t border-outline bg-white p-2 sm:p-3">
+        <div className="mb-1.5 flex flex-wrap gap-1.5">
           <button
             type="button"
-            className="inline-flex items-center gap-1 rounded border border-outline px-2 py-1 text-label-sm text-secondary hover:bg-surface"
+            className="inline-flex items-center gap-1 rounded border border-outline px-2 py-0.5 text-label-sm text-secondary hover:bg-surface"
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[14px]">attach_file</span>
             Đính kèm
           </button>
           <button
             type="button"
-            className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50/70 px-2 py-1 text-label-sm text-amber-800"
+            className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50/70 px-2 py-0.5 text-label-sm text-amber-800"
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[14px]">star</span>
             Gắn thẻ khách VIP
           </button>
         </div>
-        <div className="flex items-end gap-2 rounded-xl border border-outline bg-surface-container-low p-2 focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
+        <div className="flex items-end gap-2 rounded-xl border border-outline bg-surface-container-low p-1.5 focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
           <textarea
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
@@ -501,17 +550,17 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
               if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) onSubmit();
             }}
             rows={1}
-            className="max-h-32 min-h-[40px] flex-1 resize-none bg-transparent py-2 text-body-md text-on-surface outline-none"
+            className="max-h-32 min-h-[36px] flex-1 resize-none bg-transparent py-1.5 text-body-md text-on-surface outline-none"
             placeholder="Nhập tin nhắn hỗ trợ..."
           />
           <button
             type="button"
             onClick={onSubmit}
             disabled={!draft.trim() || sending}
-            className="mb-1 flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-on-primary transition-colors hover:bg-primary-hover disabled:opacity-50"
+            className="mb-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-on-primary transition-colors hover:bg-primary-hover disabled:opacity-50"
             aria-label="Gửi tin nhắn"
           >
-            <span aria-hidden="true" className="material-symbols-outlined">send</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[20px]">send</span>
           </button>
         </div>
       </footer>
@@ -535,16 +584,29 @@ function ContextPanel({
   onUseSaleAssistDraft,
   onNotify,
   busy,
-}: ContextPanelProps) {
+  onClose,
+}: ContextPanelProps & { readonly onClose?: () => void }) {
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   const avatarUrl = conversation?.contactAvatarUrl ?? null;
   const showAvatar = Boolean(avatarUrl && failedAvatarUrl !== avatarUrl);
   return (
-    <aside className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto overflow-x-hidden xl:h-full">
+    <aside className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto overflow-x-hidden 2xl:h-full">
       <Card>
-        <h3 className="mb-4 text-label-caps uppercase text-secondary">Thông tin khách hàng</h3>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h3 className="text-label-caps uppercase text-secondary">Thông tin khách hàng</h3>
+          {onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex size-8 items-center justify-center rounded-lg text-secondary hover:bg-surface-container-low 2xl:hidden"
+              aria-label="Đóng panel"
+            >
+              <span aria-hidden="true" className="material-symbols-outlined text-[20px]">close</span>
+            </button>
+          ) : null}
+        </div>
         <div className="text-center">
-          <div className="mx-auto flex size-16 items-center justify-center rounded-full border-2 border-white bg-surface-variant text-headline-sm font-bold text-secondary shadow-sm overflow-hidden">
+          <div className="mx-auto flex size-14 items-center justify-center rounded-full border-2 border-white bg-surface-variant text-headline-sm font-bold text-secondary shadow-sm overflow-hidden">
             {showAvatar ? (
               <img
                 src={avatarUrl!}
@@ -558,22 +620,27 @@ function ContextPanel({
               "?"
             )}
           </div>
-          <h4 className="mt-3 text-headline-sm">{conversation ? customerName(conversation) : "Chưa chọn"}</h4>
-          <div className="mt-2 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-3 py-1">
-            <span aria-hidden="true" className="material-symbols-outlined text-[16px] text-amber-500">star</span>
+          <h4 className="mt-2 text-headline-sm">{conversation ? customerName(conversation) : "Chưa chọn"}</h4>
+          <div className="mt-2 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5">
+            <span aria-hidden="true" className="material-symbols-outlined text-[14px] text-amber-500">star</span>
             <span className="text-label-sm font-bold text-amber-800">Ưu tiên chăm sóc</span>
           </div>
         </div>
-        <div className="mt-5 space-y-3 text-body-md">
-          <div className="flex items-center gap-3">
+        <div className="mt-4 space-y-2.5 text-body-md">
+          <div className="flex items-center gap-2.5">
             <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-tertiary">hub</span>
             <span>{conversation ? platformLabel(conversation.platform) : "Mọi kênh"}</span>
           </div>
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-2.5">
             <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-tertiary">tag</span>
-            <span className="min-w-0 break-all font-mono text-mono-status">{conversation?.externalThreadId ?? "Chưa có mã"}</span>
+            <span
+              className="min-w-0 truncate font-mono text-mono-status"
+              title={conversation?.externalThreadId ?? undefined}
+            >
+              {conversation?.externalThreadId ?? "Chưa có mã"}
+            </span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-tertiary">schedule</span>
             <span>{formatRelative(conversation?.lastMessageAt ?? null)}</span>
           </div>
@@ -617,12 +684,19 @@ export default function ConversationsPage() {
   const [inboxIdFilter, setInboxIdFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(routeConversationId ?? null);
-
-  useEffect(() => {
-    if (routeConversationId) setSelectedId(routeConversationId);
-  }, [routeConversationId]);
+  const [syncedRouteId, setSyncedRouteId] = useState(routeConversationId);
+  if (routeConversationId && routeConversationId !== syncedRouteId) {
+    setSyncedRouteId(routeConversationId);
+    setSelectedId(routeConversationId);
+  }
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<PageNotice | null>(null);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [contextForId, setContextForId] = useState(selectedId);
+  if (selectedId !== contextForId) {
+    setContextForId(selectedId);
+    setContextOpen(false);
+  }
 
   useEffect(() => {
     if (!notice) return;
@@ -645,33 +719,37 @@ export default function ConversationsPage() {
   });
 
   const backendStatus = statusFilter === "mine" || statusFilter === "all" ? undefined : statusFilter;
-  const conversationsQuery = useQuery({
-    queryKey: ["inbox", "conversations", { status: backendStatus, inboxId: inboxIdFilter }],
-    queryFn: () =>
-      listConversations({
+  const debouncedSearch = useDebounce(search, 300);
+  const conversationsList = useInfiniteList<ConversationListItem, ConversationCursorPage | ConversationListResponse>({
+    queryKey: [
+      "inbox",
+      "conversations",
+      {
+        status: backendStatus,
+        inboxId: inboxIdFilter,
+        q: debouncedSearch.trim() || undefined,
+        assignedTo: statusFilter === "mine" ? meId : undefined,
+      },
+    ],
+    enabled: statusFilter !== "mine" || Boolean(meId),
+    queryFn: async (pageParam) => {
+      const cursor = typeof pageParam === "string" ? pageParam : null;
+      const page = typeof pageParam === "number" ? pageParam : 1;
+      return listConversations({
         status: backendStatus,
         inboxId: inboxIdFilter === "all" ? undefined : inboxIdFilter,
-        page: 1,
-        pageSize: 50,
-      }),
+        q: debouncedSearch.trim() || undefined,
+        assignedTo: statusFilter === "mine" ? (meId ?? undefined) : undefined,
+        cursor,
+        page,
+        pageSize: 40,
+      });
+    },
   });
 
-  const conversationItems = useMemo(
-    () => (Array.isArray(conversationsQuery.data?.items) ? conversationsQuery.data.items : []),
-    [conversationsQuery.data]
-  );
-
-  const filteredItems = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return conversationItems.filter((item) => {
-      if (statusFilter === "mine" && (!meId || item.assignedTo !== meId)) return false;
-      if (!needle) return true;
-      return [customerName(item), item.externalThreadId, item.lastMessagePreview ?? "", platformLabel(item.platform)]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle);
-    });
-  }, [conversationItems, meId, search, statusFilter]);
+  const conversationItems = conversationsList.items;
+  const filteredItems = conversationItems;
+  const conversationsQuery = conversationsList.query;
 
   const activeConversationId = selectedId ?? filteredItems[0]?.id ?? null;
   const selectedListItem = filteredItems.find((item) => item.id === activeConversationId);
@@ -753,66 +831,59 @@ export default function ConversationsPage() {
 
   return (
     <AppShell title="Hội thoại đa kênh" noPadding>
-      {/* Flex-fill khít viewport (không calc cứng): header shrink-0, khối 3 cột chiếm phần còn lại.
-          Dưới xl: cuộn cả trang như cũ; từ xl: khóa trong màn hình, từng cột tự cuộn. */}
-      <div className="flex h-full min-h-0 flex-col overflow-y-auto p-3 sm:p-4 xl:overflow-hidden">
+      {/* Laptop: 2 cột (list+chat), panel khách = drawer. Màn ≥2xl: 3 cột cố định. */}
+      <div className="flex h-full min-h-0 flex-col overflow-y-auto p-2 sm:p-3 lg:overflow-hidden">
       {notice ? (
         <div className="fixed right-4 top-20 z-[90] w-[min(360px,calc(100vw-32px))]">
           <Alert tone={notice.tone}>{notice.message}</Alert>
         </div>
       ) : null}
 
-      {/* Header gọn 1 hàng: tiêu đề trái, cụm chỉ số + tổng số phải — nhường tối đa chiều cao cho 3 cột. */}
-      <Card className="mb-3 shrink-0 !p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="min-w-0">
-            <h1 className="text-headline-sm">Hộp thư tập trung</h1>
-            <p className="mt-0.5 hidden truncate text-label-sm text-on-surface-variant sm:block">
-              Ưu tiên hội thoại nóng, cập nhật tức thì và thao tác trực tiếp với khách hàng.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            <div className="flex items-center gap-5 text-center">
-              <div>
-                <p className="text-headline-md font-bold leading-none text-primary">{openCount}</p>
-                <p className="mt-1 text-label-sm text-on-surface-variant">Đang mở</p>
-              </div>
-              <div>
-                <p className="text-headline-md font-bold leading-none text-warning">{escalatedCount}</p>
-                <p className="mt-1 text-label-sm text-on-surface-variant">Cần hỗ trợ</p>
-              </div>
-              <div>
-                <p className="text-headline-md font-bold leading-none text-tertiary">{mineCount}</p>
-                <p className="mt-1 text-label-sm text-on-surface-variant">Của tôi</p>
-              </div>
-            </div>
-            <StatusPill tone={conversationsQuery.isError ? "error" : "success"}>
-              {conversationsQuery.isError ? "Mất kết nối dữ liệu" : `${conversationsQuery.data?.total ?? 0} hội thoại`}
-            </StatusPill>
-          </div>
+      {/* Header compact: 1 hàng, số liệu inline — nhường chiều cao cho list/chat. */}
+      <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1.5 rounded-lg border border-outline bg-surface-container-lowest px-3 py-2">
+        <div className="min-w-0">
+          <h1 className="text-headline-sm leading-tight">Hộp thư tập trung</h1>
         </div>
-      </Card>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-label-sm">
+          <span className="inline-flex items-baseline gap-1">
+            <span className="text-body-md font-bold leading-none text-primary">{openCount}</span>
+            <span className="text-on-surface-variant">Đang mở</span>
+          </span>
+          <span className="inline-flex items-baseline gap-1">
+            <span className="text-body-md font-bold leading-none text-warning">{escalatedCount}</span>
+            <span className="text-on-surface-variant">Cần hỗ trợ</span>
+          </span>
+          <span className="inline-flex items-baseline gap-1">
+            <span className="text-body-md font-bold leading-none text-tertiary">{mineCount}</span>
+            <span className="text-on-surface-variant">Của tôi</span>
+          </span>
+          <StatusPill tone={conversationsQuery.isError ? "error" : "success"}>
+            {conversationsQuery.isError
+              ? "Mất kết nối"
+              : `${conversationsList.total ?? conversationItems.length} hội thoại`}
+          </StatusPill>
+        </div>
+      </div>
 
       {actionError ? (
-        <div className="mb-gutter shrink-0 rounded-lg border border-error/30 bg-error/10 p-4 text-body-md text-error">
+        <div className="mb-2 shrink-0 rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-body-md text-error">
           {errorMessage(actionError)}
         </div>
       ) : null}
 
-      {/* Cột co giãn theo viewport: minmax(0,fr) + min-w-0 để không bao giờ tràn ngang;
-          minimum nhỏ vừa đủ (220/300/240) để 3 cột vẫn lọt trên laptop 1280px sau khi trừ sidebar. */}
-      <div className="grid grid-cols-1 gap-3 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(220px,0.9fr)_minmax(300px,1.7fr)_minmax(240px,1fr)]">
-        <aside className="flex min-h-[480px] min-w-0 flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest xl:h-full xl:min-h-0">
-          <div className="shrink-0 border-b border-outline p-4">
-            <h2 className="mb-3 text-headline-sm">Danh sách hội thoại</h2>
+      {/* lg–xl: list | chat. 2xl+: list | chat | context. */}
+      <div className="grid grid-cols-1 gap-2 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)] 2xl:grid-cols-[300px_minmax(0,1fr)_320px]">
+        <aside className="flex min-h-[380px] min-w-0 flex-col overflow-hidden rounded-lg border border-outline bg-surface-container-lowest lg:h-full lg:min-h-0">
+          <div className="shrink-0 border-b border-outline px-3 py-2.5">
+            <h2 className="mb-2 text-body-md font-bold text-on-surface">Danh sách hội thoại</h2>
             <Input
               icon="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Tìm tên, SĐT, mã hội thoại..."
             />
-            {/* Bộ lọc trạng thái cuộn ngang 1 hàng thay vì xuống nhiều dòng, đỡ ăn chiều cao danh sách. */}
-            <div className="mt-3 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
+            {/* Status + kênh: luôn 1 hàng cuộn ngang, không wrap ăn chiều cao list. */}
+            <div className="mt-2 flex gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin]">
               {STATUS_FILTERS.map((item) => (
                 <FilterChip
                   key={item.value}
@@ -826,7 +897,7 @@ export default function ConversationsPage() {
                 />
               ))}
             </div>
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className="mt-1.5 flex gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin]">
               <FilterChip
                 active={inboxIdFilter === "all"}
                 label="Tất cả kênh"
@@ -850,21 +921,28 @@ export default function ConversationsPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto">
-            {conversationsQuery.isLoading ? (
-              <p className="p-gutter text-body-md text-on-surface-variant">Đang tải danh sách hội thoại...</p>
-            ) : conversationsQuery.isError ? (
-              <p className="p-gutter text-body-md text-error">{errorMessage(conversationsQuery.error)}</p>
+            {conversationsList.isLoading ? (
+              <p className="p-3 text-body-md text-on-surface-variant">Đang tải danh sách hội thoại...</p>
+            ) : conversationsList.isError ? (
+              <p className="p-3 text-body-md text-error">{errorMessage(conversationsList.error)}</p>
             ) : filteredItems.length === 0 ? (
-              <p className="p-gutter text-body-md text-on-surface-variant">Không có hội thoại khớp bộ lọc.</p>
+              <p className="p-3 text-body-md text-on-surface-variant">Không có hội thoại khớp bộ lọc.</p>
             ) : (
-              filteredItems.map((conversation) => (
-                <ConversationRow
-                  key={conversation.id}
-                  conversation={conversation}
-                  selected={conversation.id === activeConversationId}
-                  onSelect={() => setSelectedId(conversation.id)}
+              <>
+                {filteredItems.map((conversation) => (
+                  <ConversationRow
+                    key={conversation.id}
+                    conversation={conversation}
+                    selected={conversation.id === activeConversationId}
+                    onSelect={() => setSelectedId(conversation.id)}
+                  />
+                ))}
+                <InfiniteScrollSentinel
+                  hasNextPage={conversationsList.hasNextPage}
+                  isFetchingNextPage={conversationsList.isFetchingNextPage}
+                  onLoadMore={conversationsList.fetchNextPage}
                 />
-              ))
+              </>
             )}
           </div>
         </aside>
@@ -894,21 +972,56 @@ export default function ConversationsPage() {
             if (!activeConversationId || rejectDraftMutation.isPending) return;
             rejectDraftMutation.mutate(messageId);
           }}
+          contextOpen={contextOpen}
+          onOpenContext={() => setContextOpen((open) => !open)}
         />
 
-        <ContextPanel
-          conversation={selectedConversation}
-          busy={actionBusy}
-          onEscalate={() => {
-            if (activeConversationId) escalateMutation.mutate();
-          }}
-          onResolve={() => {
-            if (activeConversationId) resolveMutation.mutate();
-          }}
-          onUseSaleAssistDraft={(value) => setDraft(value)}
-          onNotify={showNotice}
-        />
+        {/* Desktop rộng: cột context cố định */}
+        <div className="hidden min-h-0 2xl:block">
+          <ContextPanel
+            conversation={selectedConversation}
+            busy={actionBusy}
+            onEscalate={() => {
+              if (activeConversationId) escalateMutation.mutate();
+            }}
+            onResolve={() => {
+              if (activeConversationId) resolveMutation.mutate();
+            }}
+            onUseSaleAssistDraft={(value) => setDraft(value)}
+            onNotify={showNotice}
+          />
+        </div>
       </div>
+
+      {/* Laptop/tablet: drawer panel khách — không chiếm ngang 3 cột */}
+      {contextOpen ? (
+        <div className="fixed inset-0 z-[80] 2xl:hidden" role="dialog" aria-modal="true" aria-label="Thông tin khách hàng">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/35"
+            aria-label="Đóng"
+            onClick={() => setContextOpen(false)}
+          />
+          <div className="absolute inset-y-0 right-0 flex w-[min(100vw-2rem,360px)] flex-col border-l border-outline bg-surface p-3 shadow-2xl">
+            <ContextPanel
+              conversation={selectedConversation}
+              busy={actionBusy}
+              onClose={() => setContextOpen(false)}
+              onEscalate={() => {
+                if (activeConversationId) escalateMutation.mutate();
+              }}
+              onResolve={() => {
+                if (activeConversationId) resolveMutation.mutate();
+              }}
+              onUseSaleAssistDraft={(value) => {
+                setDraft(value);
+                setContextOpen(false);
+              }}
+              onNotify={showNotice}
+            />
+          </div>
+        </div>
+      ) : null}
       </div>
     </AppShell>
   );

@@ -641,7 +641,7 @@ export default function AgentDashboardPage() {
     queryFn: () => listJobs("active"),
     refetchInterval: 15_000,
   });
-  const activeJobCount = activeJobsQuery.data?.items.length ?? 0;
+  const activeJobCount = activeJobsQuery.data?.items?.length ?? 0;
 
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const [configAgentCode, setConfigAgentCode] = useState<string | null>(null);

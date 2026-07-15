@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as signalR from "@microsoft/signalr";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { getRealtimeAccessToken } from "@/shared/api/client";
 import type { AppNotification, NotificationEvent, NotificationListResponse } from "@/shared/api/notifications";
 
@@ -31,7 +31,9 @@ export function useNotificationsRealtime(enabled: boolean, onNotification?: (n: 
   const [state, setState] = useState<ConnectionState>("connecting");
   // Keep the latest callback without re-running the connection effect on every render.
   const cbRef = useRef(onNotification);
-  cbRef.current = onNotification;
+  useEffect(() => {
+    cbRef.current = onNotification;
+  }, [onNotification]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -51,21 +53,59 @@ export function useNotificationsRealtime(enabled: boolean, onNotification?: (n: 
     connection.on("notification", (evt: NotificationEvent) => {
       const nextNotification = eventToNotification(evt);
 
-      queryClient.setQueriesData<NotificationListResponse>({ queryKey: ["notifications", "list"] }, (old) => {
-        if (!old) return old;
-        // Thông báo gom nhóm quay lại với cùng id: cập nhật dòng cũ (số đếm mới), không chèn dòng mới.
-        if (old.items.some((item) => item.id === evt.id)) {
+      queryClient.setQueriesData<InfiniteData<NotificationListResponse> | NotificationListResponse>(
+        { queryKey: ["notifications", "list"] },
+        (old) => {
+          if (!old) return old;
+          // Infinite list cache (useInfiniteList)
+          if ("pages" in old && Array.isArray(old.pages)) {
+            const pages = old.pages;
+            if (!pages.length) return old;
+            const first = pages[0];
+            if (first.items.some((item) => item.id === evt.id)) {
+              return {
+                ...old,
+                pages: pages.map((page, idx) =>
+                  idx === 0
+                    ? {
+                        ...page,
+                        items: page.items.map((item) =>
+                          item.id === evt.id ? { ...item, ...nextNotification, isRead: item.isRead } : item,
+                        ),
+                      }
+                    : page,
+                ),
+              };
+            }
+            return {
+              ...old,
+              pages: [
+                {
+                  ...first,
+                  total: (first.total ?? first.items.length) + 1,
+                  items: [nextNotification, ...first.items],
+                },
+                ...pages.slice(1),
+              ],
+            };
+          }
+          // Legacy flat list shape
+          const flat = old as NotificationListResponse;
+          if (flat.items.some((item) => item.id === evt.id)) {
+            return {
+              ...flat,
+              items: flat.items.map((item) =>
+                item.id === evt.id ? { ...item, ...nextNotification, isRead: item.isRead } : item,
+              ),
+            };
+          }
           return {
-            ...old,
-            items: old.items.map((item) => (item.id === evt.id ? { ...item, ...nextNotification, isRead: item.isRead } : item)),
+            ...flat,
+            total: (flat.total ?? flat.items.length) + 1,
+            items: [nextNotification, ...flat.items],
           };
-        }
-        return {
-          ...old,
-          total: old.total + 1,
-          items: [nextNotification, ...old.items].slice(0, old.pageSize),
-        };
-      });
+        },
+      );
 
       queryClient.setQueryData<{ count: number }>(["notifications", "unread-count"], (old) =>
         old ? { count: old.count + 1 } : old

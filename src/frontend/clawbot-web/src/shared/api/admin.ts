@@ -10,6 +10,7 @@ export interface PagedResponse<T> {
 }
 
 export interface PancakeChannelInfo {
+  readonly inboxId: string;
   readonly pageId: string;
   readonly name: string;
   readonly platform: string;
@@ -336,6 +337,19 @@ export async function getInboxMembers(inboxId: string): Promise<readonly string[
 
 export async function updateInboxMember(inboxId: string, agentId: string | null): Promise<void> {
   await apiClient.put(`/api/admin/inboxes/${inboxId}/members`, { agentId });
+}
+
+export interface UpdatePancakeChannelRequest {
+  readonly name?: string | null;
+  readonly pageAccessToken?: string | null;
+}
+
+export async function updatePancakeChannel(inboxId: string, body: UpdatePancakeChannelRequest): Promise<void> {
+  await apiClient.patch(`/api/admin/pancake-channels/${inboxId}`, body);
+}
+
+export async function unlinkInboxMember(inboxId: string, agentId: string): Promise<void> {
+  await apiClient.delete(`/api/admin/inboxes/${inboxId}/members/${agentId}`);
 }
 
 export async function updateInbox(inboxId: string, pageAccessToken: string): Promise<void> {

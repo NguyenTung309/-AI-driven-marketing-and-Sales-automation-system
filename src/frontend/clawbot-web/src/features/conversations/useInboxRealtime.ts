@@ -1,14 +1,52 @@
 import { useEffect, useState } from "react";
 import * as signalR from "@microsoft/signalr";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { getRealtimeAccessToken } from "@/shared/api/client";
 import type {
+  ConversationCursorPage,
   ConversationDetail,
+  ConversationListItem,
   ConversationListResponse,
   InboxConversationEvent,
   InboxMessage,
   InboxMessageEvent,
 } from "@/shared/api/inbox";
+
+type ConversationListCache =
+  | InfiniteData<ConversationCursorPage | ConversationListResponse>
+  | ConversationListResponse
+  | ConversationCursorPage;
+
+function patchConversationItems(
+  items: readonly ConversationListItem[],
+  conversationId: string,
+  patch: Partial<ConversationListItem>,
+): ConversationListItem[] {
+  return items.map((item) => (item.id === conversationId ? { ...item, ...patch } : item));
+}
+
+function patchConversationListCache(
+  old: ConversationListCache | undefined,
+  conversationId: string,
+  patch: Partial<ConversationListItem>,
+): ConversationListCache | undefined {
+  if (!old) return old;
+  if ("pages" in old && Array.isArray((old as InfiniteData<ConversationCursorPage>).pages)) {
+    const infinite = old as InfiniteData<ConversationCursorPage | ConversationListResponse>;
+    return {
+      ...infinite,
+      pages: infinite.pages.map((page) => ({
+        ...page,
+        items: patchConversationItems(page.items, conversationId, patch),
+      })),
+    };
+  }
+  const flat = old as ConversationListResponse | ConversationCursorPage;
+  return {
+    ...flat,
+    items: patchConversationItems(flat.items, conversationId, patch),
+  };
+}
 
 type ConnectionState = "disabled" | "connecting" | "connected" | "reconnecting" | "disconnected" | "error";
 
@@ -67,17 +105,12 @@ export function useInboxRealtime(enabled: boolean) {
         };
       });
 
-      queryClient.setQueriesData<ConversationListResponse>({ queryKey: ["inbox", "conversations"] }, (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          items: old.items.map((item) =>
-            item.id === evt.conversationId
-              ? { ...item, lastMessageAt: evt.sentAt, lastMessagePreview: evt.content }
-              : item
-          ),
-        };
-      });
+      queryClient.setQueriesData<ConversationListCache>({ queryKey: ["inbox", "conversations"] }, (old) =>
+        patchConversationListCache(old, evt.conversationId, {
+          lastMessageAt: evt.sentAt,
+          lastMessagePreview: evt.content,
+        }),
+      );
     });
 
     connection.on("conversation", (evt: InboxConversationEvent) => {
@@ -91,17 +124,13 @@ export function useInboxRealtime(enabled: boolean) {
         };
       });
 
-      queryClient.setQueriesData<ConversationListResponse>({ queryKey: ["inbox", "conversations"] }, (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          items: old.items.map((item) =>
-            item.id === evt.conversationId
-              ? { ...item, status: evt.status, assignedTo: evt.assignedTo, lastMessageAt: evt.lastMessageAt }
-              : item
-          ),
-        };
-      });
+      queryClient.setQueriesData<ConversationListCache>({ queryKey: ["inbox", "conversations"] }, (old) =>
+        patchConversationListCache(old, evt.conversationId, {
+          status: evt.status,
+          assignedTo: evt.assignedTo,
+          lastMessageAt: evt.lastMessageAt,
+        }),
+      );
     });
 
     connection.onreconnecting(() => setConnectionState("reconnecting"));

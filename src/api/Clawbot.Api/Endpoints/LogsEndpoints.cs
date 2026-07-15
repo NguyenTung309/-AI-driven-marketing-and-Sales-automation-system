@@ -1,3 +1,4 @@
+using Clawbot.Api.Common.Pagination;
 using Clawbot.Api.Middleware;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
@@ -57,6 +58,13 @@ public sealed record TaskRunListResponse(
     TaskRunStatsResponse Stats,
     IReadOnlyList<TaskRunListItemResponse> Items);
 
+/// <summary>Cursor envelope for task-run feed (keeps stats on every page for UI chips).</summary>
+public sealed record TaskRunCursorPage(
+    IReadOnlyList<TaskRunListItemResponse> Items,
+    string? NextCursor,
+    int? Total,
+    TaskRunStatsResponse Stats);
+
 public sealed record TaskRunDetailResponse(
     TaskRunListItemResponse Run,
     IReadOnlyList<TaskRunTraceResponse> Traces,
@@ -67,6 +75,11 @@ public sealed record AuditLogListResponse(
     int Page,
     int PageSize,
     IReadOnlyList<TaskRunAuditResponse> Items);
+
+public sealed record AuditLogCursorPage(
+    IReadOnlyList<TaskRunAuditResponse> Items,
+    string? NextCursor,
+    int? Total);
 
 public static class LogsEndpoints
 {
@@ -90,13 +103,12 @@ public static class LogsEndpoints
         [FromQuery] string? agentCode,
         [FromQuery] string? status,
         [FromQuery] string? q,
-        [FromQuery] int page = 1,
+        [FromQuery] string? cursor,
         [FromQuery] int pageSize = 25,
         CancellationToken ct = default)
     {
         var tenantId = tenants.Require().TenantId;
-        page = Math.Max(1, page);
-        pageSize = Math.Clamp(pageSize, 1, 100);
+        if (pageSize is < 1 or > 100) pageSize = 25;
 
         var agents = await LoadAgentsAsync(db, ct);
         var query = db.AgentSessions.AsNoTracking();
@@ -130,11 +142,20 @@ public static class LogsEndpoints
                 (session.AgentId.HasValue && matchingAgentIds.Contains(session.AgentId.Value)));
         }
 
-        var total = await query.CountAsync(ct);
-        var sessions = await query
+        var key = KeysetQuery.Decode(cursor);
+        int? total = key is null ? await query.CountAsync(ct) : null;
+        if (key is not null)
+        {
+            var ts = key.Value.Ts;
+            var id = key.Value.Id;
+            query = query.Where(session =>
+                session.StartedAt < ts || (session.StartedAt == ts && session.Id < id));
+        }
+
+        var fetched = await query
             .OrderByDescending(session => session.StartedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            .ThenByDescending(session => session.Id)
+            .Take(pageSize + 1)
             .Select(session => new SessionRow(
                 session.Id,
                 session.AgentId,
@@ -144,10 +165,11 @@ public static class LogsEndpoints
                 session.FinishedAt))
             .ToListAsync(ct);
 
+        var (sessions, nextCursor) = KeysetQuery.SliceWithCursor(fetched, pageSize, s => s.StartedAt, s => s.Id);
         var items = await BuildRunItemsAsync(db, tenantId, agents, sessions, clock.UtcNow, ct);
         var stats = await BuildStatsAsync(db, tenantId, clock.UtcNow, ct);
 
-        return Results.Ok(new TaskRunListResponse(total, page, pageSize, stats, items));
+        return Results.Ok(new TaskRunCursorPage(items, nextCursor, total, stats));
     }
 
     private static async Task<IResult> GetTaskRunAsync(
@@ -224,13 +246,12 @@ public static class LogsEndpoints
         ITenantAccessor tenants,
         [FromQuery] string? action,
         [FromQuery] string? resourceType,
-        [FromQuery] int page = 1,
+        [FromQuery] string? cursor,
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
     {
         var tenantId = tenants.Require().TenantId;
-        page = Math.Max(1, page);
-        pageSize = Math.Clamp(pageSize, 1, 200);
+        if (pageSize is < 1 or > 200) pageSize = 50;
 
         var query = db.AuditLogs
             .IgnoreQueryFilters()
@@ -242,11 +263,20 @@ public static class LogsEndpoints
         if (!string.IsNullOrWhiteSpace(resourceType))
             query = query.Where(audit => audit.ResourceType == resourceType.Trim());
 
-        var total = await query.CountAsync(ct);
-        var items = await query
+        var key = KeysetQuery.Decode(cursor);
+        int? total = key is null ? await query.CountAsync(ct) : null;
+        if (key is not null)
+        {
+            var ts = key.Value.Ts;
+            var id = key.Value.Id;
+            query = query.Where(audit =>
+                audit.OccurredAt < ts || (audit.OccurredAt == ts && audit.Id < id));
+        }
+
+        var fetched = await query
             .OrderByDescending(audit => audit.OccurredAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            .ThenByDescending(audit => audit.Id)
+            .Take(pageSize + 1)
             .Select(audit => new TaskRunAuditResponse(
                 audit.Id,
                 audit.Action,
@@ -258,7 +288,8 @@ public static class LogsEndpoints
                 audit.OccurredAt))
             .ToListAsync(ct);
 
-        return Results.Ok(new AuditLogListResponse(total, page, pageSize, items));
+        var (rows, nextCursor) = KeysetQuery.SliceWithCursor(fetched, pageSize, r => r.OccurredAt, r => r.Id);
+        return Results.Ok(new AuditLogCursorPage(rows, nextCursor, total));
     }
 
     private static async Task<IReadOnlyList<TaskRunListItemResponse>> BuildRunItemsAsync(

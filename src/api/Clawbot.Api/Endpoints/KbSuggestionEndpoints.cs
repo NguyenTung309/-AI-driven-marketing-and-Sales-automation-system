@@ -6,6 +6,7 @@ using Clawbot.Infrastructure.Learning;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.JsonWebTokens;
 
@@ -51,16 +52,22 @@ public static class KbSuggestionEndpoints
         string? status,
         AppDbContext db,
         ITenantAccessor tenants,
-        CancellationToken ct)
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
     {
         var tenantId = tenants.Require().TenantId;
+        if (page < 1) page = 1;
+        if (pageSize is < 1 or > 200) pageSize = 50;
         var query = db.KbSuggestions.Where(s => s.TenantId == tenantId);
         if (!string.IsNullOrWhiteSpace(status))
             query = query.Where(s => s.Status == status);
 
+        var total = await query.CountAsync(ct);
         var suggestions = await query
             .OrderByDescending(s => s.CreatedAt)
-            .Take(200)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(ct);
 
         var moduleIds = suggestions
@@ -77,7 +84,7 @@ public static class KbSuggestionEndpoints
         var dtos = suggestions
             .Select(s => ToDto(s, s.TargetKbModuleId is { } mid ? moduleNames.GetValueOrDefault(mid) : null))
             .ToList();
-        return Results.Ok(dtos);
+        return Results.Ok(new { items = dtos, total, page, pageSize });
     }
 
     private static async Task<IResult> ApproveAsync(

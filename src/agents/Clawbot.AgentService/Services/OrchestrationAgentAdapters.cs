@@ -1,23 +1,27 @@
 using System.Globalization;
 using Clawbot.Agents.Core;
 using Clawbot.Agents.Core.Orchestrator;
+using Clawbot.Infrastructure.Leads;
 
 namespace Clawbot.AgentService.Services;
 
 /// <summary>
-/// Orchestration adapter for the lead agent. Reuses <see cref="LeadAgentRunner"/> (the same core
-/// logic the gRPC service uses) so a planner step can score or create leads.
+/// Orchestration adapter for the lead agent. Supports single-lead score/create and
+/// tenant-wide batch rescore (weekly "Chấm điểm khách tiềm năng" jobs).
 /// </summary>
-public sealed class LeadOrchestrationAdapter(LeadAgentRunner runner) : AgentAdapterBase("lead-agent")
+public sealed class LeadOrchestrationAdapter(
+    LeadAgentRunner runner,
+    LeadBatchRescorer batchRescorer) : AgentAdapterBase("lead-agent")
 {
     private readonly LeadAgentRunner _runner = runner;
+    private readonly LeadBatchRescorer _batchRescorer = batchRescorer;
 
     protected override async Task<string> ExecuteCoreAsync(AgentTask task, CancellationToken ct)
     {
         var input = task.Input;
-        var operation = (AgentTaskInput.OptionalString(input, "operation") ?? "score").ToLowerInvariant();
+        var operation = (AgentTaskInput.OptionalString(input, "operation") ?? InferOperation(input)).ToLowerInvariant();
 
-        if (operation == "create")
+        if (operation is "create")
         {
             var result = await _runner.CreateWithSkillsAsync(new LeadCreateInput(
                 AgentTaskInput.RequiredGuid(input, "tenant_id"),
@@ -32,6 +36,26 @@ public sealed class LeadOrchestrationAdapter(LeadAgentRunner runner) : AgentAdap
             return Json(result);
         }
 
+        if (operation is "batch_score" or "rescore" or "score_all" or "prioritize")
+        {
+            var tenantId = AgentTaskInput.RequiredGuid(input, "tenant_id");
+            var topN = OptionalInt(input, "topN")
+                ?? OptionalInt(input, "top_n")
+                ?? 5;
+            if (topN > 50) topN = 5;
+            var batch = await _batchRescorer.RescoreTenantAsync(tenantId, topN, ct).ConfigureAwait(false);
+            return Json(batch);
+        }
+
+        // Single-lead score: requires lead_id. If missing, fall back to batch (planner often omits ids).
+        if (AgentTaskInput.OptionalGuid(input, "lead_id") is null)
+        {
+            var tenantId = AgentTaskInput.RequiredGuid(input, "tenant_id");
+            var topN = OptionalInt(input, "topN") ?? OptionalInt(input, "top_n") ?? 5;
+            var batch = await _batchRescorer.RescoreTenantAsync(tenantId, topN, ct).ConfigureAwait(false);
+            return Json(batch);
+        }
+
         var features = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (AgentTaskInput.OptionalString(input, "event_code") is { } eventCode)
             features["event_code"] = eventCode;
@@ -44,6 +68,20 @@ public sealed class LeadOrchestrationAdapter(LeadAgentRunner runner) : AgentAdap
             features, ct).ConfigureAwait(false);
         return Json(score);
     }
+
+    private static string InferOperation(IReadOnlyDictionary<string, string> input)
+    {
+        if (input.ContainsKey("leadCount") || input.ContainsKey("criteria") || input.ContainsKey("topN") || input.ContainsKey("top_n"))
+            return "batch_score";
+        if (AgentTaskInput.OptionalGuid(input, "lead_id") is null)
+            return "batch_score";
+        return "score";
+    }
+
+    private static int? OptionalInt(IReadOnlyDictionary<string, string> input, string key) =>
+        input.TryGetValue(key, out var value) && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
 }
 
 /// <summary>

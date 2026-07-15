@@ -18,6 +18,7 @@ public sealed record UpdateMemberRequest(Guid? AgentId);
 public sealed record ReassignRequest(Guid NewAgentId);
 public sealed record CreateInboxRequest(string Platform, string ExternalPageId, string? PageAccessToken, Guid? AgentId);
 public sealed record UpdateInboxRequest(string? PageAccessToken);
+public sealed record UpdatePancakeChannelRequest(string? Name, string? PageAccessToken);
 
 public static class AdminInboxEndpoints
 {
@@ -28,12 +29,18 @@ public static class AdminInboxEndpoints
             .RequirePermission("admin:inboxes");
         grp.MapGet("/users/simple", ListSimpleUsersAsync);
         grp.MapPut("/inboxes/{id:guid}/members", UpdateMemberAsync);
+        grp.MapDelete("/inboxes/{id:guid}/members/{agentId:guid}", UnlinkMemberAsync);
         grp.MapPost("/inboxes/{id:guid}/reassign", ReassignAsync);
         grp.MapGet("/inboxes/{id:guid}/members", ListMembersAsync);
         grp.MapGet("/inboxes/{id:guid}/assignable-agents", ListAssignableAgentsAsync);
         grp.MapGet("/inboxes", ListInboxesAsync);
         grp.MapPost("/inboxes", CreateInboxAsync);
         grp.MapPut("/inboxes/{id:guid}", UpdateInboxAsync);
+
+        var pancakeChannels = app.MapGroup("/api/admin/pancake-channels")
+            .RequireRateLimiting(Middleware.RateLimitingExtensions.GeneralPolicy)
+            .RequirePermission("users:pancake-token:manage");
+        pancakeChannels.MapPatch("/{id:guid}", UpdatePancakeChannelAsync);
         return app;
     }
 
@@ -46,6 +53,43 @@ public static class AdminInboxEndpoints
             .Select(u => new { u.Id, u.DisplayName, u.Email })
             .ToListAsync(ct);
         return Results.Ok(users);
+    }
+
+    private static async Task<IResult> UnlinkMemberAsync(
+        Guid id,
+        Guid agentId,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IInboxNotifier notifier,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var inbox = await db.Inboxes
+            .FirstOrDefaultAsync(i => i.Id == id && i.TenantId == tenantId && i.DeletedAt == null, ct);
+        if (inbox is null) return Results.NotFound();
+
+        var member = await db.InboxMembers
+            .FirstOrDefaultAsync(m => m.InboxId == id && m.AgentId == agentId && m.TenantId == tenantId, ct);
+        if (member is null) return Results.NotFound();
+
+        var conversations = await db.Conversations
+            .Where(c => c.TenantId == tenantId && c.InboxId == id && c.AssignedTo == agentId)
+            .ToListAsync(ct);
+        foreach (var conversation in conversations)
+            conversation.Unassign();
+
+        db.InboxMembers.Remove(member);
+        await db.SaveChangesAsync(ct);
+
+        foreach (var conversation in conversations)
+        {
+            await notifier.NotifyConversationUpdatedAsync(
+                tenantId,
+                new InboxConversationEvent(conversation.Id, conversation.Status, conversation.AssignedTo, conversation.LastMessageAt),
+                ct);
+        }
+
+        return Results.NoContent();
     }
 
     private static async Task<IResult> UpdateMemberAsync(
@@ -79,6 +123,9 @@ public static class AdminInboxEndpoints
         if (!agentExists) return Results.BadRequest(new { error = "agent_not_found" });
 
         var existing = await db.InboxMembers.Where(m => m.InboxId == id).ToListAsync(ct);
+        if (existing.Count == 1 && existing[0].AgentId == body.AgentId.Value)
+            return Results.NoContent();
+
         var oldMembers = existing.Select(e => e.AgentId).ToList();
         db.InboxMembers.RemoveRange(existing);
         db.InboxMembers.Add(InboxMember.Create(tenantId, id, body.AgentId.Value));
@@ -90,9 +137,13 @@ public static class AdminInboxEndpoints
             conv.Unassign();
 
         await db.SaveChangesAsync(ct);
-        foreach (var oldId in oldMembers)
-            await notifier.NotifyConversationUpdatedAsync(tenantId,
-                new InboxConversationEvent(id, "reassigned", null, null), ct);
+        foreach (var conversation in oldConvs)
+        {
+            await notifier.NotifyConversationUpdatedAsync(
+                tenantId,
+                new InboxConversationEvent(conversation.Id, conversation.Status, conversation.AssignedTo, conversation.LastMessageAt),
+                ct);
+        }
 
         return Results.NoContent();
     }
@@ -193,6 +244,53 @@ public static class AdminInboxEndpoints
             .OrderBy(i => i.Platform).ThenBy(i => i.Name)
             .ToListAsync(ct);
         return Results.Ok(inboxes);
+    }
+
+    private static async Task<IResult> UpdatePancakeChannelAsync(
+        Guid id,
+        UpdatePancakeChannelRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IEncryptor encryptor,
+        IClock clock,
+        CancellationToken ct)
+    {
+        const int maxNameLength = 256;
+        const int maxEncryptedTokenLength = 1024;
+        var hasName = body.Name is not null;
+        var hasToken = body.PageAccessToken is not null;
+        if (!hasName && !hasToken)
+            return Results.BadRequest(new { error = "channel_update_required", message = "Can nhap ten kenh hoac token moi." });
+
+        var name = body.Name?.Trim();
+        if (hasName && string.IsNullOrEmpty(name))
+            return Results.BadRequest(new { error = "channel_name_required", message = "Ten kenh khong duoc de trong." });
+        if (name?.Length > maxNameLength)
+            return Results.BadRequest(new { error = "channel_name_too_long", message = $"Ten kenh toi da {maxNameLength} ky tu." });
+
+        var token = body.PageAccessToken?.Trim();
+        if (hasToken && string.IsNullOrEmpty(token))
+            return Results.BadRequest(new { error = "page_access_token_invalid", message = "Pancake Page Access Token khong hop le." });
+
+        var tenantId = tenants.Require().TenantId;
+        var inbox = await db.Inboxes
+            .FirstOrDefaultAsync(i => i.Id == id && i.TenantId == tenantId && i.DeletedAt == null, ct);
+        if (inbox is null) return Results.NotFound();
+
+        var now = clock.UtcNow;
+        if (hasName)
+            inbox.UpdateName(name!, now);
+
+        if (hasToken)
+        {
+            var encryptedToken = encryptor.Encrypt(token!);
+            if (encryptedToken.Length > maxEncryptedTokenLength)
+                return Results.BadRequest(new { error = "page_access_token_invalid", message = "Pancake Page Access Token qua dai." });
+            inbox.SetAccessToken(encryptedToken, now);
+        }
+
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
     }
 
     private static async Task<IResult> UpdateInboxAsync(

@@ -3,13 +3,16 @@ import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
 import { Card } from "@/shared/ui/Card";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
+import { InfiniteScrollSentinel, useDebounce, useInfiniteList } from "@/shared/ui";
 import { operationalPhaseLabel, toSafeOperationalText } from "@/shared/utils/userText";
 import {
   getTaskRunDetail,
   listLogAudit,
   listTaskRuns,
+  type AuditLogListResponse,
   type TaskRunAudit,
   type TaskRunListItem,
+  type TaskRunListResponse,
   type TaskRunTrace,
 } from "@/shared/api/logs";
 
@@ -206,18 +209,20 @@ export default function TaskLogsPage() {
   const [query, setQuery] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
-  const runsQuery = useQuery({
-    queryKey: ["logs", "task-runs", status, query],
-    queryFn: () =>
+  const debouncedQuery = useDebounce(query, 300);
+  const runsList = useInfiniteList<TaskRunListItem, TaskRunListResponse>({
+    queryKey: ["logs", "task-runs", status, debouncedQuery],
+    queryFn: (pageParam) =>
       listTaskRuns({
         status: status || undefined,
-        q: query || undefined,
-        page: 1,
+        q: debouncedQuery || undefined,
+        cursor: typeof pageParam === "string" ? pageParam : null,
         pageSize: 25,
       }),
   });
+  const runsQuery = runsList.query;
 
-  const runs = runsQuery.data?.items ?? EMPTY_RUNS;
+  const runs = runsList.items.length ? runsList.items : EMPTY_RUNS;
   const activeRunId = selectedRunId ?? runs[0]?.id ?? null;
 
   const detailQuery = useQuery({
@@ -226,15 +231,26 @@ export default function TaskLogsPage() {
     enabled: Boolean(activeRunId),
   });
 
-  const auditQuery = useQuery({
+  const auditList = useInfiniteList<TaskRunAudit, AuditLogListResponse>({
     queryKey: ["logs", "audit"],
-    queryFn: () => listLogAudit({ page: 1, pageSize: 12 }),
+    queryFn: (pageParam) =>
+      listLogAudit({
+        cursor: typeof pageParam === "string" ? pageParam : null,
+        pageSize: 12,
+      }),
   });
+  const auditQuery = auditList.query;
 
-  const stats = runsQuery.data?.stats;
+  const stats = useMemo(() => {
+    const pages = (runsQuery.data?.pages ?? []) as TaskRunListResponse[];
+    for (const p of pages) {
+      if (p.stats) return p.stats;
+    }
+    return undefined;
+  }, [runsQuery.data]);
   const traces = detailQuery.data?.traces ?? EMPTY_TRACES;
   const runAudit = detailQuery.data?.auditEvents ?? EMPTY_AUDIT;
-  const recentAudit = auditQuery.data?.items ?? EMPTY_AUDIT;
+  const recentAudit = auditList.items.length ? auditList.items : EMPTY_AUDIT;
 
   const detailEvents = useMemo(() => {
     if (runAudit.length) return runAudit;
@@ -298,7 +314,14 @@ export default function TaskLogsPage() {
               Không thể tải nhật ký tác vụ. Vui lòng thử lại hoặc kiểm tra quyền truy cập.
             </div>
           ) : (
-            <RunTable activeRunId={activeRunId} onSelect={setSelectedRunId} runs={runs} />
+            <>
+              <RunTable activeRunId={activeRunId} onSelect={setSelectedRunId} runs={runs} />
+              <InfiniteScrollSentinel
+                hasNextPage={runsList.hasNextPage}
+                isFetchingNextPage={runsList.isFetchingNextPage}
+                onLoadMore={runsList.fetchNextPage}
+              />
+            </>
           )}
         </Card>
 

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, StatusPill, ToggleSwitch } from "@/shared/ui";
-import { errorMessage, Field, inputClass } from "./adminHelpers";
+import { errorMessage, inputClass } from "./adminHelpers";
+import { Field } from "./adminUi";
 import {
   disconnectMeta,
   getMetaIntegrationStatus,

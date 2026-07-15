@@ -10,7 +10,8 @@ import {
   type AdminRecurringJob,
   type AdminScheduleJob,
 } from "@/shared/api/admin";
-import { EmptyState, formatDateTime } from "./adminHelpers";
+import { formatDateTime } from "./adminHelpers";
+import { EmptyState } from "./adminUi";
 
 const CADENCE_LABELS: Record<string, string> = {
   daily: "Hằng ngày",

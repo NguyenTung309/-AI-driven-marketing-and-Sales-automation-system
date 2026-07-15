@@ -99,6 +99,17 @@ public sealed class LeadScoringEngineTests
 
         act.Should().Throw<ArgumentNullException>();
     }
+
+    [Fact]
+    public void Alias_asked_price_matches_asks_price_rule()
+    {
+        var rules = new[] { Rule("asks_price", 10) };
+
+        var result = LeadScoringEngine.Evaluate("asked_price", null, rules);
+
+        result.Delta.Should().Be(10);
+        result.MatchedRules.Should().ContainSingle(r => r.StartsWith("asks_price"));
+    }
 }
 
 // M15 / Lead-2 — LeastBusyLeadAssignmentService picks the freest sale.

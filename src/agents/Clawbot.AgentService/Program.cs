@@ -90,6 +90,7 @@ builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Lead.KeywordLeadSignalC
 builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Lead.ILeadSignalClassifier,
     Clawbot.Agents.Core.Skills.Lead.ClaudeLeadSignalClassifier>();
 builder.Services.AddScoped<LeadAutoScorer>();
+// LeadBatchRescorer registered via Infrastructure DI (shared with API rescore endpoint).
 builder.Services.AddScoped<IAgent, LeadOrchestrationAdapter>();
 builder.Services.AddScoped<IAgent, ReportOrchestrationAdapter>();
 // M25: persist Claude cost to claude_cost_ledger (overrides in-memory tracker from the skills module).

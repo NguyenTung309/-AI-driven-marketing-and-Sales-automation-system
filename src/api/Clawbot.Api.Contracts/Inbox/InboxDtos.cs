@@ -61,3 +61,9 @@ public sealed record ConversationListResponse(
     int Total,
     int Page,
     int PageSize);
+
+/// <summary>Cursor feed for conversations (default last_message_at keyset).</summary>
+public sealed record ConversationCursorPage(
+    IReadOnlyList<ConversationListItemDto> Items,
+    string? NextCursor,
+    int? Total);

@@ -1,5 +1,6 @@
 import { Alert, Button, Card, StatusPill } from "@/shared/ui";
-import { EmptyState, formatDate, formatDateTime, keyStatus, keyTone } from "./adminHelpers";
+import { formatDate, formatDateTime, keyStatus, keyTone } from "./adminHelpers";
+import { EmptyState } from "./adminUi";
 import type { ApiKeyItem, CreatedApiKey } from "@/shared/api/admin";
 
 interface AdminKeysTabProps {

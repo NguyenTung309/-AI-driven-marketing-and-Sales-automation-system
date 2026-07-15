@@ -1,5 +1,6 @@
 import { Card } from "@/shared/ui";
-import { EmptyState, formatDateTime } from "./adminHelpers";
+import { formatDateTime } from "./adminHelpers";
+import { EmptyState } from "./adminUi";
 import type { AuditLog } from "@/shared/api/admin";
 
 interface AdminAuditTabProps {
