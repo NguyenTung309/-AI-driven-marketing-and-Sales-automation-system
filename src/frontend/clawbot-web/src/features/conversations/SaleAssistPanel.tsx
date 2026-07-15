@@ -283,7 +283,7 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
   const draftRun = useJobRun<SaleAssistDraftResponse>({
     onResult: (response) => {
       if (!conversationId) return;
-      setDraftState({ conversationId, response, text: response.draftText });
+      setDraftState({ conversationId, response, text: response.draftText ?? "" });
       onNotify?.("AI đã tạo bản nháp, đang chờ sale duyệt.", "success");
     },
   });
@@ -452,7 +452,7 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
               <span className="text-label-sm text-on-surface-variant">{responseSpeedLabel(activeDraft.response.latencyMs)}</span>
             </div>
             <textarea
-              value={activeDraft.text}
+              value={activeDraft.text ?? ""}
               onChange={(event) =>
                 setDraftState((old) => (old ? { ...old, text: event.target.value } : old))
               }
@@ -460,7 +460,15 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
               className="max-h-48 min-h-28 w-full resize-y rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary focus:ring-1 focus:ring-primary"
             />
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button type="button" size="sm" onClick={() => applyDraft(activeDraft.text)} disabled={!activeDraft.text.trim()}>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  applyDraft(activeDraft.text ?? "");
+                  setDraftState(null);
+                }}
+                disabled={!(activeDraft.text ?? "").trim()}
+              >
                 <span aria-hidden="true" className="material-symbols-outlined text-[16px]">approval</span>
                 Dùng bản nháp
               </Button>

@@ -59,6 +59,6 @@ public sealed class AgentSandboxJobHandler(
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         var result = new AgentSandboxResponse(session.Id, reply.Text, now.AddMilliseconds(1));
-        return new JobResult($"/agents/runs/{session.Id}", JsonSerializer.Serialize(result));
+        return new JobResult($"/agents/runs/{session.Id}", JsonSerializer.Serialize(result, JobResultJson.Web));
     }
 }

@@ -4,8 +4,10 @@ using Clawbot.Agents.Core.Skills.Lead;
 using Clawbot.Agents.Core.Skills.Ops;
 using Clawbot.Domain.Analytics;
 using Clawbot.Domain.Leads;
+using Clawbot.Infrastructure.Leads;
 using Clawbot.SharedKernel.Time;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
 namespace Clawbot.AgentService.Tests.Services;
@@ -77,7 +79,12 @@ public sealed class OrchestrationAgentAdaptersTests
             Substitute.For<IContactEnricher>(),
             Substitute.For<ITimezoneDetector>(),
             Substitute.For<ISpamDetector>());
-        var adapter = new LeadOrchestrationAdapter(runner);
+        var batchRescorer = new LeadBatchRescorer(
+            fx.Db,
+            new KeywordLeadSignalClassifier(),
+            clock,
+            NullLogger<LeadBatchRescorer>.Instance);
+        var adapter = new LeadOrchestrationAdapter(runner, batchRescorer);
 
         var result = await adapter.ExecuteAsync(Task("t1", new Dictionary<string, string>
         {

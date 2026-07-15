@@ -17,6 +17,12 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
+  const [wasOpen, setWasOpen] = useState(open);
+
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setQuery('');
+  }
 
   const commands: CommandItem[] = [
     { id: 'channels', label: 'Chon kenh', description: 'Chuyen den man hinh chon kenh', action: () => { navigate('/inbox'); onClose(); } },
@@ -29,10 +35,9 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
     : commands;
 
   useEffect(() => {
-    if (open) {
-      setQuery('');
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
+    if (!open) return;
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 50);
+    return () => window.clearTimeout(timer);
   }, [open]);
 
   useEffect(() => {

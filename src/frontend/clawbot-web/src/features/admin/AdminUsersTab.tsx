@@ -1,13 +1,17 @@
 import { Button, Card, StatusPill } from "@/shared/ui";
-import { EmptyState, formatDateTime, inputClass } from "./adminHelpers";
-import type { AdminUser } from "@/shared/api/admin";
+import { formatDateTime, inputClass } from "./adminHelpers";
+import { EmptyState } from "./adminUi";
+import type { AdminUser, PancakeChannelInfo } from "@/shared/api/admin";
 
 interface AdminUsersTabProps {
   readonly users: readonly AdminUser[];
   readonly search: string;
   readonly onSearchChange: (value: string) => void;
   readonly canManageUsers: boolean;
+  readonly canManagePancakeToken: boolean;
+  readonly canManageInboxOwners: boolean;
   readonly onCreateUser: () => void;
+  readonly onManageChannel: (user: AdminUser, channel: PancakeChannelInfo) => void;
   readonly onEditUser: (user: AdminUser) => void;
   readonly onToggleActive: (user: AdminUser) => void;
   readonly activeMutationPending: boolean;
@@ -20,7 +24,10 @@ export function AdminUsersTab({
   search,
   onSearchChange,
   canManageUsers,
+  canManagePancakeToken,
+  canManageInboxOwners,
   onCreateUser,
+  onManageChannel,
   onEditUser,
   onToggleActive,
   activeMutationPending,
@@ -46,7 +53,7 @@ export function AdminUsersTab({
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[860px] w-full border-collapse text-left">
+          <table className="min-w-[1040px] w-full border-collapse text-left">
             <thead className="bg-surface-variant text-label-sm uppercase text-secondary">
               <tr>
                 <th className="px-4 py-3 font-bold">Người dùng</th>
@@ -75,13 +82,33 @@ export function AdminUsersTab({
                   <td className="px-4 py-4 text-body-md text-on-surface-variant">{formatDateTime(user.lastLoginAt)}</td>
                   <td className="px-4 py-4">
                     {user.pancakeChannels && user.pancakeChannels.length > 0 ? (
-                      <div className="flex flex-col gap-1">
+                      <div className="flex min-w-[330px] flex-col gap-2">
                         {user.pancakeChannels.map((channel) => (
-                          <div key={channel.pageId} className="flex items-center gap-2">
-                            <span className="font-mono text-mono-status text-on-surface-variant">{channel.pageId}</span>
-                            <StatusPill tone={channel.hasToken ? "success" : "warning"}>
-                              {channel.hasToken ? "Có token" : "Thiếu token"}
-                            </StatusPill>
+                          <div key={channel.inboxId} className="rounded border border-outline bg-surface px-3 py-2">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate text-body-md font-semibold text-secondary">{channel.name || channel.pageId}</p>
+                                <div className="mt-1 flex flex-wrap items-center gap-2">
+                                  <span className="text-label-sm font-medium uppercase text-on-surface-variant">{channel.platform}</span>
+                                  <span className="font-mono text-mono-status text-on-surface-variant">{channel.pageId}</span>
+                                  <StatusPill tone={channel.hasToken ? "success" : "warning"}>
+                                    {channel.hasToken ? "Có token" : "Thiếu token"}
+                                  </StatusPill>
+                                </div>
+                              </div>
+                              {canManagePancakeToken || canManageInboxOwners ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="shrink-0"
+                                  onClick={() => onManageChannel(user, channel)}
+                                  aria-label={`Quản lý kênh ${channel.name || channel.pageId} của ${user.displayName}`}
+                                >
+                                  <span aria-hidden="true" className="material-symbols-outlined text-[18px]">tune</span>
+                                </Button>
+                              ) : null}
+                            </div>
                           </div>
                         ))}
                       </div>

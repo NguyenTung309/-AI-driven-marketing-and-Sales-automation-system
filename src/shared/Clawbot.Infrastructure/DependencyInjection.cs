@@ -155,6 +155,8 @@ public static class DependencyInjection
         services.AddScoped<ILeadDedupService, EfLeadDedupService>();
         services.AddScoped<IAssignmentPoolSource, EfAssignmentPoolSource>();
         services.AddClawbotLead(); // ILeadAssignmentService, consumed by LeadsEndpoints.
+        services.AddSingleton<Clawbot.Agents.Core.Skills.Lead.KeywordLeadSignalClassifier>();
+        services.AddScoped<Clawbot.Infrastructure.Leads.LeadBatchRescorer>();
         services.AddScoped<IPancakeConfigResolver, PancakeConfigResolver>();
         // SPEC-16 §5.1: per-page Pancake token model — page-token read resolver + mint/store service + HTTP gateway.
         var pancakeUserApi = cfg.GetSection(PancakeUserApiOptions.SectionName).Get<PancakeUserApiOptions>() ?? new PancakeUserApiOptions();

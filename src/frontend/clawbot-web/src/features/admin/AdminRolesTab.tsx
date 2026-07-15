@@ -1,5 +1,6 @@
 import { Button, Card, StatusPill } from "@/shared/ui";
-import { EmptyState, roleTone } from "./adminHelpers";
+import { roleTone } from "./adminHelpers";
+import { EmptyState } from "./adminUi";
 import type { Permission, Role } from "@/shared/api/admin";
 
 interface AdminRolesTabProps {

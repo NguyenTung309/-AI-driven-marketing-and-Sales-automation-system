@@ -165,8 +165,11 @@ export function KbSuggestionsPanel({ alwaysShow = false }: KbSuggestionsPanelPro
   const [rejectTarget, setRejectTarget] = useState<KbSuggestion | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
-  const suggestionsQuery = useQuery({ queryKey: ["kb", "suggestions"], queryFn: () => listKbSuggestions() });
-  const suggestions = suggestionsQuery.data ?? EMPTY;
+  const suggestionsQuery = useQuery({
+    queryKey: ["kb", "suggestions"],
+    queryFn: () => listKbSuggestions(undefined, { page: 1, pageSize: 100 }),
+  });
+  const suggestions = Array.isArray(suggestionsQuery.data?.items) ? suggestionsQuery.data.items : EMPTY;
   const pending = suggestions.filter((s) => s.status === "pending");
   const decided = suggestions.filter((s) => s.status !== "pending");
 

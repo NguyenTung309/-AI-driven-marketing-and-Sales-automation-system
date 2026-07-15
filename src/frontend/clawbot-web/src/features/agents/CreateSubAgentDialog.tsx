@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Input, Modal } from "@/shared/ui";
 import { listLlmConfigs } from "@/shared/api/llmConfigs";
@@ -40,46 +40,59 @@ function parseTools(json: string | undefined): readonly string[] {
   }
 }
 
+type FormState = {
+  code: string;
+  displayName: string;
+  agentType: string;
+  personaPrompt: string;
+  llmConfigId: string;
+  tools: readonly string[];
+};
+
+function formFromEditing(editing: OrchestrationV2Agent | null): FormState {
+  if (editing) {
+    return {
+      code: editing.code,
+      displayName: editing.displayName,
+      agentType: editing.agentType || "custom",
+      personaPrompt: editing.personaPrompt || DEFAULT_PERSONA,
+      llmConfigId: editing.llmConfigId ?? "",
+      tools: parseTools(editing.allowedToolsJson),
+    };
+  }
+  return {
+    code: "",
+    displayName: "",
+    agentType: "content",
+    personaPrompt: DEFAULT_PERSONA,
+    llmConfigId: "",
+    tools: [],
+  };
+}
+
 export function CreateSubAgentDialog({ open, editing, onClose, onSaved }: CreateSubAgentDialogProps) {
   const queryClient = useQueryClient();
   const llmConfigsQuery = useQuery({ queryKey: ["llm-configs"], queryFn: listLlmConfigs, enabled: open });
 
-  const [code, setCode] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [agentType, setAgentType] = useState<string>("content");
-  const [personaPrompt, setPersonaPrompt] = useState(DEFAULT_PERSONA);
-  const [llmConfigId, setLlmConfigId] = useState("");
-  const [tools, setTools] = useState<readonly string[]>([]);
+  const [formKey, setFormKey] = useState(`${open}:${editing?.code ?? "new"}`);
+  const [form, setForm] = useState<FormState>(() => formFromEditing(editing));
 
-  useEffect(() => {
-    if (!open) return;
-    if (editing) {
-      setCode(editing.code);
-      setDisplayName(editing.displayName);
-      setAgentType(editing.agentType || "custom");
-      setPersonaPrompt(editing.personaPrompt || DEFAULT_PERSONA);
-      setLlmConfigId(editing.llmConfigId ?? "");
-      setTools(parseTools(editing.allowedToolsJson));
-    } else {
-      setCode("");
-      setDisplayName("");
-      setAgentType("content");
-      setPersonaPrompt(DEFAULT_PERSONA);
-      setLlmConfigId("");
-      setTools([]);
-    }
-  }, [open, editing]);
+  const nextKey = `${open}:${editing?.code ?? "new"}`;
+  if (open && nextKey !== formKey) {
+    setFormKey(nextKey);
+    setForm(formFromEditing(editing));
+  }
 
   const saveMutation = useMutation({
     mutationFn: () =>
       upsertOrchestrationV2Agent({
-        code: code.trim(),
-        displayName: displayName.trim(),
-        agentType,
-        personaPrompt: personaPrompt.trim(),
+        code: form.code.trim(),
+        displayName: form.displayName.trim(),
+        agentType: form.agentType,
+        personaPrompt: form.personaPrompt.trim(),
         isOrchestratable: true,
-        allowedToolsJson: JSON.stringify(tools),
-        llmConfigId: llmConfigId === "" ? UNBIND_LLM_CONFIG : llmConfigId,
+        allowedToolsJson: JSON.stringify(form.tools),
+        llmConfigId: form.llmConfigId === "" ? UNBIND_LLM_CONFIG : form.llmConfigId,
       }),
     onSuccess: async (saved) => {
       await queryClient.invalidateQueries({ queryKey: ["orchestration-v2", "agents"] });
@@ -89,10 +102,14 @@ export function CreateSubAgentDialog({ open, editing, onClose, onSaved }: Create
   });
 
   function toggleTool(name: string) {
-    setTools((current) => (current.includes(name) ? current.filter((t) => t !== name) : [...current, name]));
+    setForm((current) => ({
+      ...current,
+      tools: current.tools.includes(name) ? current.tools.filter((t) => t !== name) : [...current.tools, name],
+    }));
   }
 
-  const canSubmit = code.trim().length >= 2 && displayName.trim().length >= 2 && personaPrompt.trim().length >= 10;
+  const canSubmit =
+    form.code.trim().length >= 2 && form.displayName.trim().length >= 2 && form.personaPrompt.trim().length >= 10;
 
   return (
     <Modal
@@ -121,8 +138,13 @@ export function CreateSubAgentDialog({ open, editing, onClose, onSaved }: Create
           </label>
           <Input
             id="sub-agent-code"
-            value={code}
-            onChange={(event) => setCode(event.target.value.toLowerCase().replaceAll(/[^a-z0-9-_]/g, ""))}
+            value={form.code}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                code: event.target.value.toLowerCase().replaceAll(/[^a-z0-9-_]/g, ""),
+              }))
+            }
             placeholder="vd: seo-writer"
             disabled={Boolean(editing)}
           />
@@ -131,13 +153,23 @@ export function CreateSubAgentDialog({ open, editing, onClose, onSaved }: Create
           <label className="mb-1 block text-body-md font-bold text-secondary" htmlFor="sub-agent-name">
             Tên hiển thị
           </label>
-          <Input id="sub-agent-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="vd: SEO Writer" />
+          <Input
+            id="sub-agent-name"
+            value={form.displayName}
+            onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))}
+            placeholder="vd: SEO Writer"
+          />
         </div>
         <div>
           <label className="mb-1 block text-body-md font-bold text-secondary" htmlFor="sub-agent-type">
             Nhóm vai trò
           </label>
-          <select id="sub-agent-type" className={SELECT_CLASS} value={agentType} onChange={(event) => setAgentType(event.target.value)}>
+          <select
+            id="sub-agent-type"
+            className={SELECT_CLASS}
+            value={form.agentType}
+            onChange={(event) => setForm((current) => ({ ...current, agentType: event.target.value }))}
+          >
             {AGENT_TYPES.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
@@ -149,7 +181,12 @@ export function CreateSubAgentDialog({ open, editing, onClose, onSaved }: Create
           <label className="mb-1 block text-body-md font-bold text-secondary" htmlFor="sub-agent-llm">
             LLM sử dụng
           </label>
-          <select id="sub-agent-llm" className={SELECT_CLASS} value={llmConfigId} onChange={(event) => setLlmConfigId(event.target.value)}>
+          <select
+            id="sub-agent-llm"
+            className={SELECT_CLASS}
+            value={form.llmConfigId}
+            onChange={(event) => setForm((current) => ({ ...current, llmConfigId: event.target.value }))}
+          >
             <option value="">— Chưa gắn (orchestrator sẽ bỏ qua) —</option>
             {(llmConfigsQuery.data ?? []).map((config) => (
               <option key={config.id} value={config.id}>
@@ -167,8 +204,8 @@ export function CreateSubAgentDialog({ open, editing, onClose, onSaved }: Create
         </label>
         <textarea
           id="sub-agent-persona"
-          value={personaPrompt}
-          onChange={(event) => setPersonaPrompt(event.target.value)}
+          value={form.personaPrompt}
+          onChange={(event) => setForm((current) => ({ ...current, personaPrompt: event.target.value }))}
           rows={6}
           className="w-full rounded-lg border border-outline bg-surface-container-lowest p-3 font-mono text-mono-status text-on-surface focus:border-primary focus:outline-none"
         />
@@ -176,7 +213,7 @@ export function CreateSubAgentDialog({ open, editing, onClose, onSaved }: Create
 
       <div>
         <p className="mb-2 text-body-md font-bold text-secondary">Công cụ được phép dùng</p>
-        <ToolPicker onToggle={toggleTool} selected={tools} />
+        <ToolPicker onToggle={toggleTool} selected={form.tools} />
       </div>
     </Modal>
   );
