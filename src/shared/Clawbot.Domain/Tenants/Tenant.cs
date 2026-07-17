@@ -31,6 +31,9 @@ public sealed class Tenant : AggregateRoot<Guid>
     public decimal? MonthlyCostCapUsd { get; private set; }
     // Sale gửi tay -> AI tạm nhường bao lâu (phút) rồi tự bật lại. Cấu hình per-tenant, mặc định 5.
     public int AiAutoReplyResumeMinutes { get; private set; } = 5;
+    // Hội thoại mở không hoạt động quá ngưỡng này (phút) thì cảnh báo sale; quá gấp đôi thì
+    // escalate Trưởng phòng KD. Cấu hình per-tenant, mặc định 5.
+    public int IdleAlertMinutes { get; private set; } = 5;
     public DateTimeOffset CreatedAt { get; private set; }
 
     private Tenant() { }
@@ -84,6 +87,10 @@ public sealed class Tenant : AggregateRoot<Guid>
     // <= 0 → về mặc định 5 phút; clamp trần 1 ngày để tránh cấu hình vô lý.
     public void SetAiAutoReplyResumeMinutes(int minutes) =>
         AiAutoReplyResumeMinutes = minutes <= 0 ? 5 : Math.Min(minutes, 1440);
+
+    // <= 0 → về mặc định 5 phút; clamp trần 1 ngày để tránh cấu hình vô lý.
+    public void SetIdleAlertMinutes(int minutes) =>
+        IdleAlertMinutes = minutes <= 0 ? 5 : Math.Min(minutes, 1440);
 
     private static string? NormalizeNullable(string? value)
     {

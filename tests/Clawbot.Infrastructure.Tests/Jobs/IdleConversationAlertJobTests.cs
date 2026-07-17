@@ -1,4 +1,5 @@
 using Clawbot.Domain.Conversations;
+using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.SharedKernel.Inbox;
 using Clawbot.SharedKernel.Notifications;
@@ -14,7 +15,9 @@ public sealed class IdleConversationAlertJobTests
     [Fact]
     public async Task RunAsync_escalates_10_minute_idle_conversation_to_sales_lead_users()
     {
-        using var fx = new TestAppDb();
+        var tenant = Tenant.Create("idle-default", "Idle Default", "free", DateTimeOffset.UtcNow);
+        using var fx = new TestAppDb(tenant.Id);
+        fx.Db.Tenants.Add(tenant);
         var assignedSaleId = Guid.NewGuid();
         var salesLeadA = Guid.Parse("11111111-1111-1111-1111-111111111111");
         var salesLeadB = Guid.Parse("22222222-2222-2222-2222-222222222222");
@@ -46,6 +49,38 @@ public sealed class IdleConversationAlertJobTests
             .Select(r => r.UserId)
             .Should().BeEquivalentTo([salesLeadA, salesLeadB]);
         publisher.Requests.Should().NotContain(r => r.Type == "idle_escalation" && r.UserId == null);
+    }
+
+    [Fact]
+    public async Task RunAsync_uses_tenant_configured_idle_threshold()
+    {
+        var tenant = Tenant.Create("idle-20", "Idle 20", "free", DateTimeOffset.UtcNow);
+        tenant.SetIdleAlertMinutes(20);
+        using var fx = new TestAppDb(tenant.Id);
+        fx.Db.Tenants.Add(tenant);
+        var now = DateTimeOffset.UtcNow;
+        // 11' im lặng: dưới ngưỡng 20' -> im; 41' im lặng: quá ngưỡng + trong band escalate (40'..42').
+        var below = Conversation.Open(fx.TenantId, "pancake", "thread-below", now.AddMinutes(-30));
+        below.AppendMessage("in", "customer", "Hỏi giá", "text", now.AddMinutes(-11));
+        var past = Conversation.Open(fx.TenantId, "pancake", "thread-past", now.AddHours(-2));
+        past.AppendMessage("in", "customer", "Cần tư vấn", "text", now.AddMinutes(-41));
+        fx.Db.Conversations.AddRange(below, past);
+        await fx.Db.SaveChangesAsync();
+
+        var publisher = new RecordingNotificationPublisher();
+        var job = new IdleConversationAlertJob(
+            fx.Db,
+            Substitute.For<IInboxNotifier>(),
+            publisher,
+            new RecordingIdleEscalationRecipientResolver(),
+            NullLogger<IdleConversationAlertJob>.Instance);
+
+        await job.RunAsync(CancellationToken.None);
+
+        publisher.Requests.Should().NotContain(r => r.Link == $"/conversations/{below.Id}");
+        publisher.Requests.Should().Contain(r => r.Type == "idle" && r.Link == $"/conversations/{past.Id}");
+        publisher.Requests.Should().Contain(r =>
+            r.Type == "idle_escalation" && r.Link == $"/conversations/{past.Id}" && r.Title.Contains("40 phút"));
     }
 
     private sealed class RecordingNotificationPublisher : INotificationPublisher

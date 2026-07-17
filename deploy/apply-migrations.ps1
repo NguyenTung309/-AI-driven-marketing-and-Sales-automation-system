@@ -64,7 +64,13 @@ function Invoke-SqlFile {
         if (Test-Path $hostPath) {
             Remove-Item $hostPath -Force -Confirm:$false
         }
-        & docker exec $ContainerName rm -f $containerPath 2>$null | Out-Null
+        # docker cp để file thuộc root, còn container mssql chạy user 'mssql' và /tmp có sticky bit
+        # → rm phải chạy -u root, không thì "Operation not permitted". EAP hạ tạm xuống Continue vì
+        # PS 5.1 wrap stderr của native command thành NativeCommandError khi đang Stop.
+        $previousEap = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        & docker exec -u root $ContainerName rm -f $containerPath 2>&1 | Out-Null
+        $ErrorActionPreference = $previousEap
     }
 }
 
