@@ -11,6 +11,10 @@ public interface IChatAutoReplyGateway
 
 public sealed class GrpcChatAutoReplyGateway(ChatAgent.ChatAgentClient client) : IChatAutoReplyGateway
 {
+    // Client-side hard stop for auto-reply. Slightly above ChatAgentGrpcService.ChatReplyTimeout (90s)
+    // so the server can Fail the session before the client abandons the stream.
+    private static readonly TimeSpan ReplyDeadline = TimeSpan.FromSeconds(100);
+
     private readonly ChatAgent.ChatAgentClient _client = client;
 
     // ChatAgent.Reply persists the out-message and sends it to the channel (SPEC-16 P2-10);
@@ -25,8 +29,13 @@ public sealed class GrpcChatAutoReplyGateway(ChatAgent.ChatAgentClient client) :
         };
         request.History.AddRange(history);
 
-        using var call = _client.Reply(request, cancellationToken: ct);
-        await foreach (var _ in call.ResponseStream.ReadAllAsync(ct).ConfigureAwait(false))
+        // Deadline + linked CTS: không để ChannelInboundMessageConsumer treo vô hạn khi Agent/LLM hang.
+        using var deadlineCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadlineCts.CancelAfter(ReplyDeadline);
+        var callOptions = new CallOptions(deadline: DateTime.UtcNow.Add(ReplyDeadline), cancellationToken: deadlineCts.Token);
+
+        using var call = _client.Reply(request, callOptions);
+        await foreach (var _ in call.ResponseStream.ReadAllAsync(deadlineCts.Token).ConfigureAwait(false))
         {
         }
     }

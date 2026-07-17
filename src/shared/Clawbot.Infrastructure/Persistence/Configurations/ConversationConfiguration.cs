@@ -14,6 +14,7 @@ public sealed class ConversationConfiguration : IEntityTypeConfiguration<Convers
         builder.Property(x => x.ExternalThreadId).HasMaxLength(256).IsRequired();
         builder.Property(x => x.Status).HasMaxLength(32).IsRequired();
         builder.Property(x => x.AiAutoReplyEnabled).HasColumnName("ai_auto_reply_enabled").HasDefaultValue(true);
+        builder.Property(x => x.AiAutoReplyResumeAt).HasColumnName("ai_auto_reply_resume_at");
         builder.Property(x => x.RowVersion).IsRowVersion();
         builder.HasMany(x => x.Messages).WithOne().HasForeignKey(m => m.ConversationId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => new { x.TenantId, x.Platform, x.ExternalThreadId }).IsUnique();

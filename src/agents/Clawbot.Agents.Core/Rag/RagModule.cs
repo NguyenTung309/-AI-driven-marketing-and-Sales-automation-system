@@ -12,21 +12,30 @@ public static class RagModule
         services.Configure<EmbeddingOptions>(cfg.GetSection(EmbeddingOptions.SectionName));
         services.Configure<LlmBaseUrlOptions>(cfg.GetSection(LlmBaseUrlOptions.SectionName));
 
-        services.AddScoped<IEmbeddingProvider, ConfiguredEmbeddingProvider>();
+        // Concrete + forward: RoutingRagRetriever cần ResolveConfigAsync (không nằm trên IEmbeddingProvider).
+        services.AddScoped<ConfiguredEmbeddingProvider>();
+        services.AddScoped<IEmbeddingProvider>(sp => sp.GetRequiredService<ConfiguredEmbeddingProvider>());
 
         services.AddScoped<QdrantRagRetriever>();
+        services.AddScoped<LlmRagRetriever>();
         services.AddScoped<IRagRetriever>(sp =>
         {
-            IRagRetriever inner = sp.GetRequiredService<QdrantRagRetriever>();
+            IRagRetriever vector = sp.GetRequiredService<QdrantRagRetriever>();
             var redis = sp.GetService<StackExchange.Redis.IConnectionMultiplexer>();
             if (redis is not null)
-                inner = new CachedRagRetriever(
-                    inner,
+                vector = new CachedRagRetriever(
+                    vector,
                     sp.GetRequiredService<IEmbeddingProvider>(),
                     redis,
                     sp.GetServices<IActiveKbVersionResolver>(),
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CachedRagRetriever>>());
-            return inner;
+
+            // Mặc định (không embedding config) -> LLM mode; có config thật -> vector mode như cũ.
+            return new RoutingRagRetriever(
+                vector,
+                sp.GetRequiredService<LlmRagRetriever>(),
+                sp.GetRequiredService<ConfiguredEmbeddingProvider>(),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RoutingRagRetriever>>());
         });
 
         services.AddScoped<KbDeployService>();

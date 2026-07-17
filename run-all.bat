@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions DisableDelayedExpansion
 
 set "ROOT=%~dp0"
 set "ENV_FILE=%ROOT%deploy\.env"
@@ -38,29 +38,17 @@ if "%~1"=="" (
     exit /b 1
 )
 set "SEED_TENANT_SLUG=%~1"
+powershell -NoProfile -Command "if ($env:SEED_TENANT_SLUG -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$') { exit 1 }"
+if errorlevel 1 (
+    echo [ERROR] --tenant only accepts 1-63 letters, numbers, dot, underscore, or hyphen.
+    exit /b 1
+)
 shift
 goto parse_args
 
 :args_done
 
-if "%DRY_RUN%"=="1" (
-    echo [DRY-RUN] ClawBot one-click runner
-    echo Root: %ROOT%
-    echo Would copy deploy\.env.example to deploy\.env if missing.
-    echo Would run: docker compose --env-file deploy\.env -f deploy\docker-compose.yml up -d sqlserver redis rabbitmq qdrant minio postgres metabase searxng
-    echo Would stop old app processes listening on ports 15873, 15874, 15875, 15876
-    echo Would apply deploy\seed\*.sql for tenant %SEED_TENANT_SLUG% when --seed is passed.
-    echo Would create dbo.schema_migrations, baseline repaired migrations through 0067, and apply every pending deploy\migrations\*.sql file.
-    echo Would apply one-shot data patches from deploy\fix_contact_overwrite.sql, guarded by dbo.data_patches.
-    echo Would run: dotnet restore Clawbot.sln
-    echo Would run: dotnet build Clawbot.sln --no-restore
-    echo Would run: npm ci in src\frontend\clawbot-web when node_modules is missing
-    echo Would start AgentService with ASPNETCORE_URLS=http://localhost:15875, shared Encryption__Base64Key, and optional Meta__Graph__* fallback from deploy\.env
-    echo Would start API with ASPNETCORE_URLS=http://localhost:15874, AgentService__Url=http://localhost:15875, shared Jwt__SigningKey/Encryption__Base64Key, and UI-managed Meta config with optional deploy\.env fallback
-    echo Would start Gateway with ASPNETCORE_URLS=http://localhost:15873 and shared Jwt__SigningKey
-    echo Would start frontend with npm run dev at http://localhost:15876
-    exit /b 0
-)
+if "%DRY_RUN%"=="1" goto dry_run
 
 echo.
 echo === ClawBot local one-click runner ===
@@ -129,6 +117,12 @@ if errorlevel 1 exit /b 1
 call :apply_meta_migration
 if errorlevel 1 exit /b 1
 
+rem Final gate before services: tenant columns EF maps on every API/AgentService boot.
+call :repair_tenant_runtime_columns
+if errorlevel 1 exit /b 1
+call :verify_tenant_runtime_columns
+if errorlevel 1 exit /b 1
+
 call :apply_data_patches
 if errorlevel 1 exit /b 1
 
@@ -158,16 +152,72 @@ if not exist "%FRONTEND_DIR%\node_modules" (
 )
 
 echo [INFO] Opening service windows...
-start "ClawBot AgentService :15875" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15875&& set ConnectionStrings__SqlServer=Server=localhost,11433;Database=clawbot;User Id=sa;Password=%MSSQL_SA_PASSWORD%;TrustServerCertificate=True;MultipleActiveResultSets=true&& set Encryption__Base64Key=%ENCRYPTION_BASE64_KEY%&& dotnet run --project ""%ROOT%src\agents\Clawbot.AgentService\Clawbot.AgentService.csproj"" --no-launch-profile"
-timeout /t 2 /nobreak >nul
+set "LAUNCH_DIR=%TEMP%\clawbot-run-all"
+if not exist "%LAUNCH_DIR%" mkdir "%LAUNCH_DIR%" >nul 2>nul
 
-start "ClawBot API :15874" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15874&& set AgentService__Url=http://localhost:15875&& set ConnectionStrings__SqlServer=Server=localhost,11433;Database=clawbot;User Id=sa;Password=%MSSQL_SA_PASSWORD%;TrustServerCertificate=True;MultipleActiveResultSets=true&& set Jwt__SigningKey=%JWT_SIGNING_KEY%&& set Encryption__Base64Key=%ENCRYPTION_BASE64_KEY%&& set WebPush__PublicKey=%WEBPUSH_PUBLIC_KEY%&& set WebPush__PrivateKey=%WEBPUSH_PRIVATE_KEY%&& dotnet run --project ""%ROOT%src\api\Clawbot.Api\Clawbot.Api.csproj"" --no-launch-profile"
-timeout /t 2 /nobreak >nul
+> "%LAUNCH_DIR%\agent.cmd" (
+    echo @echo off
+    echo setlocal EnableExtensions DisableDelayedExpansion
+    echo cd /d "%ROOT%"
+    echo set "ASPNETCORE_ENVIRONMENT=Development"
+    echo set "ASPNETCORE_URLS=http://localhost:15875"
+    echo set "ConnectionStrings__SqlServer=Server=localhost,11433;Database=clawbot;User Id=sa;Password=%MSSQL_SA_PASSWORD%;TrustServerCertificate=True;MultipleActiveResultSets=true"
+    echo set "Encryption__Base64Key=%ENCRYPTION_BASE64_KEY%"
+    echo title ClawBot AgentService :15875
+    echo echo [AgentService] starting...
+    echo dotnet run --project "%ROOT%src\agents\Clawbot.AgentService\Clawbot.AgentService.csproj" --no-launch-profile
+    echo echo [AgentService] exited with %%ERRORLEVEL%%
+    echo pause
+)
+> "%LAUNCH_DIR%\api.cmd" (
+    echo @echo off
+    echo setlocal EnableExtensions DisableDelayedExpansion
+    echo cd /d "%ROOT%"
+    echo set "ASPNETCORE_ENVIRONMENT=Development"
+    echo set "ASPNETCORE_URLS=http://localhost:15874"
+    echo set "AgentService__Url=http://localhost:15875"
+    echo set "ConnectionStrings__SqlServer=Server=localhost,11433;Database=clawbot;User Id=sa;Password=%MSSQL_SA_PASSWORD%;TrustServerCertificate=True;MultipleActiveResultSets=true"
+    echo set "Jwt__SigningKey=%JWT_SIGNING_KEY%"
+    echo set "Encryption__Base64Key=%ENCRYPTION_BASE64_KEY%"
+    echo set "WebPush__PublicKey=%WEBPUSH_PUBLIC_KEY%"
+    echo set "WebPush__PrivateKey=%WEBPUSH_PRIVATE_KEY%"
+    echo title ClawBot API :15874
+    echo echo [API] starting against localhost,11433...
+    echo dotnet run --project "%ROOT%src\api\Clawbot.Api\Clawbot.Api.csproj" --no-launch-profile
+    echo echo [API] exited with %%ERRORLEVEL%%
+    echo pause
+)
+> "%LAUNCH_DIR%\gateway.cmd" (
+    echo @echo off
+    echo setlocal EnableExtensions DisableDelayedExpansion
+    echo cd /d "%ROOT%"
+    echo set "ASPNETCORE_ENVIRONMENT=Development"
+    echo set "ASPNETCORE_URLS=http://localhost:15873"
+    echo set "Jwt__SigningKey=%JWT_SIGNING_KEY%"
+    echo title ClawBot Gateway :15873
+    echo echo [Gateway] starting...
+    echo dotnet run --project "%ROOT%src\gateway\Clawbot.Gateway\Clawbot.Gateway.csproj" --no-launch-profile
+    echo echo [Gateway] exited with %%ERRORLEVEL%%
+    echo pause
+)
+> "%LAUNCH_DIR%\web.cmd" (
+    echo @echo off
+    echo setlocal EnableExtensions DisableDelayedExpansion
+    echo cd /d "%FRONTEND_DIR%"
+    echo title ClawBot Web :15876
+    echo echo [Web] starting...
+    echo npm run dev -- --host 0.0.0.0 --port 15876
+    echo echo [Web] exited with %%ERRORLEVEL%%
+    echo pause
+)
 
-start "ClawBot Gateway :15873" cmd /k "cd /d ""%ROOT%"" && set ASPNETCORE_ENVIRONMENT=Development&& set ASPNETCORE_URLS=http://localhost:15873&& set Jwt__SigningKey=%JWT_SIGNING_KEY%&& dotnet run --project ""%ROOT%src\gateway\Clawbot.Gateway\Clawbot.Gateway.csproj"" --no-launch-profile"
-timeout /t 2 /nobreak >nul
-
-start "ClawBot Web :15876" cmd /k "cd /d ""%FRONTEND_DIR%"" && npm run dev -- --host 0.0.0.0 --port 15876"
+start "ClawBot AgentService :15875" cmd /k call "%LAUNCH_DIR%\agent.cmd"
+ping -n 3 127.0.0.1 >nul
+start "ClawBot API :15874" cmd /k call "%LAUNCH_DIR%\api.cmd"
+ping -n 3 127.0.0.1 >nul
+start "ClawBot Gateway :15873" cmd /k call "%LAUNCH_DIR%\gateway.cmd"
+ping -n 3 127.0.0.1 >nul
+start "ClawBot Web :15876" cmd /k call "%LAUNCH_DIR%\web.cmd"
 
 echo.
 echo [OK] ClawBot is starting.
@@ -217,6 +267,24 @@ if errorlevel 1 (
 )
 exit /b 0
 
+:dry_run
+echo [DRY-RUN] ClawBot one-click runner
+echo Root: "%ROOT%"
+echo Would copy deploy\.env.example to deploy\.env if missing.
+echo Would run: docker compose --env-file deploy\.env -f deploy\docker-compose.yml up -d sqlserver redis rabbitmq qdrant minio postgres metabase searxng
+echo Would stop old app processes listening on ports 15873, 15874, 15875, 15876
+echo Would apply deploy\seed\*.sql for tenant %SEED_TENANT_SLUG% when --seed is passed.
+echo Would create dbo.schema_migrations, baseline repaired migrations through %MIGRATION_BASELINE_NUMBER%, and apply every pending deploy\migrations\*.sql file.
+echo Would apply one-shot data patches from deploy\fix_contact_overwrite.sql, guarded by dbo.data_patches.
+echo Would run: dotnet restore Clawbot.sln
+echo Would run: dotnet build Clawbot.sln --no-restore
+echo Would run: npm ci in src\frontend\clawbot-web when node_modules is missing
+echo Would start AgentService with ASPNETCORE_URLS=http://localhost:15875 and shared Encryption__Base64Key.
+echo Would start API with ASPNETCORE_URLS=http://localhost:15874, AgentService__Url=http://localhost:15875, and shared Jwt__SigningKey/Encryption__Base64Key.
+echo Would start Gateway with ASPNETCORE_URLS=http://localhost:15873 and shared Jwt__SigningKey.
+echo Would start frontend with npm run dev at http://localhost:15876
+exit /b 0
+
 :read_env_value
 for /f "usebackq tokens=1,* delims==" %%A in ("%ENV_FILE%") do (
     if /i "%%A"=="%~1" set "%~1=%%B"
@@ -244,7 +312,7 @@ echo [INFO] Waiting for SQL Server...
 for /l %%I in (1,1,60) do (
     docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -Q "SELECT 1" >nul 2>nul
     if not errorlevel 1 exit /b 0
-    timeout /t 2 /nobreak >nul
+    ping -n 3 127.0.0.1 >nul
 )
 echo [ERROR] SQL Server did not become ready in time.
 exit /b 1
@@ -259,7 +327,7 @@ echo [INFO] Waiting for database clawbot to come online...
 for /l %%I in (1,1,60) do (
     docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -Q "SELECT 1" -b >nul 2>nul
     if not errorlevel 1 exit /b 0
-    timeout /t 2 /nobreak >nul
+    ping -n 3 127.0.0.1 >nul
 )
 echo [ERROR] Database clawbot did not come online in time.
 exit /b 1
@@ -273,7 +341,8 @@ if "%HAS_MIGRATION_HISTORY%"=="1" (
     call :apply_pending_migrations
     if errorlevel 1 exit /b 1
     call :repair_runtime_columns
-    exit /b %errorlevel%
+    if errorlevel 1 exit /b 1
+    exit /b 0
 )
 
 set "SCHEMA_CHECK=%TEMP%\clawbot_schema_check.txt"
@@ -321,17 +390,54 @@ if "%HAS_SCHEMA%"=="1" (
     if errorlevel 1 exit /b 1
     call :baseline_existing_migrations
     if errorlevel 1 exit /b 1
-    call :apply_pending_migrations
-    if errorlevel 1 exit /b 1
     echo [INFO] Existing schema repaired and migration history synchronized.
     exit /b 0
 )
 
 goto replay_migrations
 
+:repair_tenant_runtime_columns
+echo [INFO] Repairing tenant runtime columns required by EF...
+if not exist "%ROOT%deploy\repair_tenant_runtime_columns.sql" (
+    echo [ERROR] Missing deploy\repair_tenant_runtime_columns.sql
+    exit /b 1
+)
+type "%ROOT%deploy\repair_tenant_runtime_columns.sql" | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
+if errorlevel 1 (
+    echo [ERROR] Tenant runtime column repair failed.
+    exit /b 1
+)
+exit /b 0
+
+:verify_tenant_runtime_columns
+echo [INFO] Verifying tenant runtime columns...
+set "TENANT_COL_CHECK=%TEMP%\clawbot_tenant_cols_%RANDOM%.txt"
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -h -1 -W -Q "SET NOCOUNT ON; SELECT CONCAT(CASE WHEN COL_LENGTH(N'dbo.tenants', N'monthly_cost_cap_usd') IS NULL THEN 0 ELSE 1 END, CASE WHEN COL_LENGTH(N'dbo.tenants', N'require_content_review') IS NULL THEN 0 ELSE 1 END, CASE WHEN COL_LENGTH(N'dbo.tenants', N'require_chat_reply_approval') IS NULL THEN 0 ELSE 1 END, CASE WHEN COL_LENGTH(N'dbo.tenants', N'require_kb_human_review') IS NULL THEN 0 ELSE 1 END);" > "%TENANT_COL_CHECK%" 2>nul
+if errorlevel 1 (
+    del "%TENANT_COL_CHECK%" >nul 2>nul
+    echo [ERROR] Could not verify tenant runtime columns.
+    exit /b 1
+)
+set "TENANT_COL_FLAGS="
+for /f "usebackq delims= " %%A in ("%TENANT_COL_CHECK%") do (
+    if not defined TENANT_COL_FLAGS set "TENANT_COL_FLAGS=%%A"
+)
+del "%TENANT_COL_CHECK%" >nul 2>nul
+if /i not "%TENANT_COL_FLAGS%"=="1111" (
+    echo [ERROR] dbo.tenants is missing one or more runtime columns required by EF.
+    echo Expected monthly_cost_cap_usd, require_content_review, require_chat_reply_approval, require_kb_human_review.
+    echo Verify flags were "%TENANT_COL_FLAGS%" - want 1111.
+    echo Re-run after fixing SQL Server, or reset local DB with:
+    echo docker compose --env-file deploy\.env -f deploy\docker-compose.yml down -v
+    exit /b 1
+)
+exit /b 0
+
 :repair_runtime_columns
 echo [INFO] Repairing runtime columns on existing schema...
-docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF OBJECT_ID(N'dbo.inboxes', N'U') IS NULL AND OBJECT_ID(N'dbo.tenants', N'U') IS NOT NULL CREATE TABLE dbo.inboxes (id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_inboxes PRIMARY KEY DEFAULT NEWID(), tenant_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.tenants(id), name NVARCHAR(256) NOT NULL, platform NVARCHAR(32) NOT NULL, external_page_id NVARCHAR(128) NOT NULL, avatar_url NVARCHAR(512) NULL, encrypted_access_token NVARCHAR(1024) NULL, is_active BIT NOT NULL DEFAULT 1, created_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(), deleted_at DATETIMEOFFSET NULL); IF OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.inboxes', N'encrypted_access_token') IS NULL ALTER TABLE dbo.inboxes ADD encrypted_access_token NVARCHAR(1024) NULL; IF OBJECT_ID(N'dbo.channel_tokens', N'U') IS NULL AND OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL CREATE TABLE dbo.channel_tokens (inbox_id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_channel_tokens PRIMARY KEY REFERENCES dbo.inboxes(id), access_token_encrypted NVARCHAR(MAX) NOT NULL, refresh_token_encrypted NVARCHAR(MAX) NULL, webhook_secret_encrypted NVARCHAR(MAX) NOT NULL, token_expires_at DATETIMEOFFSET NULL, is_active BIT NOT NULL DEFAULT 1, created_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME()); IF OBJECT_ID(N'dbo.inbox_members', N'U') IS NULL AND OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.users', N'U') IS NOT NULL CREATE TABLE dbo.inbox_members (inbox_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.inboxes(id), agent_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.users(id), tenant_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.tenants(id), CONSTRAINT PK_inbox_members PRIMARY KEY (inbox_id, agent_id)); IF OBJECT_ID(N'dbo.conversation_read_state', N'U') IS NULL AND OBJECT_ID(N'dbo.users', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL CREATE TABLE dbo.conversation_read_state (user_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.users(id), conversation_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.conversations(id), last_read_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(), CONSTRAINT PK_conversation_read_state PRIMARY KEY (user_id, conversation_id)); IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'inbox_id') IS NULL ALTER TABLE dbo.conversations ADD inbox_id UNIQUEIDENTIFIER NULL REFERENCES dbo.inboxes(id); IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'row_version') IS NULL ALTER TABLE dbo.conversations ADD row_version ROWVERSION; IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'snoozed_until') IS NULL ALTER TABLE dbo.conversations ADD snoozed_until DATETIMEOFFSET NULL; IF OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_inboxes_external' AND object_id = OBJECT_ID(N'dbo.inboxes')) CREATE INDEX ix_inboxes_external ON dbo.inboxes (tenant_id, platform, external_page_id) WHERE is_active = 1; IF OBJECT_ID(N'dbo.conversation_read_state', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_convread_conv' AND object_id = OBJECT_ID(N'dbo.conversation_read_state')) CREATE INDEX ix_convread_conv ON dbo.conversation_read_state (conversation_id); IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'ai_auto_reply_enabled') IS NULL ALTER TABLE dbo.conversations ADD ai_auto_reply_enabled BIT NOT NULL CONSTRAINT DF_conversations_ai_auto_reply_enabled DEFAULT 1; IF OBJECT_ID(N'dbo.messages', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.messages', N'sender_display_name') IS NULL ALTER TABLE dbo.messages ADD sender_display_name NVARCHAR(256) NULL; IF OBJECT_ID(N'dbo.messages', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.messages', N'sender_avatar_url') IS NULL ALTER TABLE dbo.messages ADD sender_avatar_url NVARCHAR(512) NULL; IF OBJECT_ID(N'dbo.messages', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.messages', N'attachment_url') IS NULL ALTER TABLE dbo.messages ADD attachment_url NVARCHAR(2048) NULL; IF OBJECT_ID(N'dbo.contacts', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.contacts', N'avatar_url') IS NULL ALTER TABLE dbo.contacts ADD avatar_url NVARCHAR(512) NULL;"
+call :repair_tenant_runtime_columns
+if errorlevel 1 exit /b 1
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF OBJECT_ID(N'dbo.inboxes', N'U') IS NULL AND OBJECT_ID(N'dbo.tenants', N'U') IS NOT NULL CREATE TABLE dbo.inboxes (id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_inboxes PRIMARY KEY DEFAULT NEWID(), tenant_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.tenants(id), name NVARCHAR(256) NOT NULL, platform NVARCHAR(32) NOT NULL, external_page_id NVARCHAR(128) NOT NULL, avatar_url NVARCHAR(512) NULL, encrypted_access_token NVARCHAR(1024) NULL, is_active BIT NOT NULL DEFAULT 1, created_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(), deleted_at DATETIMEOFFSET NULL); IF OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.inboxes', N'encrypted_access_token') IS NULL ALTER TABLE dbo.inboxes ADD encrypted_access_token NVARCHAR(1024) NULL; IF OBJECT_ID(N'dbo.channel_tokens', N'U') IS NULL AND OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL CREATE TABLE dbo.channel_tokens (inbox_id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_channel_tokens PRIMARY KEY REFERENCES dbo.inboxes(id), access_token_encrypted NVARCHAR(MAX) NOT NULL, refresh_token_encrypted NVARCHAR(MAX) NULL, webhook_secret_encrypted NVARCHAR(MAX) NOT NULL, token_expires_at DATETIMEOFFSET NULL, is_active BIT NOT NULL DEFAULT 1, created_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME()); IF OBJECT_ID(N'dbo.inbox_members', N'U') IS NULL AND OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.users', N'U') IS NOT NULL CREATE TABLE dbo.inbox_members (inbox_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.inboxes(id), agent_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.users(id), tenant_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.tenants(id), CONSTRAINT PK_inbox_members PRIMARY KEY (inbox_id, agent_id)); IF OBJECT_ID(N'dbo.conversation_read_state', N'U') IS NULL AND OBJECT_ID(N'dbo.users', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL CREATE TABLE dbo.conversation_read_state (user_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.users(id), conversation_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.conversations(id), last_read_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(), CONSTRAINT PK_conversation_read_state PRIMARY KEY (user_id, conversation_id)); IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'inbox_id') IS NULL ALTER TABLE dbo.conversations ADD inbox_id UNIQUEIDENTIFIER NULL REFERENCES dbo.inboxes(id); IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'row_version') IS NULL ALTER TABLE dbo.conversations ADD row_version ROWVERSION; IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'snoozed_until') IS NULL ALTER TABLE dbo.conversations ADD snoozed_until DATETIMEOFFSET NULL; IF OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_inboxes_external' AND object_id = OBJECT_ID(N'dbo.inboxes')) CREATE INDEX ix_inboxes_external ON dbo.inboxes (tenant_id, platform, external_page_id) WHERE is_active = 1; IF OBJECT_ID(N'dbo.conversation_read_state', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_convread_conv' AND object_id = OBJECT_ID(N'dbo.conversation_read_state')) CREATE INDEX ix_convread_conv ON dbo.conversation_read_state (conversation_id); IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'ai_auto_reply_enabled') IS NULL ALTER TABLE dbo.conversations ADD ai_auto_reply_enabled BIT NOT NULL CONSTRAINT DF_conversations_ai_auto_reply_enabled DEFAULT 1; IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'ai_auto_reply_resume_at') IS NULL ALTER TABLE dbo.conversations ADD ai_auto_reply_resume_at DATETIMEOFFSET NULL; IF OBJECT_ID(N'dbo.messages', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.messages', N'sender_display_name') IS NULL ALTER TABLE dbo.messages ADD sender_display_name NVARCHAR(256) NULL; IF OBJECT_ID(N'dbo.messages', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.messages', N'sender_avatar_url') IS NULL ALTER TABLE dbo.messages ADD sender_avatar_url NVARCHAR(512) NULL; IF OBJECT_ID(N'dbo.messages', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.messages', N'attachment_url') IS NULL ALTER TABLE dbo.messages ADD attachment_url NVARCHAR(2048) NULL; IF OBJECT_ID(N'dbo.contacts', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.contacts', N'avatar_url') IS NULL ALTER TABLE dbo.contacts ADD avatar_url NVARCHAR(512) NULL;"
 if errorlevel 1 exit /b 1
 docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF COL_LENGTH(N'dbo.llm_configs', N'timeout_seconds') IS NULL ALTER TABLE dbo.llm_configs ADD timeout_seconds INT NULL; IF COL_LENGTH(N'dbo.llm_configs', N'max_output_tokens') IS NULL ALTER TABLE dbo.llm_configs ADD max_output_tokens INT NULL; IF COL_LENGTH(N'dbo.agents', N'llm_config_id') IS NULL ALTER TABLE dbo.agents ADD llm_config_id UNIQUEIDENTIFIER NULL; IF COL_LENGTH(N'dbo.agents', N'llm_config_id') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_agents_llm_config_id' AND object_id = OBJECT_ID(N'dbo.agents')) EXEC(N'CREATE INDEX ix_agents_llm_config_id ON agents (llm_config_id);'); IF COL_LENGTH(N'dbo.agents', N'llm_config_id') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'fk_agents_llm_configs_llm_config_id') EXEC(N'ALTER TABLE agents ADD CONSTRAINT fk_agents_llm_configs_llm_config_id FOREIGN KEY (llm_config_id) REFERENCES llm_configs (id) ON DELETE NO ACTION;'); IF COL_LENGTH(N'dbo.agent_sessions', N'requires_approval') IS NULL ALTER TABLE dbo.agent_sessions ADD requires_approval BIT NOT NULL CONSTRAINT DF_agent_sessions_requires_approval DEFAULT 0; IF COL_LENGTH(N'dbo.agent_sessions', N'replan_count') IS NULL ALTER TABLE dbo.agent_sessions ADD replan_count INT NOT NULL CONSTRAINT DF_agent_sessions_replan_count DEFAULT 0; IF COL_LENGTH(N'dbo.agent_sessions', N'row_version') IS NULL ALTER TABLE dbo.agent_sessions ADD row_version ROWVERSION; IF COL_LENGTH(N'dbo.agent_sessions', N'archived_at') IS NULL ALTER TABLE dbo.agent_sessions ADD archived_at DATETIMEOFFSET NULL; IF COL_LENGTH(N'dbo.tenants', N'require_orchestration_approval') IS NULL ALTER TABLE dbo.tenants ADD require_orchestration_approval BIT NOT NULL CONSTRAINT DF_tenants_require_orchestration_approval DEFAULT 0; IF COL_LENGTH(N'dbo.processed_messages', N'tenant_id') IS NULL ALTER TABLE dbo.processed_messages ADD tenant_id UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_processed_messages_tenant_id DEFAULT '00000000-0000-0000-0000-000000000000'; IF COL_LENGTH(N'dbo.pancake_configs', N'channel') IS NOT NULL BEGIN DECLARE @pcuq nvarchar(200); SELECT @pcuq = name FROM sys.key_constraints WHERE parent_object_id = OBJECT_ID(N'dbo.pancake_configs') AND type = 'UQ'; IF @pcuq IS NOT NULL EXEC(N'ALTER TABLE pancake_configs DROP CONSTRAINT ' + @pcuq); DECLARE @pcdf nvarchar(200); SELECT @pcdf = dc.name FROM sys.default_constraints dc INNER JOIN sys.columns c ON c.default_object_id = dc.object_id WHERE dc.parent_object_id = OBJECT_ID(N'dbo.pancake_configs') AND c.name = N'channel'; IF @pcdf IS NOT NULL EXEC(N'ALTER TABLE pancake_configs DROP CONSTRAINT ' + @pcdf); EXEC(N'ALTER TABLE dbo.pancake_configs DROP COLUMN channel'); END; IF NOT EXISTS (SELECT 1 FROM sys.key_constraints WHERE parent_object_id = OBJECT_ID(N'dbo.pancake_configs') AND type = 'UQ') ALTER TABLE dbo.pancake_configs ADD CONSTRAINT UQ_pancake_configs_tenant_id UNIQUE (tenant_id); IF COL_LENGTH(N'dbo.pancake_configs', N'base_url') IS NULL ALTER TABLE dbo.pancake_configs ADD base_url NVARCHAR(256) NOT NULL CONSTRAINT DF_pancake_configs_base_url DEFAULT N'https://pancake.vn/api/v1'; IF COL_LENGTH(N'dbo.pancake_configs', N'signature_header') IS NULL ALTER TABLE dbo.pancake_configs ADD signature_header NVARCHAR(64) NOT NULL CONSTRAINT DF_pancake_configs_signature_header DEFAULT N'x-pancake-signature'; IF COL_LENGTH(N'dbo.pancake_configs', N'signature_algo') IS NULL ALTER TABLE dbo.pancake_configs ADD signature_algo NVARCHAR(32) NOT NULL CONSTRAINT DF_pancake_configs_signature_algo DEFAULT N'hmac-sha256'; IF COL_LENGTH(N'dbo.pancake_configs', N'signature_encoding') IS NULL ALTER TABLE dbo.pancake_configs ADD signature_encoding NVARCHAR(16) NOT NULL CONSTRAINT DF_pancake_configs_signature_encoding DEFAULT N'hex'; IF COL_LENGTH(N'dbo.pancake_configs', N'send_path_template') IS NULL ALTER TABLE dbo.pancake_configs ADD send_path_template NVARCHAR(512) NOT NULL CONSTRAINT DF_pancake_configs_send_path_template DEFAULT N'/pages/{page_id}/conversations/{thread_id}/messages'; IF COL_LENGTH(N'dbo.pancake_configs', N'auth_mode') IS NULL ALTER TABLE dbo.pancake_configs ADD auth_mode NVARCHAR(16) NOT NULL CONSTRAINT DF_pancake_configs_auth_mode DEFAULT N'query'; IF COL_LENGTH(N'dbo.agent_definitions', N'kb_module_code') IS NULL ALTER TABLE dbo.agent_definitions ADD kb_module_code NVARCHAR(64) NULL; IF OBJECT_ID(N'dbo.embedding_configs', N'U') IS NULL CREATE TABLE dbo.embedding_configs (id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY, tenant_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.tenants(id) ON DELETE CASCADE, provider NVARCHAR(32) NOT NULL, model_id NVARCHAR(128) NOT NULL, display_name NVARCHAR(128) NULL, api_key_encrypted NVARCHAR(MAX) NOT NULL, base_url NVARCHAR(512) NULL, dimension INT NOT NULL CONSTRAINT df_embedding_configs_dimension DEFAULT 1536, is_active BIT NOT NULL CONSTRAINT df_embedding_configs_is_active DEFAULT 1, created_at DATETIMEOFFSET NOT NULL, updated_at DATETIMEOFFSET NOT NULL); IF OBJECT_ID(N'dbo.embedding_configs', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_embedding_configs_tenant_id_is_active' AND object_id = OBJECT_ID(N'dbo.embedding_configs')) CREATE INDEX IX_embedding_configs_tenant_id_is_active ON dbo.embedding_configs (tenant_id, is_active); IF COL_LENGTH(N'dbo.users', N'pancake_access_token_encrypted') IS NULL ALTER TABLE dbo.users ADD pancake_access_token_encrypted NVARCHAR(2048) NULL; IF COL_LENGTH(N'dbo.users', N'pancake_access_token_updated_at') IS NULL ALTER TABLE dbo.users ADD pancake_access_token_updated_at DATETIMEOFFSET NULL; IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agent_sessions_tenant_status_started_at' AND object_id = OBJECT_ID(N'dbo.agent_sessions')) EXEC(N'CREATE INDEX IX_agent_sessions_tenant_status_started_at ON agent_sessions (tenant_id, status, started_at);'); IF COL_LENGTH(N'dbo.agent_sessions', N'archived_at') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agent_sessions_tenant_archived_started_at' AND object_id = OBJECT_ID(N'dbo.agent_sessions')) EXEC(N'CREATE INDEX IX_agent_sessions_tenant_archived_started_at ON agent_sessions (tenant_id, archived_at, started_at);'); IF COL_LENGTH(N'dbo.agent_schedules', N'trigger_type') IS NULL ALTER TABLE dbo.agent_schedules ADD trigger_type NVARCHAR(16) NOT NULL CONSTRAINT DF_agent_schedules_trigger_type DEFAULT N'cadence'; IF COL_LENGTH(N'dbo.agent_schedules', N'event_key') IS NULL ALTER TABLE dbo.agent_schedules ADD event_key NVARCHAR(64) NULL; IF COL_LENGTH(N'dbo.tenants', N'monthly_cost_cap_usd') IS NULL ALTER TABLE dbo.tenants ADD monthly_cost_cap_usd DECIMAL(12,2) NULL; IF COL_LENGTH(N'dbo.claude_cost_ledger', N'session_id') IS NULL ALTER TABLE dbo.claude_cost_ledger ADD session_id UNIQUEIDENTIFIER NULL; IF OBJECT_ID(N'dbo.claude_cost_ledger', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_claude_cost_ledger_session_id' AND object_id = OBJECT_ID(N'dbo.claude_cost_ledger')) EXEC(N'CREATE INDEX IX_claude_cost_ledger_session_id ON claude_cost_ledger (session_id);'); IF OBJECT_ID(N'dbo.skill_files', N'U') IS NULL AND OBJECT_ID(N'dbo.tenants', N'U') IS NOT NULL CREATE TABLE dbo.skill_files (id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_skill_files PRIMARY KEY DEFAULT NEWID(), tenant_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.tenants(id) ON DELETE CASCADE, name NVARCHAR(128) NOT NULL, description NVARCHAR(512) NULL, content_md NVARCHAR(MAX) NOT NULL, created_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(), deleted_at DATETIMEOFFSET NULL); IF OBJECT_ID(N'dbo.skill_files', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_skill_files_tenant_name' AND object_id = OBJECT_ID(N'dbo.skill_files')) EXEC(N'CREATE UNIQUE INDEX ix_skill_files_tenant_name ON dbo.skill_files (tenant_id, name) WHERE deleted_at IS NULL;');"
 if errorlevel 1 exit /b 1
@@ -400,6 +506,7 @@ if errorlevel 1 (
 exit /b 0
 
 :apply_meta_migration
+rem SQL preamble: SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; then 0055_meta_facebook_login_for_business.sql
 echo [INFO] Ensuring Meta Facebook Login for Business schema...
 set "MIGRATION_FILE=0055_meta_facebook_login_for_business.sql"
 set "MIGRATION_SOURCE=%ROOT%deploy\migrations\%MIGRATION_FILE%"
@@ -458,82 +565,12 @@ if not "%MIGRATION_HISTORY_COUNT%"=="0" set "HAS_MIGRATION_HISTORY=1"
 exit /b 0
 
 :baseline_existing_migrations
-echo [INFO] Baselining repaired migrations through %MIGRATION_BASELINE_NUMBER%...
-pushd "%MIGRATIONS_DIR%" >nul
-for %%F in (*.sql) do (
-    call :baseline_migration_file "%%F"
-    if errorlevel 1 (
-        popd >nul
-        exit /b 1
-    )
-)
-popd >nul
-exit /b 0
-
-:baseline_migration_file
-set "MIGRATION_PREFIX="
-for /f "tokens=1 delims=_" %%N in ("%~1") do set "MIGRATION_PREFIX=%%N"
-if not defined MIGRATION_PREFIX exit /b 0
-set /a MIGRATION_NUMBER=1%MIGRATION_PREFIX%-10000
-if %MIGRATION_NUMBER% GTR %MIGRATION_BASELINE_NUMBER% exit /b 0
-call :record_migration "%~1"
+echo [INFO] Baselining repaired schema and applying migrations newer than %MIGRATION_BASELINE_NUMBER%...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%deploy\apply-migrations.ps1" -ContainerName "clawbot-sqlserver" -Database "clawbot" -SaPassword "%MSSQL_SA_PASSWORD%" -MigrationsDir "%MIGRATIONS_DIR%" -SqlCmdPath "%SQLCMD%" -BaselineNumber %MIGRATION_BASELINE_NUMBER% -BaselineExisting -RepairFilesCsv "0037_pancake_pages.sql,0041_social_credentials.sql"
 exit /b %errorlevel%
 
 :apply_pending_migrations
-call :ensure_migration_ledger
-if errorlevel 1 exit /b 1
-pushd "%MIGRATIONS_DIR%" >nul
-for %%F in (*.sql) do (
-    call :apply_migration_file "%%F"
-    if errorlevel 1 (
-        popd >nul
-        exit /b 1
-    )
-)
-popd >nul
-exit /b 0
-
-:apply_migration_file
-set "MIGRATION_FILE=%~1"
-set "MIGRATION_CHECK=%TEMP%\clawbot_migration_%RANDOM%.txt"
-docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -h -1 -W -Q "SET NOCOUNT ON; SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.schema_migrations WHERE filename = N'%MIGRATION_FILE%') THEN 1 ELSE 0 END;" > "%MIGRATION_CHECK%" 2>nul
-if errorlevel 1 (
-    del "%MIGRATION_CHECK%" >nul 2>nul
-    echo [ERROR] Could not inspect migration: %MIGRATION_FILE%
-    exit /b 1
-)
-set "MIGRATION_APPLIED=0"
-set /p MIGRATION_APPLIED=<"%MIGRATION_CHECK%"
-del "%MIGRATION_CHECK%" >nul 2>nul
-if "%MIGRATION_APPLIED%"=="1" (
-    echo [SKIP] %MIGRATION_FILE%
-    exit /b 0
-)
-echo [SQL] %MIGRATION_FILE%
-set "MIGRATION_SOURCE=%CD%\%MIGRATION_FILE%"
-set "MIGRATION_SQL=%TEMP%\clawbot_migration_%RANDOM%.sql"
-powershell -NoProfile -Command "$prefix = 'SET QUOTED_IDENTIFIER ON;' + [Environment]::NewLine + 'SET ARITHABORT ON;' + [Environment]::NewLine; [IO.File]::WriteAllText($env:MIGRATION_SQL, $prefix + [IO.File]::ReadAllText($env:MIGRATION_SOURCE), [Text.UTF8Encoding]::new($false))"
-if errorlevel 1 (
-    echo [ERROR] Could not prepare migration: %MIGRATION_FILE%
-    exit /b 1
-)
-docker cp "%MIGRATION_SQL%" clawbot-sqlserver:/tmp/clawbot_migration.sql >nul
-if errorlevel 1 (
-    del "%MIGRATION_SQL%" >nul 2>nul
-    echo [ERROR] Could not copy migration into SQL Server: %MIGRATION_FILE%
-    exit /b 1
-)
-del "%MIGRATION_SQL%" >nul 2>nul
-docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -i /tmp/clawbot_migration.sql
-if errorlevel 1 (
-    echo [ERROR] Migration failed: %MIGRATION_FILE%
-    exit /b 1
-)
-call :record_migration "%MIGRATION_FILE%"
-exit /b %errorlevel%
-
-:record_migration
-docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET NOCOUNT ON; IF NOT EXISTS (SELECT 1 FROM dbo.schema_migrations WHERE filename = N'%~1') INSERT INTO dbo.schema_migrations (filename, applied_at) VALUES (N'%~1', SYSDATETIMEOFFSET());"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%deploy\apply-migrations.ps1" -ContainerName "clawbot-sqlserver" -Database "clawbot" -SaPassword "%MSSQL_SA_PASSWORD%" -MigrationsDir "%MIGRATIONS_DIR%" -SqlCmdPath "%SQLCMD%" -BaselineNumber %MIGRATION_BASELINE_NUMBER%
 exit /b %errorlevel%
 
 :replay_migrations

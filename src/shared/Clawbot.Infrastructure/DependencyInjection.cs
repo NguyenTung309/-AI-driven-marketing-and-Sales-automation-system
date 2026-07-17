@@ -123,6 +123,8 @@ public static class DependencyInjection
             o.Address = new Uri(chatAgentUrl);
         });
         services.AddScoped<Messaging.IChatAutoReplyGateway, Messaging.GrpcChatAutoReplyGateway>();
+        // Trả lời tin khách treo khi AI (vừa) bật lại — dùng chung cho toggle tay + sweep AiAutoReplyResumeJob.
+        services.AddScoped<Messaging.IAiAutoReplyResumer, Messaging.AiAutoReplyResumer>();
 
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IIntentClassifier, KeywordIntentClassifier>();
@@ -145,6 +147,8 @@ public static class DependencyInjection
         services.AddSingleton<Clawbot.Agents.Core.Chat.ILlmConfigResolver, Agents.LlmConfigResolver>();
         services.AddScoped<IEmbeddingConfigResolver, Agents.EmbeddingConfigResolver>();
         services.AddScoped<IActiveKbVersionResolver, Agents.ActiveKbVersionResolver>();
+        // LLM-mode retrieval: đọc ContentMd KB deployed từ SQL, không cần Qdrant/embedding.
+        services.AddScoped<IKbContentReader, Agents.KbContentReader>();
         services.Configure<PublisherOptions>(cfg.GetSection(PublisherOptions.SectionName));
         services.AddSingleton<IGoldenHourResolver, DefaultGoldenHourResolver>();
         services.AddClawbotLead(); // Lead-2: least-busy assignment for API endpoints + hot-lead consumer
@@ -171,8 +175,8 @@ public static class DependencyInjection
         services.AddScoped<IPageListGateway>(sp => sp.GetRequiredService<IPageTokenMintGateway>() as IPageListGateway
             ?? throw new InvalidOperationException("IPageListGateway not available"));
 
+        // Outbound message POSTs are not idempotent; never auto-retry after an ambiguous response.
         services.AddHttpClient<IChannelAdapter, PancakeChannelAdapter>()
-            .AddPolicyHandler(HttpResiliencePolicies.Retry())
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
         // Comment auto-reply: cùng instance adapter Pancake, expose thêm action reply_comment/private_replies.

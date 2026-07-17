@@ -93,6 +93,17 @@ public static partial class DemoEndpoints
     {
         var options = opts.Value;
 
+        // Webhook demo gửi auto-reply đóng hộp thẳng qua Pancake API, bypass ChatAgent/review-gate —
+        // tuyệt đối không để mở anonymous. Chỉ chạy khi Demo:AdminKey được cấu hình VÀ caller gửi đúng
+        // X-Admin-Key; chưa cấu hình key thì coi như endpoint không tồn tại. Ingest thật đi đường
+        // PancakePollingService, không qua đây.
+        var adminKey = ctx.Request.Headers["X-Admin-Key"].FirstOrDefault();
+        if (string.IsNullOrEmpty(options.AdminKey)
+            || !string.Equals(adminKey, options.AdminKey, StringComparison.Ordinal))
+        {
+            return Results.NotFound();
+        }
+
         // Read raw body
         string rawBody;
         using (var reader = new StreamReader(ctx.Request.Body, Encoding.UTF8, leaveOpen: false))
@@ -241,7 +252,7 @@ public static partial class DemoEndpoints
             // Create trace
             await traces.CreateTraceAsync(traceId);
 
-            var bodyPreview = rawBody.Length > 500 ? rawBody[..500] + "...[TRUNCATED]" : rawBody;
+            var bodyPreview = $"[REDACTED payload, {rawBody.Length} chars]";
             // Gateway step
             await traces.AppendStepAsync(traceId, new DemoTraceStep
             {

@@ -62,14 +62,22 @@ public sealed partial class ChannelInboundMessageConsumer(
 
         try
         {
+            // Tracked (không AsNoTracking): có thể cần TryResumeAiAutoReply -> SaveChanges khi qua mốc hẹn.
             var conv = await _db.Conversations
                 .IgnoreQueryFilters()
-                .AsNoTracking()
                 .Where(c => c.Id == conversationId && c.TenantId == msg.TenantId)
-                .Select(c => new { c.AiAutoReplyEnabled, c.Status, c.AssignedTo, c.LastMessageAt })
                 .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-            if (conv is null || !conv.AiAutoReplyEnabled || conv.Status != "open")
+            if (conv is null || conv.Status != "open")
                 return;
+
+            // Sale gửi tay -> AI tạm tắt kèm mốc hẹn. Khách nhắn tiếp sau mốc đó thì AI tự bật lại và trả lời.
+            if (!conv.AiAutoReplyEnabled)
+            {
+                if (!conv.TryResumeAiAutoReply(DateTimeOffset.UtcNow))
+                    return;
+                await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+                LogAutoReplyResumed(_logger, conversationId);
+            }
 
             // Đã có 1 AI draft chờ duyệt (pending_approval, chưa gửi) trong hội thoại này thì KHÔNG sinh
             // thêm — người duyệt xử lý draft đó với ngữ cảnh mới nhất. Không có guard này, mỗi tin khách
@@ -92,10 +100,12 @@ public sealed partial class ChannelInboundMessageConsumer(
 
             // Recent context, oldest-first, excluding the message just ingested.
             // ChatRequest.history is role-less; ChatAgent maps even/odd -> user/assistant, close enough for context.
+            // Loại tin blocked (draft bị từ chối/chặn): khách chưa từng thấy, đưa vào history làm model tưởng đã trả lời.
             var history = await _db.Messages
                 .IgnoreQueryFilters()
                 .AsNoTracking()
-                .Where(m => m.ConversationId == conversationId && m.TenantId == msg.TenantId)
+                .Where(m => m.ConversationId == conversationId && m.TenantId == msg.TenantId
+                    && !(m.Direction == "out" && m.Status == "blocked"))
                 .OrderByDescending(m => m.SentAt)
                 .Skip(1)
                 .Take(HistoryLimit)
@@ -109,8 +119,8 @@ public sealed partial class ChannelInboundMessageConsumer(
             await _chatAgent.ReplyAsync(msg.TenantId, conversationId, userText, history, ct).ConfigureAwait(false);
 
             await _notifier.NotifyConversationUpdatedAsync(msg.TenantId,
-                new InboxConversationEvent(conversationId, conv.Status, conv.AssignedTo, conv.LastMessageAt), ct).ConfigureAwait(false);
-            LogAutoReplied(_logger, conversationId);
+                new InboxConversationEvent(conversationId, conv.Status, conv.AssignedTo, conv.LastMessageAt, conv.InboxId), ct).ConfigureAwait(false);
+            LogAutoReplyProcessed(_logger, conversationId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -123,12 +133,16 @@ public sealed partial class ChannelInboundMessageConsumer(
     private static partial void LogIngested(ILogger logger, string threadId, Guid conversationId, bool deduplicated);
 
     [LoggerMessage(EventId = 9111, Level = LogLevel.Information,
-        Message = "AI auto-reply sent for conversation {ConversationId}")]
-    private static partial void LogAutoReplied(ILogger logger, Guid conversationId);
+        Message = "AI auto-reply processing completed for conversation {ConversationId}")]
+    private static partial void LogAutoReplyProcessed(ILogger logger, Guid conversationId);
 
     [LoggerMessage(EventId = 9113, Level = LogLevel.Information,
         Message = "AI auto-reply skipped for conversation {ConversationId}: a pending_approval draft already awaits review")]
     private static partial void LogPendingDraftSkip(ILogger logger, Guid conversationId);
+
+    [LoggerMessage(EventId = 9114, Level = LogLevel.Information,
+        Message = "AI auto-reply resumed for conversation {ConversationId}: customer replied after the sale-handover pause window")]
+    private static partial void LogAutoReplyResumed(ILogger logger, Guid conversationId);
 
     [LoggerMessage(EventId = 9112, Level = LogLevel.Warning,
         Message = "AI auto-reply failed for conversation {ConversationId}")]

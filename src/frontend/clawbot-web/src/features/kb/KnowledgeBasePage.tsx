@@ -179,18 +179,23 @@ export default function KnowledgeBasePage() {
     },
   });
 
+  // Phát hành/re-embed chạy ngầm: job tự thông báo khi xong; nút giữ trạng thái "Đang phát hành"
+  // tới khi job kết thúc, xong thì làm mới danh sách phiên bản.
+  const [deployJobId, setDeployJobId] = useState<string | null>(null);
   const deploymentMutation = useMutation({
     mutationFn: ({ rollback }: { readonly rollback: boolean }) =>
       rollback
         ? rollbackKbVersion(selectedModule?.id ?? "", selectedVersion?.id ?? "")
         : deployKbVersion(selectedModule?.id ?? "", selectedVersion?.id ?? ""),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["kb", selectedModule?.id, "versions"] }),
-        queryClient.invalidateQueries({ queryKey: ["kb", selectedModule?.id, "versions", selectedVersion?.id] }),
-        queryClient.invalidateQueries({ queryKey: ["kb", "modules"] }),
-      ]);
-    },
+    onSuccess: (job) => setDeployJobId(job.jobId),
+  });
+  useJobWatcher(deployJobId, async () => {
+    setDeployJobId(null);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["kb", selectedModule?.id, "versions"] }),
+      queryClient.invalidateQueries({ queryKey: ["kb", selectedModule?.id, "versions", selectedVersion?.id] }),
+      queryClient.invalidateQueries({ queryKey: ["kb", "modules"] }),
+    ]);
   });
 
   const addTestCaseMutation = useMutation({
@@ -324,10 +329,10 @@ export default function KnowledgeBasePage() {
         <KbSuggestionsPanel alwaysShow />
       ) : (
         <>
-          {embeddingStatusQuery.data?.isFallback ? (
+          {embeddingStatusQuery.data?.retrievalMode === "llm" ? (
             <div className="mb-gutter">
-              <Alert tone="warning">
-                Kho tri thức đang dùng embedding hash fallback ({embeddingStatusQuery.data.dimension} chiều), chỉ phù hợp demo. Cấu hình embedding thật rồi phát hành lại KB để tăng độ chính xác RAG.
+              <Alert tone="info">
+                Kho tri thức đang truy xuất bằng LLM trực tiếp (mặc định — dùng model chat của bạn, không cần embedding). Nếu kho tri thức lớn, cấu hình embedding ở trang Nhà cung cấp LLM để bật vector search nhanh hơn.
               </Alert>
             </div>
           ) : null}
@@ -351,7 +356,7 @@ export default function KnowledgeBasePage() {
           versions={versions}
         />
         <EditorWorkspace
-          deploying={deploymentMutation.isPending}
+          deploying={deploymentMutation.isPending || deployJobId !== null}
           initialContent={versionDetailQuery.data?.contentMd ?? ""}
           key={`${selectedModule?.id ?? "none"}-${selectedVersion?.id ?? "new"}-${versionDetailQuery.data ? "loaded" : "loading"}`}
           loading={versionDetailQuery.isLoading}

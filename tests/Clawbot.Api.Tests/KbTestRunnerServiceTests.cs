@@ -86,6 +86,24 @@ public sealed class KbTestRunnerServiceTests
         claude.CapturedPrompt.Should().Contain(testCase.ExpectedAnswer);
     }
 
+    [Fact]
+    public async Task EvaluateAsync_fails_without_llm_call_when_no_chunks_retrieved()
+    {
+        var tenantId = Guid.NewGuid();
+        var moduleId = Guid.NewGuid();
+        var rag = new CapturingRagRetriever(Array.Empty<RagChunk>());
+        // Claude giả trả passed=true để chứng minh short-circuit: nếu LLM vẫn bị gọi, case sẽ pass nhầm.
+        var claude = new CapturingClaude("""{ "passed": true, "reason": "must not be called" }""");
+        var sut = new KbTestRunnerService(rag, claude, new LlmCallScope());
+        var testCase = KbTestCase.Create(moduleId, "HSK3 hoc phi bao nhieu?", "3,000,000 VND", DateTimeOffset.UtcNow);
+
+        var result = await sut.EvaluateAsync(tenantId, "HSK", testCase, CancellationToken.None);
+
+        result.Passed.Should().BeFalse();
+        result.Answer.Should().Be(KbTestRunnerService.NoContextReason);
+        claude.CapturedPrompt.Should().BeNull();
+    }
+
     private sealed class CapturingRagRetriever(IReadOnlyList<RagChunk> chunks) : IRagRetriever
     {
         public RagRequest? CapturedRequest { get; private set; }

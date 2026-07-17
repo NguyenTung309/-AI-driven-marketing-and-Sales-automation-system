@@ -29,6 +29,7 @@ public sealed record UpdateEmbeddingConfigRequest(
 
 public sealed record RotateEmbeddingKeyRequest(string ApiKey);
 
+// RetrievalMode: "vector" (có embedding config -> Qdrant) | "llm" (mặc định — LLM của tenant chọn đoạn KB).
 public sealed record EmbeddingStatusResponse(
     bool Configured,
     string Provider,
@@ -36,4 +37,5 @@ public sealed record EmbeddingStatusResponse(
     int Dimension,
     string Source,
     bool IsFallback,
-    string? DisplayName = null);
+    string? DisplayName = null,
+    string RetrievalMode = "vector");

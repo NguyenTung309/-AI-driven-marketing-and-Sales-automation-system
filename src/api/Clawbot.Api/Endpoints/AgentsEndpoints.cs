@@ -229,6 +229,7 @@ public static class AgentsEndpoints
         AppDbContext db,
         ITenantAccessor tenants,
         IJobLauncher jobs,
+        IPiiRedactor pii,
         HttpContext http,
         CancellationToken ct = default)
     {
@@ -239,10 +240,11 @@ public static class AgentsEndpoints
         if (agent is null) return Results.NotFound();
 
         var config = ReadRuntimeConfig(agent.ConfigJson);
+        var redactedMessage = (await pii.RedactAsync(req.Message.Trim(), ct).ConfigureAwait(false)).RedactedText;
         var jobId = await jobs.LaunchAsync(
             AgentSandboxJobHandler.JobType,
             $"Chạy thử agent {agent.DisplayName}",
-            new AgentSandboxJobPayload(agent.Id, agent.Code, config.SystemPrompt, req.Message.Trim()),
+            new AgentSandboxJobPayload(agent.Id, agent.Code, config.SystemPrompt, redactedMessage),
             CurrentUserId(http),
             ct: ct).ConfigureAwait(false);
 

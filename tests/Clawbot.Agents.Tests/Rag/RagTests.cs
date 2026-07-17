@@ -340,4 +340,19 @@ public sealed class KbDeployServiceTests
         // Regression: every chunk used to share version.Id → Qdrant overwrote all but the last.
         captured!.Select(r => r.Id).Should().OnlyHaveUniqueItems();
     }
+
+    [Fact]
+    public void ChunkContent_splits_a_single_oversized_paragraph_under_the_char_cap()
+    {
+        // Hồi quy: một đoạn liền mạch không xuống dòng kép, dài hơn maxChunkChars, trước đây được giữ
+        // nguyên → chunk vượt hạn mức token model embedding → deploy fail (đoạn 15955 ký tự > 8192 token).
+        var oneLongParagraph = new string('a', 3500);
+
+        var chunks = KbDeployService.ChunkContent(oneLongParagraph, maxChunkChars: 1000);
+
+        chunks.Should().HaveCountGreaterThan(1);
+        chunks.Should().OnlyContain(c => c.Length <= 1000);
+        // Không mất ký tự: nối lại phải đủ độ dài gốc (bỏ qua khoảng trắng cắt ở ranh giới — ở đây không có).
+        string.Concat(chunks).Length.Should().Be(oneLongParagraph.Length);
+    }
 }

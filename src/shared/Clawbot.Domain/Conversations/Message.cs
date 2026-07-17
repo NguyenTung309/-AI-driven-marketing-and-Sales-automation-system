@@ -22,7 +22,8 @@ public sealed class Message : Entity<Guid>, ITenantOwned
     public string? SenderAvatarUrl { get; private set; }
     public string? AttachmentUrl { get; private set; }
     // Review-gate P2: 'sent' (đã gửi/nhận bình thường) | 'pending_approval' (AI reply bị hold chờ người duyệt)
-    // | 'blocked' (bị chặn bởi safety/review — không bao giờ gửi).
+    // | 'blocked' (bị chặn bởi safety/review — không bao giờ gửi) | 'pending_send' (đã persist, chờ kênh xác nhận)
+    // | 'send_failed' (kênh từ chối/lỗi, chưa gửi thành công).
     public string Status { get; private set; } = "sent";
     public DateTimeOffset SentAt { get; private set; }
 
@@ -31,11 +32,25 @@ public sealed class Message : Entity<Guid>, ITenantOwned
     // Channel echo dedup: gan id tin nhan phia kenh (Pancake send response) sau khi da persist row local
     public void SetExternalMessageId(string externalMessageId) => ExternalMessageId = externalMessageId;
 
+    // Outbound delivery: persist trước khi gọi kênh để không bao giờ ghi nhận sent khi chưa có xác nhận.
+    public void MarkPendingSend() => Status = "pending_send";
+
     // Review-gate: draft duoc nguoi duyet (Phase 3) hoac he thong gui thanh cong -> sent.
     public void MarkSent() => Status = "sent";
 
+    // Outbound delivery thất bại: giữ row để retry/audit nhưng không được hiển thị như đã gửi.
+    public void MarkSendFailed() => Status = "send_failed";
+
     // Review-gate P3: nguoi tu choi draft pending_approval -> blocked (giu audit, khong bao gio gui).
     public void MarkBlocked() => Status = "blocked";
+
+    // PII retention: sau thoi han raw, chi giu ban da redact lam noi dung hien thi/fallback.
+    public void ScrubOriginalContent(string redactedContent)
+    {
+        Content = redactedContent;
+        RedactedContent = redactedContent;
+        OriginalContent = null;
+    }
 
     internal static Message Create(
         Guid conversationId,

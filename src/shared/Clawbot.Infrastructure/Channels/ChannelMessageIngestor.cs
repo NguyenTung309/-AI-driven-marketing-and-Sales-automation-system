@@ -118,8 +118,10 @@ public sealed partial class ChannelMessageIngestor(
 
         await _notifier.NotifyMessageAsync(tenantId, new InboxMessageEvent(
             conversation.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt,
+            AssignedTo: conversation.AssignedTo,
             SenderDisplayName: msg.SenderDisplayName,
-            SenderAvatarUrl: msg.SenderAvatarUrl), ct).ConfigureAwait(false);
+            SenderAvatarUrl: msg.SenderAvatarUrl,
+            InboxId: conversation.InboxId), ct).ConfigureAwait(false);
 
         return new IngestResult(conversation.Id, msg.Id, false);
     }

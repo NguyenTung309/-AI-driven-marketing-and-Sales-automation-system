@@ -85,7 +85,7 @@ public static class AdminInboxEndpoints
         {
             await notifier.NotifyConversationUpdatedAsync(
                 tenantId,
-                new InboxConversationEvent(conversation.Id, conversation.Status, conversation.AssignedTo, conversation.LastMessageAt),
+                new InboxConversationEvent(conversation.Id, conversation.Status, conversation.AssignedTo, conversation.LastMessageAt, conversation.InboxId),
                 ct);
         }
 
@@ -141,7 +141,7 @@ public static class AdminInboxEndpoints
         {
             await notifier.NotifyConversationUpdatedAsync(
                 tenantId,
-                new InboxConversationEvent(conversation.Id, conversation.Status, conversation.AssignedTo, conversation.LastMessageAt),
+                new InboxConversationEvent(conversation.Id, conversation.Status, conversation.AssignedTo, conversation.LastMessageAt, conversation.InboxId),
                 ct);
         }
 

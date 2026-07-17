@@ -7,6 +7,8 @@ namespace Clawbot.Infrastructure.Audit;
 
 public sealed class HttpAuditContext(IHttpContextAccessor accessor) : IAuditContext
 {
+    public const int MaxUserAgentLength = 512;
+
     private readonly IHttpContextAccessor _accessor = accessor;
 
     public Guid? UserId
@@ -24,8 +26,9 @@ public sealed class HttpAuditContext(IHttpContextAccessor accessor) : IAuditCont
     {
         get
         {
-            var v = _accessor.HttpContext?.Request?.Headers["User-Agent"].ToString();
-            return string.IsNullOrEmpty(v) ? null : v;
+            var value = _accessor.HttpContext?.Request?.Headers.UserAgent.ToString();
+            if (string.IsNullOrEmpty(value)) return null;
+            return value.Length <= MaxUserAgentLength ? value : value[..MaxUserAgentLength];
         }
     }
 }

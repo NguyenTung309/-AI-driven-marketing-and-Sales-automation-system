@@ -74,6 +74,16 @@ internal sealed partial class KbClassifyUploadJobHandler(
             ? $"Đã nạp {ok} tệp vào kho tri thức."
             // Liệt kê tệp lỗi ngay trong tóm tắt — trước đây bảng kết quả trong modal lo việc này.
             : $"Đã nạp {ok} tệp, {failures.Count} tệp lỗi:\n{string.Join('\n', failures.Select(f => $"- {f.FileName}: {f.Error}"))}";
+
+        // File nạp được nhưng deploy/embed lỗi vẫn có Success=true — phải nêu rõ, nếu không người
+        // dùng tưởng đã triển khai xong rồi thắc mắc vì sao kiểm thử 0% (bản deployed không có vector).
+        var deployFailed = results.Where(r => r.Success && r.Error == KbEndpoints.DeployFailedError).ToList();
+        if (deployFailed.Count > 0)
+        {
+            summary += "\n\nTriển khai thất bại (đã lưu bản nháp, chưa lên kho vector):\n" + string.Join('\n',
+                deployFailed.Select(f => $"- {f.FileName}: mở Kho tri thức và bấm 'Phát hành bản này' để triển khai lại"));
+        }
+
         if (testNotes.Count > 0)
             summary += "\n\nKiểm thử độ chính xác:\n" + string.Join('\n', testNotes);
 

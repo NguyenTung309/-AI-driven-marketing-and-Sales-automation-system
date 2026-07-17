@@ -111,15 +111,44 @@ public sealed partial class ConfiguredEmbeddingProvider(
         using var resp = await http.SendAsync(req, ct).ConfigureAwait(false);
         var json = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode)
-            throw new InvalidOperationException($"multimodal embeddings HTTP {(int)resp.StatusCode}: {json}");
+            throw new InvalidOperationException($"multimodal embeddings HTTP {(int)resp.StatusCode}: {TruncateBody(json)}");
 
-        using var doc = JsonDocument.Parse(json);
-        var emb = doc.RootElement.GetProperty("data")[0].GetProperty("embedding");
-        var vec = new float[emb.GetArrayLength()];
-        var i = 0;
-        foreach (var v in emb.EnumerateArray()) vec[i++] = v.GetSingle();
-        return vec;
+        // Provider có thể trả 200 nhưng body là envelope lỗi ({"error":{...}}, hay gặp ở OpenRouter)
+        // hoặc shape không có "data" — GetProperty thẳng nổ KeyNotFoundException không kèm manh mối.
+        // Đọc phòng thủ và ném lỗi mang theo body (cắt ngắn) để chẩn đoán được từ log/UI.
+        JsonDocument doc;
+        try
+        {
+            doc = JsonDocument.Parse(json);
+        }
+        catch (JsonException)
+        {
+            throw new InvalidOperationException($"multimodal embeddings non-JSON response: {TruncateBody(json)}");
+        }
+
+        using (doc)
+        {
+            if (!doc.RootElement.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Array
+                || data.GetArrayLength() == 0
+                || !data[0].TryGetProperty("embedding", out var emb)
+                || emb.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidOperationException($"multimodal embeddings unexpected response: {TruncateBody(json)}");
+            }
+
+            var vec = new float[emb.GetArrayLength()];
+            var i = 0;
+            foreach (var v in emb.EnumerateArray()) vec[i++] = v.GetSingle();
+            return vec;
+        }
     }
+
+    // Body lỗi đưa vào exception message phải cắt ngắn — response bất thường có thể là trang HTML dài.
+    private const int MaxErrorBodyChars = 500;
+
+    private static string TruncateBody(string value) =>
+        value.Length <= MaxErrorBodyChars ? value : string.Concat(value.AsSpan(0, MaxErrorBodyChars), "…");
 
     public Task<ResolvedEmbeddingConfig> ResolveConfigAsync(CancellationToken ct = default) =>
         ResolveConfigAsync(Guid.Empty, ct);

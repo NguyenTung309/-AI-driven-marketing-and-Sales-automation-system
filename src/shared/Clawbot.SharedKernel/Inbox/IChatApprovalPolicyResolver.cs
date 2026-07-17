@@ -5,4 +5,8 @@ namespace Clawbot.SharedKernel.Inbox;
 public interface IChatApprovalPolicyResolver
 {
     Task<bool> IsRequiredAsync(Guid tenantId, CancellationToken ct = default);
+
+    // Bypass review-gate P2: tenant flag SkipChatReplyReview — khi bật, reply gửi thẳng không qua
+    // critic chấm giá/cam kết (safety cứng vẫn giữ). Default false = fail-closed như cũ.
+    Task<bool> IsReviewGateBypassedAsync(Guid tenantId, CancellationToken ct = default);
 }

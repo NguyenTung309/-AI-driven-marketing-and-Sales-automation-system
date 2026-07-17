@@ -23,7 +23,10 @@ public sealed partial class ChatAgentGrpcService(
     Clawbot.SharedKernel.Inbox.IChatApprovalPolicyResolver? approvalPolicy = null) : ChatAgent.ChatAgentBase
 {
     // Review-gate P2: cap cho LLM critic trên hot-path chat (consumer tuần tự) — quá hạn coi như needs_human.
-    private static readonly TimeSpan ChatReviewTimeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan ChatReviewTimeout = TimeSpan.FromSeconds(30);
+    // Hot-path auto-reply: bao toàn bộ stream + review + send. Quá hạn phải Fail session (không để running vĩnh viễn).
+    // Khớp gần deadline gRPC client (GrpcChatAutoReplyGateway ~100s) để consumer không treo.
+    private static readonly TimeSpan ChatReplyTimeout = TimeSpan.FromSeconds(90);
 
     private readonly CoreChat.ChatAgent _agent = agent;
     private readonly Clawbot.Agents.Core.Content.ContentReviewer _reviewer = reviewer;
@@ -46,40 +49,45 @@ public sealed partial class ChatAgentGrpcService(
         }
         Guid? convId = Guid.TryParse(request.ConversationId, out var cid) ? cid : null;
 
-        Conversation? conversation = null;
-        if (convId.HasValue)
-        {
-            conversation = await _db.Conversations
-                .IgnoreQueryFilters()
-                .Where(c => c.Id == convId.Value && c.TenantId == tenantId)
-                .FirstOrDefaultAsync(context.CancellationToken).ConfigureAwait(false);
-        }
-
-        var sourcePlatform = conversation?.Platform;
-        var matchedScenarioTemplate = await MatchScenarioTemplateAsync(
-            tenantId,
-            request.UserText,
-            sourcePlatform,
-            context.CancellationToken).ConfigureAwait(false);
-
-        var history = request.History
-            .Select((text, idx) => new CoreChat.ChatTurn(idx % 2 == 0 ? "user" : "assistant", text))
-            .ToList();
-
-        // Prompt custom cua tenant tu cau hinh agent "chat-agent" (o "Huong dan tra loi").
-        // Rong -> ChatAgent dung DefaultSystemPrompt; luon boc guardrail o ChatAgent.
-        var customPrompt = await LoadChatSystemPromptAsync(tenantId, context.CancellationToken).ConfigureAwait(false);
-
-        var contactFacts = await LoadContactFactsAsync(tenantId, conversation?.ContactId, context.CancellationToken).ConfigureAwait(false);
-
+        // Tạo session sớm: mọi nhánh fail/timeout sau đây đều có chỗ Fail — tránh orphan "running".
         var session = AgentSession.Start(tenantId, agentId: null, conversationId: convId,
             goal: "chat-reply", startedAt: _clock.UtcNow);
         _db.AgentSessions.Add(session);
         await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
 
+        using var replyCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+        replyCts.CancelAfter(ChatReplyTimeout);
+        var ct = replyCts.Token;
+
+        Conversation? conversation = null;
         CoreChat.ChatAgentReply? reply = null;
         try
         {
+            if (convId.HasValue)
+            {
+                conversation = await _db.Conversations
+                    .IgnoreQueryFilters()
+                    .Where(c => c.Id == convId.Value && c.TenantId == tenantId)
+                    .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            }
+
+            var sourcePlatform = conversation?.Platform;
+            var matchedScenarioTemplate = await MatchScenarioTemplateAsync(
+                tenantId,
+                request.UserText,
+                sourcePlatform,
+                ct).ConfigureAwait(false);
+
+            var history = request.History
+                .Select((text, idx) => new CoreChat.ChatTurn(idx % 2 == 0 ? "user" : "assistant", text))
+                .ToList();
+
+            // Prompt custom cua tenant tu cau hinh agent "chat-agent" (o "Huong dan tra loi").
+            // Rong -> ChatAgent dung DefaultSystemPrompt; luon boc guardrail o ChatAgent.
+            var customPrompt = await LoadChatSystemPromptAsync(tenantId, ct).ConfigureAwait(false);
+
+            var contactFacts = await LoadContactFactsAsync(tenantId, conversation?.ContactId, ct).ConfigureAwait(false);
+
             await foreach (var chunk in _agent.StreamReplyAsync(
                                new CoreChat.ChatAgentRequest(
                                    tenantId,
@@ -91,7 +99,7 @@ public sealed partial class ChatAgentGrpcService(
                                    MatchedScenarioTemplate: matchedScenarioTemplate,
                                    CustomSystemPrompt: customPrompt,
                                    ContactFacts: contactFacts),
-                               context.CancellationToken).ConfigureAwait(false))
+                               ct).ConfigureAwait(false))
             {
                 if (chunk.Final)
                 {
@@ -108,104 +116,179 @@ public sealed partial class ChatAgentGrpcService(
         }
         catch (Exception ex)
         {
-            LogChatFailure(_logger, ex, tenantId, convId);
-            session.AppendTrace("chat", "chat-agent", "error", ex.Message, _clock.UtcNow);
-            session.Fail(_clock.UtcNow);
-            // CancellationToken.None: request bị hủy (client timeout/LLM chậm) vẫn phải chốt session —
-            // save bằng token đã cancel sẽ throw ngay và để session kẹt "running" vĩnh viễn.
-            await _db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
-            // Let the typed "no provider config bound" error escape so the interceptor maps it to
-            // FailedPrecondition/llm_config_not_configured instead of a generic Internal failure.
+            await FailSessionAsync(session, ex, tenantId, convId).ConfigureAwait(false);
             if (ex is CoreChat.LlmConfigNotConfiguredException) throw;
+            if (ex is RpcException) throw;
+            if (ex is OperationCanceledException)
+                throw new RpcException(new Status(StatusCode.DeadlineExceeded, "chat-agent timeout"));
             throw new RpcException(new Status(StatusCode.Internal, "chat-agent failure"));
         }
 
-        // Echo guard: gateway/model lỗi đôi khi trả lại NGUYÊN tin khách làm reply (quan sát gpt-5.5
-        // qua gateway 2026-07) — reply trùng tin nhập vào thì chặn hẳn, không cho vào hàng duyệt.
-        if (!reply.Blocked && !string.IsNullOrWhiteSpace(reply.Text)
-            && string.Equals(NormalizeForEchoCheck(reply.Text), NormalizeForEchoCheck(request.UserText), StringComparison.OrdinalIgnoreCase))
+        try
         {
-            reply = reply with { Blocked = true, BlockReason = "echo_reply" };
-        }
-
-        // Review-gate P3 manual-mode: tenant bật RequireChatReplyApproval → hold MỌI reply chờ người duyệt
-        // (khỏi tốn LLM critic — người là reviewer cuối). Tin sale gõ tay không đi qua đường này (QĐ5).
-        var requireApproval = !reply.Blocked
-            && _approvalPolicy is not null
-            && await _approvalPolicy.IsRequiredAsync(tenantId, context.CancellationToken).ConfigureAwait(false);
-
-        // Review-gate P2 (QĐ2 tiered): tầng 1 deterministic (ChatReplyReviewTrigger — Escalate + nội dung
-        // giá/cam kết) chạy 100%; tầng 2 LLM critic chỉ cho tin nghi ngờ. ContentReviewer fail-closed:
-        // LLM down/timeout/JSON hỏng => needs_human — không bao giờ fail-open thành gửi (QĐ3).
-        string? reviewVerdict = null;
-        string? reviewReason = null;
-        if (!reply.Blocked && !requireApproval && !string.IsNullOrWhiteSpace(reply.Text)
-            && CoreChat.ChatReplyReviewTrigger.NeedsLlmReview(reply))
-        {
-            using var reviewCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
-            reviewCts.CancelAfter(ChatReviewTimeout);
-            var review = await _reviewer.ReviewAsync(
-                tenantId, conversation?.Platform ?? "chat", reply.Text, reviewCts.Token).ConfigureAwait(false);
-            reviewVerdict = review.Verdict;
-            reviewReason = review.Reason;
-        }
-
-        // Trạng thái row tin nhắn: sent (gửi được) | pending_approval (chờ người duyệt) | blocked (chặn hẳn).
-        var messageStatus = reply.Blocked
-            ? "blocked"
-            : requireApproval
-                ? "pending_approval"
-                : reviewVerdict == Clawbot.Agents.Core.Content.ContentReviewResult.RejectVerdict
-                    ? "blocked"
-                    : reviewVerdict == Clawbot.Agents.Core.Content.ContentReviewResult.NeedsHuman
-                        ? "pending_approval"
-                        : "sent";
-
-        var phase = reply.Blocked
-            ? "blocked"
-            : requireApproval
-                ? "held_for_approval"
-                : messageStatus == "blocked"
-                    ? "review_rejected"
-                    : messageStatus == "pending_approval" ? "held_for_review" : "completed";
-        session.AppendTrace("chat", "chat-agent", phase,
-            $"intent={reply.Intent} blocked={reply.Blocked} latency={reply.LatencyMs}ms tokens={reply.InputTokens}/{reply.OutputTokens} usd={reply.UsdCost:0.0000} citations={reply.Citations.Count} lang={reply.Language} toxic_blocked={reply.ToxicityBlocked} spam={reply.SpamFlagged}{(reply.BlockReason is null ? "" : " block=" + reply.BlockReason)}{(reviewVerdict is null ? "" : $" review={reviewVerdict} reason={reviewReason}")}",
-            _clock.UtcNow);
-        session.Finish(_clock.UtcNow);
-
-        Clawbot.Domain.Conversations.Message? persistedReply = null;
-        if (convId.HasValue)
-        {
-            persistedReply = conversation?.AppendMessage("out", "agent", reply.Text, "text", _clock.UtcNow, status: messageStatus);
-        }
-
-        await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
-
-        // SPEC-16 P2-10: physically send the AI reply to the channel after persisting it. Best-effort — a channel
-        // failure surfaces a trace but does not undo the persisted reply. Only send when not blocked (safety/toxicity
-        // gates), the review gate let it through (status=sent), and the conversation has an external thread id.
-        if (!reply.Blocked && messageStatus == "sent" && conversation is { ExternalThreadId.Length: > 0 } && _channelAdapter is not null)
-        {
-            try
+            // Echo guard: gateway/model lỗi đôi khi trả lại NGUYÊN tin khách làm reply (quan sát gpt-5.5
+            // qua gateway 2026-07) — reply trùng tin nhập vào thì chặn hẳn, không cho vào hàng duyệt.
+            if (!reply.Blocked && !string.IsNullOrWhiteSpace(reply.Text)
+                && string.Equals(NormalizeForEchoCheck(reply.Text), NormalizeForEchoCheck(request.UserText), StringComparison.OrdinalIgnoreCase))
             {
-                var channelMessageId = await _channelAdapter.SendAsync(conversation.ExternalThreadId, reply.Text, context.CancellationToken).ConfigureAwait(false);
-                // Gan id phia kenh vao row da persist: poller dedup strict tin echo theo external_message_id
-                if (channelMessageId is not null)
-                    persistedReply?.SetExternalMessageId(channelMessageId);
-                session.AppendTrace("chat", "chat-agent", "sent",
-                    $"reply sent to channel {conversation.Platform} thread={conversation.ExternalThreadId}", _clock.UtcNow);
+                reply = reply with { Blocked = true, BlockReason = "echo_reply" };
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                LogChannelSendFailure(_logger, ex, tenantId, convId, conversation.Platform);
-                session.AppendTrace("chat", "chat-agent", "send_failed",
-                    $"channel send failed ({conversation.Platform}): {ex.Message}", _clock.UtcNow);
-            }
-            await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
-        }
 
-        // Part C.2: auto-score the lead from this customer message. Best-effort — never break the reply.
-        await TryAutoScoreLeadAsync(tenantId, conversation, request.UserText, context.CancellationToken).ConfigureAwait(false);
+            // Review-gate P3 manual-mode: tenant bật RequireChatReplyApproval → hold MỌI reply chờ người duyệt
+            // (khỏi tốn LLM critic — người là reviewer cuối). Tin sale gõ tay không đi qua đường này (QĐ5).
+            var requireApproval = !reply.Blocked
+                && _approvalPolicy is not null
+                && await _approvalPolicy.IsRequiredAsync(tenantId, ct).ConfigureAwait(false);
+
+            // Bypass gate P2 theo tenant (SkipChatReplyReview, QĐ user 2026-07-16): bật = gửi thẳng,
+            // không critic. Safety cứng phía trên (echo/toxicity/injection) vẫn giữ nguyên.
+            var skipReviewGate = !reply.Blocked
+                && !requireApproval
+                && _approvalPolicy is not null
+                && await _approvalPolicy.IsReviewGateBypassedAsync(tenantId, ct).ConfigureAwait(false);
+
+            // Review-gate P2 (QĐ2 tiered): tầng 1 deterministic (ChatReplyReviewTrigger — Escalate + nội dung
+            // giá/cam kết) chạy 100%; tầng 2 LLM critic chỉ cho tin nghi ngờ. ContentReviewer fail-closed:
+            // LLM down/timeout/JSON hỏng => needs_human — không bao giờ fail-open thành gửi (QĐ3).
+            string? reviewVerdict = null;
+            string? reviewReason = null;
+            if (!reply.Blocked && !requireApproval && !skipReviewGate && !string.IsNullOrWhiteSpace(reply.Text)
+                && CoreChat.ChatReplyReviewTrigger.NeedsLlmReview(reply))
+            {
+                using var reviewCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                reviewCts.CancelAfter(ChatReviewTimeout);
+                try
+                {
+                    var review = await _reviewer.ReviewAsync(
+                        tenantId, conversation?.Platform ?? "chat", reply.Text, reviewCts.Token).ConfigureAwait(false);
+                    reviewVerdict = review.Verdict;
+                    reviewReason = review.Reason;
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    // Reviewer timeout/provider-side cancellation phải fail-closed thành draft chờ duyệt,
+                    // không được làm hỏng toàn bộ auto-reply session hoặc để session running.
+                    reviewVerdict = Clawbot.Agents.Core.Content.ContentReviewResult.NeedsHuman;
+                    reviewReason = "review_timeout";
+                }
+            }
+
+            // Trạng thái row tin nhắn: sent | pending_send | send_failed | pending_approval | blocked.
+            var messageStatus = reply.Blocked
+                ? "blocked"
+                : requireApproval
+                    ? "pending_approval"
+                    : reviewVerdict == Clawbot.Agents.Core.Content.ContentReviewResult.RejectVerdict
+                        ? "blocked"
+                        : reviewVerdict == Clawbot.Agents.Core.Content.ContentReviewResult.NeedsHuman
+                            ? "pending_approval"
+                            : "sent";
+
+            var phase = reply.Blocked
+                ? "blocked"
+                : requireApproval
+                    ? "held_for_approval"
+                    : messageStatus == "blocked"
+                        ? "review_rejected"
+                        : messageStatus == "pending_approval" ? "held_for_review" : "completed";
+            session.AppendTrace("chat", "chat-agent", phase,
+                $"intent={reply.Intent} blocked={reply.Blocked} latency={reply.LatencyMs}ms tokens={reply.InputTokens}/{reply.OutputTokens} usd={reply.UsdCost:0.0000} citations={reply.Citations.Count} lang={reply.Language} toxic_blocked={reply.ToxicityBlocked} spam={reply.SpamFlagged}{(reply.BlockReason is null ? "" : " block=" + reply.BlockReason)}{(skipReviewGate ? " review=bypassed" : reviewVerdict is null ? "" : $" review={reviewVerdict} reason={reviewReason}")}",
+                _clock.UtcNow);
+
+            var shouldSendToChannel = messageStatus == "sent"
+                && conversation is { ExternalThreadId.Length: > 0 }
+                && _channelAdapter is not null;
+
+            Clawbot.Domain.Conversations.Message? persistedReply = null;
+            if (convId.HasValue)
+            {
+                persistedReply = conversation?.AppendMessage("out", "agent", reply.Text, "text", _clock.UtcNow, status: messageStatus);
+                if (shouldSendToChannel)
+                    persistedReply?.MarkPendingSend();
+            }
+
+            await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            // SPEC-16 P2-10: persist pending_send before calling the channel. Only a confirmed adapter completion may
+            // transition the row to sent; every non-cancellation failure becomes send_failed for retry/audit.
+            if (shouldSendToChannel
+                && conversation is not null
+                && persistedReply is not null
+                && _channelAdapter is not null)
+            {
+                string? channelMessageId = null;
+                var isChannelSendConfirmed = false;
+                try
+                {
+                    channelMessageId = await _channelAdapter.SendAsync(
+                        tenantId,
+                        conversation.ExternalThreadId,
+                        reply.Text,
+                        ct).ConfigureAwait(false);
+                    isChannelSendConfirmed = true;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    LogChannelSendFailure(_logger, ex, tenantId, convId, conversation.Platform);
+                    persistedReply.MarkSendFailed();
+                    session.AppendTrace("chat", "chat-agent", "send_failed",
+                        $"channel send interrupted ({conversation.Platform})", _clock.UtcNow);
+                    await _db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    LogChannelSendFailure(_logger, ex, tenantId, convId, conversation.Platform);
+                    persistedReply.MarkSendFailed();
+                    session.AppendTrace("chat", "chat-agent", "send_failed",
+                        $"channel send failed ({conversation.Platform}): {ex.GetType().Name}", _clock.UtcNow);
+                    await _db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+
+                if (isChannelSendConfirmed)
+                {
+                    // Gan id phia kenh vao row da persist: poller dedup strict tin echo theo external_message_id
+                    if (channelMessageId is not null)
+                        persistedReply.SetExternalMessageId(channelMessageId);
+                    persistedReply.MarkSent();
+                    session.AppendTrace("chat", "chat-agent", "sent",
+                        $"reply sent to channel {conversation.Platform} thread={conversation.ExternalThreadId}", _clock.UtcNow);
+                    await _db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+
+            // Chỉ Finish SAU KHI message + trạng thái delivery đã persist. Nếu save/send bị cancel trước đó,
+            // catch bên dưới vẫn thấy session Running và chốt Failed thay vì để DB kẹt running.
+            session.Finish(_clock.UtcNow);
+            await _db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
+
+            // Part C.2: auto-score the lead from this customer message. Best-effort — never break the reply.
+            await TryAutoScoreLeadAsync(tenantId, conversation, request.UserText, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (session.Status == AgentSessionStatuses.Running)
+        {
+            // Review/persist/send timeout hoặc lỗi sau stream: vẫn Fail session (đã Finish thì bỏ qua).
+            await FailSessionAsync(session, ex, tenantId, convId).ConfigureAwait(false);
+            if (ex is OperationCanceledException)
+                throw new RpcException(new Status(StatusCode.DeadlineExceeded, "chat-agent timeout"));
+            if (ex is RpcException) throw;
+            throw new RpcException(new Status(StatusCode.Internal, "chat-agent failure"));
+        }
+    }
+
+    private async Task FailSessionAsync(AgentSession session, Exception ex, Guid tenantId, Guid? convId)
+    {
+        LogChatFailure(_logger, ex, tenantId, convId);
+        // Chỉ Fail khi còn running — tránh ghi đè completed/failed nếu race.
+        if (session.Status == AgentSessionStatuses.Running)
+        {
+            var phase = ex is OperationCanceledException ? "timeout" : "error";
+            session.AppendTrace("chat", "chat-agent", phase, ex.Message, _clock.UtcNow);
+            session.Fail(_clock.UtcNow);
+        }
+        // CancellationToken.None: request bị hủy (client timeout/LLM chậm) vẫn phải chốt session —
+        // save bằng token đã cancel sẽ throw ngay và để session kẹt "running" vĩnh viễn.
+        await _db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
     private async Task TryAutoScoreLeadAsync(Guid tenantId, Conversation? conversation, string userText, CancellationToken ct)

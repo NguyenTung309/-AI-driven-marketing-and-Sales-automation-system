@@ -134,8 +134,28 @@ export async function getSaleAssistDailySummary(): Promise<SaleAssistDailySummar
   return res.data;
 }
 
-export async function getSaleAssistUpsell(conversationId: string): Promise<JobAccepted> {
-  const res = await apiClient.get<JobAccepted>("/api/sale-assist/upsell", { params: { conversationId } });
+/** 202 = job LLM; 200 = gate sớm (chưa hot / không lead) — không đẻ job. */
+export type SaleAssistUpsellLaunch = JobAccepted | SaleAssistUpsellResponse;
+
+export function isSaleAssistUpsellResult(value: unknown): value is SaleAssistUpsellResponse {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "eligible" in value &&
+    typeof (value as SaleAssistUpsellResponse).eligible === "boolean" &&
+    "suggestion" in value &&
+    typeof (value as SaleAssistUpsellResponse).suggestion === "string" &&
+    "reason" in value &&
+    typeof (value as SaleAssistUpsellResponse).reason === "string" &&
+    "leadScore" in value &&
+    typeof (value as SaleAssistUpsellResponse).leadScore === "number"
+  );
+}
+
+export async function getSaleAssistUpsell(conversationId: string): Promise<SaleAssistUpsellLaunch> {
+  const res = await apiClient.get<SaleAssistUpsellLaunch>("/api/sale-assist/upsell", {
+    params: { conversationId },
+  });
   return res.data;
 }
 

@@ -5,6 +5,8 @@ import { useJobWatcher } from "./useJobWatcher";
 export interface JobRunOptions<T> {
   readonly onResult?: (data: T) => void;
   readonly onError?: (message: string) => void;
+  /** Khi launch trả về kết quả thẳng (200) thay vì JobAccepted (202) — không poll job. */
+  readonly isImmediateResult?: (value: unknown) => value is T;
 }
 
 export interface JobRun<T> {
@@ -12,7 +14,7 @@ export interface JobRun<T> {
   readonly error: string | null;
   readonly running: boolean;
   readonly progress: number;
-  readonly start: (launch: () => Promise<JobAccepted>) => Promise<void>;
+  readonly start: (launch: () => Promise<JobAccepted | T>) => Promise<void>;
   readonly reset: () => void;
 }
 
@@ -58,12 +60,18 @@ export function useJobRun<T>(options?: JobRunOptions<T>): JobRun<T> {
     }
   });
 
-  const start = useCallback(async (launch: () => Promise<JobAccepted>) => {
+  const start = useCallback(async (launch: () => Promise<JobAccepted | T>) => {
     setError(null);
     setData(null);
     try {
       const accepted = await launch();
-      setJobId(accepted.jobId);
+      const isImmediate = optionsRef.current?.isImmediateResult;
+      if (isImmediate?.(accepted)) {
+        setData(accepted);
+        optionsRef.current?.onResult?.(accepted);
+        return;
+      }
+      setJobId((accepted as JobAccepted).jobId);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Không gửi được yêu cầu tới agent.";
       setError(message);

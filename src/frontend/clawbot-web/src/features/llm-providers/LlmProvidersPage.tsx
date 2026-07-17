@@ -457,18 +457,24 @@ export default function LlmProvidersPage() {
 
         <section className="space-y-4">
           <SectionHeader
-            title="Embedding kho tri thức"
-            description="Cấu hình vector embedding dùng khi phát hành KB và truy hồi RAG. Nếu chưa cấu hình sẽ dùng hash fallback chỉ phù hợp demo."
+            title="Embedding kho tri thức (tùy chọn)"
+            description="Không cấu hình: KB truy xuất bằng chính LLM của bạn (mặc định, không cần thêm gì). Cấu hình embedding để bật vector search — nhanh và rẻ hơn khi kho tri thức lớn."
             action={<Button onClick={openEmbeddingCreate}><span aria-hidden="true" className="material-symbols-outlined">add</span>Thêm embedding</Button>}
           />
-          <div className={`rounded-lg border px-4 py-3 text-body-md ${embeddingStatus?.isFallback ? "border-amber-200 bg-amber-50 text-amber-900" : "border-green-200 bg-green-50 text-green-900"}`}>
-            Đang dùng: <strong>{embeddingStatus?.displayName || embeddingStatus?.modelId || "đang tải"}</strong>
-            {embeddingStatus ? ` · ${embeddingStatus.provider} · ${embeddingStatus.dimension} chiều · ${embeddingStatus.source}` : null}
+          <div className={`rounded-lg border px-4 py-3 text-body-md ${embeddingStatus?.retrievalMode === "llm" ? "border-sky-200 bg-sky-50 text-sky-900" : "border-green-200 bg-green-50 text-green-900"}`}>
+            {embeddingStatus?.retrievalMode === "llm" ? (
+              <>Truy xuất KB: <strong>LLM trực tiếp (mặc định)</strong> — AI đọc kho tri thức bằng model chat của bạn, không cần embedding.</>
+            ) : (
+              <>
+                Truy xuất KB: <strong>Vector search</strong> · {embeddingStatus?.displayName || embeddingStatus?.modelId || "đang tải"}
+                {embeddingStatus ? ` · ${embeddingStatus.provider} · ${embeddingStatus.dimension} chiều · ${embeddingStatus.source}` : null}
+              </>
+            )}
           </div>
           {embeddingLoading ? (
             <div className="rounded-lg border border-outline bg-surface p-4 text-body-md text-on-surface-variant">Đang tải...</div>
           ) : (
-            <DataTable columns={embeddingColumns} rows={embeddingConfigs} rowKey={(row) => row.id} empty="Chưa có cấu hình embedding. Hệ thống sẽ dùng hash fallback." />
+            <DataTable columns={embeddingColumns} rows={embeddingConfigs} rowKey={(row) => row.id} empty="Chưa có cấu hình embedding — KB đang truy xuất bằng LLM (mặc định)." />
           )}
         </section>
 

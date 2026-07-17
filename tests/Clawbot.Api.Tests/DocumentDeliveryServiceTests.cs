@@ -36,10 +36,11 @@ public sealed class DocumentDeliveryServiceTests
             [adapter],
             new FixedClock(Now.AddMinutes(5)));
 
-        var sent = await sut.TrySendAsync(doc.Id, "zalo");
+        var sent = await sut.TrySendAsync(TenantId, doc.Id, "zalo");
 
         sent.Should().BeTrue();
         adapter.Sends.Should().ContainSingle().Which.Should().Be((
+            TenantId,
             "page-1:new-thread",
             $"Xin chào, tài liệu của bạn đã sẵn sàng: {doc.FileUrl}\nLiên kết có hiệu lực đến 22/06/2026."));
         fx.Db.ChangeTracker.Clear();
@@ -66,7 +67,7 @@ public sealed class DocumentDeliveryServiceTests
             [],
             new FixedClock(Now.AddMinutes(3)));
 
-        var sent = await sut.TrySendAsync(doc.Id, "email");
+        var sent = await sut.TrySendAsync(TenantId, doc.Id, "email");
 
         sent.Should().BeTrue();
         email.Sends.Should().ContainSingle().Which.Should().Be((
@@ -82,17 +83,17 @@ public sealed class DocumentDeliveryServiceTests
     private sealed class CapturingChannelAdapter : IChannelAdapter
     {
         public string Name => "pancake";
-        public List<(string ExternalThreadId, string Text)> Sends { get; } = [];
+        public List<(Guid TenantId, string ExternalThreadId, string Text)> Sends { get; } = [];
 
-        public Task<bool> VerifyWebhookSignatureAsync(string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default) =>
+        public Task<bool> VerifyWebhookSignatureAsync(Guid tenantId, string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default) =>
             Task.FromResult(true);
 
         public Task<IReadOnlyList<ChannelMessage>> ParseAsync(string rawBody, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<ChannelMessage>>([]);
 
-        public Task<string?> SendAsync(string externalThreadId, string text, CancellationToken ct = default)
+        public Task<string?> SendAsync(Guid tenantId, string externalThreadId, string text, CancellationToken ct = default)
         {
-            Sends.Add((externalThreadId, text));
+            Sends.Add((tenantId, externalThreadId, text));
             return Task.FromResult<string?>(null);
         }
     }

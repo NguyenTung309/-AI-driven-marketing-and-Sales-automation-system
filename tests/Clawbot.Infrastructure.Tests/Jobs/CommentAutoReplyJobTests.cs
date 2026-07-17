@@ -39,9 +39,9 @@ public sealed class CommentAutoReplyJobTests
         await sut.RunAsync(fx.TenantId, inbound.Id, CancellationToken.None);
 
         adapter.CommentReplies.Should().ContainSingle()
-            .Which.Should().Be(("page-1:comment-conv-1", "comment-1"));
+            .Which.Should().Be((fx.TenantId, "page-1:comment-conv-1", "comment-1"));
         adapter.PrivateReplies.Should().ContainSingle()
-            .Which.Should().Be(("page-1:comment-conv-1", "post-99", "comment-1", "fb-user-77"));
+            .Which.Should().Be((fx.TenantId, "page-1:comment-conv-1", "post-99", "comment-1", "fb-user-77"));
         fx.Db.ChangeTracker.Clear();
         var outbound = await fx.Db.Messages.IgnoreQueryFilters()
             .Where(m => m.ConversationId == conversation.Id && m.Direction == "out")
@@ -153,18 +153,18 @@ public sealed class CommentAutoReplyJobTests
 
     private sealed class FakeCommentAdapter : ICommentChannelAdapter
     {
-        public List<(string Thread, string CommentId)> CommentReplies { get; } = [];
-        public List<(string Thread, string PostId, string CommentId, string FromId)> PrivateReplies { get; } = [];
+        public List<(Guid TenantId, string Thread, string CommentId)> CommentReplies { get; } = [];
+        public List<(Guid TenantId, string Thread, string PostId, string CommentId, string FromId)> PrivateReplies { get; } = [];
 
-        public Task<string?> SendCommentReplyAsync(string externalThreadId, string commentMessageId, string text, CancellationToken ct = default)
+        public Task<string?> SendCommentReplyAsync(Guid tenantId, string externalThreadId, string commentMessageId, string text, CancellationToken ct = default)
         {
-            CommentReplies.Add((externalThreadId, commentMessageId));
+            CommentReplies.Add((tenantId, externalThreadId, commentMessageId));
             return Task.FromResult<string?>("cmt-reply-" + CommentReplies.Count);
         }
 
-        public Task<string?> SendPrivateReplyAsync(string externalThreadId, string postId, string commentMessageId, string fromId, string text, CancellationToken ct = default)
+        public Task<string?> SendPrivateReplyAsync(Guid tenantId, string externalThreadId, string postId, string commentMessageId, string fromId, string text, CancellationToken ct = default)
         {
-            PrivateReplies.Add((externalThreadId, postId, commentMessageId, fromId));
+            PrivateReplies.Add((tenantId, externalThreadId, postId, commentMessageId, fromId));
             return Task.FromResult<string?>("pm-reply-" + PrivateReplies.Count);
         }
     }

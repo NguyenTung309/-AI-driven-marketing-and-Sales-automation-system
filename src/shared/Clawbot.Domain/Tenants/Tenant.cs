@@ -21,11 +21,16 @@ public sealed class Tenant : AggregateRoot<Guid>
     // Review-gate P3 manual-mode: khi bật, MỌI AI reply hold thành pending_approval chờ người duyệt
     // (không gửi tự động); tin sale gõ tay miễn (QĐ5).
     public bool RequireChatReplyApproval { get; private set; }
+    // Bypass review-gate P2 (QĐ user 2026-07-16): bật = AI reply gửi thẳng, KHÔNG qua critic chấm
+    // giá/cam kết. Default OFF (fail-closed). Safety cứng (toxicity/injection/echo) vẫn giữ nguyên.
+    public bool SkipChatReplyReview { get; private set; }
     // Gate tri thức tự học: default OFF = AI tự duyệt kb_suggestions khi rail đạt (verdict approve +
     // accuracy không giảm). Bật = mọi đề xuất chờ người duyệt (QĐ 2026-07-11, ngược chiều 2 flag trên).
     public bool RequireKbHumanReview { get; private set; }
     // Hạn mức chi tiêu LLM mỗi tháng (USD). null = dùng mặc định hệ thống.
     public decimal? MonthlyCostCapUsd { get; private set; }
+    // Sale gửi tay -> AI tạm nhường bao lâu (phút) rồi tự bật lại. Cấu hình per-tenant, mặc định 5.
+    public int AiAutoReplyResumeMinutes { get; private set; } = 5;
     public DateTimeOffset CreatedAt { get; private set; }
 
     private Tenant() { }
@@ -66,12 +71,19 @@ public sealed class Tenant : AggregateRoot<Guid>
     public void SetRequireChatReplyApproval(bool requireApproval) =>
         RequireChatReplyApproval = requireApproval;
 
+    public void SetSkipChatReplyReview(bool skip) =>
+        SkipChatReplyReview = skip;
+
     public void SetRequireKbHumanReview(bool requireReview) =>
         RequireKbHumanReview = requireReview;
 
     // null hoặc <= 0 → xoá hạn mức riêng, quay về mặc định hệ thống.
     public void SetMonthlyCostCapUsd(decimal? capUsd) =>
         MonthlyCostCapUsd = capUsd is > 0m ? capUsd : null;
+
+    // <= 0 → về mặc định 5 phút; clamp trần 1 ngày để tránh cấu hình vô lý.
+    public void SetAiAutoReplyResumeMinutes(int minutes) =>
+        AiAutoReplyResumeMinutes = minutes <= 0 ? 5 : Math.Min(minutes, 1440);
 
     private static string? NormalizeNullable(string? value)
     {

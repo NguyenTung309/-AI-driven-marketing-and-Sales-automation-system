@@ -1,3 +1,4 @@
+using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Infrastructure.Persistence;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
@@ -7,6 +8,7 @@ namespace Clawbot.Infrastructure.Jobs;
 
 public sealed partial class RetentionPurgeJob(
     AppDbContext db,
+    IPiiRedactor pii,
     ILogger<RetentionPurgeJob> logger,
     TimeProvider? clock = null)
 {
@@ -14,6 +16,7 @@ public sealed partial class RetentionPurgeJob(
     private const int NotificationRetentionDays = 90;
 
     private readonly AppDbContext _db = db;
+    private readonly IPiiRedactor _pii = pii;
     private readonly ILogger<RetentionPurgeJob> _logger = logger;
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 
@@ -28,12 +31,32 @@ public sealed partial class RetentionPurgeJob(
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
         LogPurged(_logger, removed, cutoff);
 
-        // PII retention: null out raw message content >30d, keep the redacted copy (NFR PII-30d).
-        var scrubbed = await _db.Messages
+        // PII retention: re-redact every historical row before dropping raw content. This also repairs
+        // legacy/widget rows whose Content or RedactedContent was persisted before the split invariant existed.
+        var messageIds = await _db.Messages
             .IgnoreQueryFilters()
-            .Where(m => m.SentAt < cutoff && m.OriginalContent != null)
-            .ExecuteUpdateAsync(s => s.SetProperty(m => m.OriginalContent, (string?)null), ct)
+            .Where(m => m.SentAt < cutoff)
+            .Select(m => m.Id)
+            .ToListAsync(ct)
             .ConfigureAwait(false);
+        var scrubbed = 0;
+        foreach (var batch in messageIds.Chunk(500))
+        {
+            var messages = await _db.Messages
+                .IgnoreQueryFilters()
+                .Where(m => batch.Contains(m.Id))
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            foreach (var message in messages)
+            {
+                var source = message.OriginalContent ?? message.RedactedContent ?? message.Content;
+                var redacted = await _pii.RedactAsync(source, ct).ConfigureAwait(false);
+                message.ScrubOriginalContent(redacted.RedactedText);
+            }
+
+            await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+            scrubbed += messages.Count;
+        }
         LogMessagesScrubbed(_logger, scrubbed, cutoff);
 
         var notificationCutoff = now.AddDays(-NotificationRetentionDays);

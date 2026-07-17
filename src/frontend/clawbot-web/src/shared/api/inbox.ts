@@ -65,6 +65,14 @@ export interface ConversationCursorPage {
   readonly total: number | null;
 }
 
+export type InboxMessageStatus =
+  | "sent"
+  | "pending_send"
+  | "send_failed"
+  | "pending_approval"
+  | "blocked"
+  | string;
+
 export interface InboxMessage {
   readonly id: string;
   readonly direction: string;
@@ -76,8 +84,7 @@ export interface InboxMessage {
   readonly senderDisplayName: string | null;
   readonly senderAvatarUrl: string | null;
   readonly attachmentUrl: string | null;
-  // Review-gate P2: sent | pending_approval (AI reply chờ duyệt) | blocked (bị chặn, không gửi)
-  readonly status?: string;
+  readonly status?: InboxMessageStatus;
 }
 
 export interface ConversationDetail {
@@ -104,6 +111,15 @@ export interface InboxConversationEvent {
   readonly status: ConversationStatus;
   readonly assignedTo: string | null;
   readonly lastMessageAt: string | null;
+  readonly inboxId?: string | null;
+}
+
+export interface InboxMessageStatusEvent {
+  readonly conversationId: string;
+  readonly messageId: string;
+  readonly status: InboxMessageStatus;
+  readonly assignedTo?: string | null;
+  readonly inboxId?: string | null;
 }
 
 export interface InboxMessageEvent {
@@ -117,6 +133,8 @@ export interface InboxMessageEvent {
   readonly senderDisplayName?: string | null;
   readonly senderAvatarUrl?: string | null;
   readonly attachmentUrl?: string | null;
+  readonly inboxId?: string | null;
+  readonly isSynthetic?: boolean;
 }
 
 export interface ListConversationsParams {
@@ -182,6 +200,22 @@ export async function sendConversationMessage(id: string, content: string): Prom
     contentType: "text",
   });
   return res.data;
+}
+
+export async function retryConversationMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<InboxMessage> {
+  const res = await apiClient.post<InboxMessage>(
+    `/api/inbox/conversations/${conversationId}/messages/${messageId}/retry`,
+  );
+  return res.data;
+}
+
+// Kích AI soạn lại phản hồi cho tin khách đang chờ (vd sau khi từ chối draft bị chặn).
+// 202 = đang soạn; 409 = không có tin khách treo / AI đang tắt / có draft chờ duyệt.
+export async function regenerateAiReply(conversationId: string): Promise<void> {
+  await apiClient.post(`/api/inbox/conversations/${conversationId}/ai/regenerate`);
 }
 
 // Review-gate P3: duyệt AI draft đang hold — gửi thật qua kênh + chuyển status sent.

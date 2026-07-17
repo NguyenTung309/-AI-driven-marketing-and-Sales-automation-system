@@ -175,12 +175,15 @@ export async function classifyUploadKb(
   return response.data;
 }
 
-export async function deployKbVersion(moduleId: string, versionId: string): Promise<void> {
-  await apiClient.post(`/api/kb/modules/${moduleId}/versions/${versionId}/deploy`);
+// Phát hành/khôi phục chạy ngầm (job platform): trả jobId để theo dõi, có thông báo khi xong.
+export async function deployKbVersion(moduleId: string, versionId: string): Promise<JobAccepted> {
+  const response = await apiClient.post<JobAccepted>(`/api/kb/modules/${moduleId}/versions/${versionId}/deploy`);
+  return response.data;
 }
 
-export async function rollbackKbVersion(moduleId: string, versionId: string): Promise<void> {
-  await apiClient.post(`/api/kb/modules/${moduleId}/versions/${versionId}/rollback`);
+export async function rollbackKbVersion(moduleId: string, versionId: string): Promise<JobAccepted> {
+  const response = await apiClient.post<JobAccepted>(`/api/kb/modules/${moduleId}/versions/${versionId}/rollback`);
+  return response.data;
 }
 
 export async function getKbVersionDiff(moduleId: string, fromVersion: number, toVersion: number): Promise<KbVersionDiff> {

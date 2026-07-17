@@ -14,4 +14,5 @@ public sealed record PancakeRuntimeConfig(
 public interface IPancakeConfigResolver
 {
     Task<PancakeRuntimeConfig?> ResolveAsync(Guid tenantId, CancellationToken ct = default);
+    Task<PancakeRuntimeConfig?> ResolveTenantOnlyAsync(Guid tenantId, CancellationToken ct = default);
 }

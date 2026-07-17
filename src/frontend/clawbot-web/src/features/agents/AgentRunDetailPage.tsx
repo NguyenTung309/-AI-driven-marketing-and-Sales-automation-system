@@ -7,7 +7,7 @@ import { Button } from "@/shared/ui/Button";
 import { Card } from "@/shared/ui/Card";
 import { StatusPill } from "@/shared/ui/StatusPill";
 import { useAuthStore } from "@/shared/auth/authStore";
-import { operationalPhaseLabel, toSafeOperationalText } from "@/shared/utils/userText";
+import { formatOperationalTraceMessage, operationalPhaseLabel, toSafeCsvCell } from "@/shared/utils/userText";
 import { TaskResultDetails } from "./TaskResultDetails";
 import { useOrchestrationRealtime } from "./useOrchestrationRealtime";
 import { useRunControls } from "./useRunControls";
@@ -37,12 +37,12 @@ function exportRunCsv(session: OrchestrationV2RunDetail) {
       trace.occurredAt,
       trace.agentName,
       operationalPhaseLabel(trace.phase),
-      toSafeOperationalText(trace.message),
+      formatOperationalTraceMessage(trace.phase, trace.message),
       trace.taskId,
     ]),
   ];
   const csv = "﻿" + rows
-    .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
+    .map((row) => row.map(toSafeCsvCell).join(","))
     .join("\n");
   downloadFile(`phien-${session.sessionId}.csv`, "text/csv;charset=utf-8", csv);
 }
@@ -200,7 +200,7 @@ export default function AgentRunDetailPage() {
                   {traceItems.map((item, index) => (
                     <li key={`${item.taskId}-${item.phase}-${index}`} className="text-label-sm text-on-surface-variant">
                       <span className="font-mono">[{operationalPhaseLabel(item.phase)}]</span>{" "}
-                      {item.agentName || item.taskId || "session"} · {toSafeOperationalText(item.message)}
+                      {item.agentName || item.taskId || "session"} · {formatOperationalTraceMessage(item.phase, item.message)}
                     </li>
                   ))}
                 </ul>

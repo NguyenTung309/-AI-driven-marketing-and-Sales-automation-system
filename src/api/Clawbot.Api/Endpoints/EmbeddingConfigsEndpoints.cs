@@ -66,7 +66,9 @@ public static partial class EmbeddingConfigsEndpoints
                 cfg.Dimension,
                 cfg.Source,
                 cfg.IsFallback,
-                cfg.DisplayName));
+                cfg.DisplayName,
+                // Không cấu hình embedding -> KB truy xuất bằng LLM (RoutingRagRetriever), không còn hash-vector.
+                RetrievalMode: cfg.IsFallback ? "llm" : "vector"));
         }
 
         return Results.Ok(new EmbeddingStatusResponse(true, "unknown", "unknown", embedder.Dimension, "runtime", false));

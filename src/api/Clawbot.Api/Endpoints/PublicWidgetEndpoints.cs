@@ -1,4 +1,5 @@
 using Clawbot.Agents.Core.Lead;
+using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Api.Contracts.Tenants;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
@@ -101,6 +102,7 @@ public static class PublicWidgetEndpoints
         AppDbContext db,
         ILeadAssignmentService assignment,
         IInboxNotifier notifier,
+        IPiiRedactor pii,
         IClock clock,
         CancellationToken ct)
     {
@@ -121,7 +123,11 @@ public static class PublicWidgetEndpoints
         var visitorText = string.IsNullOrWhiteSpace(req.Message)
             ? $"TÃ´i muá»‘n Ä‘Æ°á»£c tÆ° váº¥n. Sá»‘ Ä‘iá»‡n thoáº¡i: {req.Phone.Trim()}"
             : req.Message.Trim();
-        var inbound = conversation.AppendMessage("in", "visitor", visitorText, "text", now);
+        var redactedVisitorText = await pii.RedactAsync(visitorText, ct).ConfigureAwait(false);
+        var inbound = conversation.AppendMessage(
+            "in", "visitor", redactedVisitorText.RedactedText, "text", now,
+            originalContent: visitorText,
+            redactedContent: redactedVisitorText.RedactedText);
 
         const string reply = "Cáº£m Æ¡n báº¡n. Há»c BÃ¡ Ä‘Ã£ ghi nháº­n thÃ´ng tin vÃ  Ä‘á»™i tÆ° váº¥n sáº½ liÃªn há»‡ trong thá»i gian sá»›m nháº¥t.";
         var outbound = conversation.AppendMessage("out", "bot", reply, "text", now.AddMilliseconds(1));
@@ -138,6 +144,7 @@ public static class PublicWidgetEndpoints
         WidgetMessageRequest req,
         AppDbContext db,
         IInboxNotifier notifier,
+        IPiiRedactor pii,
         IClock clock,
         CancellationToken ct)
     {
@@ -153,7 +160,12 @@ public static class PublicWidgetEndpoints
         if (conversation is null) return Results.NotFound(new { error = "conversation_not_found" });
 
         var now = clock.UtcNow;
-        var inbound = conversation.AppendMessage("in", "visitor", req.Content.Trim(), "text", now);
+        var visitorText = req.Content.Trim();
+        var redactedVisitorText = await pii.RedactAsync(visitorText, ct).ConfigureAwait(false);
+        var inbound = conversation.AppendMessage(
+            "in", "visitor", redactedVisitorText.RedactedText, "text", now,
+            originalContent: visitorText,
+            redactedContent: redactedVisitorText.RedactedText);
         const string reply = "MÃ¬nh Ä‘Ã£ nháº­n Ä‘Æ°á»£c tin nháº¯n. Náº¿u cáº§n tÆ° váº¥n gáº¥p, báº¡n vui lÃ²ng Ä‘á»ƒ láº¡i sá»‘ Ä‘iá»‡n thoáº¡i trong khung chat.";
         var outbound = conversation.AppendMessage("out", "bot", reply, "text", now.AddMilliseconds(1));
 
@@ -271,14 +283,17 @@ public static class PublicWidgetEndpoints
             message.Content,
             message.ContentType,
             message.SentAt,
+            AssignedTo: conversation.AssignedTo,
             SenderDisplayName: message.SenderDisplayName,
-            SenderAvatarUrl: message.SenderAvatarUrl), ct);
+            SenderAvatarUrl: message.SenderAvatarUrl,
+            InboxId: conversation.InboxId), ct);
 
         await notifier.NotifyConversationUpdatedAsync(tenantId, new InboxConversationEvent(
             conversation.Id,
             conversation.Status,
             conversation.AssignedTo,
-            conversation.LastMessageAt), ct);
+            conversation.LastMessageAt,
+            conversation.InboxId), ct);
     }
 }
 

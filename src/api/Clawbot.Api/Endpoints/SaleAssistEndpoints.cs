@@ -39,15 +39,53 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
     // 3 việc LLM của trợ lý sale (upsell / soạn nháp / tóm tắt) đều chạy ngầm qua job:
     // thấy được trong "Việc đang chạy", huỷ được, lỗi thì báo. Không bắn thông báo lúc xong —
     // sale đang mở hội thoại và nhìn màn hình chờ (NotifyOnSuccess=false ở handler).
+    // Upsell: gate lead stage=hot ngay tại API — chưa đủ điều kiện thì trả 200 thẳng, không đẻ job/log.
     private static async Task<IResult> UpsellAsync(
         Guid conversationId,
         IJobLauncher jobs,
         ITenantAccessor tenants,
+        AppDbContext db,
         HttpContext http,
         CancellationToken ct)
     {
-        _ = tenants.Require();
+        var tenantId = tenants.Require().TenantId;
         if (conversationId == Guid.Empty) return Results.BadRequest(new { error = "conversationId required" });
+
+        var conv = await db.Conversations.AsNoTracking()
+            .Where(c => c.Id == conversationId && c.TenantId == tenantId)
+            .Select(c => new { c.ContactId })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (conv is null)
+            return Results.NotFound(new { error = "conversation not found" });
+
+        if (conv.ContactId is null)
+        {
+            return Results.Ok(new SaleAssistUpsellResponse(
+                Eligible: false,
+                Suggestion: string.Empty,
+                Reason: "no lead for conversation",
+                LeadScore: 0));
+        }
+
+        var contactId = conv.ContactId;
+
+        var lead = await db.Leads.AsNoTracking()
+            .Where(l => l.TenantId == tenantId && l.ContactId == contactId && l.DeletedAt == null)
+            .OrderByDescending(l => l.Score)
+            .Select(l => new { l.Stage, l.Score })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (lead is null || lead.Stage != "hot")
+        {
+            return Results.Ok(new SaleAssistUpsellResponse(
+                Eligible: false,
+                Suggestion: string.Empty,
+                Reason: lead is null ? "no lead for conversation" : $"lead stage '{lead.Stage}' not hot yet",
+                LeadScore: lead?.Score ?? 0));
+        }
 
         return await LaunchAsync(jobs, http, SaleAssistUpsellJobHandler.JobType, "Gợi ý upsell", conversationId, ct)
             .ConfigureAwait(false);
