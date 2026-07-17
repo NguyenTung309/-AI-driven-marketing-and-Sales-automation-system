@@ -14,88 +14,109 @@ public sealed partial class IdleConversationAlertJob(
     IIdleEscalationRecipientResolver escalationRecipients,
     ILogger<IdleConversationAlertJob> logger)
 {
-    private static readonly TimeSpan IdleThreshold = TimeSpan.FromMinutes(5);
-    // SaleAssist-3 tier-2: escalate to Sales Lead after 10 min. A narrow band (10–12 min) makes
-    // this fire ~once as the conversation crosses the threshold (job runs every 2 min), rather
-    // than re-alerting the manager on every pass.
-    private static readonly TimeSpan EscalateThreshold = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan EscalateBand = TimeSpan.FromMinutes(12);
+    // SaleAssist-3 tier-2: escalate Trưởng phòng KD khi hội thoại vượt 2x ngưỡng tenant. Band hẹp
+    // 2' (bằng cadence job) để chỉ bắn ~1 lần lúc hội thoại vượt mốc, không re-alert manager mỗi pass.
+    private static readonly TimeSpan EscalateBandWidth = TimeSpan.FromMinutes(2);
+    // Ngừng nhắc tier-1 khi hội thoại đã treo quá ngưỡng + 4h (coi như bỏ rơi, tránh spam mãi).
+    private static readonly TimeSpan AlertWindow = TimeSpan.FromHours(4);
 
     [DisableConcurrentExecution(timeoutInSeconds: 120)]
     public async Task RunAsync(CancellationToken ct = default)
     {
         var now = DateTimeOffset.UtcNow;
-        var cutoff = now - IdleThreshold;
 
+        // Ngưỡng cảnh báo cấu hình per-tenant (tenants.idle_alert_minutes, mặc định 5').
+        var tenants = await db.Tenants
+            .Where(t => t.IsActive)
+            .Select(t => new { t.Id, t.IdleAlertMinutes })
+            .ToListAsync(ct);
+
+        foreach (var tenant in tenants)
+        {
+            var idleMinutes = tenant.IdleAlertMinutes <= 0 ? 5 : tenant.IdleAlertMinutes;
+            await AlertIdleAsync(tenant.Id, idleMinutes, now, ct);
+            await EscalateAsync(tenant.Id, idleMinutes, now, ct);
+        }
+    }
+
+    private async Task AlertIdleAsync(Guid tenantId, int idleMinutes, DateTimeOffset now, CancellationToken ct)
+    {
+        var cutoff = now.AddMinutes(-idleMinutes);
+        var oldestAlert = cutoff - AlertWindow;
         var idleConversations = await db.Conversations
             .IgnoreQueryFilters()
-            .Where(c => c.Status == "open"
+            .Where(c => c.TenantId == tenantId
+                && c.Status == "open"
                 && c.LastMessageAt != null
                 && c.LastMessageAt < cutoff
-                && c.LastMessageAt > now.AddHours(-4))
-            .Select(c => new { c.Id, c.TenantId, c.AssignedTo, c.InboxId })
+                && c.LastMessageAt > oldestAlert)
+            .Select(c => new { c.Id, c.AssignedTo, c.InboxId })
             .Take(30)
             .ToListAsync(ct);
 
-        if (idleConversations.Count > 0)
-        {
-            LogAlerting(logger, idleConversations.Count);
-
-            foreach (var conv in idleConversations)
-            {
-                await notifier.NotifyMessageAsync(conv.TenantId, new InboxMessageEvent(
-                    conv.Id, Guid.Empty, "system", "system",
-                    "Cuộc trò chuyện đã không hoạt động hơn 5 phút. Vui lòng kiểm tra.",
-                    "text", now,
-                    AssignedTo: conv.AssignedTo,
-                    InboxId: conv.InboxId,
-                    IsSynthetic: true), ct);
-
-                await publisher.PublishAsync(new NotificationRequest(
-                    conv.TenantId, conv.AssignedTo, "idle", "Hội thoại chờ quá 5 phút",
-                    Severity: "warning",
-                    Body: "Một hội thoại đã không hoạt động hơn 5 phút — vui lòng kiểm tra.",
-                    Link: $"/conversations/{conv.Id}"), ct);
-            }
-        }
-        else
+        if (idleConversations.Count == 0)
         {
             LogSkipped(logger, "no idle conversations");
+            return;
         }
 
-        // Tier-2: conversations crossing 10 min → escalate to Sales Lead users so a manager
-        // picks it up when the assigned sale hasn't responded.
-        var escalateOlderThan = now - EscalateThreshold;
-        var escalateNewerThan = now - EscalateBand;
+        LogAlerting(logger, idleConversations.Count);
+        foreach (var conv in idleConversations)
+        {
+            await notifier.NotifyMessageAsync(tenantId, new InboxMessageEvent(
+                conv.Id, Guid.Empty, "system", "system",
+                $"Cuộc trò chuyện đã không hoạt động hơn {idleMinutes} phút. Vui lòng kiểm tra.",
+                "text", now,
+                AssignedTo: conv.AssignedTo,
+                InboxId: conv.InboxId,
+                IsSynthetic: true), ct);
+
+            await publisher.PublishAsync(new NotificationRequest(
+                tenantId, conv.AssignedTo, "idle", $"Hội thoại chờ quá {idleMinutes} phút",
+                Severity: "warning",
+                Body: $"Một hội thoại đã không hoạt động hơn {idleMinutes} phút — vui lòng kiểm tra.",
+                Link: $"/conversations/{conv.Id}"), ct);
+        }
+    }
+
+    // Tier-2: hội thoại vượt 2x ngưỡng → escalate Sales Lead để manager tiếp quản khi sale im lặng.
+    private async Task EscalateAsync(Guid tenantId, int idleMinutes, DateTimeOffset now, CancellationToken ct)
+    {
+        var escalateMinutes = idleMinutes * 2;
+        var escalateOlderThan = now.AddMinutes(-escalateMinutes);
+        var escalateNewerThan = escalateOlderThan - EscalateBandWidth;
         var escalations = await db.Conversations
             .IgnoreQueryFilters()
-            .Where(c => c.Status == "open"
+            .Where(c => c.TenantId == tenantId
+                && c.Status == "open"
                 && c.LastMessageAt != null
                 && c.LastMessageAt <= escalateOlderThan
                 && c.LastMessageAt > escalateNewerThan)
-            .Select(c => new { c.Id, c.TenantId })
+            .Select(c => new { c.Id })
             .Take(30)
             .ToListAsync(ct);
 
+        if (escalations.Count == 0) return;
+
+        var recipients = await escalationRecipients.ResolveAsync(tenantId, ct);
         foreach (var conv in escalations)
         {
-            var recipients = await escalationRecipients.ResolveAsync(conv.TenantId, ct);
             if (recipients.Count == 0)
             {
-                await PublishEscalationAsync(conv.TenantId, null, conv.Id, ct);
+                await PublishEscalationAsync(tenantId, null, conv.Id, escalateMinutes, ct);
                 continue;
             }
 
             foreach (var userId in recipients.Distinct())
-                await PublishEscalationAsync(conv.TenantId, userId, conv.Id, ct);
+                await PublishEscalationAsync(tenantId, userId, conv.Id, escalateMinutes, ct);
         }
     }
 
-    private Task PublishEscalationAsync(Guid tenantId, Guid? userId, Guid conversationId, CancellationToken ct) =>
+    private Task PublishEscalationAsync(Guid tenantId, Guid? userId, Guid conversationId, int escalateMinutes, CancellationToken ct) =>
         publisher.PublishAsync(new NotificationRequest(
-            tenantId, userId, "idle_escalation", "Hội thoại chờ quá 10 phút — cần Trưởng phòng KD",
+            tenantId, userId, "idle_escalation", $"Hội thoại chờ quá {escalateMinutes} phút — cần Trưởng phòng KD",
             Severity: "error",
-            Body: "Một hội thoại đã chờ hơn 10 phút mà chưa được xử lý — vui lòng phân công lại.",
+            Body: $"Một hội thoại đã chờ hơn {escalateMinutes} phút mà chưa được xử lý — vui lòng phân công lại.",
             Link: $"/conversations/{conversationId}"), ct);
 
     [LoggerMessage(EventId = 12001, Level = LogLevel.Debug,

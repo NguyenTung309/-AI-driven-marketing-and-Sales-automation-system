@@ -11,6 +11,7 @@ namespace Clawbot.Api.Endpoints;
 // Review-gate P3: 2 flag mới nullable — client cũ không gửi thì giữ nguyên giá trị hiện tại.
 // RequireKbHumanReview (ai-self-learning-memory): bật = tri thức tự học luôn chờ người duyệt.
 // AiAutoReplyResumeMinutes: sale gửi tay -> AI nhường bao lâu (phút) rồi tự bật lại; null = giữ nguyên.
+// IdleAlertMinutes: hội thoại chờ quá bao lâu (phút) thì cảnh báo; escalate = 2x ngưỡng; null = giữ nguyên.
 public sealed record TenantOrchestrationSettingsRequest(
     bool RequireApproval,
     decimal? MonthlyCostCapUsd = null,
@@ -18,7 +19,8 @@ public sealed record TenantOrchestrationSettingsRequest(
     bool? RequireChatReplyApproval = null,
     bool? RequireKbHumanReview = null,
     int? AiAutoReplyResumeMinutes = null,
-    bool? SkipChatReplyReview = null);
+    bool? SkipChatReplyReview = null,
+    int? IdleAlertMinutes = null);
 
 public static class AdminEndpoints
 {
@@ -41,7 +43,7 @@ public static class AdminEndpoints
         var tenantId = tenants.Require().TenantId;
         var settings = await db.Tenants
             .Where(t => t.Id == tenantId)
-            .Select(t => new { t.RequireOrchestrationApproval, t.MonthlyCostCapUsd, t.RequireContentReview, t.RequireChatReplyApproval, t.RequireKbHumanReview, t.AiAutoReplyResumeMinutes, t.SkipChatReplyReview })
+            .Select(t => new { t.RequireOrchestrationApproval, t.MonthlyCostCapUsd, t.RequireContentReview, t.RequireChatReplyApproval, t.RequireKbHumanReview, t.AiAutoReplyResumeMinutes, t.SkipChatReplyReview, t.IdleAlertMinutes })
             .FirstOrDefaultAsync(ct);
         return Results.Ok(new
         {
@@ -52,6 +54,7 @@ public static class AdminEndpoints
             requireKbHumanReview = settings?.RequireKbHumanReview ?? false,
             aiAutoReplyResumeMinutes = settings?.AiAutoReplyResumeMinutes ?? 5,
             skipChatReplyReview = settings?.SkipChatReplyReview ?? false,
+            idleAlertMinutes = settings?.IdleAlertMinutes ?? 5,
         });
     }
 
@@ -73,8 +76,9 @@ public static class AdminEndpoints
         if (body.RequireKbHumanReview is { } rkb) tenant.SetRequireKbHumanReview(rkb);
         if (body.AiAutoReplyResumeMinutes is { } arm) tenant.SetAiAutoReplyResumeMinutes(arm);
         if (body.SkipChatReplyReview is { } scr) tenant.SetSkipChatReplyReview(scr);
+        if (body.IdleAlertMinutes is { } iam) tenant.SetIdleAlertMinutes(iam);
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new { tenant.RequireOrchestrationApproval, tenant.MonthlyCostCapUsd, tenant.RequireContentReview, tenant.RequireChatReplyApproval, tenant.RequireKbHumanReview, tenant.AiAutoReplyResumeMinutes, tenant.SkipChatReplyReview });
+        return Results.Ok(new { tenant.RequireOrchestrationApproval, tenant.MonthlyCostCapUsd, tenant.RequireContentReview, tenant.RequireChatReplyApproval, tenant.RequireKbHumanReview, tenant.AiAutoReplyResumeMinutes, tenant.SkipChatReplyReview, tenant.IdleAlertMinutes });
     }
 
     private static async Task<IResult> ListAuditLogsAsync(

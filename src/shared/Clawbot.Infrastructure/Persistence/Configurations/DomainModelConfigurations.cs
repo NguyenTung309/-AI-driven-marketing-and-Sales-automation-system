@@ -46,6 +46,7 @@ public sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.Property(x => x.SkipChatReplyReview).HasDefaultValue(false);
         builder.Property(x => x.MonthlyCostCapUsd).HasColumnType("decimal(12,2)");
         builder.Property(x => x.AiAutoReplyResumeMinutes).HasColumnName("ai_auto_reply_resume_minutes").HasDefaultValue(5);
+        builder.Property(x => x.IdleAlertMinutes).HasColumnName("idle_alert_minutes").HasDefaultValue(5);
         builder.HasIndex(x => x.Slug).IsUnique();
     }
 }

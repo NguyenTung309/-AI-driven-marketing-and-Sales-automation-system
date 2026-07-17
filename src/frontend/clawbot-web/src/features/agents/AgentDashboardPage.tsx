@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
@@ -487,6 +487,23 @@ export default function AgentDashboardPage() {
     },
     onError: (error) =>
       setNotice({ tone: "error", message: `Đặt thời gian AI bật lại thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
+  });
+  // Ngưỡng cảnh báo hội thoại chờ (phút); báo Trưởng phòng KD khi quá gấp đôi ngưỡng.
+  const idleAlertMinutes = approvalQuery.data?.idleAlertMinutes ?? 5;
+  const [idleAlertDraft, setIdleAlertDraft] = useState<string>("");
+  const idleAlertMutation = useMutation({
+    mutationFn: (minutes: number) =>
+      setTenantOrchestration(requireApproval, monthlyCostCapUsd, { idleAlertMinutes: minutes }),
+    onSuccess: async (res) => {
+      setIdleAlertDraft("");
+      setNotice({
+        tone: "success",
+        message: `Hội thoại chờ quá ${res.idleAlertMinutes} phút sẽ cảnh báo sale, quá ${res.idleAlertMinutes * 2} phút sẽ báo Trưởng phòng KD.`,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
+    },
+    onError: (error) =>
+      setNotice({ tone: "error", message: `Đặt ngưỡng cảnh báo thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
   });
   // "Tự động xây dựng kế hoạch": orchestrator quét hệ thống -> dialog checklist -> tạo schedules đã chọn.
   const [planSuggestions, setPlanSuggestions] = useState<OrchestrationPlanSuggestionsResponse | null>(null);
@@ -1335,7 +1352,26 @@ export default function AgentDashboardPage() {
             tone="warning"
             disabled={reviewFlagMutation.isPending || approvalQuery.isLoading}
             onToggle={() => reviewFlagMutation.mutate({ requireChatReplyApproval: !requireChatReplyApproval })}
-          />
+          >
+            {/* Cấu hình bổ sung của luồng AI reply: sale gõ tay thì AI nhường bao lâu rồi tiếp quản lại. */}
+            <div className="mt-3 rounded-lg border border-outline-variant bg-surface-container-low p-3">
+              <div className="flex items-center gap-2">
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-on-surface-variant">timer</span>
+                <p className="text-body-sm font-semibold text-secondary">AI tự tiếp quản lại sau khi sale trả lời tay</p>
+              </div>
+              <p className="mt-1 text-body-sm text-on-surface-variant">
+                Sale gửi tin tay thì AI tạm nhường hội thoại. Sau khoảng này AI tự bật lại và trả lời luôn tin khách
+                đang chờ (nếu có). Đang áp dụng: <span className="font-semibold text-secondary">{aiAutoReplyResumeMinutes} phút</span>.
+              </p>
+              <MinutesConfigField
+                current={aiAutoReplyResumeMinutes}
+                draft={resumeMinutesDraft}
+                pending={resumeMinutesMutation.isPending}
+                onDraftChange={setResumeMinutesDraft}
+                onSave={(minutes) => resumeMinutesMutation.mutate(minutes)}
+              />
+            </div>
+          </ApprovalToggleRow>
           <ApprovalToggleRow
             icon="school"
             title="AI tự duyệt tri thức"
@@ -1358,33 +1394,22 @@ export default function AgentDashboardPage() {
             disabled={reviewGateMutation.isPending || approvalQuery.isLoading}
             onToggle={() => reviewGateMutation.mutate(!skipChatReplyReview)}
           />
-          <div className="flex items-start gap-3 border-t border-outline-variant px-1 py-4">
-            <span aria-hidden="true" className="material-symbols-outlined mt-0.5 text-[20px] text-on-surface-variant">timer</span>
+          <div className="flex items-start gap-3 px-1 pt-4">
+            <span aria-hidden="true" className="material-symbols-outlined mt-0.5 text-[20px] text-on-surface-variant">notifications_active</span>
             <div className="flex-1">
-              <p className="text-body-md font-semibold text-secondary">AI tự tiếp quản lại sau khi sale trả lời tay</p>
+              <p className="text-body-md font-semibold text-on-surface">Cảnh báo hội thoại chờ</p>
               <p className="mt-1 text-body-sm text-on-surface-variant">
-                Sale gửi tin tay thì AI tạm nhường hội thoại. Sau khoảng này AI tự bật lại và trả lời luôn tin khách đang chờ
-                (nếu có). Đang áp dụng: <span className="font-semibold text-secondary">{aiAutoReplyResumeMinutes} phút</span>.
+                Hội thoại không hoạt động quá ngưỡng này sẽ cảnh báo sale phụ trách trong Hội thoại; quá gấp đôi ngưỡng
+                sẽ báo lên Trưởng phòng KD. Đang áp dụng: <span className="font-semibold text-secondary">{idleAlertMinutes} phút</span>{" "}
+                (báo quản lý: {idleAlertMinutes * 2} phút).
               </p>
-              <div className="mt-2 flex items-center gap-2">
-                <input
-                  className="w-24 rounded border border-outline bg-surface-container-lowest px-3 py-1.5 text-body-md focus:border-primary focus:outline-none"
-                  min={1}
-                  max={1440}
-                  onChange={(event) => setResumeMinutesDraft(event.target.value)}
-                  placeholder={String(aiAutoReplyResumeMinutes)}
-                  type="number"
-                  value={resumeMinutesDraft}
-                />
-                <span className="text-body-sm text-on-surface-variant">phút</span>
-                <Button
-                  disabled={resumeMinutesMutation.isPending || resumeMinutesDraft.trim() === "" || Number(resumeMinutesDraft) < 1}
-                  onClick={() => resumeMinutesMutation.mutate(Math.min(1440, Math.round(Number(resumeMinutesDraft))))}
-                  type="button"
-                >
-                  Lưu
-                </Button>
-              </div>
+              <MinutesConfigField
+                current={idleAlertMinutes}
+                draft={idleAlertDraft}
+                pending={idleAlertMutation.isPending}
+                onDraftChange={setIdleAlertDraft}
+                onSave={(minutes) => idleAlertMutation.mutate(minutes)}
+              />
             </div>
           </div>
         </div>
@@ -1413,6 +1438,39 @@ export default function AgentDashboardPage() {
   );
 }
 
+interface MinutesConfigFieldProps {
+  readonly current: number;
+  readonly draft: string;
+  readonly pending: boolean;
+  readonly onDraftChange: (value: string) => void;
+  readonly onSave: (minutes: number) => void;
+}
+
+// Ô nhập ngưỡng phút dùng chung cho các cấu hình dạng "N phút + Lưu" trong dialog Cấu hình duyệt.
+function MinutesConfigField({ current, draft, pending, onDraftChange, onSave }: MinutesConfigFieldProps) {
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <input
+        className="w-24 rounded border border-outline bg-surface-container-lowest px-3 py-1.5 text-body-md focus:border-primary focus:outline-none"
+        min={1}
+        max={1440}
+        onChange={(event) => onDraftChange(event.target.value)}
+        placeholder={String(current)}
+        type="number"
+        value={draft}
+      />
+      <span className="text-body-sm text-on-surface-variant">phút</span>
+      <Button
+        disabled={pending || draft.trim() === "" || Number(draft) < 1}
+        onClick={() => onSave(Math.min(1440, Math.round(Number(draft))))}
+        type="button"
+      >
+        Lưu
+      </Button>
+    </div>
+  );
+}
+
 interface ApprovalToggleRowProps {
   readonly icon: string;
   readonly title: string;
@@ -1423,6 +1481,8 @@ interface ApprovalToggleRowProps {
   readonly tone: "warning" | "primary";
   readonly disabled: boolean;
   readonly onToggle: () => void;
+  /** Cấu hình bổ sung của toggle này — render thụt vào ngay dưới mô tả. */
+  readonly children?: ReactNode;
 }
 
 function ApprovalToggleRow({
@@ -1435,15 +1495,17 @@ function ApprovalToggleRow({
   tone,
   disabled,
   onToggle,
+  children,
 }: ApprovalToggleRowProps) {
   const onClass = tone === "primary" ? "border-primary bg-primary/10 text-primary" : "border-warning bg-warning/10 text-warning";
   return (
     <div className="flex items-start justify-between gap-4 border-b border-outline py-4 last:border-0">
-      <div className="flex gap-3">
+      <div className="flex flex-1 gap-3">
         <span aria-hidden="true" className="material-symbols-outlined text-[22px] text-on-surface-variant">{icon}</span>
-        <div>
+        <div className="flex-1">
           <p className="text-body-md font-semibold text-on-surface">{title}</p>
           <p className="mt-1 text-body-sm text-on-surface-variant">{description}</p>
+          {children}
         </div>
       </div>
       <button

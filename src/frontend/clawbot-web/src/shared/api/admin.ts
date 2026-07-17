@@ -257,6 +257,8 @@ export interface TenantOrchestrationSettings {
   readonly aiAutoReplyResumeMinutes: number;
   /** Bypass review-gate: bật = AI reply gửi thẳng, không qua critic chấm giá/cam kết. */
   readonly skipChatReplyReview: boolean;
+  /** Hội thoại chờ quá ngưỡng này (phút) thì cảnh báo sale; quá gấp đôi thì báo Trưởng phòng KD. */
+  readonly idleAlertMinutes: number;
 }
 
 export interface TenantOrchestrationUpdateResult {
@@ -267,6 +269,7 @@ export interface TenantOrchestrationUpdateResult {
   readonly requireKbHumanReview: boolean;
   readonly aiAutoReplyResumeMinutes: number;
   readonly skipChatReplyReview: boolean;
+  readonly idleAlertMinutes: number;
 }
 
 export async function getTenantOrchestration(): Promise<TenantOrchestrationSettings> {
@@ -283,6 +286,7 @@ export async function setTenantOrchestration(
     readonly requireKbHumanReview?: boolean;
     readonly aiAutoReplyResumeMinutes?: number;
     readonly skipChatReplyReview?: boolean;
+    readonly idleAlertMinutes?: number;
   },
 ): Promise<TenantOrchestrationUpdateResult> {
   const res = await apiClient.put<TenantOrchestrationUpdateResult>(
@@ -296,6 +300,7 @@ export async function setTenantOrchestration(
       requireKbHumanReview: flags?.requireKbHumanReview,
       aiAutoReplyResumeMinutes: flags?.aiAutoReplyResumeMinutes,
       skipChatReplyReview: flags?.skipChatReplyReview,
+      idleAlertMinutes: flags?.idleAlertMinutes,
     },
   );
   return res.data;

@@ -31,3 +31,7 @@ IF COL_LENGTH(N'dbo.tenants', N'ai_auto_reply_resume_minutes') IS NULL
 IF COL_LENGTH(N'dbo.tenants', N'skip_chat_reply_review') IS NULL
     ALTER TABLE dbo.tenants ADD skip_chat_reply_review BIT NOT NULL
         CONSTRAINT DF_tenants_skip_chat_reply_review DEFAULT 0;
+
+IF COL_LENGTH(N'dbo.tenants', N'idle_alert_minutes') IS NULL
+    ALTER TABLE dbo.tenants ADD idle_alert_minutes INT NOT NULL
+        CONSTRAINT DF_tenants_idle_alert_minutes DEFAULT 5;
