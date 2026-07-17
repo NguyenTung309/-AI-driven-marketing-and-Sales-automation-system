@@ -36,7 +36,16 @@ public sealed partial class CommentAutoReplyJob(
             .ToListAsync(ct).ConfigureAwait(false);
 
         foreach (var candidate in candidates)
-            await RunAsync(candidate.TenantId, candidate.Id, ct).ConfigureAwait(false);
+        {
+            try
+            {
+                await RunAsync(candidate.TenantId, candidate.Id, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogCandidateFailed(logger, ex, candidate.Id);
+            }
+        }
     }
 
     public async Task RunAsync(Guid tenantId, Guid messageId, CancellationToken ct)
@@ -96,9 +105,10 @@ public sealed partial class CommentAutoReplyJob(
 
         // 1) Rep công khai dưới comment (action reply_comment + message_id).
         var replyExternalId = await commentAdapter.SendCommentReplyAsync(
-            conversation.ExternalThreadId, inbound.ExternalMessageId, reply, ct).ConfigureAwait(false);
+            conversation.TenantId, conversation.ExternalThreadId, inbound.ExternalMessageId, reply, ct).ConfigureAwait(false);
         conversation.AppendMessage("out", "bot", reply, "text", clock.UtcNow,
             externalMessageId: replyExternalId, messageType: "comment", parentPostId: inbound.ParentPostId);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         // 2) DM riêng (action private_replies) — cần post_id + from_id (commenter). FB cho 1 lần/comment.
         var fromId = conversation.ContactId.HasValue
@@ -113,10 +123,17 @@ public sealed partial class CommentAutoReplyJob(
         }
         else
         {
-            var dmExternalId = await commentAdapter.SendPrivateReplyAsync(
-                conversation.ExternalThreadId, inbound.ParentPostId, inbound.ExternalMessageId, fromId, dm, ct).ConfigureAwait(false);
-            conversation.AppendMessage("out", "bot", dm, "text", clock.UtcNow,
-                externalMessageId: dmExternalId, messageType: "dm", parentPostId: inbound.ParentPostId);
+            try
+            {
+                var dmExternalId = await commentAdapter.SendPrivateReplyAsync(
+                    conversation.TenantId, conversation.ExternalThreadId, inbound.ParentPostId, inbound.ExternalMessageId, fromId, dm, ct).ConfigureAwait(false);
+                conversation.AppendMessage("out", "bot", dm, "text", clock.UtcNow,
+                    externalMessageId: dmExternalId, messageType: "dm", parentPostId: inbound.ParentPostId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogPrivateReplyFailed(logger, ex, conversation.Id, inbound.ExternalMessageId);
+            }
         }
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -156,4 +173,12 @@ public sealed partial class CommentAutoReplyJob(
     [LoggerMessage(EventId = 9204, Level = LogLevel.Warning,
         Message = "Chat-2 comment auto-reply for conversation {ConversationId} missing {MissingField} — public reply/DM skipped accordingly")]
     private static partial void LogMissingIds(ILogger logger, Guid conversationId, string missingField);
+
+    [LoggerMessage(EventId = 9205, Level = LogLevel.Warning,
+        Message = "Chat-2 private reply failed for conversation {ConversationId}, comment {CommentId}")]
+    private static partial void LogPrivateReplyFailed(ILogger logger, Exception ex, Guid conversationId, string commentId);
+
+    [LoggerMessage(EventId = 9206, Level = LogLevel.Warning,
+        Message = "Chat-2 comment auto-reply candidate failed for conversation {ConversationId}")]
+    private static partial void LogCandidateFailed(ILogger logger, Exception ex, Guid conversationId);
 }

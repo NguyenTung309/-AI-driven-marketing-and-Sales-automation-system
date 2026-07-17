@@ -22,7 +22,9 @@ import {
   getConversation,
   listConversations,
   listChannels,
+  regenerateAiReply,
   rejectConversationDraft,
+  retryConversationMessage,
   resolveConversation,
   sendConversationMessage,
   setConversationAi,
@@ -130,6 +132,10 @@ function errorMessage(error: unknown): string {
   if (error instanceof AxiosError) {
     if (error.response?.status === 404) return "Không tìm thấy hội thoại.";
     if (error.response?.status === 401) return "Phiên đăng nhập hết hạn hoặc thiếu quyền truy cập.";
+    const apiMessage = error.response?.data as { message?: unknown } | undefined;
+    if ((error.response?.status === 400 || error.response?.status === 409) && typeof apiMessage?.message === "string") {
+      return apiMessage.message;
+    }
     if (error.response?.status === 400) return "Thông tin gửi lên chưa hợp lệ. Vui lòng kiểm tra lại.";
     if (error.response?.status === 409) return "Dữ liệu đã thay đổi bởi người khác. Vui lòng tải lại hội thoại.";
   }
@@ -242,11 +248,43 @@ interface MessageBubbleProps {
   readonly onApproveDraft?: (messageId: string) => void;
   readonly onRejectDraft?: (messageId: string) => void;
   readonly draftActionBusy?: boolean;
+  readonly onRetryMessage?: (messageId: string) => void;
+  readonly retrying?: boolean;
+  readonly retryError?: string | null;
+  readonly onRegenerateReply?: () => void;
+  readonly regenerating?: boolean;
 }
 
-function MessageBubble({ message, contactAvatarUrl, contactDisplayName, onApproveDraft, onRejectDraft, draftActionBusy }: MessageBubbleProps) {
+function messageDeliveryTone(status: InboxMessage["status"]): string {
+  if (status === "pending_approval" || status === "pending_send") return "font-semibold text-warning";
+  if (status === "blocked" || status === "send_failed") return "font-semibold text-error";
+  return "text-on-surface-variant";
+}
+
+function messageDeliveryLabel(message: InboxMessage, outbound: boolean, byAi: boolean): string {
+  if (message.status === "pending_approval") return " - Chờ duyệt (chưa gửi)";
+  if (message.status === "pending_send") return " - Đang gửi";
+  if (message.status === "send_failed") return " - Gửi thất bại";
+  if (message.status === "blocked") return " - Đã chặn (không gửi)";
+  if (byAi) return " - AI trả lời";
+  return outbound ? " - Đã gửi" : "";
+}
+
+function MessageBubble({
+  message,
+  contactAvatarUrl,
+  contactDisplayName,
+  onApproveDraft,
+  onRejectDraft,
+  draftActionBusy,
+  onRetryMessage,
+  retrying = false,
+  retryError = null,
+  onRegenerateReply,
+  regenerating = false,
+}: MessageBubbleProps) {
   const outbound = isOutbound(message);
-  const byAi = message.senderType === "ai" || message.senderType === "bot";
+  const byAi = message.senderType === "ai" || message.senderType === "bot" || message.senderType === "agent";
   const avatarUrl = message.senderAvatarUrl || contactAvatarUrl;
   const displayName = message.senderDisplayName || contactDisplayName;
   return (
@@ -277,7 +315,7 @@ function MessageBubble({ message, contactAvatarUrl, contactDisplayName, onApprov
       >
         <div className={`text-label-sm font-semibold mb-1 ${outbound ? "text-primary dark:text-primary-light" : "text-on-surface-variant"}`}>
           {outbound
-            ? (message.senderDisplayName ?? (byAi ? "AI Agent" : "Hệ thống"))
+            ? (message.senderDisplayName ?? (byAi ? "AI Agent" : message.senderType === "system" ? "Hệ thống" : "Nhân viên"))
             : (message.senderDisplayName ?? contactDisplayName ?? "Khách hàng")}
         </div>
         {message.contentType === "photo" && (message.attachmentUrl || message.content) ? (
@@ -311,14 +349,38 @@ function MessageBubble({ message, contactAvatarUrl, contactDisplayName, onApprov
         ) : (
           <p className="whitespace-pre-wrap break-words text-body-md text-on-surface">{message.content}</p>
         )}
-        <span className={`mt-1 block text-label-sm ${message.status === "pending_approval" ? "font-semibold text-warning" : message.status === "blocked" ? "font-semibold text-error" : "text-on-surface-variant"} ${outbound ? "text-right" : ""}`}>
+        <span
+          role="status"
+          aria-live="polite"
+          className={`mt-1 block text-label-sm ${messageDeliveryTone(message.status)} ${outbound ? "text-right" : ""}`}
+        >
           {formatTime(message.sentAt)}
-          {message.status === "pending_approval"
-            ? " - Chờ duyệt (chưa gửi)"
-            : message.status === "blocked"
-              ? " - Đã chặn (không gửi)"
-              : byAi ? " - AI trả lời" : outbound ? " - Đã gửi" : ""}
+          {messageDeliveryLabel(message, outbound, byAi)}
         </span>
+        {outbound && byAi && (message.status === "send_failed" || retrying) && onRetryMessage ? (
+          <div className="mt-2 flex flex-col items-end gap-1">
+            <button
+              type="button"
+              disabled={retrying}
+              onClick={() => onRetryMessage(message.id)}
+              aria-label={retrying ? "Đang gửi lại tin nhắn" : "Gửi lại tin nhắn thất bại"}
+              className="inline-flex items-center gap-1 rounded border border-error/40 px-2.5 py-1 text-label-sm font-semibold text-error transition-colors hover:bg-error/10 disabled:cursor-wait disabled:opacity-50"
+            >
+              <span
+                aria-hidden="true"
+                className={`material-symbols-outlined text-[15px] ${retrying ? "animate-spin" : ""}`}
+              >
+                {retrying ? "progress_activity" : "refresh"}
+              </span>
+              {retrying ? "Đang gửi lại…" : "Gửi lại"}
+            </button>
+            {retryError ? (
+              <span aria-live="polite" className="max-w-xs text-right text-label-sm text-error">
+                {retryError}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
         {message.status === "pending_approval" && onApproveDraft && onRejectDraft ? (
           <div className="mt-2 flex justify-end gap-2">
             <button
@@ -336,6 +398,25 @@ function MessageBubble({ message, contactAvatarUrl, contactDisplayName, onApprov
               className="rounded bg-primary px-2.5 py-1 text-label-sm font-semibold text-on-primary hover:bg-primary-hover disabled:opacity-50"
             >
               Duyệt & gửi
+            </button>
+          </div>
+        ) : null}
+        {outbound && byAi && message.status === "blocked" && onRegenerateReply ? (
+          <div className="mt-2 flex justify-end">
+            <button
+              type="button"
+              disabled={regenerating}
+              onClick={onRegenerateReply}
+              aria-label="Tạo lại phản hồi AI cho tin khách đang chờ"
+              className="inline-flex items-center gap-1 rounded border border-tertiary/40 px-2.5 py-1 text-label-sm font-semibold text-tertiary transition-colors hover:bg-tertiary/10 disabled:cursor-wait disabled:opacity-50"
+            >
+              <span
+                aria-hidden="true"
+                className={`material-symbols-outlined text-[15px] ${regenerating ? "animate-spin" : ""}`}
+              >
+                {regenerating ? "progress_activity" : "autorenew"}
+              </span>
+              {regenerating ? "Đang soạn lại…" : "Tạo lại phản hồi AI"}
             </button>
           </div>
         ) : null}
@@ -368,11 +449,36 @@ interface ChatPanelProps {
   readonly onApproveDraft: (messageId: string) => void;
   readonly onRejectDraft: (messageId: string) => void;
   readonly draftActionBusy: boolean;
+  readonly onRetryMessage: (messageId: string) => void;
+  readonly retryingMessageIds: ReadonlySet<string>;
+  readonly retryErrors: Readonly<Record<string, string>>;
+  readonly onRegenerateReply: () => void;
+  readonly regenerating: boolean;
   readonly onOpenContext?: () => void;
   readonly contextOpen?: boolean;
 }
 
-function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSubmit, sending, onToggleAi, aiToggling, onApproveDraft, onRejectDraft, draftActionBusy, onOpenContext, contextOpen }: ChatPanelProps) {
+function ChatPanel({
+  conversation,
+  isLoading,
+  error,
+  draft,
+  onDraftChange,
+  onSubmit,
+  sending,
+  onToggleAi,
+  aiToggling,
+  onApproveDraft,
+  onRejectDraft,
+  draftActionBusy,
+  onRetryMessage,
+  retryingMessageIds,
+  retryErrors,
+  onRegenerateReply,
+  regenerating,
+  onOpenContext,
+  contextOpen,
+}: ChatPanelProps) {
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const conversationId = conversation?.id ?? null;
   const messageCount = conversation?.messages.length ?? 0;
@@ -519,6 +625,11 @@ function ChatPanel({ conversation, isLoading, error, draft, onDraftChange, onSub
                 onApproveDraft={onApproveDraft}
                 onRejectDraft={onRejectDraft}
                 draftActionBusy={draftActionBusy}
+                onRetryMessage={onRetryMessage}
+                retrying={retryingMessageIds.has(message.id)}
+                retryError={retryErrors[message.id] ?? null}
+                onRegenerateReply={onRegenerateReply}
+                regenerating={regenerating}
               />
             )
           )
@@ -691,6 +802,9 @@ export default function ConversationsPage() {
   }
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<PageNotice | null>(null);
+  const [retryingMessageIds, setRetryingMessageIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [retryErrors, setRetryErrors] = useState<Readonly<Record<string, string>>>({});
+  const retryInFlightRef = useRef<ReadonlySet<string>>(new Set());
   const [contextOpen, setContextOpen] = useState(false);
   const [contextForId, setContextForId] = useState(selectedId);
   if (selectedId !== contextForId) {
@@ -810,7 +924,10 @@ export default function ConversationsPage() {
       showNotice("Đã duyệt — tin nhắn được gửi tới khách.", "success");
       void invalidateActive();
     },
-    onError: (error) => showNotice(errorMessage(error), "error"),
+    onError: (error) => {
+      showNotice(errorMessage(error), "error");
+      void invalidateActive();
+    },
   });
   const rejectDraftMutation = useMutation({
     mutationFn: (messageId: string) => rejectConversationDraft(activeConversationId ?? "", messageId),
@@ -819,6 +936,69 @@ export default function ConversationsPage() {
       void invalidateActive();
     },
     onError: (error) => showNotice(errorMessage(error), "error"),
+  });
+
+  // Nút "Tạo lại phản hồi AI" trên tin bị chặn: AI soạn lại cho tin khách đang chờ.
+  const regenerateMutation = useMutation({
+    mutationFn: () => regenerateAiReply(activeConversationId ?? ""),
+    onSuccess: () => {
+      showNotice("AI đang soạn lại phản hồi — tin mới sẽ hiện trong hội thoại.", "info");
+      void invalidateActive();
+    },
+    onError: (error) => showNotice(errorMessage(error), "error"),
+  });
+
+  const retryMutation = useMutation({
+    mutationFn: ({ conversationId, messageId }: { conversationId: string; messageId: string }) =>
+      retryConversationMessage(conversationId, messageId),
+    retry: false,
+    onMutate: ({ messageId }) => {
+      setRetryingMessageIds((current) => new Set([...current, messageId]));
+      setRetryErrors((current) => {
+        const next = { ...current };
+        delete next[messageId];
+        return next;
+      });
+    },
+    onSuccess: (message, { conversationId, messageId }) => {
+      setRetryErrors((current) => {
+        const next = { ...current };
+        delete next[messageId];
+        return next;
+      });
+      queryClient.setQueryData<ConversationDetail>(["inbox", "conversation", conversationId], (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          messages: old.messages.map((item) => (item.id === message.id ? message : item)),
+        };
+      });
+      showNotice("Đã gửi lại tin nhắn tới khách.", "success");
+      void queryClient.invalidateQueries({
+        queryKey: ["inbox", "conversation", conversationId],
+        exact: true,
+      });
+    },
+    onError: (error, { conversationId, messageId }) => {
+      const message = errorMessage(error);
+      setRetryErrors((current) => ({ ...current, [messageId]: message }));
+      showNotice(message, "error");
+      void queryClient.invalidateQueries({
+        queryKey: ["inbox", "conversation", conversationId],
+        exact: true,
+      });
+    },
+    onSettled: (_data, _error, { conversationId, messageId }) => {
+      const retryKey = `${conversationId}:${messageId}`;
+      retryInFlightRef.current = new Set(
+        [...retryInFlightRef.current].filter((key) => key !== retryKey),
+      );
+      setRetryingMessageIds((current) => {
+        const next = new Set(current);
+        next.delete(messageId);
+        return next;
+      });
+    },
   });
 
   const actionBusy = escalateMutation.isPending || resolveMutation.isPending;
@@ -972,6 +1152,20 @@ export default function ConversationsPage() {
             if (!activeConversationId || rejectDraftMutation.isPending) return;
             rejectDraftMutation.mutate(messageId);
           }}
+          onRetryMessage={(messageId) => {
+            if (!activeConversationId) return;
+            const retryKey = `${activeConversationId}:${messageId}`;
+            if (retryInFlightRef.current.has(retryKey)) return;
+            retryInFlightRef.current = new Set([...retryInFlightRef.current, retryKey]);
+            retryMutation.mutate({ conversationId: activeConversationId, messageId });
+          }}
+          retryingMessageIds={retryingMessageIds}
+          retryErrors={retryErrors}
+          onRegenerateReply={() => {
+            if (!activeConversationId || regenerateMutation.isPending) return;
+            regenerateMutation.mutate();
+          }}
+          regenerating={regenerateMutation.isPending}
           contextOpen={contextOpen}
           onOpenContext={() => setContextOpen((open) => !open)}
         />

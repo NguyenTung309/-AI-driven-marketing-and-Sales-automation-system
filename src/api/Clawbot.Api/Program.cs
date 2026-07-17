@@ -1,24 +1,24 @@
 using System.Globalization;
 using System.Text;
-using Clawbot.Api.Background;
+using Clawbot.Agents.Core.Rag;
+using Clawbot.Agents.Core.Skills;
 using Clawbot.Api.Auth;
+using Clawbot.Api.Background;
 using Clawbot.Api.Endpoints;
 using Clawbot.Api.Hubs;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.Application;
 using Clawbot.Infrastructure;
-using Clawbot.Agents.Core.Rag;
-using Clawbot.Agents.Core.Skills;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Notifications;
 using Clawbot.Infrastructure.Observability;
 using Clawbot.SharedKernel.Content;
-using Clawbot.SharedKernel.Inbox;
-using Clawbot.SharedKernel.Security;
 using Clawbot.SharedKernel.Demo;
+using Clawbot.SharedKernel.Inbox;
 using Clawbot.SharedKernel.Notifications;
+using Clawbot.SharedKernel.Security;
 using Hangfire;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -106,6 +106,7 @@ builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jo
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.DocsKitJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.KbTestJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.KbGenerateTestCasesJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.KbDeployJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentRepurposeJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentTrendScanJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentImagePromptJobHandler>();
@@ -155,6 +156,7 @@ builder.Services.Configure<Clawbot.Agents.Core.Skills.Nlp.ToxicityOptions>(
 builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Nlp.IToxicityFilter, Clawbot.Agents.Core.Skills.Nlp.DetoxifyToxicityFilter>();
 builder.Services.AddScoped<ContentImagePromptService>();
 builder.Services.AddScoped<OutboundMessageSafetyService>();
+builder.Services.AddScoped<FailedMessageRetryService>();
 builder.Services.AddScoped<ISaleAssistUpsellClient, GrpcSaleAssistUpsellClient>();
 builder.Services.AddScoped<SaleAssistUpsellSuggestionService>();
 builder.Services.AddScoped<SaleAssistDraftFeedbackService>();
@@ -181,6 +183,9 @@ if (demoOpts.Mode)
 {
     builder.Services.Configure<DemoOptions>(builder.Configuration.GetSection(DemoOptions.Section));
     builder.Services.AddHttpClient();
+    // Pancake authenticates with page_access_token in the query string. Disable framework HTTP
+    // request logging for this named client so credentials never land in application logs.
+    builder.Services.AddHttpClient("Pancake").RemoveAllLoggers();
     builder.Services.AddSingleton<DemoRuntimeConfigStore>();
     builder.Services.AddSingleton<DemoTraceService>();
     builder.Services.AddHostedService<PancakePollingService>();

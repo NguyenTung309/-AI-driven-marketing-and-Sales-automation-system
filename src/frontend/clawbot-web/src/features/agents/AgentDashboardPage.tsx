@@ -9,7 +9,7 @@ import { MetricCard } from "@/shared/ui/MetricCard";
 import { Modal } from "@/shared/ui/Modal";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import { WorkflowNode } from "@/shared/ui/WorkflowNode";
-import { operationalPhaseLabel, toSafeOperationalText } from "@/shared/utils/userText";
+import { formatOperationalTraceMessage, operationalPhaseLabel, toSafeCsvCell } from "@/shared/utils/userText";
 import { AgentConfigDrawer } from "./AgentConfigDrawer";
 import { OrchestrationPanel } from "./OrchestrationPanel";
 import { SchedulesCard } from "./SchedulesCard";
@@ -195,13 +195,13 @@ function exportTraceCsv(agent: AgentListItem | null, traces: readonly AgentTrace
       trace.occurredAt,
       trace.agentName,
       operationalPhaseLabel(trace.phase),
-      toSafeOperationalText(trace.message),
+      formatOperationalTraceMessage(trace.phase, trace.message),
       trace.sessionId,
     ]),
   ];
   // BOM để Excel nhận đúng UTF-8 tiếng Việt.
   const csv = "﻿" + rows
-    .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
+    .map((row) => row.map(toSafeCsvCell).join(","))
     .join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -383,7 +383,7 @@ function TerminalLog({
             >
               <span className="text-slate-500">{formatDateTime(trace.occurredAt)}</span>
               <span className={`font-bold uppercase ${phaseTone(trace.phase)}`}>[{operationalPhaseLabel(trace.phase)}]</span>
-              <span className="min-w-0 break-words text-slate-300">{toSafeOperationalText(trace.message)}</span>
+              <span className="min-w-0 break-words text-slate-300">{formatOperationalTraceMessage(trace.phase, trace.message)}</span>
             </div>
           ))
         ) : (
@@ -453,6 +453,40 @@ export default function AgentDashboardPage() {
     },
     onError: (error) =>
       setNotice({ tone: "error", message: `Đổi chế độ review thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
+  });
+  // Review-gate P2: bật skip = AI reply gửi thẳng không qua critic chấm giá/cam kết (rủi ro cao).
+  const skipChatReplyReview = approvalQuery.data?.skipChatReplyReview ?? false;
+  const reviewGateMutation = useMutation({
+    mutationFn: (skip: boolean) =>
+      setTenantOrchestration(requireApproval, monthlyCostCapUsd, { skipChatReplyReview: skip }),
+    onSuccess: async (res) => {
+      setNotice({
+        tone: res.skipChatReplyReview ? "info" : "success",
+        message: res.skipChatReplyReview
+          ? "Đã TẮT review gate: AI gửi thẳng mọi tin (kể cả giá/cam kết) không qua kiểm duyệt tự động."
+          : "Đã bật lại review gate: tin có giá/cam kết sẽ được AI critic kiểm trước khi gửi.",
+      });
+      await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
+    },
+    onError: (error) =>
+      setNotice({ tone: "error", message: `Đổi review gate thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
+  });
+  // Handover: sale gửi tay -> AI nhường bao lâu (phút) rồi tự bật lại và trả lời tin khách đang treo.
+  const aiAutoReplyResumeMinutes = approvalQuery.data?.aiAutoReplyResumeMinutes ?? 5;
+  const [resumeMinutesDraft, setResumeMinutesDraft] = useState<string>("");
+  const resumeMinutesMutation = useMutation({
+    mutationFn: (minutes: number) =>
+      setTenantOrchestration(requireApproval, monthlyCostCapUsd, { aiAutoReplyResumeMinutes: minutes }),
+    onSuccess: async (res) => {
+      setResumeMinutesDraft("");
+      setNotice({
+        tone: "success",
+        message: `Sale trả lời tay xong, AI sẽ tự tiếp quản lại sau ${res.aiAutoReplyResumeMinutes} phút.`,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
+    },
+    onError: (error) =>
+      setNotice({ tone: "error", message: `Đặt thời gian AI bật lại thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
   });
   // "Tự động xây dựng kế hoạch": orchestrator quét hệ thống -> dialog checklist -> tạo schedules đã chọn.
   const [planSuggestions, setPlanSuggestions] = useState<OrchestrationPlanSuggestionsResponse | null>(null);
@@ -731,7 +765,7 @@ export default function AgentDashboardPage() {
         {
           id: response.sessionId,
           side: "bot",
-          text: toSafeOperationalText(response.reply, "Đã ghi nhận phản hồi chạy thử."),
+          text: response.reply,
           time: formatDateTime(response.sentAt),
         },
       ]);
@@ -1313,6 +1347,46 @@ export default function AgentDashboardPage() {
             disabled={reviewFlagMutation.isPending || approvalQuery.isLoading}
             onToggle={() => reviewFlagMutation.mutate({ requireKbHumanReview: !requireKbHumanReview })}
           />
+          <ApprovalToggleRow
+            icon="verified_user"
+            title="Review gate AI reply"
+            description="Bật: tin AI có giá/khuyến mãi/cam kết được AI critic đối chiếu kho tri thức trước khi gửi — nghi ngờ thì giữ lại chờ người duyệt. Tắt: AI gửi thẳng mọi tin, chấp nhận rủi ro sai giá/hứa bừa với khách."
+            enabled={!skipChatReplyReview}
+            enabledLabel="BẬT"
+            disabledLabel="Đã tắt (bypass)"
+            tone="warning"
+            disabled={reviewGateMutation.isPending || approvalQuery.isLoading}
+            onToggle={() => reviewGateMutation.mutate(!skipChatReplyReview)}
+          />
+          <div className="flex items-start gap-3 border-t border-outline-variant px-1 py-4">
+            <span aria-hidden="true" className="material-symbols-outlined mt-0.5 text-[20px] text-on-surface-variant">timer</span>
+            <div className="flex-1">
+              <p className="text-body-md font-semibold text-secondary">AI tự tiếp quản lại sau khi sale trả lời tay</p>
+              <p className="mt-1 text-body-sm text-on-surface-variant">
+                Sale gửi tin tay thì AI tạm nhường hội thoại. Sau khoảng này AI tự bật lại và trả lời luôn tin khách đang chờ
+                (nếu có). Đang áp dụng: <span className="font-semibold text-secondary">{aiAutoReplyResumeMinutes} phút</span>.
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  className="w-24 rounded border border-outline bg-surface-container-lowest px-3 py-1.5 text-body-md focus:border-primary focus:outline-none"
+                  min={1}
+                  max={1440}
+                  onChange={(event) => setResumeMinutesDraft(event.target.value)}
+                  placeholder={String(aiAutoReplyResumeMinutes)}
+                  type="number"
+                  value={resumeMinutesDraft}
+                />
+                <span className="text-body-sm text-on-surface-variant">phút</span>
+                <Button
+                  disabled={resumeMinutesMutation.isPending || resumeMinutesDraft.trim() === "" || Number(resumeMinutesDraft) < 1}
+                  onClick={() => resumeMinutesMutation.mutate(Math.min(1440, Math.round(Number(resumeMinutesDraft))))}
+                  type="button"
+                >
+                  Lưu
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       </Modal>
 

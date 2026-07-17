@@ -11,6 +11,7 @@ import {
   getSaleAssistDailySummary,
   getSaleAssistUpsell,
   getSaleAssistUpsellSuggestions,
+  isSaleAssistUpsellResult,
   listQuickReplies,
   summarizeSaleAssistConversation,
   updateQuickReply,
@@ -268,7 +269,9 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
   });
   // 3 việc LLM (upsell / nháp / tóm tắt) chạy ngầm qua job — thấy được ở "Việc đang chạy", huỷ được.
   // Kết quả đổ thẳng vào panel (job không bắn thông báo: sale đang ngồi nhìn màn hình chờ).
-  const upsellRun = useJobRun<SaleAssistUpsellResponse>();
+  const upsellRun = useJobRun<SaleAssistUpsellResponse>({
+    isImmediateResult: isSaleAssistUpsellResult,
+  });
   const upsellStart = upsellRun.start;
   useEffect(() => {
     if (!conversationId) return;

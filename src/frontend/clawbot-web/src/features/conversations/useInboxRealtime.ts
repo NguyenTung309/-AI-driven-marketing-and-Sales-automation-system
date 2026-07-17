@@ -4,12 +4,13 @@ import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { getRealtimeAccessToken } from "@/shared/api/client";
 import type {
   ConversationCursorPage,
-  ConversationDetail,
   ConversationListItem,
+  ConversationDetail,
   ConversationListResponse,
   InboxConversationEvent,
   InboxMessage,
   InboxMessageEvent,
+  InboxMessageStatusEvent,
 } from "@/shared/api/inbox";
 
 type ConversationListCache =
@@ -55,24 +56,20 @@ function getHubUrl(): string {
   return apiBase ? `${apiBase}/hubs/inbox` : "/hubs/inbox";
 }
 
-function toMessage(evt: InboxMessageEvent): InboxMessage {
+function toSyntheticMessage(evt: InboxMessageEvent): InboxMessage {
   return {
     id: evt.messageId,
     direction: evt.direction,
     senderType: evt.senderType,
     senderUserId: null,
-    senderDisplayName: evt.senderDisplayName ?? null,
-    senderAvatarUrl: evt.senderAvatarUrl ?? null,
     content: evt.content,
     contentType: evt.contentType,
-    attachmentUrl: evt.attachmentUrl ?? null,
     sentAt: evt.sentAt,
+    senderDisplayName: evt.senderDisplayName ?? null,
+    senderAvatarUrl: evt.senderAvatarUrl ?? null,
+    attachmentUrl: evt.attachmentUrl ?? null,
+    status: "sent",
   };
-}
-
-function mergeMessage(messages: readonly InboxMessage[], next: InboxMessage): readonly InboxMessage[] {
-  if (messages.some((message) => message.id === next.id)) return messages;
-  return [...messages, next];
 }
 
 export function useInboxRealtime(enabled: boolean) {
@@ -95,15 +92,18 @@ export function useInboxRealtime(enabled: boolean) {
       .build();
 
     connection.on("message", (evt: InboxMessageEvent) => {
-      const nextMessage = toMessage(evt);
-      queryClient.setQueriesData<ConversationDetail>({ queryKey: ["inbox", "conversation"] }, (old) => {
-        if (!old || old.id !== evt.conversationId) return old;
-        return {
-          ...old,
-          lastMessageAt: evt.sentAt,
-          messages: mergeMessage(old.messages, nextMessage),
-        };
-      });
+      if (evt.isSynthetic) {
+        const syntheticMessage = toSyntheticMessage(evt);
+        queryClient.setQueryData<ConversationDetail>(["inbox", "conversation", evt.conversationId], (old) => {
+          if (!old || old.messages.some((message) => message.id === syntheticMessage.id)) return old;
+          return { ...old, messages: [...old.messages, syntheticMessage] };
+        });
+      } else {
+        void queryClient.invalidateQueries({
+          queryKey: ["inbox", "conversation", evt.conversationId],
+          exact: true,
+        });
+      }
 
       queryClient.setQueriesData<ConversationListCache>({ queryKey: ["inbox", "conversations"] }, (old) =>
         patchConversationListCache(old, evt.conversationId, {
@@ -113,16 +113,28 @@ export function useInboxRealtime(enabled: boolean) {
       );
     });
 
-    connection.on("conversation", (evt: InboxConversationEvent) => {
-      queryClient.setQueriesData<ConversationDetail>({ queryKey: ["inbox", "conversation"] }, (old) => {
-        if (!old || old.id !== evt.conversationId) return old;
+    connection.on("messageStatus", (evt: InboxMessageStatusEvent) => {
+      queryClient.setQueryData<ConversationDetail>(["inbox", "conversation", evt.conversationId], (old) => {
+        if (!old) return old;
         return {
           ...old,
-          status: evt.status,
-          assignedTo: evt.assignedTo,
-          lastMessageAt: evt.lastMessageAt,
+          messages: old.messages.map((message) =>
+            message.id === evt.messageId ? { ...message, status: evt.status } : message,
+          ),
         };
       });
+      void queryClient.invalidateQueries({
+        queryKey: ["inbox", "conversation", evt.conversationId],
+        exact: true,
+      });
+    });
+
+    connection.on("conversation", (evt: InboxConversationEvent) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["inbox", "conversation", evt.conversationId],
+        exact: true,
+      });
+      void queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
 
       queryClient.setQueriesData<ConversationListCache>({ queryKey: ["inbox", "conversations"] }, (old) =>
         patchConversationListCache(old, evt.conversationId, {

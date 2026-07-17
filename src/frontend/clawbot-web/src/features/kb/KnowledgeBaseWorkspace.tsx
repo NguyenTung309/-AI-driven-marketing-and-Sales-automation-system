@@ -38,7 +38,9 @@ function statusLabel(status: string): string {
 
 function accuracyPercent(value: number | null): number | null {
   if (value === null) return null;
-  return Math.max(0, Math.min(100, value <= 1 ? value * 100 : value));
+  // BE luôn trả thang 0-100 (KbVersion.AccuracyScore) — không suy đoán "≤1 là tỉ lệ" rồi nhân 100,
+  // vì điểm thật thấp sẽ bị thổi phồng (1% thành 100%).
+  return Math.max(0, Math.min(100, value));
 }
 
 function accuracyTone(value: number | null): string {

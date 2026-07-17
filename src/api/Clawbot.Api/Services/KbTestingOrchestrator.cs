@@ -28,6 +28,12 @@ internal sealed class KbTestingOrchestrator(AppDbContext db, KbTestRunnerService
     public const int AutoUploadMaxCases = 20;
     public const int ManualMaxCases = 40;
 
+    // Thông điệp khi CẢ bộ test không truy xuất được chunk nào: bản deployed không có vector trong
+    // kho (embed lúc deploy lỗi) — đây là lỗi hạ tầng, ghi 0% sẽ gây hiểu lầm "AI kém".
+    // Giữ ngắn (<140 ký tự) vì job nạp file cắt reason khi đưa vào ghi chú tóm tắt.
+    public const string NoVectorDataMessage =
+        "Kho vector không có dữ liệu của bản đã triển khai — bước embed lúc deploy có thể đã lỗi. Bấm 'Phát hành lại (re-embed)' rồi kiểm thử lại.";
+
     public static int ScaleCaseCount(int contentLength, int maxCases) =>
         Math.Clamp((int)Math.Ceiling(contentLength / (double)CharsPerCase), MinCases, maxCases);
 
@@ -81,12 +87,17 @@ internal sealed class KbTestingOrchestrator(AppDbContext db, KbTestRunnerService
         if (cases.Count == 0) return null;
 
         var passed = 0;
+        var noContext = 0;
         foreach (var testCase in cases)
         {
             ct.ThrowIfCancellationRequested();
             var result = await _runner.EvaluateAsync(tenantId, moduleCode, testCase, ct).ConfigureAwait(false);
             if (result.Passed) passed++;
+            if (result.Answer == KbTestRunnerService.NoContextReason) noContext++;
         }
+
+        if (noContext == cases.Count)
+            throw new InvalidOperationException(NoVectorDataMessage);
 
         var score = decimal.Round(100m * passed / cases.Count, 2);
         deployed.RecordAccuracy(score);

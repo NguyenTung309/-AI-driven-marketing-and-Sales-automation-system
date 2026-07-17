@@ -13,6 +13,9 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
     public string Status { get; private set; } = "open";
     // Co "AI dang chat": bat -> tin inbound duoc AI auto-reply. Tat khi sale nhay vao (gui tay/escalate).
     public bool AiAutoReplyEnabled { get; private set; } = true;
+    // Sale gui tay -> tat AI tam thoi; moc nay la thoi diem AI tu bat lai o lan khach nhan tiep theo.
+    // Null = tat vinh vien (toggle tay/escalate), khong bao gio tu bat lai.
+    public DateTimeOffset? AiAutoReplyResumeAt { get; private set; }
     public Guid? AssignedTo { get; private set; }
     public DateTimeOffset? SnoozedUntil { get; private set; }
     public DateTimeOffset? LastMessageAt { get; private set; }
@@ -55,11 +58,35 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
     public void Escalate()
     {
         Status = "escalated";
+        // Escalate = chuyen han cho nguoi, khong tu bat lai AI.
         AiAutoReplyEnabled = false;
+        AiAutoReplyResumeAt = null;
         Raise(new Events.ConversationEscalated(TenantId, Id, DateTimeOffset.UtcNow));
     }
 
-    public void SetAiAutoReply(bool enabled) => AiAutoReplyEnabled = enabled;
+    // Toggle tay tu UI: bat/tat vinh vien, xoa moc tu bat lai.
+    public void SetAiAutoReply(bool enabled)
+    {
+        AiAutoReplyEnabled = enabled;
+        AiAutoReplyResumeAt = null;
+    }
+
+    // Sale gui tay -> tam tat AI, hen bat lai sau khoang thoi gian (khach im tiep thi AI cham lai).
+    public void PauseAiAutoReplyUntil(DateTimeOffset resumeAt)
+    {
+        AiAutoReplyEnabled = false;
+        AiAutoReplyResumeAt = resumeAt;
+    }
+
+    // Khach nhan tiep sau khi da qua moc hen: bat lai AI. Tra true neu vua bat lai (de caller luu + tiep tuc reply).
+    public bool TryResumeAiAutoReply(DateTimeOffset now)
+    {
+        if (AiAutoReplyEnabled || AiAutoReplyResumeAt is null || AiAutoReplyResumeAt > now)
+            return false;
+        AiAutoReplyEnabled = true;
+        AiAutoReplyResumeAt = null;
+        return true;
+    }
 
     public void MarkMemoryExtracted(DateTimeOffset at) => MemoryExtractedAt = at;
 

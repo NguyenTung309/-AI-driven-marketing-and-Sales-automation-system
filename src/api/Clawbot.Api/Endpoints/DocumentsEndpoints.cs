@@ -164,7 +164,9 @@ public static class DocumentsEndpoints
 
         if (!string.IsNullOrWhiteSpace(sentVia))
         {
-            await delivery.TrySendAsync(documentId, sentVia, ct).ConfigureAwait(false);
+            var delivered = await delivery.TrySendAsync(tenantId, documentId, sentVia, ct).ConfigureAwait(false);
+            if (!delivered)
+                throw new InvalidOperationException($"Document {documentId} was generated but could not be delivered via {sentVia}.");
         }
 
         return new GenerateDocumentResponse(documentId, resp.FileUrl, resp.FileHash, resp.SizeBytes, resp.LatencyMs);

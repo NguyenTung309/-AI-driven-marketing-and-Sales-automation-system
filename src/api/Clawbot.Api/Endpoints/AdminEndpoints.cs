@@ -10,12 +10,15 @@ namespace Clawbot.Api.Endpoints;
 
 // Review-gate P3: 2 flag mới nullable — client cũ không gửi thì giữ nguyên giá trị hiện tại.
 // RequireKbHumanReview (ai-self-learning-memory): bật = tri thức tự học luôn chờ người duyệt.
+// AiAutoReplyResumeMinutes: sale gửi tay -> AI nhường bao lâu (phút) rồi tự bật lại; null = giữ nguyên.
 public sealed record TenantOrchestrationSettingsRequest(
     bool RequireApproval,
     decimal? MonthlyCostCapUsd = null,
     bool? RequireContentReview = null,
     bool? RequireChatReplyApproval = null,
-    bool? RequireKbHumanReview = null);
+    bool? RequireKbHumanReview = null,
+    int? AiAutoReplyResumeMinutes = null,
+    bool? SkipChatReplyReview = null);
 
 public static class AdminEndpoints
 {
@@ -38,7 +41,7 @@ public static class AdminEndpoints
         var tenantId = tenants.Require().TenantId;
         var settings = await db.Tenants
             .Where(t => t.Id == tenantId)
-            .Select(t => new { t.RequireOrchestrationApproval, t.MonthlyCostCapUsd, t.RequireContentReview, t.RequireChatReplyApproval, t.RequireKbHumanReview })
+            .Select(t => new { t.RequireOrchestrationApproval, t.MonthlyCostCapUsd, t.RequireContentReview, t.RequireChatReplyApproval, t.RequireKbHumanReview, t.AiAutoReplyResumeMinutes, t.SkipChatReplyReview })
             .FirstOrDefaultAsync(ct);
         return Results.Ok(new
         {
@@ -47,6 +50,8 @@ public static class AdminEndpoints
             requireContentReview = settings?.RequireContentReview ?? false,
             requireChatReplyApproval = settings?.RequireChatReplyApproval ?? false,
             requireKbHumanReview = settings?.RequireKbHumanReview ?? false,
+            aiAutoReplyResumeMinutes = settings?.AiAutoReplyResumeMinutes ?? 5,
+            skipChatReplyReview = settings?.SkipChatReplyReview ?? false,
         });
     }
 
@@ -66,8 +71,10 @@ public static class AdminEndpoints
         if (body.RequireContentReview is { } rcr) tenant.SetRequireContentReview(rcr);
         if (body.RequireChatReplyApproval is { } rca) tenant.SetRequireChatReplyApproval(rca);
         if (body.RequireKbHumanReview is { } rkb) tenant.SetRequireKbHumanReview(rkb);
+        if (body.AiAutoReplyResumeMinutes is { } arm) tenant.SetAiAutoReplyResumeMinutes(arm);
+        if (body.SkipChatReplyReview is { } scr) tenant.SetSkipChatReplyReview(scr);
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new { tenant.RequireOrchestrationApproval, tenant.MonthlyCostCapUsd, tenant.RequireContentReview, tenant.RequireChatReplyApproval, tenant.RequireKbHumanReview });
+        return Results.Ok(new { tenant.RequireOrchestrationApproval, tenant.MonthlyCostCapUsd, tenant.RequireContentReview, tenant.RequireChatReplyApproval, tenant.RequireKbHumanReview, tenant.AiAutoReplyResumeMinutes, tenant.SkipChatReplyReview });
     }
 
     private static async Task<IResult> ListAuditLogsAsync(

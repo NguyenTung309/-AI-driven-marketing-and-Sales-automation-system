@@ -40,7 +40,7 @@ public static partial class WebhookEndpoints
                 .FirstOrDefaultAsync(ct).ConfigureAwait(false);
             if (tenant is null) return Results.NotFound(new { error = "tenant not found" });
 
-            var ok = await adapter.VerifyWebhookSignatureAsync(body, headers, ct).ConfigureAwait(false);
+            var ok = await adapter.VerifyWebhookSignatureAsync(tenant.Id, body, headers, ct).ConfigureAwait(false);
             if (!ok)
             {
                 var ip = req.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";

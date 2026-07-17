@@ -15,7 +15,7 @@ public interface IPiiRedactor : ISkill
 // Vendor swap target: microsoft/presidio analyzer+anonymizer REST sidecar.
 public sealed partial class RegexPiiRedactor : IPiiRedactor
 {
-    [GeneratedRegex(@"(?<![\d])(0[35789]\d{8})(?![\d])", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?<![\d])(?:(?:\+?84|0)[ .-]?[35789](?:[ .-]?\d){8})(?![\d])", RegexOptions.CultureInvariant)]
     private static partial Regex PhoneRegex();
 
     [GeneratedRegex(@"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", RegexOptions.CultureInvariant)]

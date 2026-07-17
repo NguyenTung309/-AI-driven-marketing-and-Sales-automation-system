@@ -31,9 +31,17 @@ public sealed class DemoModeMiddleware
 
             // Admin key check for sensitive endpoints
             var sensitive = ctx.Request.Path.StartsWithSegments("/api/demo/config")
-                         || ctx.Request.Path.StartsWithSegments("/api/demo/traces/");
-            if (sensitive && !string.IsNullOrEmpty(_opts.AdminKey))
+                         || ctx.Request.Path.StartsWithSegments("/api/demo/traces")
+                         || ctx.Request.Path.StartsWithSegments("/api/demo/events");
+            if (sensitive)
             {
+                if (string.IsNullOrEmpty(_opts.AdminKey))
+                {
+                    ctx.Response.StatusCode = 503;
+                    await ctx.Response.WriteAsJsonAsync(new { error = "demo_admin_key_not_configured" }, JsonOpts);
+                    return;
+                }
+
                 var auth = ctx.Request.Headers.Authorization.ToString();
                 if (!auth.Equals($"Bearer {_opts.AdminKey}", StringComparison.Ordinal))
                 {
@@ -59,8 +67,10 @@ public sealed class DemoModeMiddleware
     private static bool IsPrivateIp(System.Net.IPAddress ip)
     {
         if (System.Net.IPAddress.IsLoopback(ip)) return true;
+        if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
         var b = ip.GetAddressBytes();
-        if (b.Length != 4) return true; // IPv6: treat as internal for simplicity
+        if (b.Length == 16)
+            return ip.IsIPv6LinkLocal || (b[0] & 0xfe) == 0xfc; // fe80::/10 or fc00::/7
         return b[0] == 10
             || (b[0] == 172 && b[1] is >= 16 and <= 31)
             || (b[0] == 192 && b[1] == 168);

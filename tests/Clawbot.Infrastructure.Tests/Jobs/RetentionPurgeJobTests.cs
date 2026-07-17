@@ -1,8 +1,11 @@
+using Clawbot.Agents.Core.Skills.Nlp;
+using Clawbot.Domain.Conversations;
 using Clawbot.Domain.Notifications;
 using Clawbot.Infrastructure.Jobs;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using Xunit;
 
 namespace Clawbot.Infrastructure.Tests.Jobs;
@@ -20,7 +23,7 @@ public sealed class RetentionPurgeJobTests
         t.Db.Notifications.AddRange(expired, boundary, fresh);
         await t.Db.SaveChangesAsync();
 
-        var sut = new RetentionPurgeJob(t.Db, NullLogger<RetentionPurgeJob>.Instance, new FixedTimeProvider(now));
+        var sut = new RetentionPurgeJob(t.Db, IdentityRedactor(), NullLogger<RetentionPurgeJob>.Instance, new FixedTimeProvider(now));
         await sut.RunAsync();
 
         var remainingTitles = await t.Db.Notifications
@@ -29,6 +32,39 @@ public sealed class RetentionPurgeJobTests
             .Select(n => n.Title)
             .ToListAsync();
         remainingTitles.Should().Equal("boundary", "fresh");
+    }
+
+    [Fact]
+    public async Task RunAsync_redacts_legacy_message_content_before_dropping_raw_value()
+    {
+        using var t = new TestAppDb();
+        var now = new DateTimeOffset(2026, 6, 16, 12, 0, 0, TimeSpan.Zero);
+        var conversation = Conversation.Open(t.TenantId, "widget", "widget-1", now.AddDays(-45));
+        conversation.AppendMessage("in", "visitor", "Goi 0912345678", "text", now.AddDays(-45));
+        t.Db.Conversations.Add(conversation);
+        await t.Db.SaveChangesAsync();
+
+        var pii = Substitute.For<IPiiRedactor>();
+        pii.RedactAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => new RedactionResult(
+                call.ArgAt<string>(0).Replace("0912345678", "[PHONE]", StringComparison.Ordinal),
+                Array.Empty<PiiSpan>()));
+        var sut = new RetentionPurgeJob(t.Db, pii, NullLogger<RetentionPurgeJob>.Instance, new FixedTimeProvider(now));
+
+        await sut.RunAsync();
+
+        var message = await t.Db.Messages.IgnoreQueryFilters().SingleAsync();
+        message.Content.Should().Be("Goi [PHONE]");
+        message.RedactedContent.Should().Be("Goi [PHONE]");
+        message.OriginalContent.Should().BeNull();
+    }
+
+    private static IPiiRedactor IdentityRedactor()
+    {
+        var pii = Substitute.For<IPiiRedactor>();
+        pii.RedactAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => new RedactionResult(call.ArgAt<string>(0), Array.Empty<PiiSpan>()));
+        return pii;
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider

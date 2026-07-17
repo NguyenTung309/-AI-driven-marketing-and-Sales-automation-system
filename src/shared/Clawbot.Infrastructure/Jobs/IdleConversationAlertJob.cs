@@ -33,7 +33,7 @@ public sealed partial class IdleConversationAlertJob(
                 && c.LastMessageAt != null
                 && c.LastMessageAt < cutoff
                 && c.LastMessageAt > now.AddHours(-4))
-            .Select(c => new { c.Id, c.TenantId, c.AssignedTo })
+            .Select(c => new { c.Id, c.TenantId, c.AssignedTo, c.InboxId })
             .Take(30)
             .ToListAsync(ct);
 
@@ -46,7 +46,10 @@ public sealed partial class IdleConversationAlertJob(
                 await notifier.NotifyMessageAsync(conv.TenantId, new InboxMessageEvent(
                     conv.Id, Guid.Empty, "system", "system",
                     "Cuộc trò chuyện đã không hoạt động hơn 5 phút. Vui lòng kiểm tra.",
-                    "text", now), ct);
+                    "text", now,
+                    AssignedTo: conv.AssignedTo,
+                    InboxId: conv.InboxId,
+                    IsSynthetic: true), ct);
 
                 await publisher.PublishAsync(new NotificationRequest(
                     conv.TenantId, conv.AssignedTo, "idle", "Hội thoại chờ quá 5 phút",

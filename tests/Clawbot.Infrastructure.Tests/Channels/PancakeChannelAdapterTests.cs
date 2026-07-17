@@ -67,6 +67,7 @@ public sealed class PancakeChannelAdapterTests
             TenantAccessor());
 
         var ok = await sut.VerifyWebhookSignatureAsync(
+            Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"),
             body,
             new Dictionary<string, string> { ["X-Pancake-Signature"] = signature });
 
@@ -91,6 +92,7 @@ public sealed class PancakeChannelAdapterTests
             TenantAccessor());
 
         var ok = await sut.VerifyWebhookSignatureAsync(
+            Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"),
             """{"events":[]}""",
             new Dictionary<string, string> { ["x-pancake-signature"] = "sha256=deadbeef" });
 
@@ -117,6 +119,7 @@ public sealed class PancakeChannelAdapterTests
             TenantAccessor());
 
         var ok = await sut.VerifyWebhookSignatureAsync(
+            Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"),
             body,
             new Dictionary<string, string> { ["x-pk-signature"] = HmacBase64(body, secret) });
 
@@ -148,11 +151,15 @@ public sealed class PancakeChannelAdapterTests
     {
         public Task<PancakeRuntimeConfig?> ResolveAsync(Guid tenantId, CancellationToken ct = default) =>
             Task.FromResult<PancakeRuntimeConfig?>(null);
+        public Task<PancakeRuntimeConfig?> ResolveTenantOnlyAsync(Guid tenantId, CancellationToken ct = default) =>
+            Task.FromResult<PancakeRuntimeConfig?>(null);
     }
 
     private sealed class FixedPancakeConfigResolver(PancakeRuntimeConfig config) : IPancakeConfigResolver
     {
         public Task<PancakeRuntimeConfig?> ResolveAsync(Guid tenantId, CancellationToken ct = default) =>
+            Task.FromResult<PancakeRuntimeConfig?>(config);
+        public Task<PancakeRuntimeConfig?> ResolveTenantOnlyAsync(Guid tenantId, CancellationToken ct = default) =>
             Task.FromResult<PancakeRuntimeConfig?>(config);
     }
 }

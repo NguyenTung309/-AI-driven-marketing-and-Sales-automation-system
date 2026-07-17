@@ -41,7 +41,7 @@ public sealed class StitchDesignSystemFrontendTests
     {
         var root = FindRepositoryRoot();
         // Branding-form defaults moved into adminHelpers.tsx when AdminConsolePage was split into tab components (b931614).
-        var adminHelpers = File.ReadAllText(Path.Combine(root, "src", "frontend", "clawbot-web", "src", "features", "admin", "adminHelpers.tsx"));
+        var adminHelpers = File.ReadAllText(Path.Combine(root, "src", "frontend", "clawbot-web", "src", "features", "admin", "adminHelpers.ts"));
 
         adminHelpers.Should().Contain("primaryColor: \"#d32f2f\"");
         adminHelpers.Should().NotContain("primaryColor: \"#b91c1c\"");

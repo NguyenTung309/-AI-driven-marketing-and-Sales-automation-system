@@ -20,4 +20,17 @@ public sealed class EfChatApprovalPolicyResolver(AppDbContext db) : IChatApprova
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false) ?? false;
     }
+
+    public async Task<bool> IsReviewGateBypassedAsync(Guid tenantId, CancellationToken ct = default)
+    {
+        // Tenant không tìm thấy -> false = fail-closed (gate vẫn chạy).
+        if (tenantId == Guid.Empty) return false;
+        return await _db.Tenants
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(t => t.Id == tenantId)
+            .Select(t => (bool?)t.SkipChatReplyReview)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false) ?? false;
+    }
 }

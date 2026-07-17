@@ -57,9 +57,24 @@ public sealed class ChatAgent(
     private const string AgentCode = "chat-agent";
 
     private const string DefaultSystemPrompt =
-        "You are ClawBot — an omnichannel sales assistant for a Chinese-language tutoring center. " +
-        "Answer concisely in the customer's language (default Vietnamese, switch to Chinese if asked). " +
-        "Cite knowledge-base snippets when used. If unsure, say so and offer to escalate to a human sales rep.";
+        "Bạn là tư vấn viên của trung tâm dạy tiếng Trung, đang chat với khách qua Zalo/Facebook. " +
+        "Tư vấn khóa học, lộ trình, học phí; thân thiện, chủ động hỏi nhu cầu và mời để lại số điện thoại " +
+        "hoặc đặt lịch học thử khi phù hợp. Không chắc thì nói sẽ nhờ nhân viên hỗ trợ.";
+
+    // Văn phong khoá cho hot-path chat (không nằm trong BaseGuardrail vì guardrail dùng chung cho mọi
+    // agent — reviewer/orchestrator không cần giọng chat). Trị đúng bệnh reply "sượng": lộ meta
+    // "dựa trên tài liệu", liệt kê những gì thiếu, bullet máy móc, dồn nhiều CTA.
+    private const string ChatToneRules =
+        "# Văn phong bắt buộc khi nhắn với khách\n" +
+        "- Nhắn như một tư vấn viên thật đang chat: câu ngắn, ấm, tự nhiên.\n" +
+        "- Xưng hô theo ngữ cảnh, đối đúng cặp khách đã thiết lập và giữ nhất quán cả hội thoại: " +
+        "chưa rõ thì xưng \"mình\" gọi \"bạn\"; khách xưng \"em\" → mình xưng \"chị\", gọi khách \"em\"; " +
+        "khách xưng \"anh/chị\" → mình xưng \"em\"; khách xưng \"chú/cô/bác\" → mình xưng \"cháu\" và gọi đúng vai đó.\n" +
+        "- TUYỆT ĐỐI không nhắc tới \"tài liệu\", \"kho tri thức\", \"dữ liệu\", \"hệ thống\", \"thông tin được cung cấp\" — trả lời như thể mình tự biết.\n" +
+        "- Không kể ra những gì mình KHÔNG biết hay chưa có. Thiếu thông tin nào thì bỏ qua, hoặc nói tự nhiên: \"phần này để mình kiểm tra lại rồi báo bạn ngay nhé\".\n" +
+        "- Không mở đầu bằng \"Dựa trên...\", \"Theo thông tin...\" — vào thẳng nội dung.\n" +
+        "- Hạn chế gạch đầu dòng: chỉ dùng khi khách hỏi chi tiết nhiều mục (bảng giá, lịch học); còn lại viết thành câu chat bình thường.\n" +
+        "- Kết thúc bằng tối đa MỘT câu hỏi hoặc một lời mời duy nhất, theo mạch chuyện — không dồn nhiều lựa chọn cùng lúc.";
 
     private readonly IRagRetriever _rag = rag;
     private readonly IClaudeChatClient _claude = claude;
@@ -315,8 +330,11 @@ public sealed class ChatAgent(
     {
         // Guardrail (khoa) + persona: custom cua tenant neu co, khong thi mau mac dinh.
         var persona = string.IsNullOrWhiteSpace(customSystemPrompt) ? DefaultSystemPrompt : customSystemPrompt;
-        var sb = new StringBuilder(persona.Length + 512);
+        var sb = new StringBuilder(persona.Length + 1024);
         sb.AppendLine(AgentPromptDefaults.Compose(persona));
+        // Văn phong khoá: đặt SAU persona để tenant không vô tình ghi đè bằng "Hướng dẫn trả lời".
+        sb.AppendLine();
+        sb.AppendLine(ChatToneRules);
         sb.AppendLine(CultureInfo.InvariantCulture, $"Detected intent: {intent}.");
 
         // C1: Language directive — tell Claude to reply in detected language
@@ -355,7 +373,9 @@ public sealed class ChatAgent(
         if (chunks.Count == 0) return sb.ToString();
 
         sb.AppendLine();
-        sb.AppendLine("## Knowledge base snippets (cite by [#index] when used):");
+        // Không ép "cite [#index]" trong reply: từng khiến model mở đầu "Dựa trên tài liệu..." với khách.
+        // Citations trace theo chunks retrieve được, không parse từ text.
+        sb.AppendLine("## Thông tin nội bộ để trả lời (không nhắc tới nguồn/tài liệu trong tin nhắn):");
         for (var i = 0; i < chunks.Count; i++)
         {
             var c = chunks[i];

@@ -12,6 +12,14 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
 }
 
+function deliveryLabel(status: InboxMessage["status"]): string {
+  if (status === "pending_approval") return " - Chờ duyệt";
+  if (status === "pending_send") return " - Đang gửi";
+  if (status === "send_failed") return " - Gửi thất bại";
+  if (status === "blocked") return " - Đã chặn";
+  return "";
+}
+
 function MessageAvatar({ url, name }: { url?: string | null; name?: string | null }) {
   if (url) {
     return (
@@ -65,7 +73,11 @@ export default function ChatMessageThread({ messages, loading, contactAvatarUrl,
               )}
               <div
                 className={`rounded-2xl px-4 py-2 text-body-md ${isOwner
-                    ? "bg-primary text-on-primary"
+                    ? msg.status === "send_failed" || msg.status === "blocked"
+                      ? "border border-error/40 bg-error/10 text-error"
+                      : msg.status === "pending_send" || msg.status === "pending_approval"
+                        ? "border border-warning/40 bg-warning/10 text-on-surface"
+                        : "bg-primary text-on-primary"
                     : "bg-surface-variant text-on-surface-variant"
                   }`}
               >
@@ -101,10 +113,12 @@ export default function ChatMessageThread({ messages, loading, contactAvatarUrl,
                   <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                 )}
                 <p
-                  className={`mt-1 text-label-xs ${isOwner ? "text-on-primary/70" : "text-on-surface-variant/70"
+                  className={`mt-1 text-label-xs ${isOwner && msg.status !== "send_failed" && msg.status !== "blocked"
+                    ? "text-on-primary/70"
+                    : "text-on-surface-variant/70"
                     }`}
                 >
-                  {formatTime(msg.sentAt)}
+                  {formatTime(msg.sentAt)}{deliveryLabel(msg.status)}
                 </p>
               </div>
             </div>

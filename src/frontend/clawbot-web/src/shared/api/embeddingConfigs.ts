@@ -24,6 +24,8 @@ export interface EmbeddingStatus {
   readonly source: string;
   readonly isFallback: boolean;
   readonly displayName: string | null;
+  /** "llm" = KB truy xuất bằng LLM của tenant (mặc định); "vector" = có embedding config, dùng Qdrant. */
+  readonly retrievalMode: "vector" | "llm";
 }
 
 export interface CreateEmbeddingConfigPayload {

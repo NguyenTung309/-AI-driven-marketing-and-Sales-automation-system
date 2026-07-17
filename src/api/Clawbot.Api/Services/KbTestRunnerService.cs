@@ -14,6 +14,11 @@ internal sealed class KbTestRunnerService(IRagRetriever rag, IClaudeChatClient c
 {
     private const string AgentCode = "chat-agent";
 
+    // Mã máy-đọc-được khi RAG không trả về chunk nào: kho vector không có dữ liệu cho module/bản
+    // đang chấm (thường do bước embed lúc deploy đã lỗi). Runner dùng mã này để phân biệt
+    // "AI trả lời sai" với "hạ tầng thiếu dữ liệu" — toàn bộ case dính mã này thì báo lỗi thay vì ghi 0%.
+    public const string NoContextReason = "no_context_retrieved";
+
     // ponytail: trần nội dung nạp cho bộ sinh Q&A. Nâng từ 8k -> 24k để tài liệu dài không mất phần đuôi
     // (bộ test phải phủ được cả tài liệu). Vẫn kẹp để không nổ token trên tài liệu cực lớn.
     private const int MaxGeneratePromptChars = 24000;
@@ -143,6 +148,11 @@ internal sealed class KbTestRunnerService(IRagRetriever rag, IClaudeChatClient c
         using var _llm = _llmScope.Begin(tenantId, AgentCode);
         var chunks = await _rag.RetrieveAsync(
             new RagRequest(tenantId, moduleCode, testCase.Question, 3), ct).ConfigureAwait(false);
+
+        // Không có chunk nào thì fail thẳng — hỏi LLM trên context rỗng vừa tốn 1 lượt gọi
+        // vừa che mất nguyên nhân thật (kho vector trống, không phải nội dung sai).
+        if (chunks.Count == 0)
+            return new KbTestCaseResult(testCase.Id, testCase.Question, false, NoContextReason);
 
         var context = string.Join("\n---\n", chunks.Select(c => c.Snippet));
         var evalPrompt = $"Context:\n{context}\n\nQuestion: {testCase.Question}\n" +

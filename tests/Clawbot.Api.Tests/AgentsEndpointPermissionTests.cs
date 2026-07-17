@@ -27,6 +27,19 @@ public sealed class AgentsEndpointPermissionTests
         source.Should().Contain("AppendTrace(\"sandbox\", agent.DisplayName, \"input\", redactedMessage");
         source.Should().Contain("redactedReply = (await pii.RedactAsync(reply.Text, ct)");
         source.Should().Contain("AppendTrace(\"sandbox\", agent.DisplayName, \"reply\", redactedReply");
+        source.Should().Contain("new AgentSandboxResponse(session.Id, redactedReply");
+        source.Should().NotContain("new AgentSandboxResponse(session.Id, reply.Text");
+    }
+
+    [Fact]
+    public void Sandbox_redacts_message_before_persisting_background_job_payload()
+    {
+        var source = File.ReadAllText(FindRepoFile("src", "api", "Clawbot.Api", "Endpoints", "AgentsEndpoints.cs"));
+
+        source.Should().Contain("IPiiRedactor pii");
+        source.Should().Contain("redactedMessage = (await pii.RedactAsync(req.Message.Trim(), ct)");
+        source.Should().Contain("new AgentSandboxJobPayload(agent.Id, agent.Code, config.SystemPrompt, redactedMessage)");
+        source.Should().NotContain("new AgentSandboxJobPayload(agent.Id, agent.Code, config.SystemPrompt, req.Message.Trim())");
     }
 
     [Fact]

@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Clawbot.Infrastructure.Tests.Channels;
 
-// M06/M13 — PancakeConfigResolver tenant-DB ? appsettings ? defaults cascade.
+// M06/M13 ï¿½ PancakeConfigResolver tenant-DB ? appsettings ? defaults cascade.
 public sealed class PancakeConfigResolverTests
 {
     private static readonly DateTimeOffset Now = new(2026, 6, 2, 0, 0, 0, TimeSpan.Zero);
@@ -34,7 +34,7 @@ public sealed class PancakeConfigResolverTests
 
         result.Should().NotBeNull();
         result!.AccessToken.Should().Be("PLAIN");
-        result.BaseUrl.Should().Be(row.BaseUrl);
+        result.BaseUrl.Should().Be("https://pages.fm/api/public_api/v1"); // legacy pancake.vn host is never used for send
     }
 
     [Fact]
@@ -53,6 +53,22 @@ public sealed class PancakeConfigResolverTests
         result.Should().NotBeNull();
         result!.BaseUrl.Should().Be("https://custom.example");
         result.AuthMode.Should().Be("bearer"); // normalized to lowercase
+    }
+
+    [Fact]
+    public async Task Tenant_only_resolution_never_inherits_global_secrets()
+    {
+        using var fx = new TestAppDb();
+        var enc = Substitute.For<IEncryptor>();
+        var sut = new PancakeConfigResolver(fx.Db, enc, Config(new Dictionary<string, string?>
+        {
+            ["Channels:Pancake:AccessToken"] = "global-token",
+            ["Channels:Pancake:WebhookSecret"] = "global-secret",
+        }), NullLogger<PancakeConfigResolver>.Instance);
+
+        var result = await sut.ResolveTenantOnlyAsync(Guid.NewGuid());
+
+        result.Should().BeNull();
     }
 
     [Fact]
@@ -104,5 +120,32 @@ public sealed class PancakeConfigResolverTests
         result!.AccessToken.Should().Be("env_page_token");
         result.PageId.Should().Be("env_page_123");
         result.WebhookSecret.Should().Be("env_secret");
+    }
+
+    [Fact]
+    public async Task Inactive_db_row_still_resolves_endpoint_template_without_tenant_token()
+    {
+        // AgentService send uses page token from inbox; pancake_configs may be is_active=0
+        // but still must yield BaseUrl/SendPathTemplate so SendAsync does not fail early.
+        using var fx = new TestAppDb();
+        var row = PancakeConfig.Create(fx.TenantId, Now);
+        row.UpdateEndpoint("https://pancake.vn", "/pages/{page_id}/conversations/{thread_id}/messages", "query", Now);
+        row.Deactivate(Now);
+        fx.Db.PancakeConfigs.Add(row);
+        await fx.Db.SaveChangesAsync();
+
+        var enc = Substitute.For<IEncryptor>();
+        var sut = new PancakeConfigResolver(fx.Db, enc, Config(new Dictionary<string, string?>
+        {
+            ["Channels:Pancake:BaseUrl"] = "https://pages.fm/api/public_api/v1",
+        }), NullLogger<PancakeConfigResolver>.Instance);
+
+        var result = await sut.ResolveAsync(fx.TenantId);
+
+        result.Should().NotBeNull();
+        result!.BaseUrl.Should().Be("https://pages.fm/api/public_api/v1"); // legacy pancake.vn skipped
+        result.AccessToken.Should().BeEmpty();
+        result.AuthMode.Should().Be("query");
+        result.SendPathTemplate.Should().Be("/pages/{page_id}/conversations/{thread_id}/messages");
     }
 }

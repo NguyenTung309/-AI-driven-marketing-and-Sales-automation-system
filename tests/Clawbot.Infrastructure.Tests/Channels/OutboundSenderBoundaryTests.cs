@@ -16,6 +16,8 @@ public sealed class OutboundSenderBoundaryTests
         "src/agents/Clawbot.AgentService/Services/ChatAgentGrpcService.cs",
         // gate: OutboundMessageSafetyService (sale gõ tay - QĐ5 miễn agent review) + draft approve (P3)
         "src/api/Clawbot.Api/Endpoints/InboxEndpoints.cs",
+        // gate: chỉ retry nội dung AI đã persist + chạy lại OutboundMessageSafetyService; CAS chống gửi trùng
+        "src/api/Clawbot.Api/Services/FailedMessageRetryService.cs",
         // gate: template tĩnh duyệt-1-lần, biến nội suy chỉ URL/ngày hệ thống sinh (QĐ6)
         "src/api/Clawbot.Api/Services/DocumentDeliveryService.cs",
         // gate: manual-mode/resolved skip (P3) + template tĩnh 100% (QĐ6) + action reply_comment/private_replies

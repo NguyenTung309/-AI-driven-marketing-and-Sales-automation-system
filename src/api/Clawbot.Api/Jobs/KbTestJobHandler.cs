@@ -38,6 +38,7 @@ internal sealed class KbTestJobHandler(AppDbContext db, KbTestRunnerService test
         if (cases.Count == 0) throw new InvalidOperationException("Module chưa có test case nào.");
 
         var passed = 0;
+        var noContext = 0;
         for (var i = 0; i < cases.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
@@ -46,7 +47,13 @@ internal sealed class KbTestJobHandler(AppDbContext db, KbTestRunnerService test
 
             var result = await testRunner.EvaluateAsync(ctx.TenantId, module.Code, cases[i], ct).ConfigureAwait(false);
             if (result.Passed) passed++;
+            if (result.Answer == KbTestRunnerService.NoContextReason) noContext++;
         }
+
+        // Cả bộ test không truy xuất được chunk nào = bản deployed không có vector (embed lỗi lúc
+        // deploy) — fail job với hướng dẫn khắc phục thay vì ghi 0% gây hiểu lầm chất lượng KB.
+        if (noContext == cases.Count)
+            throw new InvalidOperationException(KbTestingOrchestrator.NoVectorDataMessage);
 
         var score = decimal.Round(100m * passed / cases.Count, 2);
         deployedVersion.RecordAccuracy(score);

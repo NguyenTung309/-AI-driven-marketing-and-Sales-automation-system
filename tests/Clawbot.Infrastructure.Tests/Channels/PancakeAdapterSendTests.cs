@@ -7,8 +7,10 @@ namespace Clawbot.Infrastructure.Tests.Channels;
 
 public sealed class PancakeAdapterSendTests : IDisposable
 {
+    private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private readonly HttpClient _http = new(new PancakeSendTestHandler("test_page_token"));
     private readonly IPancakeConfigResolver _resolver;
+    private readonly IPancakePageTokenResolver _pageTokenResolver;
     private readonly ITenantAccessor _tenants = Substitute.For<ITenantAccessor>();
 
     public PancakeAdapterSendTests()
@@ -26,6 +28,12 @@ public sealed class PancakeAdapterSendTests : IDisposable
                 AuthMode: "query",
                 PageId: "pzl_test_page_123"));
         _resolver = resolver;
+        _pageTokenResolver = Substitute.For<IPancakePageTokenResolver>();
+        _pageTokenResolver.ResolveAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new PancakePageToken("test_page_token", "pzl_test_page_123", "Test Page", "zalo"));
+        _tenants.Current.Returns(new TenantContext(
+            Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            "ambient-test"));
     }
 
     public void Dispose() => _http.Dispose();
@@ -33,9 +41,9 @@ public sealed class PancakeAdapterSendTests : IDisposable
     [Fact]
     public async Task SendAsync_WithFlatThreadId_ShouldUseConfigPageId()
     {
-        var adapter = new PancakeChannelAdapter(_http, _resolver, _tenants);
+        var adapter = new PancakeChannelAdapter(_http, _resolver, _tenants, _pageTokenResolver);
         var ex = await Record.ExceptionAsync(() =>
-            adapter.SendAsync("conv_abc_456", "Hello from test", CancellationToken.None));
+            adapter.SendAsync(TenantId, "conv_abc_456", "Hello from test", CancellationToken.None));
         Assert.Null(ex);
     }
 
@@ -43,9 +51,9 @@ public sealed class PancakeAdapterSendTests : IDisposable
     public async Task SendAsync_WithUserAccessToken_ShouldPreferUserToken()
     {
         using var http = new HttpClient(new PancakeSendTestHandler("user_page_token"));
-        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants);
+        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants, _pageTokenResolver);
         var ex = await Record.ExceptionAsync(() =>
-            adapter.SendAsync("conv_abc_456", "Hello from test", "user_page_token", CancellationToken.None));
+            adapter.SendAsync(TenantId, "conv_abc_456", "Hello from test", "user_page_token", CancellationToken.None));
         Assert.Null(ex);
     }
 
@@ -61,26 +69,31 @@ public sealed class PancakeAdapterSendTests : IDisposable
         var adapter = new PancakeChannelAdapter(http, _resolver, _tenants, pageTokenResolver);
 
         var ex = await Record.ExceptionAsync(() =>
-            adapter.SendAsync("pzl_page_999:conv_123", "Hello from test", CancellationToken.None));
+            adapter.SendAsync(TenantId, "pzl_page_999:conv_123", "Hello from test", CancellationToken.None));
 
         Assert.Null(ex);
+        await _resolver.Received(1).ResolveAsync(TenantId, Arg.Any<CancellationToken>());
+        await pageTokenResolver.Received(1).ResolveAsync(
+            TenantId,
+            "pzl_page_999",
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task SendAsync_WithPageThreadId_FallsBackToConfigToken_WhenPageTokenNotStored()
+    public async Task SendAsync_WithPageThreadId_RejectsSend_WhenTenantPageTokenNotStored()
     {
-        // EARS[WHEN a page token resolver returns null (page not yet minted) THE SYSTEM SHALL fall back to the
-        // configured token so a single-page tenant still sends]
+        // Tenant-first security: never fall back to a process-wide token for an unowned page.
         using var http = new HttpClient(new PancakeSendTestHandler("test_page_token", "pzl_page_999", "conv_123"));
         var pageTokenResolver = Substitute.For<IPancakePageTokenResolver>();
         pageTokenResolver.ResolveAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns((PancakePageToken?)null);
         var adapter = new PancakeChannelAdapter(http, _resolver, _tenants, pageTokenResolver);
 
-        var ex = await Record.ExceptionAsync(() =>
-            adapter.SendAsync("pzl_page_999:conv_123", "Hello from test", CancellationToken.None));
+        var act = () => adapter.SendAsync(
+            TenantId, "pzl_page_999:conv_123", "Hello from test", CancellationToken.None);
 
-        Assert.Null(ex);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(act);
+        Assert.Contains("page token not configured", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -88,9 +101,9 @@ public sealed class PancakeAdapterSendTests : IDisposable
     {
         var handler = new PancakeSendTestHandler("test_page_token", responseBody: """{"success":true,"id":"cmt-reply-9"}""");
         using var http = new HttpClient(handler);
-        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants);
+        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants, _pageTokenResolver);
 
-        var id = await adapter.SendCommentReplyAsync("conv_abc_456", "cmt-1", "Cam on ban", CancellationToken.None);
+        var id = await adapter.SendCommentReplyAsync(TenantId, "conv_abc_456", "cmt-1", "Cam on ban", CancellationToken.None);
 
         Assert.Equal("cmt-reply-9", id);
         Assert.Contains("\"action\":\"reply_comment\"", handler.LastRequestBody);
@@ -102,9 +115,9 @@ public sealed class PancakeAdapterSendTests : IDisposable
     {
         var handler = new PancakeSendTestHandler("test_page_token", responseBody: """{"success":true,"id":"pm-9"}""");
         using var http = new HttpClient(handler);
-        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants);
+        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants, _pageTokenResolver);
 
-        var id = await adapter.SendPrivateReplyAsync("conv_abc_456", "post-7", "cmt-1", "fb-user-77", "Chao ban", CancellationToken.None);
+        var id = await adapter.SendPrivateReplyAsync(TenantId, "conv_abc_456", "post-7", "cmt-1", "fb-user-77", "Chao ban", CancellationToken.None);
 
         Assert.Equal("pm-9", id);
         Assert.Contains("\"action\":\"private_replies\"", handler.LastRequestBody);
@@ -118,9 +131,9 @@ public sealed class PancakeAdapterSendTests : IDisposable
     {
         using var http = new HttpClient(new PancakeSendTestHandler("test_page_token",
             responseBody: """{"success":true,"id":"msg_789","message":"ok"}"""));
-        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants);
+        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants, _pageTokenResolver);
 
-        var id = await adapter.SendAsync("conv_abc_456", "Hello from test", CancellationToken.None);
+        var id = await adapter.SendAsync(TenantId, "conv_abc_456", "Hello from test", CancellationToken.None);
 
         Assert.Equal("msg_789", id);
     }
@@ -130,15 +143,44 @@ public sealed class PancakeAdapterSendTests : IDisposable
     {
         using var http = new HttpClient(new PancakeSendTestHandler("test_page_token",
             responseBody: """{"success":true}"""));
-        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants);
+        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants, _pageTokenResolver);
 
-        var id = await adapter.SendAsync("conv_abc_456", "Hello from test", CancellationToken.None);
+        var id = await adapter.SendAsync(TenantId, "conv_abc_456", "Hello from test", CancellationToken.None);
 
         Assert.Null(id);
     }
+
+    [Fact]
+    public async Task SendAsync_Throws_WhenResponseReportsFailure()
+    {
+        using var http = new HttpClient(new PancakeSendTestHandler("test_page_token",
+            responseBody: """{"success":false,"message":"invalid token"}"""));
+        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants, _pageTokenResolver);
+
+        var act = () => adapter.SendAsync(TenantId, "conv_abc_456", "Hello from test", CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<ChannelSendRejectedException>(act);
+        Assert.Equal("pancake_send_rejected", exception.Code);
+    }
+
+    [Fact]
+    public async Task SendAsync_Throws_WhenResponseCannotConfirmSuccess()
+    {
+        using var http = new HttpClient(new PancakeSendTestHandler("test_page_token", responseBody: "not-json"));
+        var adapter = new PancakeChannelAdapter(http, _resolver, _tenants, _pageTokenResolver);
+
+        var act = () => adapter.SendAsync(TenantId, "conv_abc_456", "Hello from test", CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<ChannelDeliveryAmbiguousException>(act);
+        Assert.Equal("pancake_response_unconfirmed", exception.Code);
+    }
 }
 
-public sealed class PancakeSendTestHandler(string expectedToken, string expectedPage = "pzl_test_page_123", string expectedThread = "conv_abc_456", string? responseBody = null) : HttpClientHandler
+public sealed class PancakeSendTestHandler(
+    string expectedToken,
+    string expectedPage = "pzl_test_page_123",
+    string expectedThread = "conv_abc_456",
+    string? responseBody = """{"success":true}""") : HttpClientHandler
 {
     public string? LastRequestBody { get; private set; }
 

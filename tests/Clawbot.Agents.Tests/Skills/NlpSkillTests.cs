@@ -19,6 +19,14 @@ public sealed class RegexPiiRedactorTests
     }
 
     [Fact]
+    public async Task Redacts_international_vietnamese_phone_with_spaces()
+    {
+        var result = await _sut.RedactAsync("Call +84 912 345 678", CancellationToken.None);
+
+        result.RedactedText.Should().Be("Call [PHONE]");
+    }
+
+    [Fact]
     public async Task Redacts_email()
     {
         var result = await _sut.RedactAsync("mail a@b.com", CancellationToken.None);

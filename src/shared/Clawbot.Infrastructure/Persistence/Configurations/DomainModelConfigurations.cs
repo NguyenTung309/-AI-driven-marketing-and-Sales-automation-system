@@ -15,6 +15,7 @@ using Clawbot.Domain.Llm;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
+using Clawbot.Infrastructure.Audit;
 using Clawbot.Infrastructure.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -42,7 +43,9 @@ public sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.Property(x => x.RequireOrchestrationApproval).HasDefaultValue(false);
         builder.Property(x => x.RequireContentReview).HasDefaultValue(false);
         builder.Property(x => x.RequireChatReplyApproval).HasDefaultValue(false);
+        builder.Property(x => x.SkipChatReplyReview).HasDefaultValue(false);
         builder.Property(x => x.MonthlyCostCapUsd).HasColumnType("decimal(12,2)");
+        builder.Property(x => x.AiAutoReplyResumeMinutes).HasColumnName("ai_auto_reply_resume_minutes").HasDefaultValue(5);
         builder.HasIndex(x => x.Slug).IsUnique();
     }
 }
@@ -100,6 +103,7 @@ public sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Action).HasMaxLength(64).IsRequired();
         builder.Property(x => x.ResourceType).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.UserAgent).HasMaxLength(HttpAuditContext.MaxUserAgentLength);
         builder.Property(x => x.IpAddress)
             .HasConversion(
                 v => v == null ? null : v.ToString(),

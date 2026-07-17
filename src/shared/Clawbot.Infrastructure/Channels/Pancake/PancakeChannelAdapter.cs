@@ -39,12 +39,14 @@ public sealed class PancakeChannelAdapter(
     public string Name => "pancake";
 
     public async Task<bool> VerifyWebhookSignatureAsync(
+        Guid tenantId,
         string rawBody,
         IReadOnlyDictionary<string, string> headers,
         CancellationToken ct = default)
     {
+        if (tenantId == Guid.Empty) return false;
         ArgumentNullException.ThrowIfNull(headers);
-        var cfg = await CurrentConfigAsync(ct).ConfigureAwait(false);
+        var cfg = await _resolver.ResolveTenantOnlyAsync(tenantId, ct).ConfigureAwait(false);
         if (cfg is null || string.IsNullOrEmpty(cfg.WebhookSecret)) return false;
 
         var lookup = new Dictionary<string, string>(headers, StringComparer.OrdinalIgnoreCase);
@@ -109,68 +111,77 @@ public sealed class PancakeChannelAdapter(
         return Task.FromResult<IReadOnlyList<ChannelMessage>>(list);
     }
 
-    public Task<string?> SendAsync(string externalThreadId, string text, CancellationToken ct = default) =>
-        SendAsync(externalThreadId, text, accessToken: null, ct);
+    public Task<string?> SendAsync(Guid tenantId, string externalThreadId, string text, CancellationToken ct = default) =>
+        SendAsync(tenantId, externalThreadId, text, accessToken: null, ct);
 
-    public Task<string?> SendAsync(string externalThreadId, string text, string? accessToken, CancellationToken ct = default) =>
-        SendPayloadAsync(externalThreadId, accessToken,
+    public Task<string?> SendAsync(Guid tenantId, string externalThreadId, string text, string? accessToken, CancellationToken ct = default) =>
+        SendPayloadAsync(tenantId, externalThreadId, accessToken,
             senderId => new SendBody("reply_inbox", text, senderId), ct);
 
     // Comment auto-reply: rep công khai dưới comment (spec: action reply_comment + message_id).
-    public Task<string?> SendCommentReplyAsync(string externalThreadId, string commentMessageId, string text, CancellationToken ct = default)
+    public Task<string?> SendCommentReplyAsync(Guid tenantId, string externalThreadId, string commentMessageId, string text, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(commentMessageId))
             throw new ArgumentException("comment message id required", nameof(commentMessageId));
-        return SendPayloadAsync(externalThreadId, accessToken: null,
+        return SendPayloadAsync(tenantId, externalThreadId, accessToken: null,
             senderId => new SendBody("reply_comment", text, senderId, MessageId: commentMessageId), ct);
     }
 
     // Private reply từ comment (spec: action private_replies + post_id + message_id + from_id; FB/IG only).
-    public Task<string?> SendPrivateReplyAsync(string externalThreadId, string postId, string commentMessageId, string fromId, string text, CancellationToken ct = default)
+    public Task<string?> SendPrivateReplyAsync(Guid tenantId, string externalThreadId, string postId, string commentMessageId, string fromId, string text, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(postId)) throw new ArgumentException("post id required", nameof(postId));
         if (string.IsNullOrEmpty(commentMessageId)) throw new ArgumentException("comment message id required", nameof(commentMessageId));
         if (string.IsNullOrEmpty(fromId)) throw new ArgumentException("from id required", nameof(fromId));
-        return SendPayloadAsync(externalThreadId, accessToken: null,
+        return SendPayloadAsync(tenantId, externalThreadId, accessToken: null,
             senderId => new SendBody("private_replies", text, senderId, MessageId: commentMessageId, PostId: postId, FromId: fromId), ct);
     }
 
-    private async Task<string?> SendPayloadAsync(string externalThreadId, string? accessToken, Func<string?, SendBody> payloadFactory, CancellationToken ct)
+    private async Task<string?> SendPayloadAsync(
+        Guid tenantId,
+        string externalThreadId,
+        string? accessToken,
+        Func<string?, SendBody> payloadFactory,
+        CancellationToken ct)
     {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("tenant id required", nameof(tenantId));
         if (string.IsNullOrEmpty(externalThreadId))
             throw new ArgumentException("thread id required", nameof(externalThreadId));
 
-        var tenantId = _tenants.Current?.TenantId ?? Guid.Empty;
         var (threadPart, pagePart) = SplitThread(externalThreadId);
+        var cfg = await _resolver.ResolveAsync(tenantId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Pancake config not resolved for specified tenant.");
+        if (string.IsNullOrEmpty(pagePart) && !string.IsNullOrEmpty(cfg.PageId))
+            pagePart = cfg.PageId;
+        if (string.IsNullOrEmpty(pagePart))
+            throw new InvalidOperationException("Pancake page id not configured for specified tenant.");
 
-        // EARS[WHEN sending to a Pancake thread THE SYSTEM SHALL rate-limit per page (5/s) so a multi-page tenant
-        // does not share one bucket; WHEN no page is identifiable THE SYSTEM SHALL fall back to a tenant bucket]
-        var rateKey = string.IsNullOrEmpty(pagePart) ? $"tenant:{tenantId}" : $"page:{pagePart}";
+        // EARS[WHEN sending to a Pancake thread THE SYSTEM SHALL rate-limit per tenant + page (5/s) so tenants
+        // never share a bucket; WHEN no page is identifiable THE SYSTEM SHALL fall back to the tenant bucket]
+        var rateKey = string.IsNullOrEmpty(pagePart)
+            ? $"tenant:{tenantId}"
+            : $"tenant:{tenantId}:page:{pagePart}";
         using var lease = await OutboundLimiter.AcquireAsync(rateKey, 1, ct).ConfigureAwait(false);
         if (!lease.IsAcquired)
             throw new InvalidOperationException("Pancake outbound rate limit exceeded for page/tenant.");
 
-        var cfg = await CurrentConfigAsync(ct).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("Pancake config not resolved for current tenant.");
-        if (string.IsNullOrEmpty(pagePart) && !string.IsNullOrEmpty(cfg.PageId))
-            pagePart = cfg.PageId;
-
-        // EARS[WHEN a page is identifiable and no explicit token is passed THE SYSTEM SHALL resolve the stored
-        // page access token for that page (page ops require a page token, NOT the user token); WHEN none is stored
-        // THE SYSTEM SHALL fall back to the legacy configured token so a single-page tenant still works]
+        // Tenant-scoped sends must use a page token owned by that tenant. Never fall back to a
+        // process-wide access token for a page the tenant has not connected.
         string outboundToken;
         string? senderId = null;
-        if (string.IsNullOrWhiteSpace(accessToken)
-            && !string.IsNullOrEmpty(pagePart)
-            && _pageTokenResolver is not null)
+        if (string.IsNullOrWhiteSpace(accessToken))
         {
-            var pageToken = await _pageTokenResolver.ResolveAsync(tenantId, pagePart, ct).ConfigureAwait(false);
-            outboundToken = pageToken?.PageAccessToken ?? cfg.AccessToken;
-            senderId = pageToken?.SenderId;
+            var pageToken = _pageTokenResolver is null
+                ? null
+                : await _pageTokenResolver.ResolveAsync(tenantId, pagePart, ct).ConfigureAwait(false);
+            outboundToken = pageToken?.PageAccessToken
+                ?? throw new InvalidOperationException("Pancake page token not configured for specified tenant/page.");
+            senderId = pageToken.SenderId;
         }
         else
         {
-            outboundToken = string.IsNullOrWhiteSpace(accessToken) ? cfg.AccessToken : accessToken;
+            outboundToken = accessToken;
         }
         if (string.IsNullOrEmpty(outboundToken))
             throw new InvalidOperationException("Pancake access_token not configured.");
@@ -196,28 +207,30 @@ public sealed class PancakeChannelAdapter(
         if (string.Equals(cfg.AuthMode, "bearer", StringComparison.Ordinal))
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", outboundToken);
 
+        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+        if (!resp.IsSuccessStatusCode)
+            throw new ChannelSendRejectedException("pancake_http_rejected", (int)resp.StatusCode);
+
+        // Send response: {success, id, message} - id la message id phia Pancake, cung id-space voi
+        // GET messages cua poller -> caller luu vao ExternalMessageId de dedup strict tin echo.
+        var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        SendResponse? parsed;
         try
         {
-            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
-            resp.EnsureSuccessStatusCode();
-            // Send response: {success, id, message} - id la message id phia Pancake, cung id-space voi
-            // GET messages cua poller -> caller luu vao ExternalMessageId de dedup strict tin echo.
-            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            try
-            {
-                var parsed = JsonSerializer.Deserialize<SendResponse>(body, JsonOpts);
-                return string.IsNullOrEmpty(parsed?.Id) ? null : parsed.Id;
-            }
-            catch (JsonException)
-            {
-                return null;
-            }
+            parsed = JsonSerializer.Deserialize<SendResponse>(body, JsonOpts);
         }
-        catch (Exception) when (string.Equals(Environment.GetEnvironmentVariable("DEMO_MODE"), "true", StringComparison.OrdinalIgnoreCase))
+        catch (JsonException ex)
         {
-            // In demo mode, ignore outbound connection/token failures so messages can still be saved locally for manual/agent review
-            return null;
+            // HTTP thành công nhưng body không xác nhận được: provider có thể đã nhận tin.
+            throw new ChannelDeliveryAmbiguousException("pancake_response_unconfirmed", ex);
         }
+
+        if (parsed?.Success == false)
+            throw new ChannelSendRejectedException("pancake_send_rejected");
+        if (parsed?.Success != true)
+            throw new ChannelDeliveryAmbiguousException("pancake_response_unconfirmed");
+
+        return string.IsNullOrEmpty(parsed.Id) ? null : parsed.Id;
     }
 
     private static ChannelMessage[] ParseMessagingWebhook(string rawBody)
@@ -314,7 +327,7 @@ public sealed class PancakeChannelAdapter(
         [property: JsonPropertyName("post_id")] string? PostId = null,
         [property: JsonPropertyName("from_id")] string? FromId = null);
     private sealed record SendResponse(
-        [property: JsonPropertyName("success")] bool Success,
+        [property: JsonPropertyName("success")] bool? Success,
         [property: JsonPropertyName("id")] string? Id,
         [property: JsonPropertyName("message")] string? Message);
     private sealed record PancakeWebhookPayload(

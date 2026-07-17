@@ -61,6 +61,8 @@ public static class HangfireModule
                 services.AddScoped<DripSequenceJob>();
         services.AddScoped<IIdleEscalationRecipientResolver, SalesLeadIdleEscalationRecipientResolver>();
         services.AddScoped<IdleConversationAlertJob>();
+        // Sale gửi tay -> AI nhường tạm; job này bật lại + trả lời tin khách treo khi hết cửa sổ.
+        services.AddScoped<AiAutoReplyResumeJob>();
         // Review-gate P4: nhắc/escalate bài chờ review sát giờ đăng.
         services.AddScoped<IContentReviewEscalationRecipientResolver, ContentReviewEscalationRecipientResolver>();
         services.AddScoped<ContentReviewSlaJob>();
@@ -235,6 +237,12 @@ public static class HangfireModule
             "default",
             j => j.RunAsync(CancellationToken.None),
             "*/2 * * * *");
+        // Sale gửi tay -> AI nhường tạm; hết cửa sổ (tenant config, mặc định 5') thì bật lại + trả lời tin treo.
+        recurring.AddOrUpdate<AiAutoReplyResumeJob>(
+            "ai-auto-reply-resume",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            "* * * * *");
         recurring.AddOrUpdate<LeadFollowUpJob>(
             "lead-followup",
             "default",

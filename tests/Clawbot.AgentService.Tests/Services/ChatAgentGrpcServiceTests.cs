@@ -1,10 +1,12 @@
-using Clawbot.AgentService.Services;
+using System.Runtime.CompilerServices;
 using Clawbot.Agents.Contracts.Chat;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Rag;
 using Clawbot.Agents.Core.Skills.Lead;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Agents.Core.Skills.Ops;
+using Clawbot.AgentService.Services;
+using Clawbot.Domain.Agents;
 using Clawbot.Domain.ChatScenarios;
 using Clawbot.Domain.Conversations;
 using Clawbot.SharedKernel.Time;
@@ -87,7 +89,7 @@ public sealed class ChatAgentGrpcServiceTests
         {
             TenantId = TenantId.ToString("D"),
             ConversationId = conversation.Id.ToString("D"),
-            UserText = "xin chao",
+            UserText = "toi can tu van",
         }, stream, TestServerCallContext.Create());
 
         claude.StreamCalls.Should().Be(1);
@@ -99,6 +101,7 @@ public sealed class ChatAgentGrpcServiceTests
 
         var savedMessage = fx.Db.Messages.Single(m => m.ConversationId == conversation.Id && m.Direction == "out");
         savedMessage.Content.Should().Be("Xin chao");
+        savedMessage.Status.Should().Be("sent");
 
         var trace = fx.Db.AgentTraces.Single();
         trace.Message.Should().Contain("tokens=10/5");
@@ -135,8 +138,115 @@ public sealed class ChatAgentGrpcServiceTests
             UserText = "xin chao",
         }, stream, TestServerCallContext.Create());
 
-        await channel.Received(1).SendAsync("page_1:thread-ext", "Scenario reply", Arg.Any<CancellationToken>());
+        await channel.Received(1).SendAsync(TenantId, "page_1:thread-ext", "Scenario reply", Arg.Any<CancellationToken>());
         fx.Db.AgentTraces.Should().Contain(t => t.Phase == "sent" && (t.Message ?? string.Empty).Contains("page_1:thread-ext"));
+    }
+
+    [Fact]
+    public async Task Reply_marks_message_pending_before_channel_delivery_then_sent_after_confirmation()
+    {
+        using var fx = new AgentServiceTestAppDb(TenantId);
+        var conversation = Conversation.Open(TenantId, "zalo", "pzl_page_1:pzl_conv_1", Now);
+        fx.Db.Add(conversation);
+        await fx.Db.SaveChangesAsync();
+
+        var claude = new CapturingClaude();
+        var clock = new FixedClock(Now);
+        var channel = Substitute.For<Clawbot.SharedKernel.Channels.IChannelAdapter>();
+        string? statusDuringSend = null;
+        channel.SendAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                statusDuringSend = fx.Db.Messages.Single(m => m.ConversationId == conversation.Id && m.Direction == "out").Status;
+                return Task.FromResult<string?>("zalo-msg-42");
+            });
+        var service = new ChatAgentGrpcService(
+            BuildAgent(claude),
+            BuildReviewer(),
+            fx.Db,
+            clock,
+            BuildLeadScorer(fx.Db, clock),
+            NullLogger<ChatAgentGrpcService>.Instance,
+            channel);
+
+        await service.Reply(new ChatRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            ConversationId = conversation.Id.ToString("D"),
+            UserText = "xin chao",
+        }, new CapturingChatStream(), TestServerCallContext.Create());
+
+        statusDuringSend.Should().Be("pending_send");
+        var saved = fx.Db.Messages.Single(m => m.ConversationId == conversation.Id && m.Direction == "out");
+        saved.Status.Should().Be("sent");
+        saved.ExternalMessageId.Should().Be("zalo-msg-42");
+    }
+
+    [Fact]
+    public async Task Reply_marks_message_send_failed_when_channel_delivery_fails()
+    {
+        using var fx = new AgentServiceTestAppDb(TenantId);
+        var conversation = Conversation.Open(TenantId, "zalo", "pzl_page_1:pzl_conv_1", Now);
+        fx.Db.Add(conversation);
+        await fx.Db.SaveChangesAsync();
+
+        var claude = new CapturingClaude();
+        var clock = new FixedClock(Now);
+        var channel = Substitute.For<Clawbot.SharedKernel.Channels.IChannelAdapter>();
+        channel.SendAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<Task<string?>>(_ => throw new HttpRequestException("zalo unavailable"));
+        var service = new ChatAgentGrpcService(
+            BuildAgent(claude),
+            BuildReviewer(),
+            fx.Db,
+            clock,
+            BuildLeadScorer(fx.Db, clock),
+            NullLogger<ChatAgentGrpcService>.Instance,
+            channel);
+
+        await service.Reply(new ChatRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            ConversationId = conversation.Id.ToString("D"),
+            UserText = "xin chao",
+        }, new CapturingChatStream(), TestServerCallContext.Create());
+
+        var saved = fx.Db.Messages.Single(m => m.ConversationId == conversation.Id && m.Direction == "out");
+        saved.Status.Should().Be("send_failed");
+        saved.ExternalMessageId.Should().BeNull();
+        fx.Db.AgentTraces.Should().Contain(t => t.Phase == "send_failed");
+        fx.Db.AgentTraces.Should().NotContain(t => t.Phase == "sent");
+    }
+
+    [Fact]
+    public async Task Reply_marks_message_send_failed_when_channel_delivery_is_cancelled()
+    {
+        using var fx = new AgentServiceTestAppDb(TenantId);
+        var conversation = Conversation.Open(TenantId, "zalo", "pzl_page_1:pzl_conv_1", Now);
+        fx.Db.Add(conversation);
+        await fx.Db.SaveChangesAsync();
+
+        var claude = new CapturingClaude();
+        var clock = new FixedClock(Now);
+        var channel = Substitute.For<Clawbot.SharedKernel.Channels.IChannelAdapter>();
+        channel.SendAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<Task<string?>>(_ => throw new OperationCanceledException("shutdown"));
+        var service = new ChatAgentGrpcService(
+            BuildAgent(claude), BuildReviewer(), fx.Db, clock, BuildLeadScorer(fx.Db, clock),
+            NullLogger<ChatAgentGrpcService>.Instance, channel);
+
+        var act = () => service.Reply(new ChatRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            ConversationId = conversation.Id.ToString("D"),
+            UserText = "xin chao",
+        }, new CapturingChatStream(), TestServerCallContext.Create());
+
+        var exception = await act.Should().ThrowAsync<RpcException>();
+        exception.Which.StatusCode.Should().Be(StatusCode.DeadlineExceeded);
+        fx.Db.Messages.Single(m => m.ConversationId == conversation.Id && m.Direction == "out")
+            .Status.Should().Be("send_failed");
+        fx.Db.AgentSessions.Single().Status.Should().Be(AgentSessionStatuses.Failed);
     }
 
     [Fact]
@@ -168,7 +278,7 @@ public sealed class ChatAgentGrpcServiceTests
             UserText = "spam spam",
         }, stream, TestServerCallContext.Create());
 
-        await channel.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await channel.DidNotReceive().SendAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -200,7 +310,7 @@ public sealed class ChatAgentGrpcServiceTests
             UserText = "hoc phi bao nhieu",
         }, stream, TestServerCallContext.Create());
 
-        await channel.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await channel.DidNotReceive().SendAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         var saved = fx.Db.Messages.Single(m => m.ConversationId == conversation.Id && m.Direction == "out");
         saved.Status.Should().Be("pending_approval");
         fx.Db.AgentTraces.Should().Contain(t => t.Phase == "held_for_review");
@@ -234,7 +344,7 @@ public sealed class ChatAgentGrpcServiceTests
             UserText = "cam ket dau ra?",
         }, stream, TestServerCallContext.Create());
 
-        await channel.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await channel.DidNotReceive().SendAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         fx.Db.Messages.Single(m => m.Direction == "out").Status.Should().Be("blocked");
         fx.Db.AgentTraces.Should().Contain(t => t.Phase == "review_rejected");
     }
@@ -271,8 +381,49 @@ public sealed class ChatAgentGrpcServiceTests
             UserText = "xin chao",
         }, stream, TestServerCallContext.Create());
 
-        await channel.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await channel.DidNotReceive().SendAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         fx.Db.Messages.Single(m => m.Direction == "out").Status.Should().Be("pending_approval");
+    }
+
+    [Fact]
+    public async Task Reply_holds_when_reviewer_is_cancelled_fail_closed()
+    {
+        using var fx = new AgentServiceTestAppDb(TenantId);
+        var conversation = Conversation.Open(TenantId, "zalo", "page_1:thread-review-timeout", Now);
+        fx.Db.Add(conversation);
+        await fx.Db.SaveChangesAsync();
+
+        var clock = new FixedClock(Now);
+        var channel = Substitute.For<Clawbot.SharedKernel.Channels.IChannelAdapter>();
+        var reviewerClaude = Substitute.For<IClaudeChatClient>();
+        reviewerClaude.CompleteAsync(
+                Arg.Any<string>(),
+                Arg.Any<IReadOnlyList<ChatTurn>>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns<Task<ClaudeReply>>(_ => throw new OperationCanceledException("review provider timeout"));
+        var service = new ChatAgentGrpcService(
+            BuildAgent(new CapturingClaude()),
+            new Clawbot.Agents.Core.Content.ContentReviewer(reviewerClaude, new CoreChat.LlmCallScope()),
+            fx.Db,
+            clock,
+            BuildLeadScorer(fx.Db, clock),
+            NullLogger<ChatAgentGrpcService>.Instance,
+            channel);
+
+        await service.Reply(new ChatRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            ConversationId = conversation.Id.ToString("D"),
+            UserText = "xin chao",
+        }, new CapturingChatStream(), TestServerCallContext.Create());
+
+        await channel.DidNotReceive().SendAsync(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        fx.Db.Messages.Single(m => m.Direction == "out").Status.Should().Be("pending_approval");
+        fx.Db.AgentSessions.Single().Status.Should().Be(AgentSessionStatuses.Completed);
+        fx.Db.AgentTraces.Should().ContainSingle(t =>
+            t.Phase == "held_for_review" && (t.Message ?? string.Empty).Contains("review_timeout"));
     }
 
     [Fact]
@@ -305,14 +456,50 @@ public sealed class ChatAgentGrpcServiceTests
             UserText = "xin chao",
         }, stream, TestServerCallContext.Create());
 
-        await channel.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await channel.DidNotReceive().SendAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         fx.Db.Messages.Single(m => m.Direction == "out").Status.Should().Be("pending_approval");
         fx.Db.AgentTraces.Should().Contain(t => t.Phase == "held_for_approval");
     }
 
-    private sealed class FakeChatApprovalPolicy(bool required) : Clawbot.SharedKernel.Inbox.IChatApprovalPolicyResolver
+    [Fact]
+    public async Task Reply_marks_session_failed_when_request_is_cancelled_during_llm_stream()
+    {
+        // Regression: live auto-reply requests used to leave agent_sessions permanently "running"
+        // when the provider/RAG path hung and the caller cancelled the gRPC request.
+        using var fx = new AgentServiceTestAppDb(TenantId);
+        var clock = new FixedClock(Now);
+        var claude = new HangingClaude();
+        var service = new ChatAgentGrpcService(
+            BuildAgent(claude),
+            BuildReviewer(),
+            fx.Db,
+            clock,
+            BuildLeadScorer(fx.Db, clock),
+            NullLogger<ChatAgentGrpcService>.Instance);
+        using var cts = new CancellationTokenSource();
+
+        var replyTask = service.Reply(new ChatRequest
+        {
+            TenantId = TenantId.ToString("D"),
+            UserText = "xin chao",
+        }, new CapturingChatStream(), TestServerCallContext.Create(cts.Token));
+        await claude.StreamStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        cts.Cancel();
+
+        var act = async () => await replyTask;
+        var exception = await act.Should().ThrowAsync<RpcException>();
+        exception.Which.StatusCode.Should().Be(StatusCode.DeadlineExceeded);
+        fx.Db.AgentSessions.Should().ContainSingle();
+        fx.Db.AgentSessions.Single().Status.Should().Be(AgentSessionStatuses.Failed);
+        fx.Db.AgentSessions.Single().FinishedAt.Should().NotBeNull();
+        fx.Db.AgentTraces.Should().ContainSingle(t => t.Phase == "timeout");
+    }
+
+    private sealed class FakeChatApprovalPolicy(bool required, bool bypassReview = false) : Clawbot.SharedKernel.Inbox.IChatApprovalPolicyResolver
     {
         public Task<bool> IsRequiredAsync(Guid tenantId, CancellationToken ct = default) => Task.FromResult(required);
+
+        public Task<bool> IsReviewGateBypassedAsync(Guid tenantId, CancellationToken ct = default) => Task.FromResult(bypassReview);
     }
 
     private static Clawbot.Agents.Core.Content.ContentReviewer BuildReviewer(string? verdictJson = null)
@@ -374,6 +561,30 @@ public sealed class ChatAgentGrpcServiceTests
 
     private static LeadAutoScorer BuildLeadScorer(Clawbot.Infrastructure.Persistence.AppDbContext db, IClock clock) =>
         new(db, new KeywordLeadSignalClassifier(), new CoreChat.LlmCallScope(), clock, NullLogger<LeadAutoScorer>.Instance);
+
+    private sealed class HangingClaude : IClaudeChatClient
+    {
+        public TaskCompletionSource<bool> StreamStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<ClaudeReply> CompleteAsync(
+            string systemPrompt,
+            IReadOnlyList<ChatTurn> history,
+            string userMessage,
+            CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ClaudeStreamChunk> StreamAsync(
+            string systemPrompt,
+            IReadOnlyList<ChatTurn> history,
+            string userMessage,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            StreamStarted.TrySetResult(true);
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            yield break;
+        }
+    }
 
     private sealed class CapturingClaude : IClaudeChatClient
     {

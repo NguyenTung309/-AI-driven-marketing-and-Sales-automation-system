@@ -23,35 +23,66 @@ public sealed partial class PancakeConfigResolver(
     private readonly IConfiguration _cfg = cfg;
     private readonly ILogger<PancakeConfigResolver> _logger = logger;
 
+    public async Task<PancakeRuntimeConfig?> ResolveTenantOnlyAsync(Guid tenantId, CancellationToken ct = default)
+    {
+        if (tenantId == Guid.Empty) return null;
+
+        var row = await _db.PancakeConfigs
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.IsActive, ct).ConfigureAwait(false);
+        return row is null
+            ? null
+            : new PancakeRuntimeConfig(
+                BaseUrl: PreferSendBaseUrl(row.BaseUrl, _cfg["Channels:Pancake:BaseUrl"]),
+                AccessToken: SafeDecrypt(row.AccessTokenEncrypted),
+                WebhookSecret: SafeDecrypt(row.WebhookSecretEncrypted),
+                SignatureHeader: row.SignatureHeader,
+                SignatureAlgo: row.SignatureAlgo,
+                SignatureEncoding: row.SignatureEncoding,
+                SendPathTemplate: row.SendPathTemplate,
+                AuthMode: row.AuthMode,
+                PageId: row.PageId ?? string.Empty);
+    }
+
     public async Task<PancakeRuntimeConfig?> ResolveAsync(Guid tenantId, CancellationToken ct = default)
     {
-        if (tenantId != Guid.Empty)
-        {
-            var row = await _db.PancakeConfigs
+        var tenantConfig = await ResolveTenantOnlyAsync(tenantId, ct).ConfigureAwait(false);
+        if (tenantConfig is not null) return tenantConfig;
+
+        // Send path chỉ cần BaseUrl/SendPathTemplate/AuthMode; page token lấy từ inbox.
+        // Tenant có row pancake_configs nhưng is_active=0 vẫn dùng template của row đó
+        // (không phụ thuộc AccessToken tenant-wide — token thật resolve theo page).
+        // BaseUrl legacy "pancake.vn" bị loại — send API phải pages.fm.
+        var section = _cfg.GetSection("Channels:Pancake");
+        var inactiveRow = tenantId == Guid.Empty
+            ? null
+            : await _db.PancakeConfigs
                 .IgnoreQueryFilters()
                 .AsNoTracking()
-                .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.IsActive, ct).ConfigureAwait(false);
-
-            if (row is not null)
-            {
-                return new PancakeRuntimeConfig(
-                    BaseUrl: row.BaseUrl,
-                    AccessToken: SafeDecrypt(row.AccessTokenEncrypted),
-                    WebhookSecret: SafeDecrypt(row.WebhookSecretEncrypted),
-                    SignatureHeader: row.SignatureHeader,
-                    SignatureAlgo: row.SignatureAlgo,
-                    SignatureEncoding: row.SignatureEncoding,
-                    SendPathTemplate: row.SendPathTemplate,
-                    AuthMode: row.AuthMode,
-                    PageId: row.PageId ?? string.Empty);
-            }
+                .FirstOrDefaultAsync(c => c.TenantId == tenantId, ct).ConfigureAwait(false);
+        if (inactiveRow is not null)
+        {
+            return new PancakeRuntimeConfig(
+                // Row đang inactive không được quyền đổi outbound host. Chỉ dùng host từ cấu hình
+                // process hoặc default pages.fm; row chỉ đóng góp path/auth metadata.
+                BaseUrl: PreferSendBaseUrl(section["BaseUrl"], null),
+                AccessToken: string.Empty,
+                WebhookSecret: SafeDecrypt(inactiveRow.WebhookSecretEncrypted),
+                SignatureHeader: inactiveRow.SignatureHeader,
+                SignatureAlgo: inactiveRow.SignatureAlgo,
+                SignatureEncoding: inactiveRow.SignatureEncoding,
+                SendPathTemplate: string.IsNullOrWhiteSpace(inactiveRow.SendPathTemplate) ? DefaultSendPath : inactiveRow.SendPathTemplate,
+                // Inactive/legacy rows frequently contain bearer from the old pancake.vn endpoint.
+                // pages.fm page operations require page_access_token in the query string.
+                AuthMode: "query",
+                PageId: inactiveRow.PageId ?? string.Empty);
         }
 
-        var section = _cfg.GetSection("Channels:Pancake");
         if (section.Exists())
         {
             return new PancakeRuntimeConfig(
-                BaseUrl: section["BaseUrl"] ?? DefaultBaseUrl,
+                BaseUrl: PreferSendBaseUrl(section["BaseUrl"], null),
                 AccessToken: section["AccessToken"] ?? string.Empty,
                 WebhookSecret: section["WebhookSecret"] ?? string.Empty,
                 SignatureHeader: (section["SignatureHeader"] ?? DefaultSigHeader).ToLowerInvariant(),
@@ -91,6 +122,18 @@ public sealed partial class PancakeConfigResolver(
         try { return _encryptor.Decrypt(cipher); }
         catch (FormatException) { return string.Empty; }
         catch (System.Security.Cryptography.CryptographicException) { return string.Empty; }
+    }
+
+    // pages.fm public_api là host send đúng; pancake.vn (legacy seed) gửi sẽ 404/401.
+    private static string PreferSendBaseUrl(string? primary, string? secondary)
+    {
+        foreach (var candidate in new[] { primary, secondary })
+        {
+            if (string.IsNullOrWhiteSpace(candidate)) continue;
+            if (candidate.Contains("pancake.vn", StringComparison.OrdinalIgnoreCase)) continue;
+            return candidate;
+        }
+        return DefaultBaseUrl;
     }
 
     [LoggerMessage(EventId = 6001, Level = LogLevel.Information, Message = "PancakeConfigResolver: using env-var fallback (demo mode)")]

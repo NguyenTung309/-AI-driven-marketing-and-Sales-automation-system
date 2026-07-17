@@ -40,6 +40,7 @@ public sealed class DripSequenceJobTests
         await sut.RunAsync(CancellationToken.None);
 
         adapter.Sends.Should().ContainSingle().Which.Should().Be((
+            fx.TenantId,
             "thread-lan",
             "Chao Nguyen Lan, ban can tu van them khong?"));
 
@@ -113,17 +114,17 @@ public sealed class DripSequenceJobTests
     private sealed class CapturingChannelAdapter : IChannelAdapter
     {
         public string Name => "pancake";
-        public List<(string ExternalThreadId, string Text)> Sends { get; } = [];
+        public List<(Guid TenantId, string ExternalThreadId, string Text)> Sends { get; } = [];
 
-        public Task<bool> VerifyWebhookSignatureAsync(string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default) =>
+        public Task<bool> VerifyWebhookSignatureAsync(Guid tenantId, string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default) =>
             Task.FromResult(true);
 
         public Task<IReadOnlyList<ChannelMessage>> ParseAsync(string rawBody, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<ChannelMessage>>([]);
 
-        public Task<string?> SendAsync(string externalThreadId, string text, CancellationToken ct = default)
+        public Task<string?> SendAsync(Guid tenantId, string externalThreadId, string text, CancellationToken ct = default)
         {
-            Sends.Add((externalThreadId, text));
+            Sends.Add((tenantId, externalThreadId, text));
             return Task.FromResult<string?>(null);
         }
     }

@@ -53,6 +53,22 @@ export function toSafeOperationalText(value: string | null | undefined, fallback
   return text;
 }
 
+export function formatOperationalTraceMessage(
+  phase: string | null | undefined,
+  message: string | null | undefined,
+): string {
+  const normalizedPhase = (phase ?? "").trim().toLowerCase();
+  return normalizedPhase === "input" || normalizedPhase === "reply"
+    ? (message ?? "").trim()
+    : toSafeOperationalText(message);
+}
+
+export function toSafeCsvCell(value: unknown): string {
+  const text = String(value ?? "");
+  const formulaSafe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  return `"${formulaSafe.replaceAll('"', '""')}"`;
+}
+
 export function operationalPhaseLabel(value: string | null | undefined): string {
   const normalized = (value ?? "").trim().toLowerCase();
   if (!normalized) return "Thông tin";

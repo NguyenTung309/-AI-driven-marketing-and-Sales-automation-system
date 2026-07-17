@@ -121,7 +121,7 @@ public sealed partial class PancakePollingService : BackgroundService
 
                 // Ingest duoi tenant SO HUU inbox; neu dung demo resolver toan cuc, inbox va hoi thoai
                 // roi vao 2 tenant khac nhau -> ResolveInboxIdAsync khong khop -> inbox_id NULL -> auto-owner chet.
-                await PollPageAsync(client, baseUrl, inbox.ExternalPageId, token, inbox.TenantId, sweep, ct);
+                ok &= await PollPageAsync(client, baseUrl, inbox.ExternalPageId, token, inbox.TenantId, sweep, ct);
             }
         }
         catch (Exception ex)
@@ -134,21 +134,68 @@ public sealed partial class PancakePollingService : BackgroundService
         // 2. Fallback: poll the env-var page (demo mode) — khong biet tenant, dung demo resolver
         if (!string.IsNullOrEmpty(cfg.PancakePageId) && !string.IsNullOrEmpty(cfg.PancakePageAccessToken))
         {
-            await PollPageAsync(client, baseUrl, cfg.PancakePageId, cfg.PancakePageAccessToken, tenantId: null, sweep, ct);
+            ok &= await PollPageAsync(client, baseUrl, cfg.PancakePageId, cfg.PancakePageAccessToken, tenantId: null, sweep, ct);
         }
 
         return ok;
     }
 
-    private async Task PollPageAsync(HttpClient client, string baseUrl, string pageId, string token, Guid? tenantId, bool sweep, CancellationToken ct)
+    internal static PancakeSenderMapResult MapSender(
+        PancakeMessage message,
+        PancakeConversation conversation,
+        string pageId)
     {
+        var counterpart = GetConversationCounterpart(conversation);
+        var senderId = string.IsNullOrWhiteSpace(message.From?.Id) ? null : message.From.Id;
+        var effectivePageId = string.IsNullOrWhiteSpace(conversation.PageId) ? pageId : conversation.PageId;
+        var isPageSender = senderId is not null
+            && (string.Equals(senderId, pageId, StringComparison.Ordinal)
+                || string.Equals(senderId, conversation.PageId, StringComparison.Ordinal));
+        var isOwner = !string.IsNullOrWhiteSpace(message.From?.AdminId)
+            || message.From?.IsAutomated == true
+            || isPageSender;
+        var externalUserId = senderId
+            ?? (isOwner && !string.IsNullOrWhiteSpace(effectivePageId) ? effectivePageId : counterpart.Id)
+            ?? "unknown";
+        var isInboundFallback = senderId is null && !isOwner;
+        var senderName = isInboundFallback ? counterpart.Name : message.From?.Name;
+        var senderAvatar = isInboundFallback ? counterpart.AvatarUrl : message.From?.AvatarUrl;
+        var metadata = new Dictionary<string, string>
+        {
+            ["sender_id"] = externalUserId,
+            ["page_id"] = effectivePageId,
+        };
+
+        if (!string.IsNullOrWhiteSpace(counterpart.Id)) metadata["customer_id"] = counterpart.Id;
+        if (!string.IsNullOrWhiteSpace(senderName)) metadata["sender_name"] = senderName;
+        if (!string.IsNullOrWhiteSpace(senderAvatar)) metadata["sender_avatar_url"] = senderAvatar;
+        if (isOwner) metadata["is_owner"] = "true";
+
+        return new PancakeSenderMapResult(externalUserId, metadata);
+    }
+
+    private static (string? Id, string? Name, string? AvatarUrl) GetConversationCounterpart(
+        PancakeConversation conversation)
+    {
+        var customer = conversation.From?.IsGroup != true && conversation.Customers is { Count: > 0 }
+            ? conversation.Customers[0]
+            : null;
+        return (
+            string.IsNullOrWhiteSpace(customer?.Id) ? conversation.From?.Id : customer.Id,
+            string.IsNullOrWhiteSpace(customer?.Name) ? conversation.From?.Name : customer.Name,
+            string.IsNullOrWhiteSpace(customer?.AvatarUrl) ? conversation.From?.AvatarUrl : customer.AvatarUrl);
+    }
+
+    private async Task<bool> PollPageAsync(HttpClient client, string baseUrl, string pageId, string token, Guid? tenantId, bool sweep, CancellationToken ct)
+    {
+        var ok = true;
         var convUrl = $"https://pages.fm/api/public_api/v2/pages/{pageId}/conversations?page_access_token={token}&per_page=50";
         var convResp = await client.GetAsync(convUrl, ct);
-        if (!convResp.IsSuccessStatusCode) return;
+        if (!convResp.IsSuccessStatusCode) return false;
 
         var json = await convResp.Content.ReadAsStringAsync(ct);
         var resp = JsonSerializer.Deserialize<PancakeConversationsResponse>(json, JsonOpts);
-        if (resp?.Conversations is null) return;
+        if (resp?.Success == false || resp?.Conversations is null) return false;
 
         var convIndex = 0;
         foreach (var conv in resp.Conversations)
@@ -163,9 +210,18 @@ public sealed partial class PancakePollingService : BackgroundService
 
             var msgUrl = $"{baseUrl}/pages/{pageId}/conversations/{conv.Id}/messages?page_access_token={token}&limit=50";
             var msgResp = await client.GetAsync(msgUrl, ct);
-            if (!msgResp.IsSuccessStatusCode) continue;
+            if (!msgResp.IsSuccessStatusCode)
+            {
+                ok = false;
+                continue;
+            }
             var msgJson = await msgResp.Content.ReadAsStringAsync(ct);
             var msgData = JsonSerializer.Deserialize<PancakeMessagesResponse>(msgJson, JsonOpts);
+            if (msgData?.Success == false || msgData?.Messages is null)
+            {
+                ok = false;
+                continue;
+            }
             var convId = conv.Id ?? "unknown";
             var messages = msgData?.Messages;
             if (messages is null || messages.Length == 0) continue;
@@ -192,10 +248,6 @@ public sealed partial class PancakePollingService : BackgroundService
                 if (msg?.Id is null) continue;
                 if (processedIds.Contains(msg.Id)) continue;
                 processedIds.Add(msg.Id);
-                newCount++;
-
-                db.ProcessedMessages.Add(new ProcessedMessage(resolvedTenantId, "zalo", msg.Id, convId));
-                LogProcessedNew(_log, msg.Id, convId);
 
                 try
                 {
@@ -206,44 +258,18 @@ public sealed partial class PancakePollingService : BackgroundService
                     ["content_type"] = "text",
                 };
 
-                // Per-message sender info: render-only, never used for the conversation contact
-                if (msg.From != null)
+                var sender = MapSender(msg, conv, pageId);
+                foreach (var pair in sender.Metadata)
                 {
-                    if (!string.IsNullOrEmpty(msg.From.Name)) metadata["sender_name"] = msg.From.Name;
-                    if (!string.IsNullOrEmpty(msg.From.AvatarUrl)) metadata["sender_avatar_url"] = msg.From.AvatarUrl;
-                    metadata["sender_id"] = msg.From.Id ?? "";
-                }
-                else if (conv.LastSentBy != null)
-                {
-                    metadata["sender_id"] = conv.LastSentBy.Id ?? "";
-                    if (!string.IsNullOrEmpty(conv.LastSentBy.Name)) metadata["sender_name"] = conv.LastSentBy.Name;
-                    if (!string.IsNullOrEmpty(conv.LastSentBy.AvatarUrl)) metadata["sender_avatar_url"] = conv.LastSentBy.AvatarUrl;
+                    metadata[pair.Key] = pair.Value;
                 }
 
                 // Conversation counterpart (group or 1-1 customer): authoritative for the left-list contact
-                var counterpartName = conv.From?.Name;
-                var counterpartAvatar = conv.From?.AvatarUrl;
-                if (conv.From?.IsGroup != true && conv.Customers is { Count: > 0 })
-                {
-                    var customer = conv.Customers[0];
-                    if (!string.IsNullOrEmpty(customer.Name)) counterpartName = customer.Name;
-                    if (!string.IsNullOrEmpty(customer.AvatarUrl)) counterpartAvatar = customer.AvatarUrl;
-                }
-                if (!string.IsNullOrEmpty(counterpartName)) metadata["conversation_name"] = counterpartName;
-                if (!string.IsNullOrEmpty(counterpartAvatar)) metadata["conversation_avatar_url"] = counterpartAvatar;
+                var counterpart = GetConversationCounterpart(conv);
+                if (!string.IsNullOrEmpty(counterpart.Name)) metadata["conversation_name"] = counterpart.Name;
+                if (!string.IsNullOrEmpty(counterpart.AvatarUrl)) metadata["conversation_avatar_url"] = counterpart.AvatarUrl;
                 if (conv.From?.IsGroup == true) metadata["is_group"] = "true";
                 if (conv.From?.Id is { Length: > 0 } fromId) metadata["from_id"] = fromId;
-
-                // Outbound detection: page itself, admin reply, or automated (AI) message
-                var senderExternalId = msg.From?.Id;
-                if (msg.From?.AdminId != null
-                    || msg.From?.IsAutomated == true
-                    || (!string.IsNullOrEmpty(senderExternalId)
-                        && (senderExternalId == pageId || senderExternalId == conv.PageId)))
-                {
-                    metadata["is_owner"] = "true";
-                }
-                metadata["page_id"] = string.IsNullOrEmpty(conv.PageId) ? pageId : conv.PageId;
 
                 // Parse attachments for rich content
                 // Use per-message text; fallback to conv.Snippet when msg.Message is empty
@@ -289,14 +315,21 @@ public sealed partial class PancakePollingService : BackgroundService
                 var isComment = string.Equals(conv.Type, "COMMENT", StringComparison.OrdinalIgnoreCase);
                 var channelMsg = new Clawbot.SharedKernel.Channels.ChannelMessage(
                     Channel: "zalo", ExternalThreadId: $"{pageId}:{convId}",
-                    ExternalUserId: msg.From?.Id ?? conv.From?.Id ?? "unknown", Text: text,
+                    ExternalUserId: sender.ExternalUserId, Text: text,
                     SentAt: msg.InsertedAt.HasValue ? new DateTimeOffset(msg.InsertedAt.Value, TimeSpan.Zero) : (conv.UpdatedAt.HasValue ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow),
                     Metadata: metadata,
                     MessageType: isComment ? "comment" : "text",
                     ParentPostId: isComment ? conv.PostId : null);
                 await publisher.Publish(new Clawbot.SharedKernel.Channels.ChannelInboundMessageReceived(resolvedTenantId, channelMsg), ct);
+                db.ProcessedMessages.Add(new ProcessedMessage(resolvedTenantId, "zalo", msg.Id, convId));
+                LogProcessedNew(_log, msg.Id, convId);
+                newCount++;
             }
-            catch (Exception ex) { LogIngestFailed(_log, msg.Id, ex.Message); }
+            catch (Exception ex)
+            {
+                ok = false;
+                LogIngestFailed(_log, msg.Id, ex.Message);
+            }
             }
 
             // Sweep vong lai hoi thoai da xu ly het: khong co gi de luu, khong tao trace rac
@@ -309,11 +342,16 @@ public sealed partial class PancakePollingService : BackgroundService
             await _traces.AppendStepAsync(traceId, new DemoTraceStep
             {
                 Layer = "pancake_poll", Status = DemoTraceStepStatus.Success,
-                Output = new() { ["action"] = "inbound_message", ["platform"] = "zalo", ["text"] = snippet, ["conversation_id"] = convId, ["message_count"] = conv.MessageCount },
+                Output = new() { ["action"] = "inbound_message", ["platform"] = "zalo", ["text"] = "[REDACTED]", ["conversation_id"] = convId, ["message_count"] = conv.MessageCount },
             });
             await _traces.CompleteTraceAsync(traceId);
         }
+
+        return ok;
     }
+internal sealed record PancakeSenderMapResult(
+    string ExternalUserId,
+    IReadOnlyDictionary<string, string> Metadata);
 public sealed record PancakeConversationsResponse(bool? Success, PancakeConversation[]? Conversations);
 public sealed record PancakeMessagesResponse(bool? Success, PancakeMessage[]? Messages);
 public sealed record PancakeMessage(

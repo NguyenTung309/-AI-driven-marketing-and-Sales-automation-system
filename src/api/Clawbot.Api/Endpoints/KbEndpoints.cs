@@ -330,6 +330,10 @@ public static class KbEndpoints
 
     private const int MaxClassifyFiles = 20;
 
+    // Mã lỗi per-file khi nạp tự động: file đã lưu bản nháp nhưng bước deploy/embed thất bại.
+    // Job nạp file đọc mã này để nêu rõ trong summary (Success vẫn true vì nội dung đã vào kho).
+    internal const string DeployFailedError = "deploy_failed";
+
     // Bulk upload: extract each file, let the LLM pick (or create) the KB module, save a version.
     // autoDeploy=true (default) also deploys + embeds; failures are per-file, one bad file
     // doesn't block the rest.
@@ -442,19 +446,24 @@ public static class KbEndpoints
         {
             try
             {
+                // Embed lên vector store TRƯỚC, thành công mới archive bản cũ + đánh dấu deployed.
+                // Thứ tự ngược lại tạo "bản deployed ma": embed lỗi nhưng Status đã mutate trên entity
+                // đang tracking, SaveChanges kế tiếp trong cùng scope flush xuống DB → kiểm thử chấm 0%
+                // vì Qdrant không có chunk nào của bản này.
+                await deployService.EmbedAndUpsertAsync(version, module.Code, tenantId, ct);
+
                 var previous = await db.KbVersions
                     .Where(v => v.KbModuleId == module.Id && v.Status == "deployed")
                     .ToListAsync(ct);
                 foreach (var prev in previous) db.Entry(prev).Property("Status").CurrentValue = "archived";
                 version.Deploy(clock.UtcNow);
-                await deployService.EmbedAndUpsertAsync(version, module.Code, tenantId, ct);
                 await db.SaveChangesAsync(ct);
                 deployed = true;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 LogUploadFailed(logger, module.Id, ex);
-                error = "deploy_failed";
+                error = DeployFailedError;
             }
         }
 
@@ -520,45 +529,60 @@ public static class KbEndpoints
         return version is null ? Results.NotFound() : Results.Ok(version);
     }
 
+    // Phát hành chạy ngầm qua job platform (KbDeployJobHandler): KB lớn + embedding thật là hàng chục
+    // lời gọi API — giữ HTTP request là treo nút UI vài phút. Job tự thông báo khi xong/lỗi.
     private static async Task<IResult> DeployVersionAsync(
         Guid id,
         Guid versionId,
         AppDbContext db,
         ITenantAccessor tenants,
-        IClock clock,
-        KbDeployService deployService,
-        CancellationToken ct)
-    {
-        var tenantId = tenants.Require().TenantId;
-        var owns = await db.KbModules.FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId, ct);
-        if (owns is null) return Results.NotFound();
-
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
-        var deployed = await db.KbVersions
-            .Where(v => v.KbModuleId == id && v.Status == "deployed")
-            .ToListAsync(ct);
-        foreach (var prev in deployed) db.Entry(prev).Property("Status").CurrentValue = "archived";
-
-        var target = await db.KbVersions.FirstOrDefaultAsync(v => v.Id == versionId && v.KbModuleId == id, ct);
-        if (target is null) return Results.NotFound();
-        target.Deploy(clock.UtcNow);
-        await db.SaveChangesAsync(ct);
-
-        await deployService.EmbedAndUpsertAsync(target, owns.Code, tenantId, ct);
-
-        await tx.CommitAsync(ct);
-        return Results.NoContent();
-    }
+        IJobLauncher jobs,
+        HttpContext http,
+        CancellationToken ct) =>
+        await LaunchDeployJobAsync(id, versionId, isRollback: false, db, tenants, jobs, http, ct);
 
     private static async Task<IResult> RollbackToVersionAsync(
         Guid id,
         Guid versionId,
         AppDbContext db,
         ITenantAccessor tenants,
-        IClock clock,
-        KbDeployService deployService,
+        IJobLauncher jobs,
+        HttpContext http,
         CancellationToken ct) =>
-        await DeployVersionAsync(id, versionId, db, tenants, clock, deployService, ct);
+        await LaunchDeployJobAsync(id, versionId, isRollback: true, db, tenants, jobs, http, ct);
+
+    private static async Task<IResult> LaunchDeployJobAsync(
+        Guid id,
+        Guid versionId,
+        bool isRollback,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IJobLauncher jobs,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var owns = await db.KbModules.FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId, ct);
+        if (owns is null) return Results.NotFound();
+
+        var version = await db.KbVersions
+            .Where(v => v.Id == versionId && v.KbModuleId == id)
+            .Select(v => new { v.Version })
+            .FirstOrDefaultAsync(ct);
+        if (version is null) return Results.NotFound();
+
+        var title = isRollback
+            ? $"Khôi phục KB {owns.Code} về v{version.Version}"
+            : $"Phát hành KB {owns.Code} v{version.Version}";
+        var jobId = await jobs.LaunchAsync(
+            KbDeployJobHandler.JobType,
+            title,
+            new KbDeployJobPayload(id, versionId, isRollback),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
+
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
+    }
 
     private static async Task<IResult> DiffVersionsAsync(
         Guid id,
