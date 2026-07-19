@@ -44,6 +44,7 @@ public sealed class AuditSaveChangesInterceptor(
 
         var entries = ctx.ChangeTracker.Entries()
             .Where(e => e.Entity is not AuditLog
+                && e.Entity is not IAuditExempt
                 && (e.State == EntityState.Added || e.State == EntityState.Modified || e.State == EntityState.Deleted))
             .ToList();
 

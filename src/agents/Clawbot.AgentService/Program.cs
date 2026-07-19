@@ -21,9 +21,11 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Console + file log (logs/agent-*.log): loi runtime (auto-reply 9112, channel send...) phai doc lai duoc
 // sau khi cua so console dong — dong bo cach cau hinh voi Clawbot.Api.
+// SystemLogs sink: Warning+ → dbo.system_logs (admin "Lỗi hệ thống" tab).
 builder.Host.UseSerilog((ctx, lc) => lc
     .ReadFrom.Configuration(ctx.Configuration)
-    .WriteTo.Console(formatProvider: System.Globalization.CultureInfo.InvariantCulture));
+    .WriteTo.Console(formatProvider: System.Globalization.CultureInfo.InvariantCulture)
+    .WriteTo.SystemLogs(ctx.Configuration.GetConnectionString("SqlServer"), "agent-service"));
 
 builder.Services.AddGrpc(o => o.Interceptors.Add<LlmConfigGrpcInterceptor>());
 builder.Services.AddApplication();

@@ -17,6 +17,7 @@ using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.Llm;
 using Clawbot.Domain.Notifications;
+using Clawbot.Domain.Observability;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
@@ -42,6 +43,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<SystemLogEntry> SystemLogs => Set<SystemLogEntry>();
+    public DbSet<RequestStatsHourly> RequestStatsHourly => Set<RequestStatsHourly>();
     public DbSet<Auth.RefreshToken> RefreshTokens => Set<Auth.RefreshToken>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<Clawbot.Domain.Jobs.BackgroundJob> BackgroundJobs => Set<Clawbot.Domain.Jobs.BackgroundJob>();

@@ -184,6 +184,45 @@ public static partial class DevDataSeeder
                    WHERE name = N'IX_content_schedule_meta_asset_id'
                      AND object_id = OBJECT_ID(N'dbo.content_schedule'))
                 CREATE INDEX IX_content_schedule_meta_asset_id ON dbo.content_schedule(meta_asset_id);
+
+            IF OBJECT_ID(N'dbo.system_logs', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.system_logs (
+                    id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT pk_system_logs PRIMARY KEY,
+                    occurred_at DATETIMEOFFSET NOT NULL,
+                    level NVARCHAR(16) NOT NULL,
+                    source NVARCHAR(32) NOT NULL,
+                    category NVARCHAR(256) NULL,
+                    message NVARCHAR(2048) NOT NULL,
+                    exception NVARCHAR(MAX) NULL,
+                    status_code INT NULL,
+                    method NVARCHAR(10) NULL,
+                    path NVARCHAR(512) NULL,
+                    elapsed_ms FLOAT NULL,
+                    trace_id NVARCHAR(64) NULL,
+                    tenant_id UNIQUEIDENTIFIER NULL,
+                    user_id UNIQUEIDENTIFIER NULL,
+                    properties NVARCHAR(MAX) NULL
+                );
+                CREATE INDEX ix_system_logs_occurred ON dbo.system_logs(occurred_at DESC) INCLUDE (level, tenant_id);
+                CREATE INDEX ix_system_logs_tenant ON dbo.system_logs(tenant_id, occurred_at DESC);
+                CREATE INDEX ix_system_logs_trace ON dbo.system_logs(trace_id) WHERE trace_id IS NOT NULL;
+            END
+
+            IF OBJECT_ID(N'dbo.request_stats_hourly', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.request_stats_hourly (
+                    id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT pk_request_stats_hourly PRIMARY KEY,
+                    bucket_hour DATETIMEOFFSET NOT NULL,
+                    tenant_id UNIQUEIDENTIFIER NOT NULL,
+                    status_class NVARCHAR(8) NOT NULL,
+                    count BIGINT NOT NULL CONSTRAINT df_request_stats_hourly_count DEFAULT 0
+                );
+                CREATE UNIQUE INDEX ux_request_stats_hourly_bucket_tenant_class
+                    ON dbo.request_stats_hourly(bucket_hour, tenant_id, status_class);
+                CREATE INDEX ix_request_stats_hourly_tenant_bucket
+                    ON dbo.request_stats_hourly(tenant_id, bucket_hour DESC);
+            END
             """, ct);
 
     // EnsureCreated only builds the model (the tenant query filter is an unexecuted

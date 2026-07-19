@@ -85,6 +85,18 @@ public sealed class MetaConnection : AggregateRoot<Guid>, ITenantOwned
         UpdatedAt = at;
     }
 
+    // Ghi lỗi validate/sync app-level (vd. "API access blocked") mà KHÔNG ép reconnect —
+    // token/page vẫn có thể publish được; reconnect OAuth không gỡ block Meta.
+    // restoreActive: gỡ reconnect_required do validate nhầm trước đó (token còn hạn).
+    public void NoteError(string error, DateTimeOffset at, bool restoreActive = false)
+    {
+        LastError = string.IsNullOrWhiteSpace(error) ? "meta_error" : error.Trim();
+        if (restoreActive && Status == "reconnect_required")
+            Status = "active";
+        LastValidatedAt = at;
+        UpdatedAt = at;
+    }
+
     public void Disconnect(DateTimeOffset at)
     {
         AccessTokenEncrypted = string.Empty;
@@ -163,7 +175,7 @@ public sealed class MetaAsset : AggregateRoot<Guid>, ITenantOwned
     }
 }
 
-public sealed class MetaOAuthState : AggregateRoot<Guid>, ITenantOwned
+public sealed class MetaOAuthState : AggregateRoot<Guid>, ITenantOwned, IAuditExempt
 {
     public Guid TenantId { get; private set; }
     public Guid UserId { get; private set; }

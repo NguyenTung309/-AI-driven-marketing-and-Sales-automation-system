@@ -18,7 +18,7 @@ public static class BackgroundJobStatuses
 /// Run record cho một tác vụ chạy ngầm (sinh nội dung, sinh tài liệu, chạy test KB...).
 /// Là nơi user click vào từ thông báo để xem trạng thái. Terminal state không quay ngược.
 /// </summary>
-public sealed class BackgroundJob : Entity<Guid>, ITenantOwned
+public sealed class BackgroundJob : Entity<Guid>, ITenantOwned, IAuditExempt
 {
     public Guid TenantId { get; private set; }
     public Guid? UserId { get; private set; }

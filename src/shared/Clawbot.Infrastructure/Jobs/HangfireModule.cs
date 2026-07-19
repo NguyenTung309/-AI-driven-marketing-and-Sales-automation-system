@@ -36,6 +36,7 @@ public static class HangfireModule
         });
 
         services.AddScoped<RetentionPurgeJob>();
+        services.AddScoped<RequestStatsFlushJob>();
         services.AddScoped<DailySummaryJob>();
         services.AddScoped<DailyKpiRollupJob>();
         services.AddScoped<RefreshTokenCleanupJob>();
@@ -122,6 +123,11 @@ public static class HangfireModule
             "retention",
             j => j.RunAsync(CancellationToken.None),
             Cron.Daily(2));
+        recurring.AddOrUpdate<RequestStatsFlushJob>(
+            "request-stats-flush",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            "* * * * *");
         recurring.AddOrUpdate<DailyKpiRollupJob>(
             "kpi-daily-rollup",
             "kpi",

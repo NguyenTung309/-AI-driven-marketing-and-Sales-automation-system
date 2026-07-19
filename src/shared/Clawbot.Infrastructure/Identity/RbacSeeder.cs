@@ -68,6 +68,7 @@ public static partial class RbacSeeder
         ("users:manage", [Admin]),
         ("users:pancake-token:manage", [Admin, SalesLead]),
         ("system:config", [Admin]),
+        ("system.logs", [Admin]),
         ("admin:inboxes", [Admin]),
     ];
 
@@ -100,7 +101,7 @@ public static partial class RbacSeeder
             "docs.generate",
             "ads.read", "ads.manage",
             "analytics.read",
-            "admin.system", "admin.audit",
+            "admin.system", "admin.audit", "system.logs",
         ],
         [Sale] =
         [

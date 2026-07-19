@@ -46,6 +46,7 @@ public static class DependencyInjection
 
         services.AddScoped<IAuditContext, HttpAuditContext>();
         services.AddScoped<AuditSaveChangesInterceptor>();
+        services.AddSingleton<Clawbot.Infrastructure.Observability.RequestStatsCounter>();
         services.AddClawbotPiiRedactor(); // AuditSaveChangesInterceptor depends on IPiiRedactor.
         services.AddScoped<Messaging.DomainEventDispatchInterceptor>();
         // ai-self-learning-memory Lớp 3: memory theo agent — ContentReviewer nạp "lỗi hay gặp" vào persona.

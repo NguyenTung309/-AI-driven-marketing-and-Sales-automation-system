@@ -86,6 +86,8 @@ export type TenantBrandingUpdate = Partial<{
 
 export interface AuditLog {
   readonly id: string;
+  readonly userId: string | null;
+  readonly userEmail: string | null;
   readonly action: string;
   readonly resourceType: string;
   readonly resourceId: string | null;
@@ -93,6 +95,39 @@ export interface AuditLog {
   readonly ipAddress: string | null;
   readonly userAgent: string | null;
   readonly occurredAt: string;
+}
+
+export interface SystemLogEntry {
+  readonly id: number;
+  readonly occurredAt: string;
+  readonly level: string;
+  readonly source: string;
+  readonly category: string | null;
+  readonly message: string;
+  readonly statusCode: number | null;
+  readonly method: string | null;
+  readonly path: string | null;
+  readonly elapsedMs: number | null;
+  readonly traceId: string | null;
+  readonly userId: string | null;
+}
+
+export interface SystemLogDetail extends SystemLogEntry {
+  readonly exception: string | null;
+  readonly tenantId: string | null;
+  readonly properties: string | null;
+}
+
+export interface SystemLogSummary {
+  readonly errors24h: number;
+  readonly warnings24h: number;
+}
+
+export interface SystemLogCursorPage {
+  readonly items: readonly SystemLogEntry[];
+  readonly nextCursor: string | null;
+  readonly total: number | null;
+  readonly summary: SystemLogSummary;
 }
 
 export interface ListUsersParams {
@@ -314,6 +349,42 @@ export async function listAuditLogs(params?: {
 }): Promise<PagedResponse<AuditLog>> {
   const res = await apiClient.get<PagedResponse<AuditLog>>("/api/admin/audit-logs", { params });
   return res.data;
+}
+
+export async function listSystemLogs(params?: {
+  readonly level?: string;
+  readonly statusGroup?: string;
+  readonly source?: string;
+  readonly q?: string;
+  readonly from?: string;
+  readonly to?: string;
+  readonly cursor?: string | null;
+  readonly pageSize?: number;
+}): Promise<SystemLogCursorPage> {
+  const res = await apiClient.get<SystemLogCursorPage>("/api/admin/system-logs", { params });
+  return res.data;
+}
+
+export async function getSystemLog(id: number): Promise<SystemLogDetail> {
+  const res = await apiClient.get<SystemLogDetail>(`/api/admin/system-logs/${id}`);
+  return res.data;
+}
+
+export interface RequestStatsPoint {
+  readonly bucketHour: string;
+  readonly ok2xx: number;
+  readonly client4xx: number;
+  readonly server5xx: number;
+}
+
+export async function listRequestStatsHourly(params?: {
+  readonly hours?: number;
+}): Promise<readonly RequestStatsPoint[]> {
+  const res = await apiClient.get<{ items: readonly RequestStatsPoint[] }>(
+    "/api/admin/system-logs/stats/hourly",
+    { params },
+  );
+  return res.data.items;
 }
 
 // --- Channel Management ---

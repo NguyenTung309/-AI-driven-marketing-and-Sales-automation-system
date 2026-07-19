@@ -28,7 +28,7 @@ public static class AdminEndpoints
     {
         var grp = app.MapGroup("/api/admin").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
-        grp.MapGet("/audit-logs", ListAuditLogsAsync);
+        grp.MapGet("/audit-logs", ListAuditLogsAsync).RequirePermission("system.logs");
         grp.MapGet("/tenant/orchestration", GetTenantOrchestrationAsync).RequirePermission("agent.read");
         grp.MapPut("/tenant/orchestration", UpdateTenantOrchestrationAsync).RequirePermission("system:config");
 
@@ -107,13 +107,14 @@ public static class AdminEndpoints
             query = query.Where(a => a.ResourceId == resourceId.Value);
 
         var total = await query.CountAsync(ct);
-        var items = await query
+        var rows = await query
             .OrderByDescending(a => a.OccurredAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(a => new
             {
                 a.Id,
+                a.UserId,
                 a.Action,
                 a.ResourceType,
                 a.ResourceId,
@@ -123,6 +124,28 @@ public static class AdminEndpoints
                 a.OccurredAt,
             })
             .ToListAsync(ct);
+
+        var userIds = rows.Where(r => r.UserId.HasValue).Select(r => r.UserId!.Value).Distinct().ToArray();
+        var emails = userIds.Length == 0
+            ? new Dictionary<Guid, string>()
+            : await db.Users.AsNoTracking()
+                .Where(u => userIds.Contains(u.Id))
+                .Select(u => new { u.Id, u.Email })
+                .ToDictionaryAsync(u => u.Id, u => u.Email ?? string.Empty, ct);
+
+        var items = rows.Select(a => new
+        {
+            a.Id,
+            a.UserId,
+            UserEmail = a.UserId.HasValue && emails.TryGetValue(a.UserId.Value, out var email) ? email : null,
+            a.Action,
+            a.ResourceType,
+            a.ResourceId,
+            a.DiffJson,
+            a.IpAddress,
+            a.UserAgent,
+            a.OccurredAt,
+        }).ToList();
 
         return Results.Ok(new { total, page, pageSize, items });
     }
