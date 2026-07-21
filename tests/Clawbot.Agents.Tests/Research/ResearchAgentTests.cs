@@ -23,15 +23,22 @@ public sealed class ResearchAgentTests
     }
 
     [Fact]
-    public async Task ResearchAgent_fans_out_sources_and_skips_failures()
+    public async Task ResearchAgent_disables_hidden_sources_and_skips_other_source_failures()
     {
-        var sourceA = new FakeTrendSource(
+        var google = new FakeTrendSource(
             "google_trends",
             enabled: true,
             [new RawTrend("HSK 5 vocabulary", "google_trends", "2K+", 2_000d, [])]);
-        var sourceB = new FakeTrendSource("youtube", enabled: true, null, throwOnFetch: true);
-        var sourceC = new FakeTrendSource("baidu", enabled: false, [new RawTrend("drop", "baidu", "", 1d, [])]);
-        var agent = new ResearchAgent([sourceA, sourceB, sourceC], new WeightedTrendScorer());
+        var youtube = new FakeTrendSource(
+            "youtube",
+            enabled: true,
+            [new RawTrend("HSK YouTube trend", "youtube", "10K views", 10_000d, [])]);
+        var tiktok = new FakeTrendSource(
+            "tiktok",
+            enabled: true,
+            [new RawTrend("HSK TikTok trend", "tiktok", "20K views", 20_000d, [])]);
+        var failingSource = new FakeTrendSource("baidu", enabled: true, null, throwOnFetch: true);
+        var agent = new ResearchAgent([google, youtube, tiktok, failingSource], new WeightedTrendScorer());
 
         var trends = await agent.ScanAsync(
             new ResearchScanRequest(Guid.NewGuid(), "VN", ["HSK"]),
@@ -39,9 +46,10 @@ public sealed class ResearchAgentTests
 
         trends.Should().ContainSingle();
         trends[0].Topic.Should().Be("HSK 5 vocabulary");
-        sourceA.FetchCount.Should().Be(1);
-        sourceB.FetchCount.Should().Be(1);
-        sourceC.FetchCount.Should().Be(0);
+        google.FetchCount.Should().Be(1);
+        youtube.FetchCount.Should().Be(0);
+        tiktok.FetchCount.Should().Be(0);
+        failingSource.FetchCount.Should().Be(1);
     }
 
     private sealed class FakeTrendSource(

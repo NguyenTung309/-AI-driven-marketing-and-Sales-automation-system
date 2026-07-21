@@ -20,6 +20,7 @@ public sealed partial class RetentionPurgeJob(
     private const int DefaultAuditRetentionDays = 180;
     private const int SensitiveDataRetentionDays = 30;
     private const int NotificationRetentionDays = 90;
+    private const int ContentWorkflowMetricsRetentionDays = 180;
 
     private readonly AppDbContext _db = db;
     private readonly IPiiRedactor _pii = pii;
@@ -84,6 +85,13 @@ public sealed partial class RetentionPurgeJob(
             .Where(n => n.CreatedAt < notificationCutoff)
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
         LogNotificationsPurged(_logger, notificationsRemoved, notificationCutoff);
+
+        var contentMetricsCutoff = now.AddDays(-ContentWorkflowMetricsRetentionDays);
+        var contentMetricsRemoved = await _db.ContentWorkflowMetricsHourly
+            .IgnoreQueryFilters()
+            .Where(metrics => metrics.HourUtc < contentMetricsCutoff)
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        LogContentWorkflowMetricsPurged(_logger, contentMetricsRemoved, contentMetricsCutoff);
     }
 
     [LoggerMessage(EventId = 5001, Level = LogLevel.Information, Message = "Retention purge removed {Count} audit_logs before {Cutoff:o}")]
@@ -97,4 +105,10 @@ public sealed partial class RetentionPurgeJob(
 
     [LoggerMessage(EventId = 5004, Level = LogLevel.Information, Message = "Retention purge removed {Count} system_logs before {Cutoff:o}")]
     private static partial void LogSystemLogsPurged(ILogger logger, int count, DateTimeOffset cutoff);
+
+    [LoggerMessage(EventId = 5005, Level = LogLevel.Information, Message = "Retention purge removed {Count} content workflow metric rows before {Cutoff:o}")]
+    private static partial void LogContentWorkflowMetricsPurged(
+        ILogger logger,
+        int count,
+        DateTimeOffset cutoff);
 }

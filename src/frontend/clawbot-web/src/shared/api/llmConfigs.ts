@@ -16,6 +16,7 @@ export interface LlmConfig {
   readonly outputUsdPer1M: number | null;
   readonly timeoutSeconds: number | null;
   readonly maxOutputTokens: number | null;
+  readonly supportsVision: boolean | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -30,6 +31,7 @@ export interface CreateLlmConfigPayload {
   readonly outputUsdPer1M?: number | null;
   readonly timeoutSeconds?: number | null;
   readonly maxOutputTokens?: number | null;
+  readonly supportsVision?: boolean | null;
 }
 
 export type UpdateLlmConfigPayload = Omit<CreateLlmConfigPayload, "apiKey">;

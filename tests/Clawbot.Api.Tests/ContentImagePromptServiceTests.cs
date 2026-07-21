@@ -20,14 +20,14 @@ public sealed class ContentImagePromptServiceTests
 
         var result = await sut.GenerateAsync(new GenerateImagePromptRequest(
             Brief: "  HSK4 opening campaign  ",
-            Platform: " TikTok ",
+            Platform: " Instagram ",
             Style: "  clean realistic classroom  ",
             BrandTokens: ["red", " Red ", "Học Bá", ""]));
 
         generator.Requests.Should().ContainSingle().Which.Should().BeEquivalentTo(
             new ImagePromptRequest(
                 "HSK4 opening campaign",
-                "tiktok",
+                "instagram",
                 "clean realistic classroom",
                 ["red", "Học Bá"]));
         result.Prompt.Should().Be("Hero visual prompt");
@@ -38,8 +38,9 @@ public sealed class ContentImagePromptServiceTests
     [Fact]
     public async Task GenerateAsync_rejects_unsupported_platform()
     {
-        var sut = new ContentImagePromptService(new CapturingImagePromptGenerator(
-            new ImagePromptResult("prompt", string.Empty, new Dictionary<string, string>())), new LlmCallScope(), new FixedTenantAccessor(Guid.NewGuid()));
+        var generator = new CapturingImagePromptGenerator(
+            new ImagePromptResult("prompt", string.Empty, new Dictionary<string, string>()));
+        var sut = new ContentImagePromptService(generator, new LlmCallScope(), new FixedTenantAccessor(Guid.NewGuid()));
 
         var act = async () => await sut.GenerateAsync(new GenerateImagePromptRequest(
             Brief: "Campaign",
@@ -49,6 +50,27 @@ public sealed class ContentImagePromptServiceTests
 
         await act.Should().ThrowAsync<ArgumentException>()
             .WithMessage("*unsupported platform*");
+        generator.Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("tiktok")]
+    [InlineData("youtube")]
+    public async Task GenerateAsync_rejects_hidden_legacy_platforms(string platform)
+    {
+        var generator = new CapturingImagePromptGenerator(
+            new ImagePromptResult("prompt", string.Empty, new Dictionary<string, string>()));
+        var sut = new ContentImagePromptService(generator, new LlmCallScope(), new FixedTenantAccessor(Guid.NewGuid()));
+
+        var act = async () => await sut.GenerateAsync(new GenerateImagePromptRequest(
+            Brief: "Campaign",
+            Platform: platform,
+            Style: null,
+            BrandTokens: []));
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*unsupported platform*");
+        generator.Requests.Should().BeEmpty();
     }
 
     private sealed class CapturingImagePromptGenerator(ImagePromptResult result) : IImagePromptGenerator

@@ -25,6 +25,27 @@ public sealed record LeadDedupHitDto(Guid LeadId, Guid ContactId, string Reason,
 
 public sealed record LeadActivityRequest(string EventCode, string? Platform, string? Notes);
 public sealed record LeadActivityResponse(int NewScore, string Stage, string Reason, IReadOnlyList<string> MatchedRules);
+public sealed record LeadStageRequest(
+    string Stage,
+    string? Reason,
+    decimal? Amount = null,
+    string? Currency = null);
+public sealed record LeadStageResponse(int Score, string Stage);
+
+public sealed record LeadRevenueCreateRequest(decimal Amount, string? Currency = null);
+public sealed record LeadRevenueDecisionRequest(string Action, decimal? Amount = null);
+public sealed record LeadRevenueResponse(
+    Guid Id,
+    Guid LeadId,
+    decimal Amount,
+    string Currency,
+    string Source,
+    string Status,
+    string? Evidence,
+    Guid? ProposedBy,
+    Guid? DecidedBy,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? DecidedAt);
 
 public sealed record LeadAssignRequest(Guid? UserId);
 

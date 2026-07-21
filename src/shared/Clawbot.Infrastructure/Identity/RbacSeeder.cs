@@ -45,6 +45,10 @@ public static partial class RbacSeeder
         ("leads:write", [Admin, SalesLead, Sale]),
         ("content:read", All),
         ("content:write", [Admin, Marketer]),
+        // Phase 4.8: human publishing decisions vs privileged external delivery separation.
+        // Marketer may approve/reject; only Admin may retry/reconcile publish attempts.
+        ("content:approve", [Admin, Marketer]),
+        ("content:publish", [Admin]),
         ("ads:read", [Admin, Marketer, QA, Viewer]),
         ("ads:write", [Admin, Marketer]),
         ("analytics:read", All),
@@ -221,7 +225,8 @@ public static partial class RbacSeeder
             foreach (var role in roles)
             {
                 var roleId = RoleIds[role];
-                if (have.Contains((roleId, permId))) continue;
+                // Cập nhật have sau Add — Matrix + Legacy có thể trùng (role,perm).
+                if (!have.Add((roleId, permId))) continue;
                 db.RolePermissions.Add(RolePermission.Create(roleId, permId));
             }
         }
@@ -232,7 +237,7 @@ public static partial class RbacSeeder
             foreach (var code in codes)
             {
                 if (!permIdByCode.TryGetValue(code, out var permId)) continue;
-                if (have.Contains((roleId, permId))) continue;
+                if (!have.Add((roleId, permId))) continue;
                 db.RolePermissions.Add(RolePermission.Create(roleId, permId));
             }
         }

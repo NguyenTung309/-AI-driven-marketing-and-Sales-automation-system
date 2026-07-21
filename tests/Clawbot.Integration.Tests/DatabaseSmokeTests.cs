@@ -45,6 +45,25 @@ public sealed class DatabaseSmokeTests : IClassFixture<SqlServerFixture>
     }
 
     [Fact]
+    public async Task Lead_lifecycle_schema_has_config_columns_and_revenue_invariants()
+    {
+        await using var conn = await _fx.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT CONCAT(
+                CASE WHEN COL_LENGTH(N'dbo.tenants', N'lead_lost_after_days') IS NULL THEN 0 ELSE 1 END,
+                CASE WHEN COL_LENGTH(N'dbo.tenants', N'auto_approve_lead_revenue') IS NULL THEN 0 ELSE 1 END,
+                CASE WHEN OBJECT_ID(N'dbo.lead_revenues', N'U') IS NULL THEN 0 ELSE 1 END,
+                CASE WHEN EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_lead_revenues_one_active' AND object_id = OBJECT_ID(N'dbo.lead_revenues')) THEN 1 ELSE 0 END,
+                CASE WHEN EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_lead_revenues_amount' AND parent_object_id = OBJECT_ID(N'dbo.lead_revenues')) THEN 1 ELSE 0 END,
+                CASE WHEN COL_LENGTH(N'dbo.kpi_daily', N'revenue') IS NULL THEN 0 ELSE 1 END
+            );
+            """;
+        var flags = (string)(await cmd.ExecuteScalarAsync())!;
+        flags.Should().Be("111111", because: "run-all/migrations 0072-0075 must create lead lifecycle + revenue invariants");
+    }
+
+    [Fact]
     public async Task M01_Can_insert_and_read_contact_with_tenant()
     {
         await using var conn = await _fx.OpenConnectionAsync();
@@ -362,7 +381,7 @@ public sealed class DatabaseSmokeTests : IClassFixture<SqlServerFixture>
         {
             "tenants", "users", "roles", "permissions", "role_permissions", "user_roles", "api_keys",
             "audit_logs", "contacts", "contact_external_ids", "conversations", "messages",
-            "leads", "lead_scoring_rules", "lead_activities",
+            "leads", "lead_scoring_rules", "lead_activities", "lead_revenues",
             "kb_modules", "kb_versions", "kb_test_cases",
             "chat_scenarios", "agents", "agent_sessions", "agent_traces",
             "quick_reply_templates", "document_templates", "generated_documents",

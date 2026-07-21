@@ -22,6 +22,20 @@ public sealed class AgentServiceProgramRegistrationTests
         program.Should().Contain("AddHostedService<Clawbot.AgentService.Services.AgentScheduleWorker>()");
     }
 
+    [Fact]
+    public void Agent_service_program_registers_content_review_dispatch_pipeline()
+    {
+        var program = File.ReadAllText(FindRepoFile("src", "agents", "Clawbot.AgentService", "Program.cs"));
+
+        program.Should().Contain("Configure<Clawbot.AgentService.Services.ContentReviewWorkerOptions>");
+        program.Should().Contain("AddScoped<Clawbot.AgentService.Services.IContentReviewExecutor");
+        program.Should().Contain("AddScoped<Clawbot.AgentService.Services.IContentReviewCoordinator");
+        program.Should().Contain("AddScoped<Clawbot.AgentService.Services.IContentPublishingApprovalPolicyResolver");
+        program.Should().Contain("AddScoped<Clawbot.AgentService.Services.ReviewTenantWorker>()");
+        program.Should().Contain("AddScoped<Clawbot.AgentService.Services.IReviewTenantRunner>");
+        program.Should().Contain("AddHostedService<Clawbot.AgentService.Services.ContentReviewDispatchWorker>()");
+    }
+
     private static string FindRepoFile(params string[] segments)
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

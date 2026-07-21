@@ -42,14 +42,18 @@ public sealed class ContentReviewSlaJobTests
     [Fact]
     public async Task RunAsync_tier2_escalates_scheduled_unreviewed_item_past_deadline()
     {
-        // Critique #4: item đã 'scheduled' nhưng chưa ký — publish job skip nó mỗi pass; SLA job PHẢI thấy.
+        // Fixture legacy trước cutover: writer cũ có thể lưu 'scheduled' mà chưa có review theo revision.
+        // Cố ý bỏ qua invariant domain mới để SLA bridge vẫn phát hiện được các dòng này.
         using var fx = new TestAppDb();
         var item = ContentItem.Create(fx.TenantId, "facebook", "body", createdBy: null, Now.AddHours(-3));
         item.Approve(Guid.NewGuid(), Now.AddHours(-2));
-        item.MarkScheduled(Now.AddHours(-2));
         item.SetDesiredPublishAt(Now.AddMinutes(-10), Now.AddHours(-2)); // đã quá hạn
         fx.Db.ContentItems.Add(item);
         await fx.Db.SaveChangesAsync();
+        await fx.Db.ContentItems
+            .Where(candidate => candidate.Id == item.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(candidate => candidate.Status, "scheduled"));
+        fx.Db.ChangeTracker.Clear();
         var publisher = Substitute.For<INotificationPublisher>();
         var lead1 = Guid.NewGuid();
         var lead2 = Guid.NewGuid();

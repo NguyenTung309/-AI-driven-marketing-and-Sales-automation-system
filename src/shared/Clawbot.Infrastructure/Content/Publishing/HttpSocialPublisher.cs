@@ -43,6 +43,10 @@ public sealed class HttpSocialPublisher(HttpClient http, IOptions<PublisherOptio
         if (string.IsNullOrWhiteSpace(_options.Endpoint) || string.IsNullOrWhiteSpace(_options.Token))
             return new PublishResult(false, null, "publisher_not_configured");
 
+        // Phase 2.14: operator endpoint only — HTTPS/no userinfo/no private SSRF unless ops allowlist.
+        if (!Clawbot.Agents.Core.Chat.LlmBaseUrlGuard.IsAllowedBaseUrl(_options.Endpoint))
+            return new PublishResult(false, null, "publisher_endpoint_not_allowed");
+
         using var message = new HttpRequestMessage(HttpMethod.Post, new Uri(_options.Endpoint, UriKind.Absolute))
         {
             Content = new StringContent(BuildPayload(request), Encoding.UTF8, "application/json"),

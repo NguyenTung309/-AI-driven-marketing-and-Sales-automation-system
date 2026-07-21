@@ -240,13 +240,7 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
   });
   const manualApproval = orchestrationQuery.data?.requireChatReplyApproval ?? false;
   const manualApprovalMutation = useMutation({
-    // PUT ghi cả requireApproval + cap, nên phải gửi kèm giá trị hiện tại (tránh xoá nhầm field khác).
-    mutationFn: (next: boolean) =>
-      setTenantOrchestration(
-        orchestrationQuery.data?.requireApproval ?? false,
-        orchestrationQuery.data?.monthlyCostCapUsd ?? null,
-        { requireChatReplyApproval: next },
-      ),
+    mutationFn: (next: boolean) => setTenantOrchestration({ requireChatReplyApproval: next }),
     onSuccess: async (res) => {
       await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
       onNotify?.(res.requireChatReplyApproval ? "Đã bật duyệt tay AI reply." : "Đã tắt duyệt tay AI reply.", "success");

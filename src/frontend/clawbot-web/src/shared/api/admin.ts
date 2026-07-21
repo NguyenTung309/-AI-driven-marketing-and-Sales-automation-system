@@ -294,6 +294,10 @@ export interface TenantOrchestrationSettings {
   readonly skipChatReplyReview: boolean;
   /** Hội thoại chờ quá ngưỡng này (phút) thì cảnh báo sale; quá gấp đôi thì báo Trưởng phòng KD. */
   readonly idleAlertMinutes: number;
+  /** Lead im lặng quá N ngày → lost; 0 = tắt. */
+  readonly leadLostAfterDays: number;
+  /** AI ước tính doanh thu tự duyệt (default tắt). */
+  readonly autoApproveLeadRevenue: boolean;
 }
 
 export interface TenantOrchestrationUpdateResult {
@@ -305,7 +309,24 @@ export interface TenantOrchestrationUpdateResult {
   readonly aiAutoReplyResumeMinutes: number;
   readonly skipChatReplyReview: boolean;
   readonly idleAlertMinutes: number;
+  readonly leadLostAfterDays: number;
+  readonly autoApproveLeadRevenue: boolean;
 }
+
+/** PATCH-like: chỉ field được set mới gửi (undefined = BE giữ nguyên). Tránh GET fail fallback ghi đè. */
+export type TenantOrchestrationPatch = {
+  readonly requireApproval?: boolean;
+  readonly monthlyCostCapUsd?: number | null;
+  readonly clearMonthlyCostCapUsd?: boolean;
+  readonly requireContentReview?: boolean;
+  readonly requireChatReplyApproval?: boolean;
+  readonly requireKbHumanReview?: boolean;
+  readonly aiAutoReplyResumeMinutes?: number;
+  readonly skipChatReplyReview?: boolean;
+  readonly idleAlertMinutes?: number;
+  readonly leadLostAfterDays?: number;
+  readonly autoApproveLeadRevenue?: boolean;
+};
 
 export async function getTenantOrchestration(): Promise<TenantOrchestrationSettings> {
   const res = await apiClient.get<TenantOrchestrationSettings>("/api/admin/tenant/orchestration");
@@ -313,29 +334,22 @@ export async function getTenantOrchestration(): Promise<TenantOrchestrationSetti
 }
 
 export async function setTenantOrchestration(
-  requireApproval: boolean,
-  monthlyCostCapUsd?: number | null,
-  flags?: {
-    readonly requireContentReview?: boolean;
-    readonly requireChatReplyApproval?: boolean;
-    readonly requireKbHumanReview?: boolean;
-    readonly aiAutoReplyResumeMinutes?: number;
-    readonly skipChatReplyReview?: boolean;
-    readonly idleAlertMinutes?: number;
-  },
+  patch: TenantOrchestrationPatch,
 ): Promise<TenantOrchestrationUpdateResult> {
   const res = await apiClient.put<TenantOrchestrationUpdateResult>(
     "/api/admin/tenant/orchestration",
     {
-      requireApproval,
-      monthlyCostCapUsd: monthlyCostCapUsd ?? null,
-      // undefined = không gửi field -> BE giữ nguyên giá trị hiện tại
-      requireContentReview: flags?.requireContentReview,
-      requireChatReplyApproval: flags?.requireChatReplyApproval,
-      requireKbHumanReview: flags?.requireKbHumanReview,
-      aiAutoReplyResumeMinutes: flags?.aiAutoReplyResumeMinutes,
-      skipChatReplyReview: flags?.skipChatReplyReview,
-      idleAlertMinutes: flags?.idleAlertMinutes,
+      requireApproval: patch.requireApproval,
+      monthlyCostCapUsd: patch.monthlyCostCapUsd,
+      clearMonthlyCostCapUsd: patch.clearMonthlyCostCapUsd ?? false,
+      requireContentReview: patch.requireContentReview,
+      requireChatReplyApproval: patch.requireChatReplyApproval,
+      requireKbHumanReview: patch.requireKbHumanReview,
+      aiAutoReplyResumeMinutes: patch.aiAutoReplyResumeMinutes,
+      skipChatReplyReview: patch.skipChatReplyReview,
+      idleAlertMinutes: patch.idleAlertMinutes,
+      leadLostAfterDays: patch.leadLostAfterDays,
+      autoApproveLeadRevenue: patch.autoApproveLeadRevenue,
     },
   );
   return res.data;

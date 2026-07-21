@@ -46,6 +46,12 @@ public static class HangfireModule
         services.AddScoped<IWeeklyTrendScanner, GrpcWeeklyTrendScanner>();
         services.AddScoped<WeeklyTrendScanJob>();
         services.AddScoped<ContentPublishJob>();
+        // Phase 3.9: outcome_unknown never blind-retried; privileged reconcile / provider lookup.
+        services.AddScoped<ContentPublishAttemptReconciliationJob>();
+        // Phase 6.7: durable content workflow health (review debt / held / outcome_unknown / pause).
+        services.Configure<ContentWorkflowHealthOptions>(
+            cfg.GetSection(ContentWorkflowHealthOptions.SectionName));
+        services.AddScoped<ContentWorkflowHealthJob>();
         services.AddScoped<MetaEngagementSyncJob>();
         services.AddScoped<MetaConnectionHealthJob>();
         services.AddScoped<MetaBusinessIntegrationWebhookJob>();
@@ -81,6 +87,11 @@ public static class HangfireModule
         // Lớp 2: trích facts về khách sau hội thoại idle.
         services.AddScoped<Clawbot.Agents.Core.Learning.ContactFactExtractor>();
         services.AddScoped<ContactMemoryExtractionJob>();
+        // Ước tính doanh thu lead từ hội thoại (launch từ API khi → customer, không có revenue).
+        services.AddScoped<Clawbot.Agents.Core.Lead.LeadRevenueEstimator>();
+        services.AddScoped<Clawbot.Infrastructure.Leads.ILeadNotificationRecipientResolver,
+            Clawbot.Infrastructure.Leads.LeadNotificationRecipientResolver>();
+        services.AddScoped<Clawbot.Infrastructure.Leads.LeadRevenueEstimateService>();
         // Lớp 3: bài học cho reviewer từ lý do reject + nén KB weekly.
         services.AddScoped<Clawbot.Agents.Core.Learning.AgentMistakeExtractor>();
         services.AddScoped<AgentMemoryDistillationJob>();
@@ -170,8 +181,18 @@ public static class HangfireModule
             "content",
             j => j.RunAsync(CancellationToken.None),
             "*/5 * * * *");
+        recurring.AddOrUpdate<ContentPublishAttemptReconciliationJob>(
+            "content-publish-reconcile",
+            "content",
+            j => j.RunAsync(CancellationToken.None),
+            "*/10 * * * *");
         recurring.AddOrUpdate<ContentReviewSlaJob>(
             "content-review-sla",
+            "content",
+            j => j.RunAsync(CancellationToken.None),
+            "*/5 * * * *");
+        recurring.AddOrUpdate<ContentWorkflowHealthJob>(
+            "content-workflow-health",
             "content",
             j => j.RunAsync(CancellationToken.None),
             "*/5 * * * *");

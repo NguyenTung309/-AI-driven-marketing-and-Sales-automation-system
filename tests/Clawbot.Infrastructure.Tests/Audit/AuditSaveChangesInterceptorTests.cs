@@ -1,5 +1,6 @@
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Domain.Contacts;
+using Clawbot.Domain.Content;
 using Clawbot.Infrastructure.Audit;
 using Clawbot.SharedKernel.Audit;
 using Clawbot.SharedKernel.Multitenancy;
@@ -48,6 +49,35 @@ public sealed class AuditSaveChangesInterceptorTests
         logs[0].Action.Should().Be("create");
         logs[0].ResourceType.Should().Be(nameof(Contact));
         logs[0].DiffJson.Should().Contain("John Doe");
+    }
+
+    [Fact]
+    public async Task Excludes_content_payloads_from_generic_audit_diff()
+    {
+        var tenantId = Guid.NewGuid();
+        using var fx = new TestAppDb(tenantId, Build(tenantId, Passthrough()));
+        fx.Db.ContentItems.Add(ContentItem.Create(
+            tenantId,
+            "facebook",
+            "private customer-derived draft",
+            createdBy: null,
+            Now));
+
+        await fx.Db.SaveChangesAsync();
+
+        var log = await fx.Db.AuditLogs.IgnoreQueryFilters().SingleAsync();
+        log.ResourceType.Should().Be(nameof(ContentItem));
+        log.DiffJson.Should().NotContain("private customer-derived draft");
+        log.DiffJson.Should().NotContain(nameof(ContentItem.Body));
+        log.DiffJson.Should().NotContain(nameof(ContentItem.AssetsJson));
+        log.DiffJson.Should().Contain(nameof(ContentItem.ContentRevision));
+    }
+
+    [Fact]
+    public void Content_assets_are_audit_exempt_so_generic_interceptor_skips_them()
+    {
+        // Phase 2.13: lifecycle rows with storage keys/hashes never enter generic EF audit diffs.
+        typeof(ContentAsset).Should().Implement<Clawbot.Domain.Common.IAuditExempt>();
     }
 
     [Fact]

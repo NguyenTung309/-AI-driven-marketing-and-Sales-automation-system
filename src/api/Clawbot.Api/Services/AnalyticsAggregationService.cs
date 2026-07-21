@@ -57,6 +57,7 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
             BuildDelta("replies", current.Sum(r => r.Replies), previous.Sum(r => r.Replies)),
             BuildDelta("conversions", current.Sum(r => r.Conversions), previous.Sum(r => r.Conversions)),
             BuildDelta("adSpend", SumNullable(current.Select(r => r.AdSpend)) ?? 0m, SumNullable(previous.Select(r => r.AdSpend)) ?? 0m),
+            BuildDelta("revenue", SumNullable(current.Select(r => r.Revenue)) ?? 0m, SumNullable(previous.Select(r => r.Revenue)) ?? 0m),
             BuildDelta("avgResponseTimeSec", AverageNullable(current.Select(r => r.AvgResponseTimeSec)) ?? 0m, AverageNullable(previous.Select(r => r.AvgResponseTimeSec)) ?? 0m),
         };
 
@@ -195,7 +196,8 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
                 k.Conversions,
                 k.AvgResponseTimeSec,
                 k.AdSpend,
-                k.AdSpend.HasValue && k.Leads > 0 ? k.AdSpend.Value / k.Leads : null))
+                k.AdSpend.HasValue && k.Leads > 0 ? k.AdSpend.Value / k.Leads : null,
+                k.Revenue))
             .ToListAsync(ct).ConfigureAwait(false);
     }
 
@@ -217,7 +219,8 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
                     g.Sum(r => r.Conversions),
                     AverageNullable(g.Select(r => r.AvgResponseTimeSec)),
                     adSpend,
-                    adSpend.HasValue && leads > 0 ? Math.Round(adSpend.Value / leads, 2) : null);
+                    adSpend.HasValue && leads > 0 ? Math.Round(adSpend.Value / leads, 2) : null,
+                    SumNullable(g.Select(r => r.Revenue)));
             })
             .OrderBy(r => PlatformOrder(r.Platform))
             .ThenBy(r => r.Platform, StringComparer.OrdinalIgnoreCase)
@@ -289,8 +292,8 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
         platform.ToLowerInvariant() switch
         {
             "all" => 0,
-            "zalo" => 1,
-            "facebook" => 2,
+            "facebook" => 1,
+            "zalo" => 2,
             "instagram" => 3,
             "tiktok" => 4,
             "youtube" => 5,

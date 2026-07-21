@@ -1,6 +1,7 @@
 using Clawbot.Agents.Core.Lead;
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.Leads.Events;
+using Clawbot.Infrastructure.Leads;
 using Clawbot.Infrastructure.Messaging;
 using Clawbot.SharedKernel.Notifications;
 using Clawbot.SharedKernel.Time;
@@ -91,6 +92,110 @@ public sealed class LeadBecameWarmConsumerTests
     private static ConsumeContext<LeadBecameWarm> Context(LeadBecameWarm message)
     {
         var context = Substitute.For<ConsumeContext<LeadBecameWarm>>();
+        context.Message.Returns(message);
+        context.CancellationToken.Returns(CancellationToken.None);
+        return context;
+    }
+}
+
+public sealed class LeadBecameCustomerConsumerTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 7, 20, 8, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public async Task Consume_NotifiesAssignedOwner()
+    {
+        using var fx = new TestAppDb();
+        var ownerId = Guid.NewGuid();
+        var lead = Lead.Create(fx.TenantId, Guid.NewGuid(), "facebook", Now.AddHours(-1));
+        lead.Assign(ownerId);
+        lead.MarkCustomer("paid", Now);
+        fx.Db.Leads.Add(lead);
+        await fx.Db.SaveChangesAsync();
+        var publisher = new RecordingNotificationPublisher();
+        var recipients = Substitute.For<ILeadNotificationRecipientResolver>();
+        recipients.ResolveAsync(fx.TenantId, ownerId, Arg.Any<CancellationToken>()).Returns(ownerId);
+        var consumer = new LeadBecameCustomerConsumer(
+            fx.Db,
+            publisher,
+            recipients,
+            NullLogger<LeadBecameCustomerConsumer>.Instance);
+
+        await consumer.Consume(Context(new LeadBecameCustomer(fx.TenantId, lead.Id, ownerId, 72, Now)));
+
+        publisher.Requests.Should().ContainSingle(r =>
+            r.Type == "lead_customer"
+            && r.UserId == ownerId
+            && r.TenantId == fx.TenantId
+            && r.Link == $"/leads/{lead.Id}");
+    }
+
+    [Fact]
+    public async Task Consume_WhenNoOwner_NotifiesAdminFallback_NotBroadcast()
+    {
+        using var fx = new TestAppDb();
+        var adminId = Guid.NewGuid();
+        var lead = Lead.Create(fx.TenantId, Guid.NewGuid(), "facebook", Now.AddHours(-1));
+        lead.MarkCustomer("paid", Now);
+        fx.Db.Leads.Add(lead);
+        await fx.Db.SaveChangesAsync();
+        var publisher = new RecordingNotificationPublisher();
+        var recipients = Substitute.For<ILeadNotificationRecipientResolver>();
+        recipients.ResolveAsync(fx.TenantId, null, Arg.Any<CancellationToken>()).Returns(adminId);
+        var consumer = new LeadBecameCustomerConsumer(
+            fx.Db,
+            publisher,
+            recipients,
+            NullLogger<LeadBecameCustomerConsumer>.Instance);
+
+        await consumer.Consume(Context(new LeadBecameCustomer(fx.TenantId, lead.Id, null, 50, Now)));
+
+        publisher.Requests.Should().ContainSingle(r => r.UserId == adminId && r.Type == "lead_customer");
+    }
+
+    private static ConsumeContext<LeadBecameCustomer> Context(LeadBecameCustomer message)
+    {
+        var context = Substitute.For<ConsumeContext<LeadBecameCustomer>>();
+        context.Message.Returns(message);
+        context.CancellationToken.Returns(CancellationToken.None);
+        return context;
+    }
+}
+
+public sealed class LeadReactivatedConsumerTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 7, 20, 8, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public async Task Consume_NotifiesAssignedOwnerWithWarning()
+    {
+        using var fx = new TestAppDb();
+        var ownerId = Guid.NewGuid();
+        var lead = Lead.Create(fx.TenantId, Guid.NewGuid(), "facebook", Now.AddHours(-1));
+        lead.Assign(ownerId);
+        fx.Db.Leads.Add(lead);
+        await fx.Db.SaveChangesAsync();
+        var publisher = new RecordingNotificationPublisher();
+        var recipients = Substitute.For<ILeadNotificationRecipientResolver>();
+        recipients.ResolveAsync(fx.TenantId, ownerId, Arg.Any<CancellationToken>()).Returns(ownerId);
+        var consumer = new LeadReactivatedConsumer(
+            fx.Db,
+            publisher,
+            recipients,
+            NullLogger<LeadReactivatedConsumer>.Instance);
+
+        await consumer.Consume(Context(new LeadReactivated(fx.TenantId, lead.Id, ownerId, 45, Now)));
+
+        publisher.Requests.Should().ContainSingle(r =>
+            r.Type == "lead_reactivated"
+            && r.UserId == ownerId
+            && r.Severity == "warning"
+            && r.Link == $"/leads/{lead.Id}");
+    }
+
+    private static ConsumeContext<LeadReactivated> Context(LeadReactivated message)
+    {
+        var context = Substitute.For<ConsumeContext<LeadReactivated>>();
         context.Message.Returns(message);
         context.CancellationToken.Returns(CancellationToken.None);
         return context;

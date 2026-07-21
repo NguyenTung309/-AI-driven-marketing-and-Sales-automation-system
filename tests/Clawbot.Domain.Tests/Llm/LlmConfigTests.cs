@@ -29,4 +29,35 @@ public sealed class LlmConfigTests
 
         act.Should().Throw<InvalidOperationException>().WithMessage("*key rotation*");
     }
+
+    [Fact]
+    public void SupportsVision_is_nullable_tri_state_and_updatable()
+    {
+        var config = LlmConfig.Create(
+            Guid.NewGuid(),
+            "openai",
+            "gpt-4o",
+            "cipher",
+            Now,
+            supportsVision: true);
+        config.SupportsVision.Should().BeTrue();
+
+        config.UpdateConnection(
+            "openai",
+            "gpt-4o",
+            baseUrl: null,
+            displayName: "vision on",
+            Now.AddMinutes(1),
+            supportsVision: false);
+        config.SupportsVision.Should().BeFalse();
+
+        config.UpdateConnection(
+            "openai",
+            "gpt-4o",
+            baseUrl: null,
+            displayName: "vision auto",
+            Now.AddMinutes(2),
+            supportsVision: null);
+        config.SupportsVision.Should().BeNull();
+    }
 }

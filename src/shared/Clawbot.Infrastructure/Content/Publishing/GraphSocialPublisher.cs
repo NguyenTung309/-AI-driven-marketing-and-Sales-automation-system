@@ -14,6 +14,7 @@ public sealed class GraphPublisherOptions
 
     public GraphChannelOptions Facebook { get; init; } = new();
     public GraphChannelOptions Zalo { get; init; } = new();
+    public bool InstagramPublishingEnabled { get; init; }
 }
 
 public sealed class GraphChannelOptions
@@ -51,6 +52,7 @@ public sealed partial class GraphSocialPublisher(
         return platform switch
         {
             "facebook" => await PublishFacebookAsync(request, ct).ConfigureAwait(false),
+            "instagram" => await PublishInstagramAsync(request, ct).ConfigureAwait(false),
             "zalo" => await PublishZaloAsync(request, ct).ConfigureAwait(false),
             _ => new PublishResult(false, null, $"unsupported_platform:{request.Platform}"),
         };
@@ -190,6 +192,260 @@ public sealed partial class GraphSocialPublisher(
         }
     }
 
+    // Instagram publishing uses only the linked tenant Meta Page connection and its discovered professional account.
+    private async Task<PublishResult> PublishInstagramAsync(PublishRequest request, CancellationToken ct)
+    {
+        if (!_options.InstagramPublishingEnabled)
+            return new PublishResult(false, null, "instagram_not_configured");
+
+        var media = ResolveInstagramImage(request.AssetsJson);
+        if (media.Error is not null)
+            return new PublishResult(false, null, media.Error);
+        if (_metaIntegration is null || _metaGraph is null)
+            return new PublishResult(false, null, "instagram_not_configured");
+
+        var refreshAssetId = request.MetaAssetId;
+        try
+        {
+            var resolution = await _metaIntegration.ResolveInstagramAsync(
+                request.TenantId,
+                request.MetaAssetId,
+                ct).ConfigureAwait(false);
+            if (resolution.Status != MetaInstagramResolutionStatus.Resolved
+                || resolution.Credential is null)
+            {
+                return MapInstagramResolutionFailure(resolution.Status);
+            }
+
+            var credential = resolution.Credential;
+            refreshAssetId = credential.PageAssetId;
+            var published = await _metaGraph.PublishInstagramAsync(
+                request.TenantId,
+                credential.InstagramUserId,
+                credential.PageAccessToken,
+                request.Body,
+                media.ImageUrl!,
+                ct).ConfigureAwait(false);
+            LogPublished(_logger, "instagram", request.TenantId, request.ContentItemId, published.Permalink ?? published.MediaId);
+            return new PublishResult(true, published.Permalink, null);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return InstagramFailure(request, "instagram_timeout", "timeout");
+        }
+        catch (MetaGraphException ex) when (ex.IsTokenError)
+        {
+            return await RetryInstagramAfterTokenErrorAsync(
+                request,
+                refreshAssetId,
+                media.ImageUrl!,
+                ct).ConfigureAwait(false);
+        }
+        catch (MetaGraphException ex)
+        {
+            return InstagramGraphFailure(request, ex);
+        }
+        catch (HttpRequestException)
+        {
+            return InstagramFailure(request, "instagram_unavailable", "unavailable");
+        }
+        catch (Exception)
+        {
+            return InstagramFailure(request, "instagram_error", "unexpected");
+        }
+    }
+
+    private async Task<PublishResult> RetryInstagramAfterTokenErrorAsync(
+        PublishRequest request,
+        Guid? assetId,
+        string imageUrl,
+        CancellationToken ct)
+    {
+        try
+        {
+            var refreshed = await _metaIntegration!.RefreshPageAsync(
+                request.TenantId,
+                assetId,
+                ct).ConfigureAwait(false);
+            if (refreshed is null)
+            {
+                await _metaIntegration.MarkReconnectRequiredAsync(
+                    request.TenantId,
+                    "meta_page_token_refresh_failed",
+                    ct).ConfigureAwait(false);
+                return new PublishResult(false, null, "instagram_reconnect_required");
+            }
+
+            var instagramUserId = await _metaGraph!.ResolveInstagramAccountAsync(
+                request.TenantId,
+                refreshed.PageId,
+                refreshed.PageAccessToken,
+                ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(instagramUserId))
+                return new PublishResult(false, null, "instagram_not_linked");
+
+            var published = await _metaGraph.PublishInstagramAsync(
+                request.TenantId,
+                instagramUserId,
+                refreshed.PageAccessToken,
+                request.Body,
+                imageUrl,
+                ct).ConfigureAwait(false);
+            LogPublished(_logger, "instagram", request.TenantId, request.ContentItemId, published.Permalink ?? published.MediaId);
+            return new PublishResult(true, published.Permalink, null);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return InstagramFailure(request, "instagram_timeout", "retry_timeout");
+        }
+        catch (MetaGraphException ex) when (ex.IsTokenError)
+        {
+            await _metaIntegration!.MarkReconnectRequiredAsync(
+                request.TenantId,
+                $"meta_token_{ex.Code ?? 0}_{ex.Subcode ?? 0}",
+                ct).ConfigureAwait(false);
+            return new PublishResult(false, null, "instagram_reconnect_required");
+        }
+        catch (MetaGraphException ex)
+        {
+            return InstagramGraphFailure(request, ex);
+        }
+        catch (HttpRequestException)
+        {
+            return InstagramFailure(request, "instagram_unavailable", "retry_unavailable");
+        }
+        catch (Exception)
+        {
+            return InstagramFailure(request, "instagram_error", "retry_unexpected");
+        }
+    }
+
+    private static PublishResult MapInstagramResolutionFailure(MetaInstagramResolutionStatus status) =>
+        status switch
+        {
+            MetaInstagramResolutionStatus.MissingScopes => new PublishResult(false, null, "instagram_permissions_missing"),
+            MetaInstagramResolutionStatus.NotLinked => new PublishResult(false, null, "instagram_not_linked"),
+            _ => new PublishResult(false, null, "instagram_not_configured"),
+        };
+
+    private PublishResult InstagramGraphFailure(PublishRequest request, MetaGraphException exception)
+    {
+        var code = exception.Code ?? exception.HttpStatus ?? 0;
+        return InstagramFailure(request, $"instagram_graph_{code}", $"graph_{code}");
+    }
+
+    private PublishResult InstagramFailure(PublishRequest request, string error, string reason)
+    {
+        LogInstagramPublishFailed(_logger, request.TenantId, request.ContentItemId, reason);
+        return new PublishResult(false, null, error);
+    }
+
+    private static (string? ImageUrl, string? Error) ResolveInstagramImage(string assetsJson)
+    {
+        if (string.IsNullOrWhiteSpace(assetsJson))
+            return (null, "instagram_media_required");
+
+        try
+        {
+            using var doc = JsonDocument.Parse(assetsJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                return (null, "instagram_media_invalid");
+
+            var hasImageEntry = false;
+            foreach (var asset in doc.RootElement.EnumerateArray())
+            {
+                if (asset.ValueKind != JsonValueKind.Object
+                    || !asset.TryGetProperty("type", out var type)
+                    || type.ValueKind != JsonValueKind.String
+                    || !string.Equals(type.GetString(), "image", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                hasImageEntry = true;
+                if (asset.TryGetProperty("url", out var url)
+                    && url.ValueKind == JsonValueKind.String
+                    && IsPublicJpegUrl(url.GetString(), out var imageUrl))
+                {
+                    return (imageUrl, null);
+                }
+            }
+
+            return hasImageEntry
+                ? (null, "instagram_media_invalid")
+                : (null, "instagram_media_required");
+        }
+        catch (JsonException)
+        {
+            return (null, "instagram_media_invalid");
+        }
+    }
+
+    private static bool IsPublicJpegUrl(string? value, out string? imageUrl)
+    {
+        imageUrl = null;
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(uri.Host)
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || (!uri.AbsolutePath.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)
+                && !uri.AbsolutePath.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase))
+            || !IsPublicHost(uri))
+        {
+            return false;
+        }
+
+        imageUrl = uri.AbsoluteUri;
+        return true;
+    }
+
+    private static bool IsPublicHost(Uri uri)
+    {
+        if (uri.IsLoopback
+            || uri.IdnHost.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || uri.IdnHost.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase)
+            || uri.IdnHost.EndsWith(".local", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!System.Net.IPAddress.TryParse(uri.IdnHost, out var address))
+        {
+            return uri.IdnHost.Contains('.')
+                   && Uri.CheckHostName(uri.IdnHost) == UriHostNameType.Dns;
+        }
+        if (address.IsIPv4MappedToIPv6)
+            address = address.MapToIPv4();
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            var first = address.GetAddressBytes()[0];
+            return !System.Net.IPAddress.IsLoopback(address)
+                   && !address.Equals(System.Net.IPAddress.IPv6Any)
+                   && !address.Equals(System.Net.IPAddress.IPv6None)
+                   && !address.IsIPv6LinkLocal
+                   && !address.IsIPv6Multicast
+                   && !address.IsIPv6SiteLocal
+                   && first is not 0xfc and not 0xfd;
+        }
+
+        var bytes = address.GetAddressBytes();
+        return bytes[0] is not (0 or 10 or 127)
+               && bytes[0] < 224
+               && !(bytes[0] == 100 && bytes[1] is >= 64 and <= 127)
+               && !(bytes[0] == 169 && bytes[1] == 254)
+               && !(bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
+               && !(bytes[0] == 192 && bytes[1] == 168)
+               && !(bytes[0] == 198 && bytes[1] is 18 or 19);
+    }
+
     // EARS[WHEN publishing to Zalo THE SYSTEM SHALL resolve credentials from the encrypted DB store first, falling
     // back to options when none exists]
     private async Task<PublishResult> PublishZaloAsync(PublishRequest request, CancellationToken ct)
@@ -283,4 +539,7 @@ public sealed partial class GraphSocialPublisher(
 
     [LoggerMessage(EventId = 5204, Level = LogLevel.Warning, Message = "Meta publish failed for content {ContentItemId} tenant {TenantId}: {Reason}")]
     private static partial void LogMetaPublishFailed(ILogger logger, Guid tenantId, Guid contentItemId, string reason, Exception exception);
+
+    [LoggerMessage(EventId = 5205, Level = LogLevel.Warning, Message = "Instagram publish failed for content {ContentItemId} tenant {TenantId}: {Reason}")]
+    private static partial void LogInstagramPublishFailed(ILogger logger, Guid tenantId, Guid contentItemId, string reason);
 }

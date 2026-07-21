@@ -51,7 +51,10 @@ public sealed partial class LeadBatchRescorer(
 
         var leads = await _db.Leads
             .IgnoreQueryFilters()
-            .Where(l => l.TenantId == tenantId && l.DeletedAt == null)
+            .Where(l => l.TenantId == tenantId
+                && l.DeletedAt == null
+                && l.Stage != "customer"
+                && l.Stage != "lost")
             .OrderByDescending(l => l.CreatedAt)
             .ToListAsync(ct).ConfigureAwait(false);
 

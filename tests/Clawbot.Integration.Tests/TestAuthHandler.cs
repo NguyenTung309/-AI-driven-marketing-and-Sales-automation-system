@@ -24,15 +24,18 @@ public sealed class TestAuthHandler(
             new Claim("tenant_slug", "test"),
             new Claim(ClaimTypes.Role, "Admin"),
             new Claim("role_id", "11111111-1111-1111-1111-111111111111"),
-            new Claim("perm", "kb.read"),
-            new Claim("perm", "kb.write"),
-            new Claim("perm", "inbox.read"),
-            new Claim("perm", "lead.read"),
-            new Claim("perm", "lead.write"),
-            new Claim("perm", "content.read"),
-            new Claim("perm", "content.write"),
-            new Claim("perm", "analytics.read"),
-            new Claim("perm", "admin.system"),
+            // Exact codes from RbacSeeder matrix (colon form). role_id Admin also resolves via IPermissionResolver.
+            new Claim("perm", "kb:read"),
+            new Claim("perm", "kb:write"),
+            new Claim("perm", "conversations:read"),
+            new Claim("perm", "leads:read"),
+            new Claim("perm", "leads:write"),
+            new Claim("perm", "content:read"),
+            new Claim("perm", "content:write"),
+            new Claim("perm", "analytics:read"),
+            new Claim("perm", "sale-assist:use"),
+            new Claim("perm", "system:config"),
+            new Claim("perm", "system.logs"),
         };
         var identity = new ClaimsIdentity(claims, "Test");
         var principal = new ClaimsPrincipal(identity);

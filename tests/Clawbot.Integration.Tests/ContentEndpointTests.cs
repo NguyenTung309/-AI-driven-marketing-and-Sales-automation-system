@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
@@ -53,7 +54,7 @@ public sealed class ContentEndpointTests : IClassFixture<SqlServerFixture>, IAsy
         var list = await _client.GetAsync("/api/content/briefs?platform=facebook");
         list.StatusCode.Should().Be(HttpStatusCode.OK);
         var listed = await ReadJsonAsync(list);
-        listed.RootElement.EnumerateArray()
+        listed.RootElement.GetProperty("items").EnumerateArray()
             .Should().Contain(e => e.GetProperty("id").GetGuid() == id);
 
         var update = await _client.PutAsJsonAsync($"/api/content/briefs/{id}", new
@@ -72,8 +73,187 @@ public sealed class ContentEndpointTests : IClassFixture<SqlServerFixture>, IAsy
         var afterDelete = await _client.GetAsync("/api/content/briefs?platform=zalo");
         afterDelete.StatusCode.Should().Be(HttpStatusCode.OK);
         var rows = await ReadJsonAsync(afterDelete);
-        rows.RootElement.EnumerateArray()
+        rows.RootElement.GetProperty("items").EnumerateArray()
             .Should().NotContain(e => e.GetProperty("id").GetGuid() == id);
+    }
+
+    [Theory]
+    [InlineData(" FACEBOOK ", "facebook")]
+    [InlineData(" Zalo ", "zalo")]
+    [InlineData("INSTAGRAM", "instagram")]
+    public async Task Create_brief_normalizes_canonical_platform(string input, string expected)
+    {
+        var response = await _client.PostAsJsonAsync("/api/content/briefs", new
+        {
+            platform = input,
+            brief = "Canonical platform campaign",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var json = await ReadJsonAsync(response);
+        json.RootElement.GetProperty("platform").GetString().Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("tiktok")]
+    [InlineData("youtube")]
+    [InlineData("website")]
+    [InlineData("fb")]
+    public async Task Create_brief_rejects_platform_outside_canonical_writable_set(string platform)
+    {
+        var response = await _client.PostAsJsonAsync("/api/content/briefs", new
+        {
+            platform,
+            brief = "Unsupported platform campaign",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var json = await ReadJsonAsync(response);
+        json.RootElement.GetProperty("code").GetString().Should().Be("content.platform_unsupported");
+    }
+
+    [Fact]
+    public async Task Update_brief_allows_text_only_change_when_legacy_platform_is_preserved()
+    {
+        var briefId = Guid.NewGuid();
+        await InsertContentBriefAsync(briefId, "tiktok", "Historical brief");
+
+        var response = await _client.PutAsJsonAsync($"/api/content/briefs/{briefId}", new
+        {
+            platform = " TIKTOK ",
+            brief = "Updated historical text",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = await ReadJsonAsync(response);
+        json.RootElement.GetProperty("platform").GetString().Should().Be("tiktok");
+        json.RootElement.GetProperty("brief").GetString().Should().Be("Updated historical text");
+    }
+
+    [Fact]
+    public async Task Update_brief_rejects_switching_legacy_platform_to_another_unsupported_value()
+    {
+        var briefId = Guid.NewGuid();
+        await InsertContentBriefAsync(briefId, "tiktok", "Historical brief");
+
+        var response = await _client.PutAsJsonAsync($"/api/content/briefs/{briefId}", new
+        {
+            platform = "youtube",
+            brief = "Must not rewrite historical platform",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var json = await ReadJsonAsync(response);
+        json.RootElement.GetProperty("code").GetString().Should().Be("content.platform_unsupported");
+    }
+
+    [Fact]
+    public async Task Generate_normalizes_canonical_platform_before_enqueuing_job()
+    {
+        var response = await _client.PostAsJsonAsync("/api/content/items/generate", new
+        {
+            briefId = (Guid?)null,
+            platform = " Instagram ",
+            briefText = "Generate a campaign draft",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var responseJson = await ReadJsonAsync(response);
+        var payloadJson = await ReadBackgroundJobPayloadAsync(responseJson.RootElement.GetProperty("jobId").GetGuid());
+        payloadJson.RootElement.GetProperty("Platform").GetString().Should().Be("instagram");
+    }
+
+    [Theory]
+    [InlineData("tiktok")]
+    [InlineData("youtube")]
+    [InlineData("website")]
+    public async Task Generate_rejects_platform_outside_canonical_writable_set(string platform)
+    {
+        var response = await _client.PostAsJsonAsync("/api/content/items/generate", new
+        {
+            briefId = (Guid?)null,
+            platform,
+            briefText = "Generate a campaign draft",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var json = await ReadJsonAsync(response);
+        json.RootElement.GetProperty("code").GetString().Should().Be("content.platform_unsupported");
+    }
+
+    [Fact]
+    public async Task Generate_does_not_fall_back_to_legacy_brief_platform()
+    {
+        var briefId = Guid.NewGuid();
+        await InsertContentBriefAsync(briefId, "tiktok", "Historical brief");
+
+        var response = await _client.PostAsJsonAsync("/api/content/items/generate", new
+        {
+            briefId,
+            platform = (string?)null,
+            briefText = (string?)null,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var json = await ReadJsonAsync(response);
+        json.RootElement.GetProperty("code").GetString().Should().Be("content.platform_unsupported");
+    }
+
+    [Fact]
+    public async Task Repurpose_normalizes_canonical_platforms_before_enqueuing_job()
+    {
+        var itemId = Guid.NewGuid();
+        await InsertContentItemAsync(itemId, "facebook", "Source draft");
+
+        var response = await _client.PostAsJsonAsync($"/api/content/items/{itemId}/repurpose", new
+        {
+            targetPlatforms = new[] { " ZALO ", "Instagram" },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var responseJson = await ReadJsonAsync(response);
+        var payloadJson = await ReadBackgroundJobPayloadAsync(responseJson.RootElement.GetProperty("jobId").GetGuid());
+        payloadJson.RootElement.GetProperty("TargetPlatforms").EnumerateArray()
+            .Select(value => value.GetString())
+            .Should().Equal("zalo", "instagram");
+    }
+
+    [Theory]
+    [InlineData("tiktok")]
+    [InlineData("youtube")]
+    [InlineData("website")]
+    public async Task Repurpose_rejects_platform_outside_canonical_writable_set(string platform)
+    {
+        var itemId = Guid.NewGuid();
+        await InsertContentItemAsync(itemId, "facebook", "Source draft");
+
+        var response = await _client.PostAsJsonAsync($"/api/content/items/{itemId}/repurpose", new
+        {
+            targetPlatforms = new[] { "zalo", platform },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var json = await ReadJsonAsync(response);
+        json.RootElement.GetProperty("code").GetString().Should().Be("content.platform_unsupported");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Repurpose_rejects_null_or_missing_target_platforms(bool includeNullProperty)
+    {
+        var itemId = Guid.NewGuid();
+        await InsertContentItemAsync(itemId, "facebook", "Source draft");
+        using var content = new StringContent(
+            includeNullProperty ? "{\"targetPlatforms\":null}" : "{}",
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await _client.PostAsync($"/api/content/items/{itemId}/repurpose", content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var json = await ReadJsonAsync(response);
+        json.RootElement.GetProperty("code").GetString().Should().Be("content.repurpose_invalid");
     }
 
     [Fact]
@@ -99,10 +279,15 @@ public sealed class ContentEndpointTests : IClassFixture<SqlServerFixture>, IAsy
         var missing = await _client.GetAsync($"/api/content/items/{Guid.NewGuid()}");
         missing.StatusCode.Should().Be(HttpStatusCode.NotFound);
 
-        var approve = await _client.PostAsync($"/api/content/items/{itemId}/approve", content: null);
+        var revision = updated.RootElement.GetProperty("contentRevision").GetInt32();
+        await MarkContentItemReviewedAsync(itemId);
+        var approve = await _client.PostAsJsonAsync($"/api/content/items/{itemId}/approve", new
+        {
+            expectedRevision = revision,
+        });
         approve.StatusCode.Should().Be(HttpStatusCode.OK);
         var approved = await ReadJsonAsync(approve);
-        approved.RootElement.GetProperty("status").GetString().Should().Be("approved");
+        approved.RootElement.GetProperty("status").GetString().Should().Be("scheduled");
 
         var scheduledAt = DateTimeOffset.UtcNow.AddDays(2);
         var schedule = await _client.PostAsJsonAsync($"/api/content/items/{itemId}/schedule", new
@@ -156,6 +341,53 @@ public sealed class ContentEndpointTests : IClassFixture<SqlServerFixture>, IAsy
     {
         var stream = await response.Content.ReadAsStreamAsync();
         return await JsonDocument.ParseAsync(stream);
+    }
+
+    private async Task<JsonDocument> ReadBackgroundJobPayloadAsync(Guid jobId)
+    {
+        await using var conn = await _sql.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT payload_json FROM background_jobs WHERE id = @id AND tenant_id = @tenantId;";
+        cmd.Parameters.Add(new SqlParameter("@id", jobId));
+        cmd.Parameters.Add(new SqlParameter("@tenantId", TenantId));
+        var payload = (string?)await cmd.ExecuteScalarAsync();
+        payload.Should().NotBeNullOrWhiteSpace();
+        return JsonDocument.Parse(payload!);
+    }
+
+    private async Task InsertContentBriefAsync(Guid id, string platform, string brief)
+    {
+        await using var conn = await _sql.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO content_briefs
+                (id, tenant_id, platform, brief, status, created_at, updated_at)
+            VALUES
+                (@id, @tenantId, @platform, @brief, 'pending', SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET());
+            """;
+        cmd.Parameters.Add(new SqlParameter("@id", id));
+        cmd.Parameters.Add(new SqlParameter("@tenantId", TenantId));
+        cmd.Parameters.Add(new SqlParameter("@platform", platform));
+        cmd.Parameters.Add(new SqlParameter("@brief", brief));
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private async Task MarkContentItemReviewedAsync(Guid id)
+    {
+        await using var conn = await _sql.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE content_items
+            SET agent_review_status = 'passed',
+                agent_reviewed_revision = content_revision,
+                agent_reviewed_at = SYSDATETIMEOFFSET(),
+                image_review_status = 'not_applicable',
+                reviewed_image_count = 0
+            WHERE id = @id AND tenant_id = @tenantId;
+            """;
+        cmd.Parameters.Add(new SqlParameter("@id", id));
+        cmd.Parameters.Add(new SqlParameter("@tenantId", TenantId));
+        await cmd.ExecuteNonQueryAsync();
     }
 
     private async Task InsertContentItemAsync(Guid id, string platform, string body)

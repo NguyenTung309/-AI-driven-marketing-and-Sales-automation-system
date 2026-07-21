@@ -64,6 +64,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     // Leads
     public DbSet<Lead> Leads => Set<Lead>();
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
+    public DbSet<LeadRevenue> LeadRevenues => Set<LeadRevenue>();
     public DbSet<LeadScoringRule> LeadScoringRules => Set<LeadScoringRule>();
     public DbSet<DripSequence> DripSequences => Set<DripSequence>();
     public DbSet<DripSequenceStep> DripSequenceSteps => Set<DripSequenceStep>();
@@ -106,6 +107,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<ContentBrief> ContentBriefs => Set<ContentBrief>();
     public DbSet<ContentItem> ContentItems => Set<ContentItem>();
     public DbSet<ContentSchedule> ContentSchedules => Set<ContentSchedule>();
+    public DbSet<ContentReviewTask> ContentReviewTasks => Set<ContentReviewTask>();
+    public DbSet<ContentAsset> ContentAssets => Set<ContentAsset>();
+    public DbSet<ContentPublishAttempt> ContentPublishAttempts => Set<ContentPublishAttempt>();
+    public DbSet<ContentWorkflowMetricsHourly> ContentWorkflowMetricsHourly => Set<ContentWorkflowMetricsHourly>();
     public DbSet<SocialCredential> SocialCredentials => Set<SocialCredential>();
 
     // Meta business integrations
@@ -157,6 +162,33 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     {
         base.OnModelCreating(builder);
         builder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+
+        if (string.Equals(Database.ProviderName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))
+        {
+            builder.Entity<ContentItem>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            builder.Entity<ContentSchedule>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            builder.Entity<ContentReviewTask>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            builder.Entity<ContentAsset>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            builder.Entity<ContentPublishAttempt>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+        }
+        else
+        {
+            builder.Entity<ContentItem>().Property(x => x.RowVersion).IsRowVersion();
+            builder.Entity<ContentSchedule>().Property(x => x.RowVersion).IsRowVersion();
+            builder.Entity<ContentReviewTask>().Property(x => x.RowVersion).IsRowVersion();
+            builder.Entity<ContentAsset>().Property(x => x.RowVersion).IsRowVersion();
+            builder.Entity<ContentPublishAttempt>().Property(x => x.RowVersion).IsRowVersion();
+        }
 
         builder.AddInboxStateEntity();
 

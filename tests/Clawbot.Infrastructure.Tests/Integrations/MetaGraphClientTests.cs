@@ -112,6 +112,193 @@ public sealed class MetaGraphClientTests
     }
 
     [Fact]
+    public async Task ResolveInstagramAccountAsync_uses_configured_graph_endpoint_and_page_token()
+    {
+        var handler = new SequenceHandler(_ => Json(HttpStatusCode.OK, """
+            {"instagram_business_account":{"id":"ig-user-123"}}
+            """));
+        var client = BuildClient(
+            handler,
+            baseUrl: "https://meta-proxy.example/graph",
+            apiVersion: "v99.0");
+
+        var accountId = await client.ResolveInstagramAccountAsync(
+            TenantId,
+            "page-123",
+            "page-token",
+            CancellationToken.None);
+
+        accountId.Should().Be("ig-user-123");
+        var request = handler.Requests.Should().ContainSingle().Which;
+        request.Method.Should().Be(HttpMethod.Get);
+        request.RequestUri!.GetLeftPart(UriPartial.Path)
+            .Should().Be("https://meta-proxy.example/graph/v99.0/page-123");
+        request.RequestUri.Query.Should().Contain("fields=instagram_business_account%7Bid%7D");
+        request.RequestUri.Query.Should().Contain("access_token=page-token");
+        request.RequestUri.Query.Should().Contain($"appsecret_proof={Proof("page-token")}");
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"instagram_business_account\":null}")]
+    [InlineData("{\"instagram_business_account\":{}}")]
+    [InlineData("{\"instagram_business_account\":{\"id\":123}}")]
+    public async Task ResolveInstagramAccountAsync_returns_null_when_page_is_not_linked(string responseBody)
+    {
+        var handler = new SequenceHandler(_ => Json(HttpStatusCode.OK, responseBody));
+        var client = BuildClient(handler);
+
+        var accountId = await client.ResolveInstagramAccountAsync(
+            TenantId,
+            "page-123",
+            "page-token",
+            CancellationToken.None);
+
+        accountId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PublishInstagramAsync_creates_container_publishes_and_resolves_provider_permalink()
+    {
+        var handler = new SequenceHandler(
+            _ => Json(HttpStatusCode.OK, """{"id":"creation-123"}"""),
+            _ => Json(HttpStatusCode.OK, """{"id":"media-456"}"""),
+            _ => Json(HttpStatusCode.OK, """{"permalink":"https://www.instagram.com/p/provider-slug/"}"""));
+        var client = BuildClient(handler);
+
+        var result = await client.PublishInstagramAsync(
+            TenantId,
+            "ig-user-123",
+            "page-token",
+            "Caption with spaces",
+            "https://cdn.example/photo.jpg?signature=image-secret",
+            CancellationToken.None);
+
+        result.MediaId.Should().Be("media-456");
+        result.Permalink.Should().Be("https://www.instagram.com/p/provider-slug/");
+        handler.Requests.Should().HaveCount(3);
+
+        handler.Requests[0].Method.Should().Be(HttpMethod.Post);
+        handler.Requests[0].RequestUri!.AbsolutePath.Should().Be("/v25.0/ig-user-123/media");
+        handler.Requests[0].Body.Should().Contain("image_url=https%3A%2F%2Fcdn.example%2Fphoto.jpg%3Fsignature%3Dimage-secret");
+        handler.Requests[0].Body.Should().Contain("caption=Caption+with+spaces");
+        handler.Requests[0].Body.Should().Contain($"appsecret_proof={Proof("page-token")}");
+
+        handler.Requests[1].Method.Should().Be(HttpMethod.Post);
+        handler.Requests[1].RequestUri!.AbsolutePath.Should().Be("/v25.0/ig-user-123/media_publish");
+        handler.Requests[1].Body.Should().Contain("creation_id=creation-123");
+        handler.Requests[1].Body.Should().Contain($"appsecret_proof={Proof("page-token")}");
+
+        handler.Requests[2].Method.Should().Be(HttpMethod.Get);
+        handler.Requests[2].RequestUri!.AbsolutePath.Should().Be("/v25.0/media-456");
+        handler.Requests[2].RequestUri!.Query.Should().Contain("fields=permalink");
+        handler.Requests[2].RequestUri!.Query.Should().Contain("access_token=page-token");
+    }
+
+    [Fact]
+    public async Task PublishInstagramAsync_does_not_fabricate_permalink_from_opaque_media_id()
+    {
+        var handler = new SequenceHandler(
+            _ => Json(HttpStatusCode.OK, """{"id":"creation-123"}"""),
+            _ => Json(HttpStatusCode.OK, """{"id":"opaque-media-id"}"""),
+            _ => Json(HttpStatusCode.OK, "{}"));
+        var client = BuildClient(handler);
+
+        var result = await client.PublishInstagramAsync(
+            TenantId,
+            "ig-user-123",
+            "page-token",
+            "Caption",
+            "https://cdn.example/photo.jpeg",
+            CancellationToken.None);
+
+        result.MediaId.Should().Be("opaque-media-id");
+        result.Permalink.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PublishInstagramAsync_rejects_missing_creation_id_before_publish()
+    {
+        var handler = new SequenceHandler(_ => Json(HttpStatusCode.OK, """{"status":"accepted"}"""));
+        var client = BuildClient(handler);
+
+        var action = () => client.PublishInstagramAsync(
+            TenantId,
+            "ig-user-123",
+            "page-token",
+            "Caption",
+            "https://cdn.example/photo.jpg",
+            CancellationToken.None);
+
+        var error = await action.Should().ThrowAsync<MetaGraphException>();
+        error.Which.Message.Should().Be("meta_response_missing_id");
+        handler.Requests.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task PublishInstagramAsync_rejects_missing_published_media_id()
+    {
+        var handler = new SequenceHandler(
+            _ => Json(HttpStatusCode.OK, """{"id":"creation-123"}"""),
+            _ => Json(HttpStatusCode.OK, """{"status":"published"}"""));
+        var client = BuildClient(handler);
+
+        var action = () => client.PublishInstagramAsync(
+            TenantId,
+            "ig-user-123",
+            "page-token",
+            "Caption",
+            "https://cdn.example/photo.jpg",
+            CancellationToken.None);
+
+        var error = await action.Should().ThrowAsync<MetaGraphException>();
+        error.Which.Message.Should().Be("meta_response_missing_id");
+        handler.Requests.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task PublishInstagramAsync_classifies_media_publish_token_errors()
+    {
+        var handler = new SequenceHandler(
+            _ => Json(HttpStatusCode.OK, """{"id":"creation-123"}"""),
+            _ => Json(HttpStatusCode.BadRequest, """
+                {"error":{"message":"Session expired","type":"OAuthException","code":190,"error_subcode":463}}
+                """));
+        var client = BuildClient(handler);
+
+        var action = () => client.PublishInstagramAsync(
+            TenantId,
+            "ig-user-123",
+            "expired-page-token",
+            "Caption",
+            "https://cdn.example/photo.jpg",
+            CancellationToken.None);
+
+        var error = await action.Should().ThrowAsync<MetaGraphException>();
+        error.Which.Code.Should().Be(190);
+        error.Which.Subcode.Should().Be(463);
+        error.Which.IsTokenError.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task PublishInstagramAsync_preserves_caller_cancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var client = BuildClient(new SequenceHandler());
+
+        var action = () => client.PublishInstagramAsync(
+            TenantId,
+            "ig-user-123",
+            "page-token",
+            "Caption",
+            "https://cdn.example/photo.jpg",
+            cancellation.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task Graph_error_190_is_classified_as_token_error()
     {
         var handler = new SequenceHandler(_ => Json(HttpStatusCode.BadRequest, """
@@ -129,7 +316,9 @@ public sealed class MetaGraphClientTests
 
     private static MetaGraphClient BuildClient(
         HttpMessageHandler handler,
-        string authorizationMode = MetaAuthorizationModes.BusinessSystemUser)
+        string authorizationMode = MetaAuthorizationModes.BusinessSystemUser,
+        string baseUrl = "https://graph.facebook.com",
+        string apiVersion = "v25.0")
     {
         var configurations = Substitute.For<IMetaGraphConfigurationResolver>();
         configurations.ResolveAsync(TenantId, Arg.Any<CancellationToken>())
@@ -141,7 +330,8 @@ public sealed class MetaGraphClientTests
                 AuthorizationMode = authorizationMode,
                 RedirectUri = "https://api.example/api/admin/meta/callback",
                 FrontendReturnUrl = "https://app.example/system",
-                ApiVersion = "v25.0",
+                BaseUrl = baseUrl,
+                ApiVersion = apiVersion,
             });
         return new MetaGraphClient(
             new HttpClient(handler),

@@ -271,6 +271,7 @@ public static partial class AdminMetaIntegrationEndpoints
         ITenantAccessor tenants,
         IMetaIntegrationService integrations,
         IMetaGraphConfigurationResolver configurations,
+        ILoggerFactory loggerFactory,
         HttpContext http,
         CancellationToken ct)
     {
@@ -287,9 +288,26 @@ public static partial class AdminMetaIntegrationEndpoints
         {
             return Error(http, StatusCodes.Status409Conflict, "meta.connection_missing", "Chưa có kết nối Meta để kiểm tra.");
         }
-        catch (MetaGraphException)
+        catch (MetaGraphException ex)
         {
-            return Error(http, StatusCodes.Status502BadGateway, "meta.validation_failed", "Không thể kiểm tra kết nối Meta lúc này.");
+            LogValidateFailed(loggerFactory.CreateLogger("MetaValidate"), tenantId, ex.Code, ex.Subcode, ex.HttpStatus, ex.Message, ex);
+            // Vẫn trả snapshot (status reconnect_required + lastError) kèm message Graph thật để FE/admin soi được.
+            var snapshot = await integrations.GetSnapshotAsync(tenantId, ct).ConfigureAwait(false);
+            return Results.Json(
+                new
+                {
+                    code = "meta.validation_failed",
+                    errorCode = "meta.validation_failed",
+                    message = DescribeValidateFailure(ex),
+                    metaCode = ex.Code,
+                    metaSubcode = ex.Subcode,
+                    metaHttpStatus = ex.HttpStatus,
+                    metaType = ex.ErrorType,
+                    lastError = snapshot.LastError,
+                    connection = snapshot,
+                    requestId = http.TraceIdentifier,
+                },
+                statusCode: StatusCodes.Status502BadGateway);
         }
     }
 
@@ -390,6 +408,38 @@ public static partial class AdminMetaIntegrationEndpoints
               _ => "connection_failed",
           };
 
+    private static string DescribeValidateFailure(MetaGraphException ex)
+    {
+        var graphHint = string.IsNullOrWhiteSpace(ex.Message) ? "Meta Graph trả lỗi không rõ." : ex.Message.Trim();
+        if (graphHint.Length > 280)
+            graphHint = graphHint[..280];
+
+        // "API access blocked" (code 200) = Meta block app/BM/developer — không phải thiếu pages_* scope.
+        if (graphHint.Contains("API access blocked", StringComparison.OrdinalIgnoreCase)
+            || (ex.Code == 200 && graphHint.Contains("blocked", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "Meta đang chặn truy cập Graph API (API access blocked). Không phải thiếu quyền Page trong OAuth — "
+                + "kiểm tra developers.facebook.com (checkpoint/app restricted), Business Manager Account Quality, "
+                + "Business Verification, rồi thử Access Token Debugger. Reconnect OAuth thường không gỡ block này. "
+                + $"Chi tiết: {graphHint}";
+        }
+
+        // Code hay gặp khi validate:
+        // - 190 + subcodes: token hết hạn/thu hồi (thường đã được service mark reconnect, không tới đây)
+        // - 1/2/4/17/32: transient / rate limit
+        // - 100: param invalid (AppId/AppSecret/config sai)
+        // - 200/10: permission (message cổ điển "Requires pages_…")
+        if (ex.Code is 1 or 2 or 4 or 17 or 32 || ex.IsTransient)
+            return $"Meta tạm thời lỗi/rate-limit (code {ex.Code}). Thử lại sau. Chi tiết: {graphHint}";
+        if (ex.Code is 100)
+            return $"Cấu hình Meta App không hợp lệ (App ID/Secret/API). Chi tiết: {graphHint}";
+        if (ex.Code is 10 or 200 or 294)
+            return $"Thiếu quyền Graph (permission). Chi tiết: {graphHint}";
+        if (ex.HttpStatus is 401 or 403)
+            return $"Meta từ chối xác thực app token (HTTP {ex.HttpStatus}). Kiểm tra App Secret. Chi tiết: {graphHint}";
+        return $"Không kiểm tra được kết nối Meta (code {ex.Code?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?"}/{ex.Subcode?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-"}). {graphHint}";
+    }
+
     private static IResult Error(HttpContext http, int statusCode, string errorCode, string message) =>
         Results.Json(
             new { code = errorCode, errorCode, message, requestId = http.TraceIdentifier },
@@ -397,4 +447,17 @@ public static partial class AdminMetaIntegrationEndpoints
 
     [LoggerMessage(EventId = 5251, Level = LogLevel.Error, Message = "Meta OAuth callback failed for tenant {TenantId}")]
     private static partial void LogCallbackFailed(ILogger logger, Guid tenantId, Exception exception);
+
+    [LoggerMessage(
+        EventId = 5252,
+        Level = LogLevel.Error,
+        Message = "Meta validate failed for tenant {TenantId}: code={Code} subcode={Subcode} http={HttpStatus} message={Message}")]
+    private static partial void LogValidateFailed(
+        ILogger logger,
+        Guid tenantId,
+        int? code,
+        int? subcode,
+        int? httpStatus,
+        string message,
+        Exception exception);
 }

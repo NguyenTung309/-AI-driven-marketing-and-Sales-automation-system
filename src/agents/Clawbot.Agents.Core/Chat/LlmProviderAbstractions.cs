@@ -2,6 +2,7 @@ namespace Clawbot.Agents.Core.Chat;
 
 // A fully-resolved, decrypted provider config for a single agent call.
 // The API key is plaintext here (decrypted at resolve time) and must never be logged or persisted.
+// Phase 2.12: ConfigId/UpdatedAt/SupportsVision support review-path vision capability resolution.
 public sealed record ResolvedLlmConfig(
     string Provider,
     string Model,
@@ -10,7 +11,10 @@ public sealed record ResolvedLlmConfig(
     decimal? InputUsdPer1M,
     decimal? OutputUsdPer1M,
     int? TimeoutSeconds = null,
-    int? MaxOutputTokens = null);
+    int? MaxOutputTokens = null,
+    Guid? ConfigId = null,
+    DateTimeOffset? ConfigUpdatedAt = null,
+    bool? SupportsVision = null);
 
 // Resolves the LLM config bound to an agent (by code) for a tenant.
 // Throws LlmConfigNotConfiguredException when unbound or inactive (D1 — no fallback).

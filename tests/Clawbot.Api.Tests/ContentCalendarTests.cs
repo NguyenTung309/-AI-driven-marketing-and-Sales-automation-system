@@ -13,7 +13,7 @@ public sealed class ContentCalendarTests
         var tenantId = Guid.NewGuid();
         var now = new DateTimeOffset(2026, 6, 8, 2, 0, 0, TimeSpan.Zero);
         var item = ContentItem.Create(tenantId, "instagram", "Carousel body", createdBy: null, now);
-        var schedule = ContentSchedule.Schedule(tenantId, item.Id, "instagram", now.AddHours(3), now);
+        var schedule = ContentSchedule.Schedule(tenantId, item.Id, item.ContentRevision, "instagram", now.AddHours(3), now);
 
         var rows = ContentEndpoints.BuildCalendarRows([schedule], new Dictionary<Guid, ContentItem>
         {
@@ -32,7 +32,7 @@ public sealed class ContentCalendarTests
     {
         var tenantId = Guid.NewGuid();
         var now = new DateTimeOffset(2026, 6, 8, 2, 0, 0, TimeSpan.Zero);
-        var schedule = ContentSchedule.Schedule(tenantId, Guid.NewGuid(), "facebook", now.AddHours(3), now);
+        var schedule = ContentSchedule.Schedule(tenantId, Guid.NewGuid(), 1, "facebook", now.AddHours(3), now);
 
         var rows = ContentEndpoints.BuildCalendarRows([schedule], new Dictionary<Guid, ContentItem>());
 
@@ -77,8 +77,9 @@ public sealed class ContentCalendarTests
         var now = new DateTimeOffset(2026, 6, 8, 2, 0, 0, TimeSpan.Zero);
         var item1 = ContentItem.Create(tenantId, "tiktok", "Post 1", createdBy: null, now);
         var item2 = ContentItem.Create(tenantId, "youtube", "Post 2", createdBy: null, now);
-        var s1 = ContentSchedule.Schedule(tenantId, item1.Id, "tiktok", now.AddHours(3), now);
-        var s2 = ContentSchedule.Schedule(tenantId, item2.Id, "youtube", now.AddHours(5), now);
+        var s1 = ContentSchedule.Schedule(tenantId, item1.Id, item1.ContentRevision, "tiktok", now.AddHours(3), now);
+        var s2 = ContentSchedule.Schedule(tenantId, item2.Id, item2.ContentRevision, "youtube", now.AddHours(5), now);
+        s2.MarkPublishing(now.AddHours(5));
         s2.MarkPosted("https://social.example/p/2", now.AddHours(6));
 
         var rows = ContentEndpoints.BuildCalendarRows(

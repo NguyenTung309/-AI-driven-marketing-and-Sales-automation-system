@@ -104,6 +104,8 @@ public sealed record MetaPageToken(
 
 public sealed record MetaPublishedPost(string PostId, string Permalink);
 
+public sealed record MetaInstagramPublishedMedia(string MediaId, string? Permalink);
+
 public interface IMetaGraphClient
 {
     Task<string> BuildAuthorizationUrlAsync(Guid tenantId, string state, CancellationToken ct = default);
@@ -117,6 +119,18 @@ public interface IMetaGraphClient
         string pageAccessToken,
         string message,
         string? imageUrl,
+        CancellationToken ct = default);
+    Task<string?> ResolveInstagramAccountAsync(
+        Guid tenantId,
+        string pageId,
+        string pageAccessToken,
+        CancellationToken ct = default);
+    Task<MetaInstagramPublishedMedia> PublishInstagramAsync(
+        Guid tenantId,
+        string instagramUserId,
+        string pageAccessToken,
+        string caption,
+        string imageUrl,
         CancellationToken ct = default);
     Task<JsonDocument> GetAsync(
         Guid tenantId,
@@ -317,6 +331,101 @@ public sealed partial class MetaGraphClient(
         return new MetaPublishedPost(postId, $"https://www.facebook.com/{postId}");
     }
 
+    public async Task<string?> ResolveInstagramAccountAsync(
+        Guid tenantId,
+        string pageId,
+        string pageAccessToken,
+        CancellationToken ct = default)
+    {
+        var options = await GetConfiguredAsync(tenantId, ct).ConfigureAwait(false);
+        using var doc = await GetAsync(
+            options,
+            Uri.EscapeDataString(pageId),
+            new Dictionary<string, string?>
+            {
+                ["fields"] = "instagram_business_account{id}",
+            },
+            pageAccessToken,
+            ct).ConfigureAwait(false);
+        if (!doc.RootElement.TryGetProperty("instagram_business_account", out var account)
+            || account.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return OptionalString(account, "id");
+    }
+
+    public async Task<MetaInstagramPublishedMedia> PublishInstagramAsync(
+        Guid tenantId,
+        string instagramUserId,
+        string pageAccessToken,
+        string caption,
+        string imageUrl,
+        CancellationToken ct = default)
+    {
+        var options = await GetConfiguredAsync(tenantId, ct).ConfigureAwait(false);
+        var escapedUserId = Uri.EscapeDataString(instagramUserId);
+        using var creation = await PostAsync(
+            options,
+            $"{escapedUserId}/media",
+            new Dictionary<string, string>
+            {
+                ["image_url"] = imageUrl,
+                ["caption"] = caption,
+            },
+            pageAccessToken,
+            ct).ConfigureAwait(false);
+        var creationId = RequiredString(creation.RootElement, "id");
+
+        using var published = await PostAsync(
+            options,
+            $"{escapedUserId}/media_publish",
+            new Dictionary<string, string>
+            {
+                ["creation_id"] = creationId,
+            },
+            pageAccessToken,
+            ct).ConfigureAwait(false);
+        var mediaId = RequiredString(published.RootElement, "id");
+        var permalink = await ResolveInstagramPermalinkAsync(
+            options,
+            tenantId,
+            mediaId,
+            pageAccessToken,
+            ct).ConfigureAwait(false);
+        return new MetaInstagramPublishedMedia(mediaId, permalink);
+    }
+
+    private async Task<string?> ResolveInstagramPermalinkAsync(
+        MetaGraphOptions options,
+        Guid tenantId,
+        string mediaId,
+        string pageAccessToken,
+        CancellationToken ct)
+    {
+        try
+        {
+            using var doc = await GetAsync(
+                options,
+                Uri.EscapeDataString(mediaId),
+                new Dictionary<string, string?> { ["fields"] = "permalink" },
+                pageAccessToken,
+                ct).ConfigureAwait(false);
+            return OptionalString(doc.RootElement, "permalink");
+        }
+        catch (MetaGraphException ex)
+        {
+            LogInstagramPermalinkLookupFailed(_logger, tenantId, mediaId, ex.Code ?? ex.HttpStatus ?? 0);
+            return null;
+        }
+        catch (HttpRequestException)
+        {
+            LogInstagramPermalinkLookupFailed(_logger, tenantId, mediaId, 0);
+            return null;
+        }
+    }
+
     public async Task<JsonDocument> GetAsync(
         Guid tenantId,
         string relativePath,
@@ -486,6 +595,13 @@ public sealed partial class MetaGraphClient(
 
     [LoggerMessage(EventId = 5250, Level = LogLevel.Debug, Message = "Meta Graph usage {Header}: {Value}")]
     private static partial void LogUsage(ILogger logger, string header, string value);
+
+    [LoggerMessage(EventId = 5251, Level = LogLevel.Warning, Message = "Meta Instagram permalink lookup failed for tenant {TenantId}, media {MediaId}, code {ErrorCode}")]
+    private static partial void LogInstagramPermalinkLookupFailed(
+        ILogger logger,
+        Guid tenantId,
+        string mediaId,
+        int errorCode);
 }
 
 public sealed class MetaGraphException : Exception

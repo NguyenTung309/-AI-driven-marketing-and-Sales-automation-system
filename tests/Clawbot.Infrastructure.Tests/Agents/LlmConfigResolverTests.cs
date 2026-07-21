@@ -46,7 +46,10 @@ public sealed class LlmConfigResolverTests
             "plain-key",
             "https://api.example",
             1.25m,
-            5.5m));
+            5.5m,
+            ConfigId: config.Id,
+            ConfigUpdatedAt: config.UpdatedAt,
+            SupportsVision: config.SupportsVision));
     }
 
     [Fact]

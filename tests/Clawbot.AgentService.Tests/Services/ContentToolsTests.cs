@@ -4,6 +4,8 @@ using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Orchestrator;
 using Clawbot.Agents.Core.Rag;
 using Clawbot.Domain.Content;
+using Clawbot.Infrastructure.Content;
+using Clawbot.SharedKernel.Content;
 using Clawbot.SharedKernel.Time;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -55,6 +57,55 @@ public sealed class ContentToolsTests
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("brief");
         (await fx.Db.ContentItems.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public void ContentGenerateTool_schema_exposes_only_canonical_writable_platforms()
+    {
+        using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
+        var sut = BuildGenerateTool(fx);
+
+        sut.InputSchemaJson.Should().Contain("facebook|instagram|zalo");
+        sut.InputSchemaJson.Should().NotContain("tiktok");
+        sut.InputSchemaJson.Should().NotContain("youtube");
+        sut.InputSchemaJson.Should().NotContain("website");
+    }
+
+    [Theory]
+    [InlineData("tiktok")]
+    [InlineData("youtube")]
+    [InlineData("website")]
+    public async Task ContentGenerateTool_rejects_unsupported_platform_before_generation(string platform)
+    {
+        using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
+        var sut = BuildGenerateTool(fx);
+
+        var result = await sut.InvokeAsync(
+            new Dictionary<string, string> { ["platform"] = platform, ["brief"] = "HSK launch" },
+            new ToolContext(fx.TenantId, "task-1", AgentDefinitionId: Guid.NewGuid(), AgentCode: "content-agent"),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("unsupported platform");
+        (await fx.Db.ContentItems.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+        (await fx.Db.ContentReviewTasks.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ContentGenerateTool_normalizes_canonical_platform_before_generation()
+    {
+        using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
+        var sut = BuildGenerateTool(fx);
+
+        var result = await sut.InvokeAsync(
+            new Dictionary<string, string> { ["platform"] = " Instagram ", ["brief"] = "HSK launch" },
+            new ToolContext(fx.TenantId, "task-1", AgentDefinitionId: Guid.NewGuid(), AgentCode: "content-agent"),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        var saved = await fx.Db.ContentItems.IgnoreQueryFilters().SingleAsync();
+        saved.Platform.Should().Be("instagram");
+        saved.Body.Should().StartWith("Draft for instagram:");
     }
 
     [Fact]
@@ -172,7 +223,9 @@ public sealed class ContentToolsTests
     {
         using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
         var published = ContentItem.Create(fx.TenantId, "facebook", "body", createdBy: null, Now);
-        published.MarkPublished(Now);
+        PrepareApproved(published);
+        published.MarkScheduled(Now.AddMinutes(4));
+        published.MarkPublished(Now.AddMinutes(5));
         fx.Db.ContentItems.Add(published);
         await fx.Db.SaveChangesAsync();
         var sut = BuildApproveTool(fx);
@@ -187,20 +240,28 @@ public sealed class ContentToolsTests
     }
 
     [Fact]
-    public async Task ContentScheduleTool_SchedulesApprovedItem_AndCreatesScheduleRow()
+    public async Task ContentScheduleTool_CreatesGoldenHourIntent_IgnoringCallerTime()
     {
-        // EARS[WHEN scheduling an approved item THE SYSTEM SHALL mark it scheduled and create a ContentSchedule row]
         using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
-        var item = ContentItem.Create(fx.TenantId, "facebook", "body", createdBy: null, Now);
-        item.ApproveByAgent(Guid.NewGuid(), Now);
+        var item = ContentItem.Create(fx.TenantId, "zalo", "body", createdBy: null, Now);
+        PrepareApproved(item);
         fx.Db.ContentItems.Add(item);
         await fx.Db.SaveChangesAsync();
-        var sut = new ContentScheduleTool(fx.Db, new FixedClock(Now), new FakeReviewPolicy(false));
-        var scheduledAt = Now.AddDays(2);
+        var golden = new DefaultGoldenHourResolver();
+        var expected = golden.ResolveNext("zalo", Now);
+        var sut = new ContentScheduleTool(
+            fx.Db,
+            new FixedClock(Now),
+            new ContentAutoScheduler(fx.Db, golden));
 
         var result = await sut.InvokeAsync(
-            new Dictionary<string, string> { ["content_id"] = item.Id.ToString(), ["scheduled_at"] = scheduledAt.ToString("o") },
-            new ToolContext(fx.TenantId, "task-1", AgentDefinitionId: Guid.NewGuid(), AgentCode: "reviewer"),
+            new Dictionary<string, string>
+            {
+                ["content_id"] = item.Id.ToString(),
+                // Caller-controlled time must be ignored by autonomous tool (Phase 3.10).
+                ["scheduled_at"] = Now.AddDays(10).ToString("o"),
+            },
+            new ToolContext(fx.TenantId, "task-1", AgentDefinitionId: Guid.NewGuid(), AgentCode: "reviewer", CanPublishContent: true),
             CancellationToken.None);
 
         result.Success.Should().BeTrue();
@@ -208,8 +269,38 @@ public sealed class ContentToolsTests
         savedItem.Status.Should().Be("scheduled");
         var schedule = await fx.Db.ContentSchedules.IgnoreQueryFilters().SingleAsync();
         schedule.ContentItemId.Should().Be(item.Id);
-        schedule.Platform.Should().Be("facebook");
-        schedule.ScheduledAt.Should().Be(scheduledAt);
+        schedule.ContentRevision.Should().Be(item.ContentRevision);
+        schedule.Platform.Should().Be("zalo");
+        schedule.ScheduledAt.Should().Be(expected);
+        schedule.ApprovalMode.Should().Be(item.ApprovalMode);
+        schedule.PublishingPolicyVersionApplied.Should().Be(item.PublishingPolicyVersionApplied);
+    }
+
+    [Theory]
+    [InlineData("tiktok")]
+    [InlineData("youtube")]
+    [InlineData("website")]
+    public async Task ContentScheduleTool_RejectsLegacyPlatformsWithoutCreatingSchedule(string platform)
+    {
+        using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
+        var item = ContentItem.Create(fx.TenantId, platform, "body", createdBy: null, Now);
+        PrepareApproved(item);
+        fx.Db.ContentItems.Add(item);
+        await fx.Db.SaveChangesAsync();
+        var sut = new ContentScheduleTool(
+            fx.Db,
+            new FixedClock(Now),
+            new ContentAutoScheduler(fx.Db, new DefaultGoldenHourResolver()));
+
+        var result = await sut.InvokeAsync(
+            new Dictionary<string, string> { ["content_id"] = item.Id.ToString() },
+            new ToolContext(fx.TenantId, "task-1", CanPublishContent: true),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be("content.platform_unsupported");
+        (await fx.Db.ContentSchedules.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+        (await fx.Db.ContentItems.IgnoreQueryFilters().SingleAsync()).Status.Should().Be("approved");
     }
 
     [Fact]
@@ -219,43 +310,54 @@ public sealed class ContentToolsTests
         var draft = ContentItem.Create(fx.TenantId, "facebook", "body", createdBy: null, Now);
         fx.Db.ContentItems.Add(draft);
         await fx.Db.SaveChangesAsync();
-        var sut = new ContentScheduleTool(fx.Db, new FixedClock(Now), new FakeReviewPolicy(false));
+        var sut = new ContentScheduleTool(
+            fx.Db,
+            new FixedClock(Now),
+            new ContentAutoScheduler(fx.Db, new DefaultGoldenHourResolver()));
 
         var result = await sut.InvokeAsync(
-            new Dictionary<string, string> { ["content_id"] = draft.Id.ToString(), ["scheduled_at"] = Now.AddDays(2).ToString("o") },
-            new ToolContext(fx.TenantId, "task-1"),
+            new Dictionary<string, string> { ["content_id"] = draft.Id.ToString() },
+            new ToolContext(fx.TenantId, "task-1", CanPublishContent: true),
             CancellationToken.None);
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("draft");
+        result.Error.Should().Contain("content_current_revision_not_schedulable");
         (await fx.Db.ContentSchedules.IgnoreQueryFilters().CountAsync()).Should().Be(0);
     }
 
     [Fact]
-    public async Task ContentPublishTool_PublishesApprovedItem_AndMarksPublished()
+    public async Task ContentPublishTool_Queues_existing_schedule_without_calling_provider()
     {
-        // EARS[WHEN publishing an approved item THE SYSTEM SHALL call the publisher and mark the item published on success]
         using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
         var item = ContentItem.Create(fx.TenantId, "facebook", "body", createdBy: null, Now);
-        item.ApproveByAgent(Guid.NewGuid(), Now);
+        PrepareApproved(item);
+        item.MarkScheduled(Now.AddMinutes(4));
+        var schedule = ContentSchedule.Schedule(
+            fx.TenantId,
+            item.Id,
+            item.ContentRevision,
+            item.Platform,
+            Now.AddDays(1),
+            Now.AddMinutes(4));
+        schedule.SetApprovalContext(
+            item.ApprovalMode!,
+            item.PublishingPolicyVersionApplied!.Value,
+            publishTargetId: null);
+        schedule.MarkHeld("manual_hold", Now.AddMinutes(5));
         fx.Db.ContentItems.Add(item);
+        fx.Db.ContentSchedules.Add(schedule);
         await fx.Db.SaveChangesAsync();
-        var publisher = Substitute.For<Clawbot.Infrastructure.Content.Publishing.ISocialPublisher>();
-        publisher.PublishAsync(Arg.Any<Clawbot.Infrastructure.Content.Publishing.PublishRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new Clawbot.Infrastructure.Content.Publishing.PublishResult(true, "https://fb/post/1", null));
-        var sut = new ContentPublishTool(fx.Db, publisher, new FixedClock(Now), new FakeReviewPolicy(false));
+        var sut = new ContentPublishTool(fx.Db, new FixedClock(Now));
 
         var result = await sut.InvokeAsync(
             new Dictionary<string, string> { ["content_id"] = item.Id.ToString() },
-            new ToolContext(fx.TenantId, "task-1", AgentDefinitionId: Guid.NewGuid(), AgentCode: "publisher"),
+            new ToolContext(fx.TenantId, "task-1", AgentDefinitionId: Guid.NewGuid(), AgentCode: "publisher", CanPublishContent: true),
             CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        var saved = await fx.Db.ContentItems.IgnoreQueryFilters().SingleAsync();
-        saved.Status.Should().Be("published");
-        await publisher.Received(1).PublishAsync(
-            Arg.Is<Clawbot.Infrastructure.Content.Publishing.PublishRequest>(r => r.ContentItemId == item.Id && r.Platform == "facebook"),
-            Arg.Any<CancellationToken>());
+        (await fx.Db.ContentItems.IgnoreQueryFilters().SingleAsync()).Status.Should().Be("scheduled");
+        (await fx.Db.ContentSchedules.IgnoreQueryFilters().SingleAsync()).Status
+            .Should().Be(ContentSchedule.StatusPending);
     }
 
     [Fact]
@@ -265,84 +367,78 @@ public sealed class ContentToolsTests
         var draft = ContentItem.Create(fx.TenantId, "facebook", "body", createdBy: null, Now);
         fx.Db.ContentItems.Add(draft);
         await fx.Db.SaveChangesAsync();
-        var publisher = Substitute.For<Clawbot.Infrastructure.Content.Publishing.ISocialPublisher>();
-        var sut = new ContentPublishTool(fx.Db, publisher, new FixedClock(Now), new FakeReviewPolicy(false));
+        var sut = new ContentPublishTool(fx.Db, new FixedClock(Now));
 
         var result = await sut.InvokeAsync(
             new Dictionary<string, string> { ["content_id"] = draft.Id.ToString() },
-            new ToolContext(fx.TenantId, "task-1"),
+            new ToolContext(fx.TenantId, "task-1", CanPublishContent: true),
             CancellationToken.None);
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("draft");
-        await publisher.DidNotReceive().PublishAsync(Arg.Any<Clawbot.Infrastructure.Content.Publishing.PublishRequest>(), Arg.Any<CancellationToken>());
+        result.Error.Should().Contain("content_current_revision_not_publishable");
     }
 
     [Fact]
-    public async Task ContentPublishTool_SurfacesPublisherFailure()
+    public async Task ContentPublishTool_requires_current_revision_schedule()
     {
         using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
         var item = ContentItem.Create(fx.TenantId, "facebook", "body", createdBy: null, Now);
-        item.ApproveByAgent(Guid.NewGuid(), Now);
+        PrepareApproved(item);
+        item.MarkScheduled(Now.AddMinutes(4));
         fx.Db.ContentItems.Add(item);
         await fx.Db.SaveChangesAsync();
-        var publisher = Substitute.For<Clawbot.Infrastructure.Content.Publishing.ISocialPublisher>();
-        publisher.PublishAsync(Arg.Any<Clawbot.Infrastructure.Content.Publishing.PublishRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new Clawbot.Infrastructure.Content.Publishing.PublishResult(false, null, "facebook_not_configured"));
-        var sut = new ContentPublishTool(fx.Db, publisher, new FixedClock(Now), new FakeReviewPolicy(false));
+        var sut = new ContentPublishTool(fx.Db, new FixedClock(Now));
 
         var result = await sut.InvokeAsync(
             new Dictionary<string, string> { ["content_id"] = item.Id.ToString() },
-            new ToolContext(fx.TenantId, "task-1", AgentDefinitionId: Guid.NewGuid(), AgentCode: "publisher"),
+            new ToolContext(fx.TenantId, "task-1", AgentDefinitionId: Guid.NewGuid(), AgentCode: "publisher", CanPublishContent: true),
             CancellationToken.None);
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("publish_failed");
-        result.Error.Should().Contain("facebook_not_configured");
-        var saved = await fx.Db.ContentItems.IgnoreQueryFilters().SingleAsync();
-        saved.Status.Should().Be("approved"); // unchanged on failure
+        result.Error.Should().Contain("content_schedule_required");
     }
 
     [Fact]
-    public async Task ContentScheduleTool_RefusesUnreviewedItem_WhenTenantRequiresReview()
+    public async Task ContentScheduleTool_RefusesLegacyApproveWithoutPublishingApproval()
     {
-        // Review-gate P1 (G6): autonomous run cannot schedule content lacking the reviewer-agent signoff.
+        // Publishing approval fields are required; legacy Approve alone cannot schedule.
         using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
         var item = ContentItem.Create(fx.TenantId, "facebook", "body", createdBy: null, Now);
-        item.Approve(Guid.NewGuid(), Now); // human approved only — ApprovedByAgentId stays null
+        item.Approve(Guid.NewGuid(), Now);
         fx.Db.ContentItems.Add(item);
         await fx.Db.SaveChangesAsync();
-        var sut = new ContentScheduleTool(fx.Db, new FixedClock(Now), new FakeReviewPolicy(true));
+        var sut = new ContentScheduleTool(
+            fx.Db,
+            new FixedClock(Now),
+            new ContentAutoScheduler(fx.Db, new DefaultGoldenHourResolver()));
 
         var result = await sut.InvokeAsync(
-            new Dictionary<string, string> { ["content_id"] = item.Id.ToString(), ["scheduled_at"] = Now.AddDays(1).ToString("o") },
-            new ToolContext(fx.TenantId, "task-1", AgentDefinitionId: Guid.NewGuid(), AgentCode: "publisher"),
+            new Dictionary<string, string> { ["content_id"] = item.Id.ToString() },
+            new ToolContext(fx.TenantId, "task-1", AgentDefinitionId: Guid.NewGuid(), AgentCode: "publisher", CanPublishContent: true),
             CancellationToken.None);
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("content_review_required");
+        result.Error.Should().Contain("content_current_revision_not_schedulable");
         (await fx.Db.ContentSchedules.IgnoreQueryFilters().CountAsync()).Should().Be(0);
     }
 
     [Fact]
-    public async Task ContentPublishTool_RefusesUnreviewedItem_WhenTenantRequiresReview()
+    public async Task ContentPublishTool_RefusesUnreviewedItem_Unconditionally()
     {
         using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
         var item = ContentItem.Create(fx.TenantId, "facebook", "body", createdBy: null, Now);
         item.Approve(Guid.NewGuid(), Now); // human approved only
         fx.Db.ContentItems.Add(item);
         await fx.Db.SaveChangesAsync();
-        var publisher = Substitute.For<Clawbot.Infrastructure.Content.Publishing.ISocialPublisher>();
-        var sut = new ContentPublishTool(fx.Db, publisher, new FixedClock(Now), new FakeReviewPolicy(true));
+        var sut = new ContentPublishTool(fx.Db, new FixedClock(Now));
 
         var result = await sut.InvokeAsync(
             new Dictionary<string, string> { ["content_id"] = item.Id.ToString() },
-            new ToolContext(fx.TenantId, "task-1", AgentDefinitionId: Guid.NewGuid(), AgentCode: "publisher"),
+            new ToolContext(fx.TenantId, "task-1", AgentDefinitionId: Guid.NewGuid(), AgentCode: "publisher", CanPublishContent: true),
             CancellationToken.None);
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("content_review_required");
-        await publisher.DidNotReceive().PublishAsync(Arg.Any<Clawbot.Infrastructure.Content.Publishing.PublishRequest>(), Arg.Any<CancellationToken>());
+        result.Error.Should().Contain("content_current_revision_not_publishable");
     }
 
     [Fact]
@@ -379,12 +475,53 @@ public sealed class ContentToolsTests
             CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        (await fx.Db.ContentItems.IgnoreQueryFilters().SingleAsync()).CreatedByAgentId.Should().Be(creatorDefId);
+        var saved = await fx.Db.ContentItems.IgnoreQueryFilters().SingleAsync();
+        saved.CreatedByAgentId.Should().Be(creatorDefId);
+        saved.ContentRevision.Should().Be(1);
+        saved.Status.Should().Be("draft");
+
+        var reviewTask = await fx.Db.ContentReviewTasks.IgnoreQueryFilters().SingleAsync();
+        reviewTask.TenantId.Should().Be(fx.TenantId);
+        reviewTask.ContentItemId.Should().Be(saved.Id);
+        reviewTask.ContentRevision.Should().Be(1);
+        reviewTask.Status.Should().Be(ContentReviewTask.StatusPending);
+        reviewTask.NextAttemptAt.Should().Be(Now);
+        reviewTask.CreatedAt.Should().Be(Now);
     }
 
-    private sealed class FakeReviewPolicy(bool required) : Clawbot.SharedKernel.Content.IContentReviewPolicyResolver
+    [Fact]
+    public async Task ContentGenerateTool_RequiresAgentDefinitionId()
     {
-        public Task<bool> IsRequiredAsync(Guid tenantId, CancellationToken ct = default) => Task.FromResult(required);
+        using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
+        var sut = BuildGenerateTool(fx);
+
+        var result = await sut.InvokeAsync(
+            new Dictionary<string, string> { ["platform"] = "facebook", ["brief"] = "HSK launch" },
+            new ToolContext(fx.TenantId, "task-1", AgentDefinitionId: null, AgentCode: "content-agent"),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("content_generator_agent_required");
+        (await fx.Db.ContentItems.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+        (await fx.Db.ContentReviewTasks.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+    }
+
+    private static void PrepareApproved(ContentItem item)
+    {
+        item.BeginAgentReview(item.ContentRevision, Now.AddMinutes(1));
+        item.RecordAgentReview(
+            item.ContentRevision,
+            ContentItem.ReviewStatusPassed,
+            ContentItem.ImageReviewStatusNotApplicable,
+            reviewedImageCount: 0,
+            reviewerAgentId: Guid.NewGuid(),
+            reason: "passed",
+            at: Now.AddMinutes(2));
+        item.ApproveAutomatically(
+            item.ContentRevision,
+            ContentItem.PublishingPolicyAutomatic,
+            appliedPolicyVersion: 1,
+            at: Now.AddMinutes(3));
     }
 
     private static ContentGenerateTool BuildGenerateTool(AgentServiceTestAppDb fx)

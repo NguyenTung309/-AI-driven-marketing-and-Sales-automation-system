@@ -2,9 +2,11 @@ using Clawbot.AgentService.Services;
 using Clawbot.Agents.Contracts.Content;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Rag;
+using Clawbot.Domain.Agents;
 using Clawbot.Domain.Content;
 using Clawbot.SharedKernel.Time;
 using FluentAssertions;
+using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -22,6 +24,7 @@ public sealed class ContentAgentGrpcServiceTests
         var tenantId = Guid.NewGuid();
         var briefId = Guid.NewGuid();
         using var fx = new AgentServiceTestAppDb(tenantId);
+        var generatorId = await SeedContentAgentAsync(fx);
         var service = BuildService(fx);
 
         var response = await service.Generate(
@@ -55,6 +58,88 @@ public sealed class ContentAgentGrpcServiceTests
         saved.CreatedAt.Should().Be(Now);
         saved.UpdatedAt.Should().Be(Now);
         saved.Status.Should().Be("draft");
+        saved.CreatedByAgentId.Should().Be(generatorId);
+        saved.ContentRevision.Should().Be(1);
+
+        var reviewTask = await fx.Db.ContentReviewTasks.IgnoreQueryFilters().SingleAsync();
+        reviewTask.TenantId.Should().Be(tenantId);
+        reviewTask.ContentItemId.Should().Be(saved.Id);
+        reviewTask.ContentRevision.Should().Be(1);
+        reviewTask.Status.Should().Be(ContentReviewTask.StatusPending);
+        reviewTask.NextAttemptAt.Should().Be(Now);
+        reviewTask.CreatedAt.Should().Be(Now);
+    }
+
+    [Theory]
+    [InlineData("tiktok")]
+    [InlineData("youtube")]
+    [InlineData("website")]
+    public async Task Generate_rejects_unsupported_channel_without_persisting(string platform)
+    {
+        using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
+        var service = BuildService(fx);
+
+        var act = () => service.Generate(
+            new ContentRequest
+            {
+                TenantId = fx.TenantId.ToString(),
+                Channel = platform,
+                Brief = "HSK launch",
+            },
+            TestServerCallContext.Create());
+
+        var exception = await act.Should().ThrowAsync<RpcException>();
+        exception.Which.StatusCode.Should().Be(StatusCode.InvalidArgument);
+        exception.Which.Status.Detail.Should().Be("content.platform_unsupported");
+        (await fx.Db.ContentItems.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+        (await fx.Db.ContentReviewTasks.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Generate_normalizes_supported_channel_before_generation_and_persistence()
+    {
+        var tenantId = Guid.NewGuid();
+        using var fx = new AgentServiceTestAppDb(tenantId);
+        await SeedContentAgentAsync(fx);
+        var service = BuildService(fx);
+
+        var response = await service.Generate(
+            new ContentRequest
+            {
+                TenantId = tenantId.ToString(),
+                Channel = " Instagram ",
+                Brief = "HSK launch",
+            },
+            TestServerCallContext.Create());
+
+        response.Title.Should().Be("instagram");
+        response.Body.Should().Be("Draft for instagram: Brief=HSK launch");
+        response.Variants.Should().ContainSingle().Which.Platform.Should().Be("instagram");
+        (await fx.Db.ContentItems.IgnoreQueryFilters().SingleAsync()).Platform.Should().Be("instagram");
+        (await fx.Db.ContentReviewTasks.IgnoreQueryFilters().CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Generate_fails_closed_when_content_agent_definition_missing()
+    {
+        var tenantId = Guid.NewGuid();
+        using var fx = new AgentServiceTestAppDb(tenantId);
+        var service = BuildService(fx);
+
+        var act = async () => await service.Generate(
+            new ContentRequest
+            {
+                TenantId = tenantId.ToString(),
+                Channel = "facebook",
+                Brief = "HSK launch",
+            },
+            TestServerCallContext.Create());
+
+        var ex = await act.Should().ThrowAsync<RpcException>();
+        ex.Which.StatusCode.Should().Be(StatusCode.FailedPrecondition);
+        ex.Which.Status.Detail.Should().Contain("content_agent_not_configured");
+        (await fx.Db.ContentItems.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+        (await fx.Db.ContentReviewTasks.IgnoreQueryFilters().CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -63,6 +148,7 @@ public sealed class ContentAgentGrpcServiceTests
         var tenantId = Guid.NewGuid();
         var briefId = Guid.NewGuid();
         using var fx = new AgentServiceTestAppDb(tenantId);
+        var generatorId = await SeedContentAgentAsync(fx);
         var source = ContentItem.Create(tenantId, "facebook", "Original source", createdBy: null, Now.AddDays(-1), briefId);
         fx.Db.ContentItems.Add(source);
         await fx.Db.SaveChangesAsync();
@@ -73,16 +159,16 @@ public sealed class ContentAgentGrpcServiceTests
             {
                 TenantId = tenantId.ToString(),
                 ContentId = source.Id.ToString(),
-                TargetChannels = { "tiktok", " youtube ", "TIKTOK" },
+                TargetChannels = { "zalo", " Instagram ", "ZALO" },
             },
             TestServerCallContext.Create());
 
-        response.Title.Should().Be("tiktok");
-        response.Body.Should().Be("Draft for tiktok: Brief=Original source");
-        response.Variants.Select(v => v.Platform).Should().Equal("tiktok", "youtube");
+        response.Title.Should().Be("zalo");
+        response.Body.Should().Be("Draft for zalo: Brief=Original source");
+        response.Variants.Select(v => v.Platform).Should().Equal("zalo", "instagram");
         response.Variants.Select(v => v.Body).Should().Equal(
-            "Draft for tiktok: Brief=Original source",
-            "Draft for youtube: Brief=Original source");
+            "Draft for zalo: Brief=Original source",
+            "Draft for instagram: Brief=Original source");
 
         var saved = (await fx.Db.ContentItems.IgnoreQueryFilters().ToListAsync())
             .OrderBy(i => i.CreatedAt)
@@ -91,16 +177,86 @@ public sealed class ContentAgentGrpcServiceTests
         saved.Should().HaveCount(3);
         saved[0].Id.Should().Be(source.Id);
         var repurposed = saved.Where(i => i.Id != source.Id).OrderBy(i => i.Platform).ToList();
-        repurposed.Select(i => i.Platform).Should().Equal("tiktok", "youtube");
+        repurposed.Select(i => i.Platform).Should().Equal("instagram", "zalo");
         repurposed.Should().OnlyContain(i =>
             i.TenantId == tenantId
             && i.BriefId == briefId
             && i.CreatedAt == Now
             && i.UpdatedAt == Now
-            && i.Status == "draft");
+            && i.Status == "draft"
+            && i.CreatedByAgentId == generatorId
+            && i.ContentRevision == 1);
         repurposed.Select(i => i.Body).Should().BeEquivalentTo(
-            ["Draft for tiktok: Brief=Original source", "Draft for youtube: Brief=Original source"]);
-        response.ContentId.Should().Be(repurposed.Single(i => i.Platform == "tiktok").Id.ToString());
+            ["Draft for instagram: Brief=Original source", "Draft for zalo: Brief=Original source"]);
+        response.ContentId.Should().Be(repurposed.Single(i => i.Platform == "zalo").Id.ToString());
+
+        var reviewTasks = await fx.Db.ContentReviewTasks.IgnoreQueryFilters()
+            .OrderBy(task => task.ContentItemId)
+            .ToListAsync();
+        reviewTasks.Should().HaveCount(2);
+        reviewTasks.Select(task => task.ContentItemId)
+            .Should().BeEquivalentTo(repurposed.Select(item => item.Id));
+        reviewTasks.Should().OnlyContain(task =>
+            task.TenantId == tenantId
+            && task.ContentRevision == 1
+            && task.Status == ContentReviewTask.StatusPending
+            && task.NextAttemptAt == Now
+            && task.CreatedAt == Now);
+    }
+
+    [Theory]
+    [InlineData("tiktok")]
+    [InlineData("youtube")]
+    [InlineData("website")]
+    public async Task Repurpose_rejects_unsupported_target_with_stable_error(string platform)
+    {
+        using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
+        var service = BuildService(fx);
+        var request = new RepurposeRequest
+        {
+            TenantId = fx.TenantId.ToString(),
+            ContentId = Guid.NewGuid().ToString(),
+        };
+        request.TargetChannels.Add(platform);
+
+        var act = () => service.Repurpose(request, TestServerCallContext.Create());
+
+        var exception = await act.Should().ThrowAsync<RpcException>();
+        exception.Which.StatusCode.Should().Be(StatusCode.InvalidArgument);
+        exception.Which.Status.Detail.Should().Be("content.platform_unsupported");
+    }
+
+    [Fact]
+    public async Task Repurpose_rejects_empty_target_list_with_stable_error()
+    {
+        using var fx = new AgentServiceTestAppDb(Guid.NewGuid());
+        var service = BuildService(fx);
+
+        var act = () => service.Repurpose(
+            new RepurposeRequest
+            {
+                TenantId = fx.TenantId.ToString(),
+                ContentId = Guid.NewGuid().ToString(),
+            },
+            TestServerCallContext.Create());
+
+        var exception = await act.Should().ThrowAsync<RpcException>();
+        exception.Which.StatusCode.Should().Be(StatusCode.InvalidArgument);
+        exception.Which.Status.Detail.Should().Be("content.repurpose_invalid");
+    }
+
+    private static async Task<Guid> SeedContentAgentAsync(AgentServiceTestAppDb fx)
+    {
+        var generator = AgentDefinition.Create(
+            fx.TenantId,
+            "content-agent",
+            "Content Agent",
+            "content",
+            "Generate drafts",
+            Now);
+        fx.Db.AgentDefinitions.Add(generator);
+        await fx.Db.SaveChangesAsync();
+        return generator.Id;
     }
 
     private static ContentAgentGrpcService BuildService(AgentServiceTestAppDb fx)

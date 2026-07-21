@@ -1,4 +1,5 @@
 using Clawbot.Agents.Core.Skills.Nlp;
+using Clawbot.Domain.Content;
 using Clawbot.Domain.Conversations;
 using Clawbot.Domain.Notifications;
 using Clawbot.Infrastructure.Jobs;
@@ -32,6 +33,36 @@ public sealed class RetentionPurgeJobTests
             .Select(n => n.Title)
             .ToListAsync();
         remainingTitles.Should().Equal("boundary", "fresh");
+    }
+
+    [Fact]
+    public async Task RunAsync_removes_content_workflow_metrics_older_than_180_days_across_tenants()
+    {
+        using var t = new TestAppDb();
+        var now = new DateTimeOffset(2026, 6, 16, 12, 0, 0, TimeSpan.Zero);
+        var otherTenantId = Guid.NewGuid();
+        t.Db.ContentWorkflowMetricsHourly.AddRange(
+            ContentWorkflowMetricsHourly.Create(t.TenantId, now.AddDays(-181)),
+            ContentWorkflowMetricsHourly.Create(otherTenantId, now.AddDays(-181)),
+            ContentWorkflowMetricsHourly.Create(t.TenantId, now.AddDays(-180)),
+            ContentWorkflowMetricsHourly.Create(t.TenantId, now.AddDays(-2)));
+        await t.Db.SaveChangesAsync();
+        var sut = new RetentionPurgeJob(
+            t.Db,
+            IdentityRedactor(),
+            NullLogger<RetentionPurgeJob>.Instance,
+            new FixedTimeProvider(now));
+
+        await sut.RunAsync();
+
+        var remaining = await t.Db.ContentWorkflowMetricsHourly
+            .IgnoreQueryFilters()
+            .OrderBy(metrics => metrics.HourUtc)
+            .Select(metrics => metrics.HourUtc)
+            .ToListAsync();
+        remaining.Should().Equal(
+            ContentWorkflowMetricsHourly.Create(t.TenantId, now.AddDays(-180)).HourUtc,
+            ContentWorkflowMetricsHourly.Create(t.TenantId, now.AddDays(-2)).HourUtc);
     }
 
     [Fact]

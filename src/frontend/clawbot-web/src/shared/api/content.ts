@@ -11,6 +11,28 @@ export interface ContentBrief {
   readonly updatedAt: string;
 }
 
+export interface ContentAgentReview {
+  readonly status: string;
+  readonly reviewedRevision: number | null;
+  readonly reviewedByAgentId: string | null;
+  readonly reviewedAt: string | null;
+  readonly reason: string | null;
+  readonly imageReviewStatus: string;
+  readonly reviewedImageCount: number;
+}
+
+export interface ContentPublishingApproval {
+  readonly status: string;
+  readonly policyApplied: string | null;
+  readonly policyVersionApplied: number | null;
+  readonly approvedRevision: number | null;
+  readonly mode: string | null;
+  readonly approvedBy: string | null;
+  readonly approvedAt: string | null;
+  readonly reason: string | null;
+  readonly requirementReason: string | null;
+}
+
 export interface ContentItem {
   readonly id: string;
   readonly briefId: string | null;
@@ -23,6 +45,51 @@ export interface ContentItem {
   readonly approvedAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly contentRevision?: number;
+  readonly agentReview?: ContentAgentReview | null;
+  readonly publishingApproval?: ContentPublishingApproval | null;
+  readonly workflowState?: string;
+  readonly canApprove?: boolean;
+  readonly canReject?: boolean;
+  readonly canRetryReview?: boolean;
+  readonly canSchedule?: boolean;
+  readonly canPublish?: boolean;
+}
+
+export type ContentPublishingApprovalPolicy = "automatic" | "human_required";
+export type ContentReviewerVisionCapability = "available" | "unavailable" | "unknown";
+
+export interface ContentPublishingPolicy {
+  readonly agentReviewRequired: boolean;
+  readonly agentReviewMode: string;
+  readonly reviewerVisionCapability: ContentReviewerVisionCapability | string;
+  readonly publishingApprovalPolicy: ContentPublishingApprovalPolicy | string;
+  readonly policyVersion: number;
+  readonly updatedAt: string;
+}
+
+export interface UpdateContentPublishingPolicyPayload {
+  readonly publishingApprovalPolicy: ContentPublishingApprovalPolicy;
+}
+
+export interface ApproveContentItemPayload {
+  readonly expectedRevision: number;
+  readonly overrideReason?: string | null;
+}
+
+export interface RejectContentItemPayload {
+  readonly expectedRevision: number;
+  readonly reason?: string | null;
+}
+
+export interface RetryAgentReviewPayload {
+  readonly expectedRevision: number;
+}
+
+export interface ReconcilePublishPayload {
+  readonly outcome: "succeeded" | "failed";
+  readonly externalPostId?: string | null;
+  readonly errorCode?: string | null;
 }
 
 export interface ContentQueueResponse {
@@ -47,6 +114,8 @@ export interface ContentSchedule {
   readonly likeCount: number | null;
   readonly commentCount: number | null;
   readonly engagementSyncedAt: string | null;
+  readonly retryCount: number;
+  readonly lastError: string | null;
 }
 
 export interface ContentCalendarItem {
@@ -61,6 +130,8 @@ export interface ContentCalendarItem {
   readonly metaAssetId: string | null;
   readonly likeCount: number | null;
   readonly commentCount: number | null;
+  readonly retryCount: number;
+  readonly lastError: string | null;
 }
 
 export interface ContentPublishTarget {
@@ -272,13 +343,38 @@ export async function deleteContentItem(id: string): Promise<void> {
   await apiClient.delete(`/api/content/items/${id}`);
 }
 
-export async function approveContentItem(id: string): Promise<ContentItem> {
-  const res = await apiClient.post<ContentItem>(`/api/content/items/${id}/approve`);
+export async function getContentPublishingPolicy(): Promise<ContentPublishingPolicy> {
+  const res = await apiClient.get<ContentPublishingPolicy>("/api/content/settings/publishing-policy");
   return res.data;
 }
 
-export async function rejectContentItem(id: string, reason?: string): Promise<ContentItem> {
-  const res = await apiClient.post<ContentItem>(`/api/content/items/${id}/reject`, { reason: reason?.trim() || null });
+export async function updateContentPublishingPolicy(
+  payload: UpdateContentPublishingPolicyPayload,
+): Promise<ContentPublishingPolicy> {
+  const res = await apiClient.put<ContentPublishingPolicy>("/api/content/settings/publishing-policy", payload);
+  return res.data;
+}
+
+export async function approveContentItem(id: string, payload: ApproveContentItemPayload): Promise<ContentItem> {
+  const res = await apiClient.post<ContentItem>(`/api/content/items/${id}/approve`, {
+    expectedRevision: payload.expectedRevision,
+    overrideReason: payload.overrideReason?.trim() || null,
+  });
+  return res.data;
+}
+
+export async function rejectContentItem(id: string, payload: RejectContentItemPayload): Promise<ContentItem> {
+  const res = await apiClient.post<ContentItem>(`/api/content/items/${id}/reject`, {
+    expectedRevision: payload.expectedRevision,
+    reason: payload.reason?.trim() || null,
+  });
+  return res.data;
+}
+
+export async function retryAgentReview(id: string, payload: RetryAgentReviewPayload): Promise<ContentItem> {
+  const res = await apiClient.post<ContentItem>(`/api/content/items/${id}/agent-review/retry`, {
+    expectedRevision: payload.expectedRevision,
+  });
   return res.data;
 }
 
@@ -306,4 +402,18 @@ export async function getContentCalendar(params: ContentCalendarParams = {}): Pr
 
 export async function deleteContentSchedule(id: string): Promise<void> {
   await apiClient.delete(`/api/content/schedule/${id}`);
+}
+
+// Phase 4.6: privileged durable retry — resets schedule state for the Hangfire publisher (no inline provider).
+export async function retryContentSchedule(id: string): Promise<ContentSchedule> {
+  const res = await apiClient.post<ContentSchedule>(`/api/content/schedules/${id}/publish/retry`);
+  return res.data;
+}
+
+export async function reconcileContentSchedule(
+  id: string,
+  payload: ReconcilePublishPayload,
+): Promise<ContentSchedule> {
+  const res = await apiClient.post<ContentSchedule>(`/api/content/schedules/${id}/publish/reconcile`, payload);
+  return res.data;
 }

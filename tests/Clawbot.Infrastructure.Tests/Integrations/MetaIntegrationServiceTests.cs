@@ -218,6 +218,167 @@ public sealed class MetaIntegrationServiceTests
         snapshot.Connected.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task ResolveInstagramAsync_distinguishes_missing_usable_meta_page()
+    {
+        var tenant = Tenant.Create("meta-instagram-none", "Meta Instagram None", "pro", Now);
+        using var fx = new TestAppDb(tenant.Id);
+        fx.Db.Tenants.Add(tenant);
+        await fx.Db.SaveChangesAsync();
+        var service = BuildService(fx, AuthorizedGraph());
+
+        var result = await service.ResolveInstagramAsync(tenant.Id, null, CancellationToken.None);
+
+        result.Status.Should().Be(MetaInstagramResolutionStatus.MetaOrPageUnavailable);
+        result.Credential.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResolveInstagramAsync_distinguishes_connection_without_usable_page()
+    {
+        var tenant = Tenant.Create("meta-instagram-no-page", "Meta Instagram No Page", "pro", Now);
+        using var fx = new TestAppDb(tenant.Id);
+        fx.Db.Tenants.Add(tenant);
+        await fx.Db.SaveChangesAsync();
+        var graph = AuthorizedGraph();
+        graph.DebugTokenAsync(tenant.Id, "root-token", Arg.Any<CancellationToken>())
+            .Returns(new MetaDebugToken(
+                true,
+                "app-123",
+                "BUSINESS_INTEGRATION_SYSTEM_USER",
+                "system-user-1",
+                ["pages_show_list", "pages_read_engagement", "pages_manage_posts", "instagram_basic", "instagram_content_publish"],
+                null,
+                null));
+        graph.GetPagesAsync(tenant.Id, "root-token", Arg.Any<CancellationToken>()).Returns(
+            [new MetaPageToken("page-read", "Read only", "page-token", ["ANALYZE"])]);
+        var service = BuildService(fx, graph);
+        await service.CompleteAuthorizationAsync(tenant.Id, "oauth-code");
+
+        var result = await service.ResolveInstagramAsync(tenant.Id, null, CancellationToken.None);
+
+        result.Status.Should().Be(MetaInstagramResolutionStatus.MetaOrPageUnavailable);
+        result.Credential.Should().BeNull();
+        (await service.GetSnapshotAsync(tenant.Id)).Connected.Should().BeTrue();
+        await graph.DidNotReceive().ResolveInstagramAccountAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("instagram_basic")]
+    [InlineData("instagram_content_publish")]
+    public async Task ResolveInstagramAsync_requires_each_instagram_scope_without_invalidating_facebook(
+        string missingScope)
+    {
+        var tenantSlug = string.Equals(missingScope, "instagram_basic", StringComparison.Ordinal)
+            ? "meta-ig-basic"
+            : "meta-ig-publish";
+        var tenant = Tenant.Create(tenantSlug, "Meta Instagram Scope", "pro", Now);
+        using var fx = new TestAppDb(tenant.Id);
+        fx.Db.Tenants.Add(tenant);
+        await fx.Db.SaveChangesAsync();
+        var graph = AuthorizedGraph();
+        var grantedScopes = new[]
+        {
+            "pages_show_list",
+            "pages_read_engagement",
+            "pages_manage_posts",
+            "instagram_basic",
+            "instagram_content_publish",
+        }.Where(scope => !string.Equals(scope, missingScope, StringComparison.Ordinal)).ToArray();
+        graph.DebugTokenAsync(tenant.Id, "root-token", Arg.Any<CancellationToken>())
+            .Returns(new MetaDebugToken(
+                true,
+                "app-123",
+                "BUSINESS_INTEGRATION_SYSTEM_USER",
+                "system-user-1",
+                grantedScopes,
+                null,
+                null));
+        graph.GetPagesAsync(tenant.Id, "root-token", Arg.Any<CancellationToken>()).Returns(
+            [new MetaPageToken("page-write", "Writable", "page-token", ["CREATE_CONTENT"])]);
+        var service = BuildService(fx, graph);
+        await service.CompleteAuthorizationAsync(tenant.Id, "oauth-code");
+
+        var result = await service.ResolveInstagramAsync(tenant.Id, null, CancellationToken.None);
+
+        result.Status.Should().Be(MetaInstagramResolutionStatus.MissingScopes);
+        result.Credential.Should().BeNull();
+        (await service.GetSnapshotAsync(tenant.Id)).Connected.Should().BeTrue();
+        (await service.ResolvePageAsync(tenant.Id, null)).Should().NotBeNull();
+        await graph.DidNotReceive().ResolveInstagramAccountAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ResolveInstagramAsync_reports_page_not_linked_when_scopes_are_present()
+    {
+        var tenant = Tenant.Create("meta-instagram-unlinked", "Meta Instagram Unlinked", "pro", Now);
+        using var fx = new TestAppDb(tenant.Id);
+        fx.Db.Tenants.Add(tenant);
+        await fx.Db.SaveChangesAsync();
+        var graph = InstagramAuthorizedGraph(tenant.Id, instagramUserId: null);
+        var service = BuildService(fx, graph);
+        await service.CompleteAuthorizationAsync(tenant.Id, "oauth-code");
+
+        var result = await service.ResolveInstagramAsync(tenant.Id, null, CancellationToken.None);
+
+        result.Status.Should().Be(MetaInstagramResolutionStatus.NotLinked);
+        result.Credential.Should().BeNull();
+        await graph.Received(1).ResolveInstagramAccountAsync(
+            tenant.Id,
+            "page-write",
+            "page-token",
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ResolveInstagramAsync_returns_typed_immutable_linked_credential()
+    {
+        var tenant = Tenant.Create("meta-instagram-linked", "Meta Instagram Linked", "pro", Now);
+        using var fx = new TestAppDb(tenant.Id);
+        fx.Db.Tenants.Add(tenant);
+        await fx.Db.SaveChangesAsync();
+        var graph = InstagramAuthorizedGraph(tenant.Id, "ig-user-123");
+        var service = BuildService(fx, graph);
+        await service.CompleteAuthorizationAsync(tenant.Id, "oauth-code");
+        var page = await fx.Db.MetaAssets.IgnoreQueryFilters().SingleAsync();
+
+        var result = await service.ResolveInstagramAsync(tenant.Id, page.Id, CancellationToken.None);
+
+        result.Status.Should().Be(MetaInstagramResolutionStatus.Resolved);
+        result.Credential.Should().Be(new MetaInstagramCredential(page.Id, "ig-user-123", "page-token"));
+    }
+
+    private static IMetaGraphClient InstagramAuthorizedGraph(Guid tenantId, string? instagramUserId)
+    {
+        var graph = AuthorizedGraph();
+        graph.DebugTokenAsync(tenantId, "root-token", Arg.Any<CancellationToken>())
+            .Returns(new MetaDebugToken(
+                true,
+                "app-123",
+                "BUSINESS_INTEGRATION_SYSTEM_USER",
+                "system-user-1",
+                ["pages_show_list", "pages_read_engagement", "pages_manage_posts", "instagram_basic", "instagram_content_publish"],
+                null,
+                null));
+        graph.GetPagesAsync(tenantId, "root-token", Arg.Any<CancellationToken>()).Returns(
+            [new MetaPageToken("page-write", "Writable", "page-token", ["CREATE_CONTENT"])]);
+        graph.ResolveInstagramAccountAsync(
+                tenantId,
+                "page-write",
+                "page-token",
+                Arg.Any<CancellationToken>())
+            .Returns(instagramUserId);
+        return graph;
+    }
+
     private static IMetaGraphClient AuthorizedGraph(string appId = "app-123")
     {
         var graph = Substitute.For<IMetaGraphClient>();

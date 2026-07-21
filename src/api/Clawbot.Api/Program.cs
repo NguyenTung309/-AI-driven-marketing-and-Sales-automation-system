@@ -129,6 +129,7 @@ builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jo
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.SaleAssistUpsellJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.AgentSandboxJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.LeadCreateWithSkillsJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.LeadRevenueEstimateJobHandler>();
 // Relay notifications published on Redis by AgentService (run failed / pending approval) into NotificationHub.
 builder.Services.AddHostedService<Clawbot.Api.Hubs.RedisNotificationRelay>();
 // B5: cost summary cho điểm phê duyệt — cùng ledger với cost guard của orchestrator.

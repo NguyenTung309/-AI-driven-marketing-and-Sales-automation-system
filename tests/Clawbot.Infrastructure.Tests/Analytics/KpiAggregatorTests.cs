@@ -78,6 +78,43 @@ public sealed class KpiAggregatorTests
     }
 
     [Fact]
+    public async Task Daily_aggregate_sums_only_approved_revenue_by_decided_at_and_platform()
+    {
+        using var fx = new TestAppDb();
+        var day = new DateOnly(2026, 6, 7);
+        var dayStart = new DateTimeOffset(2026, 6, 7, 0, 0, 0, TimeSpan.FromHours(7));
+        var userId = Guid.NewGuid();
+
+        var facebookLead = Lead.Create(fx.TenantId, Guid.NewGuid(), "facebook", dayStart.AddHours(1));
+        facebookLead.MarkCustomer("paid", dayStart.AddHours(2));
+        var youtubeLead = Lead.Create(fx.TenantId, Guid.NewGuid(), "youtube", dayStart.AddHours(1));
+        youtubeLead.MarkCustomer("paid", dayStart.AddHours(2));
+
+        // Approved today facebook
+        var approvedFb = LeadRevenue.CreateManual(fx.TenantId, facebookLead.Id, 5_000_000m, "VND", userId, dayStart.AddHours(3));
+        // Pending AI — không vào KPI
+        var pending = LeadRevenue.ProposeByAi(fx.TenantId, facebookLead.Id, 9_000_000m, "VND", "x", dayStart.AddHours(4));
+        // Rejected
+        var rejected = LeadRevenue.ProposeByAi(fx.TenantId, youtubeLead.Id, 1_000_000m, "VND", "y", dayStart.AddHours(4));
+        rejected.Reject(userId, dayStart.AddHours(5));
+        // Approved youtube hôm nay
+        var approvedYt = LeadRevenue.CreateManual(fx.TenantId, youtubeLead.Id, 2_000_000m, "VND", userId, dayStart.AddHours(6));
+        // Approved ngày khác — không vào
+        var previous = LeadRevenue.CreateManual(fx.TenantId, facebookLead.Id, 7_000_000m, "VND", userId, dayStart.AddDays(-1));
+
+        fx.Db.Leads.AddRange(facebookLead, youtubeLead);
+        fx.Db.LeadRevenues.AddRange(approvedFb, pending, rejected, approvedYt, previous);
+        await fx.Db.SaveChangesAsync();
+        fx.Db.ChangeTracker.Clear();
+
+        var rows = await new KpiAggregator(fx.Db).AggregateDailyAsync(fx.TenantId, day, CancellationToken.None);
+
+        rows.Single(r => r.Platform == "facebook").Revenue.Should().Be(5_000_000m);
+        rows.Single(r => r.Platform == "youtube").Revenue.Should().Be(2_000_000m);
+        rows.Single(r => r.Platform == "all").Revenue.Should().Be(7_000_000m);
+    }
+
+    [Fact]
     public async Task Rollup_job_writes_platform_rows_idempotently()
     {
         using var fx = new TestAppDb();

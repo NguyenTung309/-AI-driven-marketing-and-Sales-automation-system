@@ -36,14 +36,14 @@ public sealed class AllowedToolsValidationTests
         // EARS[WHEN the admin lacks a tool's required permission THE SYSTEM SHALL deny granting it to an agent]
         var error = await OrchestrationV2Endpoints.ValidateAllowedToolsAsync(
             """["content.publish"]""", UserWithPerms(), Resolver(), CancellationToken.None);
-        error.Should().StartWith("tool_permission_denied:content.publish:content:write");
+        error.Should().StartWith("tool_permission_denied:content.publish:content:publish");
     }
 
     [Fact]
     public async Task Validate_AllowsToolWhenAdminHasRequiredPermission()
     {
         var error = await OrchestrationV2Endpoints.ValidateAllowedToolsAsync(
-            """["content.publish","content.approve"]""", UserWithPerms("content:write"), Resolver(), CancellationToken.None);
+            """["content.publish","content.review"]""", UserWithPerms("content:write", "content:publish"), Resolver(), CancellationToken.None);
         error.Should().BeNull();
     }
 

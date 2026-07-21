@@ -51,6 +51,26 @@ jobs:
         working-directory: src/frontend/clawbot-web
         run: npm run build
 
+      - name: Install Playwright Chromium
+        working-directory: src/frontend/clawbot-web
+        run: npx playwright install --with-deps chromium
+
+      - name: Frontend Platform Focus E2E
+        working-directory: src/frontend/clawbot-web
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 15876 --strictPort > platform-focus-vite.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid"' EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:15876/login > /dev/null; then
+              npm run test:e2e:platform
+              exit $?
+            fi
+            sleep 1
+          done
+          cat platform-focus-vite.log
+          exit 1
+
       - name: Unit Tests (no Docker)
         run: >
           dotnet test Clawbot.sln

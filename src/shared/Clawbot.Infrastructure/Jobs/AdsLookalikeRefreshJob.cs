@@ -32,8 +32,9 @@ public sealed partial class AdsLookalikeRefreshJob(
                     continue;
 
                 var seedKeys = await db.Leads.IgnoreQueryFilters()
-                    .Where(l => l.TenantId == tenantId && (l.Stage == "hot" || l.Stage == "won"))
-                    .Join(db.Contacts.IgnoreQueryFilters(),
+                    .Where(l => l.TenantId == tenantId && (l.Stage == "hot" || l.Stage == "customer"))
+                    .Join(
+                        db.Contacts.IgnoreQueryFilters().Where(c => c.TenantId == tenantId),
                         l => l.ContactId,
                         c => c.Id,
                         (l, c) => c.Phone ?? c.Email ?? string.Empty)

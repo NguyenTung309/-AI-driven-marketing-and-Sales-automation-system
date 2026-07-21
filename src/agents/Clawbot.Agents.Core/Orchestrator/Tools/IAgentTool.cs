@@ -21,7 +21,8 @@ public sealed record ToolContext(
     Guid? AgentDefinitionId = null,
     string? AgentCode = null,
     bool RequireHighRiskApproval = false,
-    bool DryRun = false);
+    bool DryRun = false,
+    bool CanPublishContent = false);
 
 public sealed record ToolResult(bool Success, string Output, string? Error)
 {

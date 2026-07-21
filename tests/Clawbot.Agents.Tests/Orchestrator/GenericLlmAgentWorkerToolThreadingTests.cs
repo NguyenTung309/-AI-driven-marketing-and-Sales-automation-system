@@ -79,6 +79,98 @@ public sealed class GenericLlmAgentWorkerToolThreadingTests
         result.Output.Should().Contain("c-123");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_Fails_WhenTextOnlyAdmitsMissingLeadList()
+    {
+        var definition = new AgentDefinitionCatalogEntry(
+            Id: Guid.NewGuid(),
+            Code: "lead-agent",
+            ShortName: "lead",
+            DisplayName: "Lead Agent",
+            AgentType: "lead",
+            Description: "List leads",
+            InputSchemaJson: "{}",
+            Orchestratable: true,
+            KbModuleCode: null,
+            AllowedToolsJson: "[]"); // text-only path
+        var worker = new GenericLlmAgentWorker(
+            definition,
+            new EmptyRag(),
+            new ScriptedChatClient("Thiếu danh sách 11 lead gốc. Input chỉ có tenant_id."),
+            new OrchestratorCostGuard(new InMemoryLlmCostTracker()),
+            new LlmCallScope(),
+            new ToolRegistry(Array.Empty<IAgentTool>()));
+
+        var result = await worker.ExecuteAsync(
+            new AgentTask("t1", "lead-agent", "Xác định lead lạnh", new Dictionary<string, string>
+            {
+                ["tenant_id"] = Guid.NewGuid().ToString("D"),
+            }),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be("blocked_missing_input");
+    }
+
+    [Theory]
+    [InlineData("Thiếu danh sách 11 lead gốc", true)]
+    [InlineData("please provide the list of leads", true)]
+    [InlineData("Draft created successfully", false)]
+    public void LooksLikeBlockedMissingData_detects_soft_fail_phrases(string text, bool expected)
+    {
+        GenericLlmAgentWorker.LooksLikeBlockedMissingData(text).Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UsesDefaultTools_WhenAllowedToolsJsonEmpty_ButRegistryHasTool()
+    {
+        // DB grant [] nhưng AgentToolDefaults gán lead-agent → ReAct path, không text-only.
+        var definition = new AgentDefinitionCatalogEntry(
+            Id: Guid.NewGuid(),
+            Code: "lead-agent",
+            ShortName: "lead",
+            DisplayName: "Lead Agent",
+            AgentType: "lead",
+            Description: "List leads",
+            InputSchemaJson: "{}",
+            Orchestratable: true,
+            KbModuleCode: null,
+            AllowedToolsJson: "[]");
+        var registry = new ToolRegistry(new IAgentTool[] { new FakeLeadListTool() });
+        var worker = new GenericLlmAgentWorker(
+            definition,
+            new EmptyRag(),
+            new ScriptedChatClient(
+                """{"tool":"lead-agent","args":{"operation":"list","stage":"cold"}}""",
+                "Listed cold leads."),
+            new OrchestratorCostGuard(new InMemoryLlmCostTracker()),
+            new LlmCallScope(),
+            registry);
+
+        var result = await worker.ExecuteAsync(
+            new AgentTask("t1", "lead-agent", "Xác định lead lạnh", new Dictionary<string, string>
+            {
+                ["tenant_id"] = Guid.NewGuid().ToString("D"),
+            }),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.Error);
+        result.Output.Should().Contain("lead_ids");
+        result.Output.Should().Contain("lead-1");
+    }
+
+    private sealed class FakeLeadListTool : IAgentTool
+    {
+        public string Name => "lead-agent";
+        public string Description => "List leads";
+        public string InputSchemaJson => "{}";
+        public string RequiredPermission => "leads:write";
+        public ToolRiskLevel RiskLevel => ToolRiskLevel.Low;
+
+        public Task<ToolResult> InvokeAsync(IReadOnlyDictionary<string, string> args, ToolContext ctx, CancellationToken ct) =>
+            Task.FromResult(ToolResult.Ok("""{"operation":"list","total":1,"lead_ids":["lead-1"],"items":[{"lead_id":"lead-1","stage":"cold"}]}"""));
+    }
+
     private sealed class FakeContentTool : IAgentTool
     {
         public string Name => "content-agent";

@@ -28,6 +28,44 @@ public sealed class FrontendConversationRenderingTests
     }
 
     [Fact]
+    public void Agent_dashboard_persists_selected_agent_in_url_and_keeps_configuration_state_separate()
+    {
+        var source = File.ReadAllText(FindRepoFile(
+            "src", "frontend", "clawbot-web", "src", "features", "agents", "AgentDashboardPage.tsx"));
+
+        source.Should().Contain("const requestedAgentCode = searchParams.get(\"agent\");");
+        source.Should().Contain("function selectAgent(code: string)");
+        source.Should().Contain("function openAgentLogs(code: string)");
+        source.Should().Contain("const pendingSearchParamsRef = useRef(new URLSearchParams(searchParams));");
+        source.Should().Contain("const nextParams = new URLSearchParams(pendingSearchParamsRef.current);");
+        source.Should().Contain("agentsQuery.isFetchedAfterMount");
+        source.Should().Contain("updateSearchParams({ agent: agent.code });");
+        source.Should().Contain("onSessionIdChange={(sessionId) => updateSearchParams({ sessionId })}");
+        source.Should().Contain("updateSearchParams({ planResult: null });");
+        source.Split("setSearchParams(", StringSplitOptions.None).Should().HaveCount(2);
+        source.Should().Contain("const [configAgentCode, setConfigAgentCode]");
+        source.Should().NotContain("const [selectedCode, setSelectedCode]");
+    }
+
+    [Fact]
+    public void Agent_dashboard_exposes_accessible_agent_switching_in_logs_and_team_cta()
+    {
+        var source = File.ReadAllText(FindRepoFile(
+            "src", "frontend", "clawbot-web", "src", "features", "agents", "AgentDashboardPage.tsx"));
+
+        source.Should().Contain("htmlFor=\"agent-log-select\"");
+        source.Should().Contain("id=\"agent-log-select\"");
+        source.Should().Contain("Xem nhật ký & chi phí");
+        source.Should().Contain("aria-pressed={isSelected}");
+        source.Should().Contain("role=\"tablist\"");
+        source.Should().Contain("role=\"tab\"");
+        source.Should().Contain("aria-selected={tab === item.key}");
+        source.Should().Contain("tabIndex={tab === item.key ? 0 : -1}");
+        source.Should().Contain("handleDashboardTabKeyDown");
+        source.Should().Contain("hidden={tab !== \"nhat-ky\"}");
+    }
+
+    [Fact]
     public void Run_detail_uses_phase_aware_trace_text_and_formula_safe_csv()
     {
         var source = File.ReadAllText(FindRepoFile(

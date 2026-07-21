@@ -79,4 +79,21 @@ public sealed class HangfireModuleTests
             "0 * * * *",
             Arg.Any<RecurringJobOptions>());
     }
+
+    [Fact]
+    public void ScheduleClawbotJobs_schedules_content_workflow_health_every_five_minutes()
+    {
+        var recurring = Substitute.For<IRecurringJobManager>();
+        using var services = new ServiceCollection()
+            .AddSingleton(recurring)
+            .BuildServiceProvider();
+
+        Clawbot.Infrastructure.Jobs.HangfireModule.ScheduleClawbotJobs(services);
+
+        recurring.Received().AddOrUpdate(
+            "content-workflow-health",
+            Arg.Any<Job>(),
+            "*/5 * * * *",
+            Arg.Any<RecurringJobOptions>());
+    }
 }

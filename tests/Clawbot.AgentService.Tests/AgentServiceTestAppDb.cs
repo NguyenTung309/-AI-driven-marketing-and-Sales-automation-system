@@ -11,6 +11,7 @@ namespace Clawbot.AgentService.Tests;
 internal sealed class AgentServiceTestAppDb : IDisposable
 {
     private readonly SqliteConnection _connection;
+    private readonly ITenantAccessor _tenants;
 
     public AgentServiceTestAppDb(Guid tenantId)
     {
@@ -18,23 +19,29 @@ internal sealed class AgentServiceTestAppDb : IDisposable
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
 
-        var tenants = Substitute.For<ITenantAccessor>();
+        _tenants = Substitute.For<ITenantAccessor>();
         var ctx = new TenantContext(TenantId, "test");
-        tenants.Current.Returns(ctx);
-        tenants.Require().Returns(ctx);
+        _tenants.Current.Returns(ctx);
+        _tenants.Require().Returns(ctx);
 
-        var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlite(_connection)
-            .ReplaceService<IModelCustomizer, SqliteFriendlyModelCustomizer>()
-            .Options;
-
-        Db = new AppDbContext(options, tenants);
+        Db = CreateDbContext();
         Db.Database.EnsureCreated();
     }
 
     public AppDbContext Db { get; }
 
     public Guid TenantId { get; }
+
+    public AppDbContext CreateDbContext(params IInterceptor[] interceptors)
+    {
+        var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(_connection)
+            .ReplaceService<IModelCustomizer, SqliteFriendlyModelCustomizer>();
+        if (interceptors.Length > 0)
+            optionsBuilder.AddInterceptors(interceptors);
+
+        return new AppDbContext(optionsBuilder.Options, _tenants);
+    }
 
     public void Dispose()
     {

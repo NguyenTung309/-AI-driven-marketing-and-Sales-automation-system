@@ -86,6 +86,38 @@ builder.Services.AddScoped<AutonomousOrchestrator>(sp => new AutonomousOrchestra
 builder.Services.AddScoped<Clawbot.AgentService.Services.ITenantTrendScanner, Clawbot.AgentService.Services.TrendScanService>();
 builder.Services.AddScoped<Clawbot.AgentService.Services.AgentScheduleRunner>();
 builder.Services.AddHostedService<Clawbot.AgentService.Services.AgentScheduleWorker>();
+builder.Services.Configure<Clawbot.AgentService.Services.ContentReviewWorkerOptions>(
+    builder.Configuration.GetSection(Clawbot.AgentService.Services.ContentReviewWorkerOptions.SectionName));
+builder.Services.AddSingleton<Clawbot.Agents.Core.Content.ILlmVisionCapabilityResolver,
+    Clawbot.Agents.Core.Content.LlmVisionCapabilityResolver>();
+builder.Services.AddSingleton<Clawbot.Agents.Core.Content.IContentReviewCompletionClientFactory>(sp =>
+{
+    var env = sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+    var baseUrlOptions = sp.GetService<Microsoft.Extensions.Options.IOptions<Clawbot.Agents.Core.Chat.LlmBaseUrlOptions>>()?.Value
+        ?? new Clawbot.Agents.Core.Chat.LlmBaseUrlOptions();
+    var allowPrivate = env.IsDevelopment() && baseUrlOptions.AllowPrivate;
+    return new Clawbot.Agents.Core.Content.ContentReviewCompletionClientFactory(allowPrivate);
+});
+builder.Services.AddScoped<Clawbot.Agents.Core.Content.ContentReviewer>();
+builder.Services.AddScoped<Clawbot.AgentService.Services.IContentReviewExecutor,
+    Clawbot.AgentService.Services.ContentReviewExecutor>();
+builder.Services.AddScoped<Clawbot.AgentService.Services.IContentReviewCoordinator,
+    Clawbot.AgentService.Services.ContentReviewCoordinator>();
+builder.Services.Configure<Clawbot.Agents.Core.Content.ContentAssetReaderOptions>(
+    builder.Configuration.GetSection(Clawbot.Agents.Core.Content.ContentAssetReaderOptions.SectionName));
+builder.Services.AddScoped<Clawbot.Agents.Core.Content.IContentAssetRepository,
+    Clawbot.AgentService.Services.EfContentAssetRepository>();
+builder.Services.AddScoped<Clawbot.Agents.Core.Content.IContentAssetReader>(sp =>
+    new Clawbot.Agents.Core.Content.ContentAssetReader(
+        sp.GetRequiredService<Clawbot.Agents.Core.Content.IContentAssetRepository>(),
+        sp.GetRequiredService<Clawbot.Agents.Core.Docs.IDocumentStorage>(),
+        sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Clawbot.Agents.Core.Content.ContentAssetReaderOptions>>().Value));
+builder.Services.AddScoped<Clawbot.AgentService.Services.IContentPublishingApprovalPolicyResolver,
+    Clawbot.AgentService.Services.LockedContentPublishingApprovalPolicyResolver>();
+builder.Services.AddScoped<Clawbot.AgentService.Services.ReviewTenantWorker>();
+builder.Services.AddScoped<Clawbot.AgentService.Services.IReviewTenantRunner>(sp =>
+    sp.GetRequiredService<Clawbot.AgentService.Services.ReviewTenantWorker>());
+builder.Services.AddHostedService<Clawbot.AgentService.Services.ContentReviewDispatchWorker>();
 builder.Services.AddHostedService<Clawbot.AgentService.Services.ChatSessionRecoveryService>();
 builder.Services.AddScoped<IAgent, ChatAgentAdapter>();
 builder.Services.AddScoped<IAgent, ContentAgentAdapter>();

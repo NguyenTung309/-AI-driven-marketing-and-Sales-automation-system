@@ -35,6 +35,7 @@ interface AggregateMetrics {
   readonly replies: number;
   readonly conversions: number;
   readonly adSpend: number;
+  readonly revenue: number;
   readonly avgResponseTimeSec: number | null;
 }
 
@@ -45,7 +46,7 @@ const EMPTY_COSTS: readonly AgentCostItem[] = [];
 const EMPTY_ANOMALIES: readonly AnomalyPoint[] = [];
 const EMPTY_FORECAST: readonly ForecastPoint[] = [];
 
-const CHANNELS = ["facebook", "zalo", "tiktok", "website", "youtube"] as const;
+const CHANNELS = ["facebook", "zalo", "instagram"] as const;
 
 function isoDate(value: Date): string {
   return value.toISOString().slice(0, 10);
@@ -66,6 +67,7 @@ function platformLabel(platform: string | null | undefined): string {
   const value = normalize(platform);
   if (value === "facebook") return "Facebook";
   if (value === "zalo") return "Zalo";
+  if (value === "instagram") return "Instagram";
   if (value === "tiktok") return "TikTok";
   if (value === "website" || value === "web") return "Website";
   if (value === "youtube") return "YouTube";
@@ -80,6 +82,7 @@ function metricLabel(metric: string | null | undefined): string {
   if (value === "replies") return "Phản hồi";
   if (value === "conversions") return "Chuyển đổi";
   if (value === "adspend") return "Chi phí quảng cáo";
+  if (value === "revenue") return "Doanh thu";
   if (value === "cpl") return "Chi phí/lead";
   if (value === "avgresponsetimesec") return "Thời gian phản hồi";
   return metric || "Chỉ số";
@@ -89,6 +92,7 @@ function platformIcon(platform: string): string {
   const value = normalize(platform);
   if (value === "facebook") return "thumb_up";
   if (value === "zalo") return "chat";
+  if (value === "instagram") return "photo_camera";
   if (value === "tiktok") return "music_note";
   if (value === "website" || value === "web") return "language";
   if (value === "youtube") return "play_circle";
@@ -135,6 +139,7 @@ function aggregate(rows: readonly OmniChannelRow[]): AggregateMetrics {
     replies: rows.reduce((sum, row) => sum + row.replies, 0),
     conversions: rows.reduce((sum, row) => sum + row.conversions, 0),
     adSpend: rows.reduce((sum, row) => sum + (row.adSpend ?? 0), 0),
+    revenue: rows.reduce((sum, row) => sum + (row.revenue ?? 0), 0),
     avgResponseTimeSec: responseTimes.length
       ? responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length
       : null,
@@ -213,12 +218,12 @@ function ChannelKpiGrid({ rows }: { readonly rows: readonly OmniChannelRow[] }) 
     <Card>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-headline-sm text-secondary">Hiệu suất 5 kênh</h2>
+          <h2 className="text-headline-sm text-secondary">Hiệu suất 3 kênh</h2>
           <p className="mt-1 text-body-md text-on-surface-variant">Lead, tin nhắn, phản hồi, chuyển đổi và chi phí/lead theo từng kênh.</p>
         </div>
         <StatusPill tone="neutral">{rows.length} dòng dữ liệu</StatusPill>
       </div>
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         {knownRows.map((row, index) => {
           const channel = CHANNELS[index];
           const leads = row?.leads ?? 0;
@@ -595,6 +600,9 @@ export default function AnalyticsReportsPage() {
   });
 
   const rows = Array.isArray(omnichannelQuery.data?.rows) ? omnichannelQuery.data.rows : EMPTY_ROWS;
+  const visibleRows = rows.filter((row) =>
+    CHANNELS.some((channel) => channel === normalize(row.platform))
+  );
   const deltas = Array.isArray(deltaQuery.data?.metrics) ? deltaQuery.data.metrics : EMPTY_DELTAS;
   const agents = Array.isArray(agentsQuery.data) ? agentsQuery.data : EMPTY_AGENTS;
   const costs = Array.isArray(costsQuery.data?.items) ? costsQuery.data.items : EMPTY_COSTS;
@@ -638,6 +646,13 @@ export default function AnalyticsReportsPage() {
       meta: deltaText(deltaFor(deltas, "adSpend")),
       tone: deltaTone(deltaFor(deltas, "adSpend"), false),
     },
+    {
+      icon: "account_balance_wallet",
+      label: "Doanh thu",
+      value: formatCurrency(agg.revenue),
+      meta: deltaText(deltaFor(deltas, "revenue")),
+      tone: deltaTone(deltaFor(deltas, "revenue"), true),
+    },
   ];
 
   return (
@@ -646,7 +661,7 @@ export default function AnalyticsReportsPage() {
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <h1 className="text-headline-md text-secondary">Báo cáo thống kê</h1>
-            <p className="mt-1 text-body-md text-on-surface-variant">Theo dõi hiệu suất và tương tác của AI Agent theo 5 kênh.</p>
+            <p className="mt-1 text-body-md text-on-surface-variant">Theo dõi hiệu suất và tương tác của AI Agent trên Facebook, Zalo và Instagram.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill tone={apiError ? "error" : omnichannelQuery.data?.stale ? "warning" : "success"}>
@@ -707,10 +722,10 @@ export default function AnalyticsReportsPage() {
             {metrics.map((metric) => <MetricCard key={metric.label} {...metric} />)}
           </section>
           <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1.5fr)_380px]">
-            <ChannelBars rows={rows} />
+            <ChannelBars rows={visibleRows} />
             <FunnelCard funnel={funnelQuery.data ?? null} />
           </section>
-          <ChannelKpiGrid rows={rows} />
+          <ChannelKpiGrid rows={visibleRows} />
         </div>
       ) : null}
 
@@ -747,7 +762,7 @@ export default function AnalyticsReportsPage() {
             <ForecastCard points={forecast} />
             <AnomalyList anomalies={anomalies} />
           </section>
-          <ChannelKpiGrid rows={rows} />
+          <ChannelKpiGrid rows={visibleRows} />
         </div>
       ) : null}
 

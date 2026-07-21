@@ -104,7 +104,7 @@ public sealed class ReportAgentRunner(
         var normalized = (metric ?? string.Empty).Trim().ToLowerInvariant();
         return normalized switch
         {
-            "leads" or "dms" or "replies" or "conversions" or "avg_response_time_sec" or "ad_spend" or "cpl" => normalized,
+            "leads" or "dms" or "replies" or "conversions" or "avg_response_time_sec" or "ad_spend" or "cpl" or "revenue" => normalized,
             "response_time" => "avg_response_time_sec",
             _ => throw new ArgumentException("metric is not supported."),
         };
@@ -120,6 +120,7 @@ public sealed class ReportAgentRunner(
             "avg_response_time_sec" => row.AvgResponseTimeSec.HasValue ? (double)row.AvgResponseTimeSec.Value : null,
             "ad_spend" => row.AdSpend.HasValue ? (double)row.AdSpend.Value : null,
             "cpl" => row.AdSpend.HasValue && row.Leads > 0 ? (double)(row.AdSpend.Value / row.Leads) : null,
+            "revenue" => row.Revenue.HasValue ? (double)row.Revenue.Value : null,
             _ => null,
         };
 }

@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\shared\Clawbot.Domain\Clawbot.Domain.csproj" />
+    <ProjectReference Include="..\..\src\shared\Clawbot.SharedKernel\Clawbot.SharedKernel.csproj" />
   </ItemGroup>
 
 </Project>
