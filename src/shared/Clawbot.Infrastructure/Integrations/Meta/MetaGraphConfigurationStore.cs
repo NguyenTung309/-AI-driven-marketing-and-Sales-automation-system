@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using Clawbot.Domain.Content;
 using Clawbot.Infrastructure.Persistence;
@@ -121,15 +120,18 @@ public sealed partial class MetaGraphConfigurationStore(
                     MetaAuthorizationModes.NormalizeOrDefault(current.AuthorizationMode),
                     next.AuthorizationMode,
                     StringComparison.Ordinal));
-        var encrypted = encryptor.Encrypt(JsonSerializer.Serialize(next, JsonOptions));
+        var serialized = JsonSerializer.Serialize(next, JsonOptions);
         var now = clock.UtcNow;
         if (row is null)
         {
-            row = SocialCredential.Create(tenantId, Provider, encrypted, now);
+            var rowId = Guid.NewGuid();
+            var encrypted = Protect(tenantId, rowId, serialized);
+            row = SocialCredential.Create(rowId, tenantId, Provider, encrypted, now);
             db.SocialCredentials.Add(row);
         }
         else
         {
+            var encrypted = Protect(tenantId, row.Id, serialized);
             row.UpdateCredentials(encrypted, now);
             row.Activate(now);
         }
@@ -180,17 +182,36 @@ public sealed partial class MetaGraphConfigurationStore(
 
     private MetaAppCredentialPayload? TryDecrypt(SocialCredential row)
     {
+        if (!MetaCredentialEnvelopeCodec.TryDecode(
+                encryptor,
+                AppConfigurationContext(row.TenantId, row.Id),
+                row.CredentialsEncrypted,
+                out var json)
+            || json is null)
+        {
+            LogInvalidStoredConfiguration(logger, row.TenantId);
+            return null;
+        }
+
         try
         {
-            var json = encryptor.Decrypt(row.CredentialsEncrypted);
             return JsonSerializer.Deserialize<MetaAppCredentialPayload>(json, JsonOptions);
         }
-        catch (Exception ex) when (ex is FormatException or CryptographicException or JsonException)
+        catch (JsonException)
         {
-            LogInvalidStoredConfiguration(logger, row.TenantId, ex);
+            LogInvalidStoredConfiguration(logger, row.TenantId);
             return null;
         }
     }
+
+    private string Protect(Guid tenantId, Guid rowId, string serialized) =>
+        MetaCredentialEnvelopeCodec.Encode(
+            encryptor,
+            AppConfigurationContext(tenantId, rowId),
+            serialized);
+
+    private static MetaCredentialEnvelopeContext AppConfigurationContext(Guid tenantId, Guid rowId) =>
+        new(tenantId, Provider, MetaCredentialPurposes.AppConfiguration, rowId);
 
     private MetaGraphOptions BuildOptions(MetaAppCredentialPayload payload) =>
         new()
@@ -258,7 +279,7 @@ public sealed partial class MetaGraphConfigurationStore(
             updatedAt);
 
     [LoggerMessage(EventId = 5252, Level = LogLevel.Warning, Message = "Stored Meta App configuration is invalid for tenant {TenantId}")]
-    private static partial void LogInvalidStoredConfiguration(ILogger logger, Guid tenantId, Exception exception);
+    private static partial void LogInvalidStoredConfiguration(ILogger logger, Guid tenantId);
 
     private sealed record MetaAppCredentialPayload(
         string? AppId,

@@ -43,6 +43,14 @@ public sealed class GraphSocialPublisherTests
         InstagramPublishingEnabled = true,
     };
 
+    private static IInstagramCredentialResolver AbsentInstagramResolver()
+    {
+        var resolver = Substitute.For<IInstagramCredentialResolver>();
+        resolver.ResolveAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Absent));
+        return resolver;
+    }
+
     [Fact]
     public async Task PublishAsync_Facebook_PostsFeedWithPageToken_AndReturnsPermalink()
     {
@@ -202,8 +210,8 @@ public sealed class GraphSocialPublisherTests
         var result = await publisher.PublishAsync(ZaloRequest(), CancellationToken.None);
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("zalo_error");
-        result.Error.Should().Contain("invalid token");
+        result.Error.Should().Be("zalo_error_-123");
+        result.Error.Should().NotContain("invalid token");
     }
 
     [Fact]
@@ -269,7 +277,8 @@ public sealed class GraphSocialPublisherTests
             credentialResolver: null,
             NullLogger<GraphSocialPublisher>.Instance,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: AbsentInstagramResolver());
 
         var result = await publisher.PublishAsync(FacebookRequest(), CancellationToken.None);
 
@@ -297,7 +306,8 @@ public sealed class GraphSocialPublisherTests
             credentialResolver: null,
             NullLogger<GraphSocialPublisher>.Instance,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: AbsentInstagramResolver());
 
         var result = await publisher.PublishAsync(
             new PublishRequest(TenantId, ContentItemId, "facebook", "Learn HSK today", "[]", ScheduledAt, assetId),
@@ -331,7 +341,8 @@ public sealed class GraphSocialPublisherTests
             credentialResolver: null,
             NullLogger<GraphSocialPublisher>.Instance,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: AbsentInstagramResolver());
 
         var result = await publisher.PublishAsync(
             new PublishRequest(TenantId, ContentItemId, "facebook", "Learn HSK today", "[]", ScheduledAt, assetId),
@@ -361,7 +372,8 @@ public sealed class GraphSocialPublisherTests
             credentialResolver: null,
             NullLogger<GraphSocialPublisher>.Instance,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: AbsentInstagramResolver());
 
         var result = await publisher.PublishAsync(
             new PublishRequest(TenantId, ContentItemId, "facebook", "Learn HSK today", "[]", ScheduledAt, assetId),
@@ -383,7 +395,8 @@ public sealed class GraphSocialPublisherTests
             credentialResolver: null,
             NullLogger<GraphSocialPublisher>.Instance,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: AbsentInstagramResolver());
 
         var result = await publisher.PublishAsync(InstagramRequest(), CancellationToken.None);
 
@@ -419,7 +432,8 @@ public sealed class GraphSocialPublisherTests
             credentialResolver: null,
             NullLogger<GraphSocialPublisher>.Instance,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: AbsentInstagramResolver());
 
         var result = await publisher.PublishAsync(InstagramRequest(assetsJson), CancellationToken.None);
 
@@ -436,6 +450,29 @@ public sealed class GraphSocialPublisherTests
             Arg.Any<string>(),
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PublishAsync_Instagram_fails_closed_when_standalone_resolver_is_unavailable()
+    {
+        var integrations = Substitute.For<IMetaIntegrationService>();
+        var graph = Substitute.For<IMetaGraphClient>();
+        var publisher = new GraphSocialPublisher(
+            new HttpClient(new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK))),
+            Options.Create(InstagramOptions()),
+            credentialResolver: null,
+            NullLogger<GraphSocialPublisher>.Instance,
+            metaIntegration: integrations,
+            metaGraph: graph);
+
+        var result = await publisher.PublishAsync(
+            InstagramRequest("[{\"type\":\"image\",\"url\":\"https://cdn.example/hsk.jpeg\"}]", Guid.NewGuid()),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be("instagram_credentials_invalid");
+        await integrations.DidNotReceiveWithAnyArgs().ResolveInstagramAsync(default, default, default);
+        await graph.DidNotReceiveWithAnyArgs().PublishInstagramAsync(default, default!, default!, default!, default!, default);
     }
 
     [Fact]
@@ -464,7 +501,8 @@ public sealed class GraphSocialPublisherTests
             credentialResolver: null,
             NullLogger<GraphSocialPublisher>.Instance,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: AbsentInstagramResolver());
 
         var result = await publisher.PublishAsync(
             InstagramRequest("[{\"type\":\"image\",\"url\":\"https://cdn.example/hsk.jpeg\"}]", assetId),
@@ -499,7 +537,8 @@ public sealed class GraphSocialPublisherTests
             credentialResolver: null,
             NullLogger<GraphSocialPublisher>.Instance,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: AbsentInstagramResolver());
 
         var result = await publisher.PublishAsync(
             InstagramRequest(metaAssetId: assetId, providerTargetId: "ig-user-original"),
@@ -531,7 +570,8 @@ public sealed class GraphSocialPublisherTests
             credentialResolver: null,
             NullLogger<GraphSocialPublisher>.Instance,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: AbsentInstagramResolver());
 
         var result = await publisher.PublishAsync(
             InstagramRequest(metaAssetId: assetId),
@@ -593,7 +633,8 @@ public sealed class GraphSocialPublisherTests
             credentialResolver: null,
             NullLogger<GraphSocialPublisher>.Instance,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: AbsentInstagramResolver());
 
         var result = await publisher.PublishAsync(
             InstagramRequest("[{\"type\":\"image\",\"url\":\"https://cdn.example/hsk.jpg\"}]", assetId),
@@ -643,7 +684,8 @@ public sealed class GraphSocialPublisherTests
             credentialResolver: null,
             NullLogger<GraphSocialPublisher>.Instance,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: AbsentInstagramResolver());
 
         var result = await publisher.PublishAsync(
             InstagramRequest(metaAssetId: assetId),
@@ -689,7 +731,8 @@ public sealed class GraphSocialPublisherTests
             credentialResolver: null,
             NullLogger<GraphSocialPublisher>.Instance,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: AbsentInstagramResolver());
 
         var result = await publisher.PublishAsync(
             InstagramRequest("[{\"type\":\"image\",\"url\":\"https://cdn.example/hsk.jpg\"}]", assetId),
@@ -740,7 +783,8 @@ public sealed class GraphSocialPublisherTests
             credentialResolver: null,
             logger,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: AbsentInstagramResolver());
 
         var result = await publisher.PublishAsync(
             InstagramRequest($"[{{\"type\":\"image\",\"url\":\"{imageUrl}\"}}]", assetId),

@@ -112,6 +112,135 @@ public sealed class ContentAutoSchedulerTests
     }
 
     [Fact]
+    public async Task CreateIntentAsync_updates_active_held_facebook_intent_with_selected_target_and_time()
+    {
+        using var fx = new TestAppDb();
+        var item = await SeedApprovedItemAsync(fx, platform: "facebook");
+        var golden = Substitute.For<IGoldenHourResolver>();
+        var originalAt = Now.AddHours(4);
+        var rescheduledAt = Now.AddHours(8);
+        golden.ResolveNext("facebook", Now).Returns(originalAt);
+        var scheduler = new ContentAutoScheduler(fx.Db, golden);
+        var existing = await scheduler.CreateIntentAsync(item, publishTargetId: null, Now);
+        await fx.Db.SaveChangesAsync();
+        var selectedPage = Guid.NewGuid();
+
+        var updated = await scheduler.CreateIntentAsync(
+            item,
+            selectedPage,
+            Now.AddMinutes(10),
+            desiredPublishAt: rescheduledAt);
+
+        updated.Id.Should().Be(existing.Id);
+        updated.Status.Should().Be(ContentSchedule.StatusPending);
+        updated.ScheduledAt.Should().Be(rescheduledAt);
+        updated.MetaAssetId.Should().Be(selectedPage);
+        updated.PublishTargetId.Should().Be(selectedPage);
+        updated.LastErrorCode.Should().BeNull();
+        item.DesiredPublishAt.Should().Be(rescheduledAt);
+        (await fx.Db.ContentSchedules.IgnoreQueryFilters().CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CreateIntentAsync_updates_active_zalo_intent_with_explicit_time()
+    {
+        using var fx = new TestAppDb();
+        var item = await SeedApprovedItemAsync(fx, platform: "zalo");
+        var golden = Substitute.For<IGoldenHourResolver>();
+        golden.ResolveNext("zalo", Now).Returns(Now.AddHours(4));
+        var scheduler = new ContentAutoScheduler(fx.Db, golden);
+        var existing = await scheduler.CreateIntentAsync(item, publishTargetId: null, Now);
+        await fx.Db.SaveChangesAsync();
+        var explicitAt = Now.AddHours(9);
+
+        var updated = await scheduler.CreateIntentAsync(
+            item,
+            publishTargetId: null,
+            Now.AddMinutes(10),
+            desiredPublishAt: explicitAt);
+
+        updated.Id.Should().Be(existing.Id);
+        updated.ScheduledAt.Should().Be(explicitAt);
+        updated.Status.Should().Be(ContentSchedule.StatusPending);
+        item.DesiredPublishAt.Should().Be(explicitAt);
+    }
+
+    [Fact]
+    public async Task CreateIntentAsync_preserves_instagram_target_snapshot_when_only_time_changes()
+    {
+        using var fx = new TestAppDb();
+        var item = await SeedApprovedItemAsync(fx, platform: "instagram");
+        var golden = Substitute.For<IGoldenHourResolver>();
+        golden.ResolveNext("instagram", Now).Returns(Now.AddHours(4));
+        var scheduler = new ContentAutoScheduler(fx.Db, golden);
+        var existing = await scheduler.CreateIntentAsync(
+            item,
+            publishTargetId: null,
+            Now,
+            providerTargetId: "17841400000000000");
+        await fx.Db.SaveChangesAsync();
+        var rescheduledAt = Now.AddHours(8);
+
+        var updated = await scheduler.CreateIntentAsync(
+            item,
+            publishTargetId: null,
+            Now.AddMinutes(10),
+            desiredPublishAt: rescheduledAt);
+
+        updated.Id.Should().Be(existing.Id);
+        updated.ScheduledAt.Should().Be(rescheduledAt);
+        updated.MetaAssetId.Should().BeNull();
+        updated.ProviderTargetId.Should().Be("17841400000000000");
+        updated.LastErrorCode.Should().Be(ContentAutoScheduler.ErrorInstagramPublishingUnavailable);
+    }
+
+    [Fact]
+    public async Task CreateIntentAsync_preserves_legacy_instagram_reselection_hold_on_time_only_change()
+    {
+        using var fx = new TestAppDb();
+        var item = await SeedApprovedItemAsync(fx, platform: "instagram");
+        var golden = Substitute.For<IGoldenHourResolver>();
+        golden.ResolveNext("instagram", Now).Returns(Now.AddHours(4));
+        var scheduler = new ContentAutoScheduler(fx.Db, golden);
+        var existing = await scheduler.CreateIntentAsync(item, publishTargetId: null, Now);
+        existing.MarkHeld(ContentSchedule.ErrorInstagramTargetReselectionRequired, Now.AddMinutes(1));
+        await fx.Db.SaveChangesAsync();
+        var rescheduledAt = Now.AddHours(8);
+
+        var updated = await scheduler.CreateIntentAsync(
+            item,
+            publishTargetId: null,
+            Now.AddMinutes(10),
+            desiredPublishAt: rescheduledAt);
+
+        updated.Id.Should().Be(existing.Id);
+        updated.ScheduledAt.Should().Be(rescheduledAt);
+        updated.Status.Should().Be(ContentSchedule.StatusHeld);
+        updated.ProviderTargetId.Should().BeNull();
+        updated.LastErrorCode.Should().Be(ContentSchedule.ErrorInstagramTargetReselectionRequired);
+    }
+
+    [Fact]
+    public async Task CreateIntentAsync_accepts_standalone_instagram_target_without_meta_asset()
+    {
+        using var fx = new TestAppDb();
+        var item = await SeedApprovedItemAsync(fx, platform: "instagram");
+        var golden = Substitute.For<IGoldenHourResolver>();
+        golden.ResolveNext("instagram", Now).Returns(Now.AddHours(4));
+        var scheduler = new ContentAutoScheduler(fx.Db, golden);
+
+        var schedule = await scheduler.CreateIntentAsync(
+            item,
+            publishTargetId: null,
+            Now,
+            providerTargetId: "17841400000000000");
+
+        schedule.MetaAssetId.Should().BeNull();
+        schedule.ProviderTargetId.Should().Be("17841400000000000");
+        schedule.LastErrorCode.Should().Be(ContentAutoScheduler.ErrorInstagramPublishingUnavailable);
+    }
+
+    [Fact]
     public async Task CreateIntentAsync_does_not_recreate_user_canceled_intent()
     {
         using var fx = new TestAppDb();

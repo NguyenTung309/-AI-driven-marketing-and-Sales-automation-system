@@ -4,6 +4,10 @@ const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:15876";
 const timestamp = "2026-07-22T08:00:00.000Z";
 const legacyBriefId = "11111111-1111-1111-1111-111111111111";
 const legacyItemId = "22222222-2222-2222-2222-222222222222";
+const scheduledItemId = "33333333-3333-3333-3333-333333333333";
+const scheduledId = "44444444-4444-4444-4444-444444444444";
+const originalMetaAssetId = "55555555-5555-5555-5555-555555555555";
+const currentDefaultMetaAssetId = "66666666-6666-6666-6666-666666666666";
 const admin = {
   email: process.env.E2E_ADMIN_EMAIL ?? "admin@clawbot.local",
   password: process.env.E2E_ADMIN_PASSWORD ?? "Admin@12345",
@@ -41,8 +45,9 @@ async function json(route, status, body) {
   });
 }
 
-async function installMockApi(page) {
+async function installMockApi(page, options = {}) {
   let sessionActive = false;
+  let lastScheduleRequest = null;
   let legacyBrief = {
     id: legacyBriefId,
     platform: "tiktok",
@@ -73,6 +78,16 @@ async function installMockApi(page) {
     canRetryReview: false,
     canSchedule: false,
     canPublish: false,
+  };
+  const scheduledItem = {
+    ...legacyItem,
+    id: scheduledItemId,
+    briefId: null,
+    platform: "facebook",
+    status: "scheduled",
+    body: "Facebook schedule with frozen non-default target",
+    workflowState: "scheduled",
+    canSchedule: true,
   };
   let lastBriefUpdate = null;
   const accessToken = "platform-focus-access-token";
@@ -139,13 +154,32 @@ async function installMockApi(page) {
         return json(route, 200, legacyBrief);
       }
       if (method === "GET" && path === "/api/content/queue") {
-        return json(route, 200, { items: [legacyItem], total: 1, page: 1, pageSize: 40, nextCursor: null });
+        return json(route, 200, { items: [scheduledItem, legacyItem], total: 2, page: 1, pageSize: 40, nextCursor: null });
       }
       if (method === "GET" && path === `/api/content/items/${legacyItemId}`) {
         return json(route, 200, legacyItem);
       }
+      if (method === "GET" && path === `/api/content/items/${scheduledItemId}`) {
+        return json(route, 200, scheduledItem);
+      }
       if (method === "GET" && path === "/api/content/calendar") {
-        return json(route, 200, { items: [] });
+        return json(route, 200, {
+          items: [{
+            scheduleId: scheduledId,
+            contentItemId: scheduledItemId,
+            platform: "facebook",
+            status: "pending",
+            body: scheduledItem.body,
+            scheduledAt: "2026-07-25T02:00:00.000Z",
+            postedAt: null,
+            postUrl: null,
+            metaAssetId: originalMetaAssetId,
+            likeCount: null,
+            commentCount: null,
+            retryCount: 0,
+            lastError: null,
+          }],
+        });
       }
       if (method === "GET" && path === "/api/content/trends") {
         return json(route, 200, { trends: [] });
@@ -160,7 +194,46 @@ async function installMockApi(page) {
         });
       }
       if (method === "GET" && path === "/api/content/publish-targets") {
-        return json(route, 200, { items: [] });
+        const originalTarget = {
+          id: originalMetaAssetId,
+          platform: "facebook",
+          externalId: "page-original",
+          name: "Page gốc đã khóa",
+          isDefault: false,
+        };
+        return json(route, 200, {
+          mode: "linked_meta",
+          items: [
+            {
+              id: currentDefaultMetaAssetId,
+              platform: "facebook",
+              externalId: "page-current-default",
+              name: "Page mặc định mới",
+              isDefault: true,
+            },
+            ...(options.includeOriginalTarget === false ? [] : [originalTarget]),
+          ],
+        });
+      }
+      if (method === "POST" && path === `/api/content/items/${scheduledItemId}/schedule`) {
+        lastScheduleRequest = request.postDataJSON();
+        return json(route, 201, {
+          id: scheduledId,
+          contentItemId: scheduledItemId,
+          platform: "facebook",
+          scheduledAt: lastScheduleRequest.scheduledAt,
+          postedAt: null,
+          status: "pending",
+          postUrl: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          metaAssetId: originalMetaAssetId,
+          likeCount: null,
+          commentCount: null,
+          engagementSyncedAt: null,
+          retryCount: 0,
+          lastError: null,
+        });
       }
       if (method === "GET" && path.endsWith("/api/analytics/omnichannel")) {
         return json(route, 200, { from, to, stale: false, rows: analyticsRows() });
@@ -206,7 +279,10 @@ async function installMockApi(page) {
     },
   );
 
-  return { getLastBriefUpdate: () => lastBriefUpdate };
+  return {
+    getLastBriefUpdate: () => lastBriefUpdate,
+    getLastScheduleRequest: () => lastScheduleRequest,
+  };
 }
 
 async function loginViaUi(page) {
@@ -218,12 +294,12 @@ async function loginViaUi(page) {
   await page.waitForURL((url) => !url.pathname.includes("/login"), { timeout: 30_000 });
 }
 
-async function withPage(run) {
+async function withPage(run, options = {}) {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ locale: "vi-VN" });
   const page = await context.newPage();
   try {
-    const mocks = await installMockApi(page);
+    const mocks = await installMockApi(page, options);
     await loginViaUi(page);
     await run(page, mocks);
   } finally {
@@ -283,6 +359,46 @@ async function testAnalyticsThreeChannelFocus() {
   });
 }
 
+async function openExistingFacebookSchedule(page) {
+  await page.goto(`${baseURL}/content`);
+  const scheduledItem = page.getByRole("button", { name: /Facebook.*Facebook schedule with frozen non-default target/ });
+  await expect(scheduledItem).toBeVisible();
+  await scheduledItem.click();
+  await page.getByRole("button", { name: "Đổi lịch (tuỳ chọn)", exact: true }).click();
+  return page.getByRole("dialog", { name: "Lên lịch xuất bản nội dung" });
+}
+
+async function testExistingScheduleKeepsFrozenTarget() {
+  await withPage(async (page, mocks) => {
+    const dialog = await openExistingFacebookSchedule(page);
+    const targetSelect = dialog.getByLabel("Facebook Page");
+    await expect(targetSelect).toHaveValue(originalMetaAssetId);
+    await expect(targetSelect.locator(`option[value="${currentDefaultMetaAssetId}"]`)).toHaveText("Page mặc định mới (mặc định)");
+
+    await dialog.getByRole("button", { name: /Chọn thời điểm riêng/i }).click();
+    await dialog.getByLabel("Giờ").fill("10:30");
+    await dialog.getByRole("button", { name: "Xác nhận lên lịch", exact: true }).click();
+
+    await expect.poll(() => mocks.getLastScheduleRequest()).toMatchObject({ metaAssetId: null });
+  });
+}
+
+async function testMissingFrozenTargetDoesNotUseCurrentDefault() {
+  await withPage(async (page, mocks) => {
+    const dialog = await openExistingFacebookSchedule(page);
+    const targetSelect = dialog.getByLabel("Facebook Page");
+    await expect(targetSelect).toHaveValue("");
+    await expect(dialog.getByText(/giữ nguyên đích đăng đã khóa/i)).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Xác nhận lên lịch", exact: true })).toBeEnabled();
+
+    await dialog.getByRole("button", { name: /Chọn thời điểm riêng/i }).click();
+    await dialog.getByLabel("Giờ").fill("11:15");
+    await dialog.getByRole("button", { name: "Xác nhận lên lịch", exact: true }).click();
+
+    await expect.poll(() => mocks.getLastScheduleRequest()).toMatchObject({ metaAssetId: null });
+  }, { includeOriginalTarget: false });
+}
+
 async function testLegacyReadOnlyContract() {
   await withPage(async (page, mocks) => {
     await page.goto(`${baseURL}/content`);
@@ -337,6 +453,8 @@ async function main() {
     ["new content picker exposes only Facebook, Zalo, and Instagram", testContentPlatformPicker],
     ["trend settings keep Google and omit legacy content targets", testTrendSettingsRemainAvailable],
     ["analytics charts render and scale only the three primary channels", testAnalyticsThreeChannelFocus],
+    ["time-only reschedule keeps the frozen non-default Meta target", testExistingScheduleKeepsFrozenTarget],
+    ["missing frozen target never falls back to the current default", testMissingFrozenTargetDoesNotUseCurrentDefault],
     ["legacy TikTok content remains readable and text-editable", testLegacyReadOnlyContract],
   ];
 

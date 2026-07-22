@@ -242,6 +242,31 @@ END;
 IF OBJECT_ID(N'dbo.TR_content_schedule_writer_gate', N'TR') IS NOT NULL
     DROP TRIGGER dbo.TR_content_schedule_writer_gate;
 
+-- Instagram target snapshot repair. Dynamic SQL is required because this script may add and
+-- reference provider_target_id in the same SqlCommand batch.
+IF OBJECT_ID(N'dbo.content_schedule', N'U') IS NOT NULL
+BEGIN
+    IF COL_LENGTH(N'dbo.content_schedule', N'provider_target_id') IS NULL
+        EXEC(N'ALTER TABLE dbo.content_schedule ADD provider_target_id NVARCHAR(128) NULL;');
+
+    IF COL_LENGTH(N'dbo.content_schedule', N'provider_target_id') IS NOT NULL
+    BEGIN
+        EXEC(N'
+            UPDATE dbo.content_schedule
+            SET status = N''held'',
+                next_attempt_at = NULL,
+                last_error_code = N''instagram_target_reselection_required'',
+                last_error = N''Instagram target must be reselected after the provider target snapshot repair.'',
+                updated_at = SYSDATETIMEOFFSET()
+            WHERE LOWER(LTRIM(RTRIM(platform))) = N''instagram''
+              AND status IN (N''pending'', N''held'', N''publishing'', N''outcome_unknown'')
+              AND NULLIF(LTRIM(RTRIM(provider_target_id)), N'''') IS NULL
+              AND (status <> N''held''
+                   OR ISNULL(last_error_code, N'''') <> N''instagram_target_reselection_required''
+                   OR next_attempt_at IS NOT NULL);');
+    END;
+END;
+
 IF OBJECT_ID(N'dbo.content_schedule', N'U') IS NOT NULL
 BEGIN
     EXEC(N'

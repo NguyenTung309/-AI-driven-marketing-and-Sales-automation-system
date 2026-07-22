@@ -10,7 +10,7 @@ public sealed class EncryptionOptions
     public string Base64Key { get; set; } = string.Empty;
 }
 
-public sealed class AesEncryptor(IOptions<EncryptionOptions> options) : IEncryptor
+public sealed class AesEncryptor(IOptions<EncryptionOptions> options) : IAuthenticatedEncryptor, ILegacyCiphertextDecryptor
 {
     private const byte Version = 1;
     private const int IvLength = 16;
@@ -67,6 +67,18 @@ public sealed class AesEncryptor(IOptions<EncryptionOptions> options) : IEncrypt
 
         return DecryptLegacy(data);
     }
+
+    public string DecryptAuthenticated(string ciphertext)
+    {
+        var data = Convert.FromBase64String(ciphertext);
+        if (data.Length < 1 + IvLength + TagLength || data[0] != Version)
+            throw new CryptographicException("Authenticated ciphertext is required.");
+
+        return DecryptAuthenticated(data);
+    }
+
+    string ILegacyCiphertextDecryptor.DecryptLegacyForMigration(string ciphertext) =>
+        DecryptLegacy(Convert.FromBase64String(ciphertext));
 
     private string DecryptAuthenticated(byte[] data)
     {

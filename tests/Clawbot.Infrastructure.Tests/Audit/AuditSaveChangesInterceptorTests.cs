@@ -74,6 +74,25 @@ public sealed class AuditSaveChangesInterceptorTests
     }
 
     [Fact]
+    public async Task Excludes_social_credential_ciphertext_from_generic_audit_diff()
+    {
+        var tenantId = Guid.NewGuid();
+        using var fx = new TestAppDb(tenantId, Build(tenantId, Passthrough()));
+        fx.Db.SocialCredentials.Add(SocialCredential.Create(
+            tenantId,
+            "instagram",
+            "encrypted-secret-material",
+            Now));
+
+        await fx.Db.SaveChangesAsync();
+
+        var log = await fx.Db.AuditLogs.IgnoreQueryFilters().SingleAsync();
+        log.ResourceType.Should().Be(nameof(SocialCredential));
+        log.DiffJson.Should().NotContain("encrypted-secret-material");
+        log.DiffJson.Should().NotContain(nameof(SocialCredential.CredentialsEncrypted));
+    }
+
+    [Fact]
     public void Content_assets_are_audit_exempt_so_generic_interceptor_skips_them()
     {
         // Phase 2.13: lifecycle rows with storage keys/hashes never enter generic EF audit diffs.

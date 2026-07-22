@@ -65,7 +65,7 @@ public sealed class MetaGraphConfigurationStoreTests
     }
 
     [Fact]
-    public async Task ResolveAsync_defaults_legacy_payload_without_mode_to_business_system_user()
+    public async Task ResolveAsync_defaults_enveloped_payload_without_mode_to_business_system_user()
     {
         var tenant = Tenant.Create("meta-legacy", "Meta Legacy", "pro", Now);
         using var fx = new TestAppDb(tenant.Id);
@@ -74,10 +74,20 @@ public sealed class MetaGraphConfigurationStoreTests
         var legacyPayload = """
             {"appId":"legacy-app","appSecret":"legacy-secret","configurationId":"legacy-config","webhookVerifyToken":"legacy-verify","redirectUri":"https://api.example/api/admin/meta/callback","frontendReturnUrl":"https://app.example/system"}
             """;
+        var rowId = Guid.NewGuid();
+        var encrypted = MetaCredentialEnvelopeCodec.Encode(
+            encryptor,
+            new MetaCredentialEnvelopeContext(
+                tenant.Id,
+                MetaGraphConfigurationStore.Provider,
+                MetaCredentialPurposes.AppConfiguration,
+                rowId),
+            legacyPayload);
         fx.Db.SocialCredentials.Add(SocialCredential.Create(
+            rowId,
             tenant.Id,
             MetaGraphConfigurationStore.Provider,
-            encryptor.Encrypt(legacyPayload),
+            encrypted,
             Now));
         await fx.Db.SaveChangesAsync();
         var store = BuildStore(fx);
@@ -194,10 +204,11 @@ public sealed class MetaGraphConfigurationStoreTests
             ApiVersion = "v25.0",
         };
 
-    private sealed class Base64Encryptor : IEncryptor
+    private sealed class Base64Encryptor : IAuthenticatedEncryptor
     {
         public string Encrypt(string plaintext) => Convert.ToBase64String(Encoding.UTF8.GetBytes(plaintext));
         public string Decrypt(string ciphertext) => Encoding.UTF8.GetString(Convert.FromBase64String(ciphertext));
+        public string DecryptAuthenticated(string ciphertext) => Decrypt(ciphertext);
     }
 
     private sealed class FixedClock(DateTimeOffset now) : IClock

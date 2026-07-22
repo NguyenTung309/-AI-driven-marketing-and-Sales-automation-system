@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using Clawbot.Domain.Integrations;
 using Clawbot.Infrastructure.Persistence;
@@ -130,14 +129,16 @@ public sealed class MetaIntegrationService(
         var expiresAt = debug.ExpiresAt
             ?? (token.ExpiresIn is > 0 ? now.AddSeconds(token.ExpiresIn.Value) : null);
         var scopesJson = JsonSerializer.Serialize(debug.Scopes.Order(StringComparer.Ordinal), JsonOptions);
-        var encryptedToken = _encryptor.Encrypt(token.AccessToken);
 
         await using var transaction = await _db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
         await AcquireAuthorizationLockAsync(tenantId, ct).ConfigureAwait(false);
         var connection = await ConnectionQuery(tenantId).FirstOrDefaultAsync(ct).ConfigureAwait(false);
         if (connection is null)
         {
+            var connectionId = Guid.NewGuid();
+            var encryptedToken = ProtectConnectionToken(tenantId, connectionId, token.AccessToken);
             connection = MetaConnection.Create(
+                connectionId,
                 tenantId,
                 identity.ClientBusinessId,
                 identity.Id,
@@ -151,6 +152,7 @@ public sealed class MetaIntegrationService(
         }
         else
         {
+            var encryptedToken = ProtectConnectionToken(tenantId, connection.Id, token.AccessToken);
             connection.UpdateAuthorization(
                 identity.ClientBusinessId,
                 identity.Id,
@@ -224,7 +226,7 @@ public sealed class MetaIntegrationService(
             ?? throw new InvalidOperationException("Meta connection not found.");
         if (!IsConnectionUsable(connection, configuration))
             throw new InvalidOperationException("Meta connection is not active.");
-        var token = Decrypt(connection.AccessTokenEncrypted)
+        var token = TryUnprotectConnectionToken(connection)
             ?? throw new InvalidOperationException("Meta connection token is unavailable.");
         try
         {
@@ -245,7 +247,7 @@ public sealed class MetaIntegrationService(
             throw new InvalidOperationException("Meta Graph is not configured.");
         var connection = await ConnectionQuery(tenantId).FirstOrDefaultAsync(ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Meta connection not found.");
-        var token = Decrypt(connection.AccessTokenEncrypted);
+        var token = TryUnprotectConnectionToken(connection);
         if (string.IsNullOrWhiteSpace(token))
         {
             connection.RequireReconnect("meta_token_missing", _clock.UtcNow);
@@ -339,7 +341,7 @@ public sealed class MetaIntegrationService(
     private bool ShouldKeepConnectionActive(MetaConnection connection)
     {
         var now = _clock.UtcNow;
-        if (string.IsNullOrWhiteSpace(Decrypt(connection.AccessTokenEncrypted)))
+        if (string.IsNullOrWhiteSpace(TryUnprotectConnectionToken(connection)))
             return false;
         if (connection.ExpiresAt.HasValue && connection.ExpiresAt <= now)
             return false;
@@ -395,7 +397,7 @@ public sealed class MetaIntegrationService(
         var connection = await GetUsableConnectionAsync(tenantId, ct).ConfigureAwait(false);
         if (connection is null)
             return null;
-        return Decrypt(connection.AccessTokenEncrypted);
+        return TryUnprotectConnectionToken(connection);
     }
 
     public async Task<MetaPageCredential?> ResolvePageAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default)
@@ -424,7 +426,7 @@ public sealed class MetaIntegrationService(
         if (asset is null || !CanPublish(ToSnapshot(asset)))
             return null;
 
-        var token = Decrypt(asset.AccessTokenEncrypted);
+        var token = TryUnprotectAssetToken(asset);
         return string.IsNullOrWhiteSpace(token)
             ? null
             : new MetaPageCredential(asset.Id, asset.ExternalId, asset.Name, token);
@@ -482,7 +484,7 @@ public sealed class MetaIntegrationService(
         if (!IsConnectionUsable(connection, configuration))
             return new MetaPageRefreshResult(MetaPageRefreshStatus.ReconnectRequired, null);
 
-        var rootToken = Decrypt(connection.AccessTokenEncrypted);
+        var rootToken = TryUnprotectConnectionToken(connection);
         if (string.IsNullOrWhiteSpace(rootToken))
             return new MetaPageRefreshResult(MetaPageRefreshStatus.ReconnectRequired, null);
 
@@ -544,14 +546,21 @@ public sealed class MetaIntegrationService(
         {
             seen.Add(page.Id);
             var tasksJson = JsonSerializer.Serialize(page.Tasks.Order(StringComparer.Ordinal), JsonOptions);
-            var encryptedToken = _encryptor.Encrypt(page.AccessToken);
             if (byExternalId.TryGetValue(page.Id, out var asset))
             {
+                var encryptedToken = ProtectAssetToken(asset, page.AccessToken);
                 asset.UpdatePage(page.Name, tasksJson, encryptedToken, now);
             }
             else
             {
+                var assetId = Guid.NewGuid();
+                var encryptedToken = ProtectAssetToken(
+                    connection.TenantId,
+                    assetId,
+                    connection.Id,
+                    page.AccessToken);
                 asset = MetaAsset.CreatePage(
+                    assetId,
                     connection.TenantId,
                     connection.Id,
                     page.Id,
@@ -609,7 +618,7 @@ public sealed class MetaIntegrationService(
         configuration.IsConfigured
         && TokenTypeMatchesConfiguration(connection.TokenType, configuration)
         && connection.Status == "active"
-        && !string.IsNullOrWhiteSpace(Decrypt(connection.AccessTokenEncrypted))
+        && !string.IsNullOrWhiteSpace(TryUnprotectConnectionToken(connection))
         && (!connection.ExpiresAt.HasValue || connection.ExpiresAt > _clock.UtcNow)
         && (!connection.DataAccessExpiresAt.HasValue || connection.DataAccessExpiresAt > _clock.UtcNow);
 
@@ -639,14 +648,56 @@ public sealed class MetaIntegrationService(
         return RequiredInstagramScopes.Where(scope => !grantedScopes.Contains(scope)).ToArray();
     }
 
-    private string? Decrypt(string encrypted)
-    {
-        if (string.IsNullOrWhiteSpace(encrypted))
-            return null;
-        try { return _encryptor.Decrypt(encrypted); }
-        catch (FormatException) { return null; }
-        catch (CryptographicException) { return null; }
-    }
+    private string ProtectConnectionToken(Guid tenantId, Guid connectionId, string token) =>
+        MetaCredentialEnvelopeCodec.Encode(
+            _encryptor,
+            new MetaCredentialEnvelopeContext(
+                tenantId,
+                MetaGraphConfigurationStore.Provider,
+                MetaCredentialPurposes.ConnectionAccessToken,
+                connectionId),
+            token);
+
+    private string ProtectAssetToken(MetaAsset asset, string token) =>
+        ProtectAssetToken(asset.TenantId, asset.Id, asset.ConnectionId, token);
+
+    private string ProtectAssetToken(Guid tenantId, Guid assetId, Guid connectionId, string token) =>
+        MetaCredentialEnvelopeCodec.Encode(
+            _encryptor,
+            new MetaCredentialEnvelopeContext(
+                tenantId,
+                MetaGraphConfigurationStore.Provider,
+                MetaCredentialPurposes.PageAccessToken,
+                assetId,
+                connectionId),
+            token);
+
+    private string? TryUnprotectConnectionToken(MetaConnection connection) =>
+        MetaCredentialEnvelopeCodec.TryDecode(
+            _encryptor,
+            new MetaCredentialEnvelopeContext(
+                connection.TenantId,
+                MetaGraphConfigurationStore.Provider,
+                MetaCredentialPurposes.ConnectionAccessToken,
+                connection.Id),
+            connection.AccessTokenEncrypted,
+            out var token)
+            ? token
+            : null;
+
+    private string? TryUnprotectAssetToken(MetaAsset asset) =>
+        MetaCredentialEnvelopeCodec.TryDecode(
+            _encryptor,
+            new MetaCredentialEnvelopeContext(
+                asset.TenantId,
+                MetaGraphConfigurationStore.Provider,
+                MetaCredentialPurposes.PageAccessToken,
+                asset.Id,
+                asset.ConnectionId),
+            asset.AccessTokenEncrypted,
+            out var token)
+            ? token
+            : null;
 
     private static MetaAssetSnapshot ToSnapshot(MetaAsset asset) =>
         new(

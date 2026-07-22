@@ -44,6 +44,7 @@ import {
   type ContentCalendarItem,
   type ContentItem,
   type ContentPublishTarget,
+  type ContentPublishTargetMode,
   type ContentQueueResponse,
   type Trend,
 } from "@/shared/api/content";
@@ -56,6 +57,12 @@ type NoticeTone = "info" | "success" | "warning" | "error";
 interface NoticeState {
   readonly tone: NoticeTone;
   readonly message: string;
+}
+
+interface ScheduleTargetState {
+  readonly isExistingSchedule: boolean;
+  readonly originalMetaAssetId: string | null;
+  readonly explicitMetaAssetId: string | null;
 }
 
 interface ContentAsset {
@@ -103,6 +110,11 @@ const EMPTY_BRIEFS: readonly ContentBrief[] = [];
 const EMPTY_ITEMS: readonly ContentItem[] = [];
 const EMPTY_CALENDAR: readonly ContentCalendarItem[] = [];
 const EMPTY_TRENDS: readonly Trend[] = [];
+const EMPTY_SCHEDULE_TARGET: ScheduleTargetState = {
+  isExistingSchedule: false,
+  originalMetaAssetId: null,
+  explicitMetaAssetId: null,
+};
 
 function normalize(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
@@ -166,9 +178,12 @@ function canRetrySchedule(status: string): boolean {
   return value === "pending" || value === "failed" || value === "held";
 }
 
-function requiresMetaTarget(platform: string | null | undefined): boolean {
+function requiresMetaTarget(
+  platform: string | null | undefined,
+  targetMode: ContentPublishTargetMode | undefined = "linked_meta",
+): boolean {
   const value = normalize(platform);
-  return value === "facebook" || value === "instagram";
+  return value === "facebook" || (value === "instagram" && targetMode === "linked_meta");
 }
 
 function lastErrorLabel(lastError: string | null | undefined): string | null {
@@ -184,6 +199,7 @@ function lastErrorLabel(lastError: string | null | undefined): string | null {
   if (value === "instagram_publishing_disabled") return "Tính năng đăng Instagram trực tiếp đang bị tắt.";
   if (value === "instagram_media_required") return "Instagram cần ít nhất một ảnh trước khi đăng.";
   if (value === "instagram_media_invalid") return "Ảnh Instagram không hợp lệ hoặc không thể được Meta truy cập.";
+  if (value === "instagram_credentials_invalid") return "Thông tin Instagram độc lập không hợp lệ. Hãy sửa hoặc tắt ghi đè trong Quản trị hệ thống.";
   if (value === "instagram_target_required") return "Hãy chọn Meta Page đã liên kết Instagram trước khi đăng.";
   if (value === "instagram_target_unavailable") return "Meta Page hoặc tài khoản Instagram đã chọn không còn khả dụng. Hãy chọn lại đích đăng.";
   if (value === "instagram_permissions_missing") return "Kết nối Meta thiếu quyền đăng Instagram. Hãy cấp lại quyền cần thiết.";
@@ -1107,7 +1123,10 @@ function ScheduleDialog({
   error,
   targets,
   targetsLoading,
+  targetMode,
   selectedTargetId,
+  preserveExistingTarget,
+  originalTargetUnavailable,
   onMode,
   onDate,
   onTime,
@@ -1123,7 +1142,10 @@ function ScheduleDialog({
   readonly error: unknown;
   readonly targets: readonly ContentPublishTarget[];
   readonly targetsLoading: boolean;
+  readonly targetMode: ContentPublishTargetMode | undefined;
   readonly selectedTargetId: string | null;
+  readonly preserveExistingTarget: boolean;
+  readonly originalTargetUnavailable: boolean;
   readonly onMode: (value: ScheduleMode) => void;
   readonly onDate: (value: string) => void;
   readonly onTime: (value: string) => void;
@@ -1131,6 +1153,16 @@ function ScheduleDialog({
   readonly onClose: () => void;
   readonly onSubmit: () => void;
 }) {
+  const normalizedPlatform = normalize(item.platform);
+  const isTargetModeInvalid = normalizedPlatform === "instagram"
+    && targetMode === "invalid"
+    && !preserveExistingTarget;
+  const isTargetResolutionPending = requiresMetaTarget(item.platform)
+    && !preserveExistingTarget
+    && (targetsLoading || !targetMode);
+  const showsTargetSelector = requiresMetaTarget(item.platform, targetMode) || isTargetResolutionPending;
+  const needsSelectedTarget = requiresMetaTarget(item.platform, targetMode) && !preserveExistingTarget;
+
   return (
     <Modal
       open
@@ -1141,7 +1173,11 @@ function ScheduleDialog({
           <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
             Hủy bỏ
           </Button>
-          <Button type="button" onClick={onSubmit} disabled={saving || (requiresMetaTarget(item.platform) && !selectedTargetId)}>
+          <Button
+            type="button"
+            onClick={onSubmit}
+            disabled={saving || isTargetModeInvalid || isTargetResolutionPending || (needsSelectedTarget && !selectedTargetId)}
+          >
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">event_available</span>
             {saving ? "Đang lên lịch..." : "Xác nhận lên lịch"}
           </Button>
@@ -1154,24 +1190,39 @@ function ScheduleDialog({
           <p className="mb-2 text-label-caps uppercase text-secondary">Kênh đăng tải</p>
           <PlatformBadge platform={item.platform} />
         </div>
-        {requiresMetaTarget(item.platform) ? (
+        {normalizedPlatform === "instagram" && targetMode === "standalone" ? (
+          <Alert tone="info">Bài sẽ dùng tài khoản Instagram độc lập đang bật trong Quản trị hệ thống.</Alert>
+        ) : null}
+        {isTargetModeInvalid ? (
+          <Alert tone="error">Thông tin Instagram độc lập đang lỗi. Hãy sửa hoặc tắt ghi đè trước khi lên lịch.</Alert>
+        ) : null}
+        {showsTargetSelector ? (
           <label className="block">
             <span className="mb-1 block text-label-caps uppercase text-secondary">
-              {normalize(item.platform) === "instagram" ? "Meta Page liên kết Instagram" : "Facebook Page"}
+              {normalizedPlatform === "instagram" ? "Meta Page liên kết Instagram" : "Facebook Page"}
             </span>
-            {targetsLoading ? (
+            {targetsLoading || !targetMode ? (
               <p className="rounded border border-outline bg-surface px-3 py-2 text-body-md text-on-surface-variant">Đang tải danh sách Page...</p>
             ) : targets.length ? (
-              <select
-                className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
-                value={selectedTargetId ?? ""}
-                onChange={(event) => onTarget(event.target.value)}
-              >
-                <option value="" disabled>Chọn Page sẽ đăng</option>
-                {targets.map((target) => (
-                  <option key={target.id} value={target.id}>{target.name}{target.isDefault ? " (mặc định)" : ""}</option>
-                ))}
-              </select>
+              <div className="space-y-2">
+                <select
+                  className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
+                  value={selectedTargetId ?? ""}
+                  onChange={(event) => onTarget(event.target.value)}
+                >
+                  <option value="" disabled>
+                    {preserveExistingTarget ? "Giữ Page đã gắn với lịch hiện tại" : "Chọn Page sẽ đăng"}
+                  </option>
+                  {targets.map((target) => (
+                    <option key={target.id} value={target.id}>{target.name}{target.isDefault ? " (mặc định)" : ""}</option>
+                  ))}
+                </select>
+                {originalTargetUnavailable ? (
+                  <Alert tone="info">
+                    Không tải được Page đã gắn với lịch hiện tại. Nếu chỉ đổi thời gian, hệ thống sẽ giữ nguyên đích đăng đã khóa.
+                  </Alert>
+                ) : null}
+              </div>
             ) : (
               <Alert tone="warning">Chưa có Meta Page khả dụng. Hãy kết nối Meta trong phần Quản trị hệ thống.</Alert>
             )}
@@ -1253,7 +1304,7 @@ export default function ContentWorkspacePage() {
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("golden");
   const [scheduleDate, setScheduleDate] = useState(defaultScheduleDate);
   const [scheduleTime, setScheduleTime] = useState("09:00");
-  const [scheduleMetaAssetId, setScheduleMetaAssetId] = useState<string | null>(null);
+  const [scheduleTarget, setScheduleTarget] = useState<ScheduleTargetState>(EMPTY_SCHEDULE_TARGET);
   const [overrideItem, setOverrideItem] = useState<ContentItem | null>(null);
   const [overrideReason, setOverrideReason] = useState("");
   const [rejectItem, setRejectItem] = useState<ContentItem | null>(null);
@@ -1282,10 +1333,47 @@ export default function ContentWorkspacePage() {
     enabled: Boolean(requestedItemId),
     retry: false,
   });
+  const scheduleTargetPlatform = scheduleItem && requiresMetaTarget(scheduleItem.platform)
+    ? normalize(scheduleItem.platform)
+    : null;
   const publishTargetsQuery = useQuery({
-    queryKey: ["content", "publish-targets", "facebook"],
-    queryFn: () => getContentPublishTargets("facebook"),
+    queryKey: ["content", "publish-targets", scheduleTargetPlatform],
+    queryFn: () => getContentPublishTargets(scheduleTargetPlatform!),
+    enabled: Boolean(scheduleTargetPlatform),
   });
+  const calendarItems = Array.isArray(calendarQuery.data?.items) ? calendarQuery.data.items : EMPTY_CALENDAR;
+  const scheduleTargets = publishTargetsQuery.data?.items ?? [];
+  const defaultScheduleTarget = scheduleTargets.find((target) => target.isDefault)
+    ?? scheduleTargets[0]
+    ?? null;
+  const activeDialogSchedule = scheduleItem
+    ? calendarItems.find((schedule) =>
+        schedule.contentItemId === scheduleItem.id
+        && (normalize(schedule.status) === "pending" || normalize(schedule.status) === "held"),
+      )
+    : null;
+  const originalScheduleTargetId = scheduleTarget.originalMetaAssetId
+    ?? activeDialogSchedule?.metaAssetId
+    ?? null;
+  const isScheduleTargetRequired = requiresMetaTarget(scheduleItem?.platform, publishTargetsQuery.data?.mode);
+  const isOriginalScheduleTargetAvailable = Boolean(
+    originalScheduleTargetId
+    && scheduleTargets.some((target) => target.id === originalScheduleTargetId),
+  );
+  const isPreservingScheduleTarget = scheduleTarget.isExistingSchedule
+    && scheduleTarget.explicitMetaAssetId === null;
+  const selectedScheduleTargetId = isScheduleTargetRequired
+    ? scheduleTarget.explicitMetaAssetId
+      ?? (scheduleTarget.isExistingSchedule
+        ? isOriginalScheduleTargetAvailable ? scheduleTarget.originalMetaAssetId : null
+        : defaultScheduleTarget?.id ?? null)
+    : null;
+  const submittedScheduleTargetId = isScheduleTargetRequired
+    ? scheduleTarget.isExistingSchedule ? scheduleTarget.explicitMetaAssetId : selectedScheduleTargetId
+    : null;
+  const isOriginalScheduleTargetUnavailable = isScheduleTargetRequired
+    && isPreservingScheduleTarget
+    && !isOriginalScheduleTargetAvailable;
   // Mac dinh chi xem tuan hien tai; "all" = xem lai cac tuan cu (card se kem nhan tuan)
   const [trendWeeks] = useState(() => {
     const now = new Date();
@@ -1305,7 +1393,6 @@ export default function ContentWorkspacePage() {
 
   const briefs = Array.isArray(briefsQuery.data?.items) ? briefsQuery.data.items : EMPTY_BRIEFS;
   const queueItems = queueList.items.length ? queueList.items : EMPTY_ITEMS;
-  const calendarItems = Array.isArray(calendarQuery.data?.items) ? calendarQuery.data.items : EMPTY_CALENDAR;
   const trends = Array.isArray(trendsQuery.data?.trends) ? trendsQuery.data.trends : EMPTY_TRENDS;
   const linkedItem = linkedItemQuery.data ?? null;
   const displayedQueueItems = linkedItem && !queueItems.some((item) => item.id === linkedItem.id)
@@ -1531,11 +1618,11 @@ export default function ContentWorkspacePage() {
     mutationFn: (item: ContentItem) => scheduleContentItem(
       item.id,
       scheduledAtIso(scheduleMode, scheduleDate, scheduleTime),
-      requiresMetaTarget(item.platform) ? scheduleMetaAssetId : null,
+      submittedScheduleTargetId,
     ),
     onSuccess: async () => {
       setScheduleItem(null);
-      setScheduleMetaAssetId(null);
+      setScheduleTarget(EMPTY_SCHEDULE_TARGET);
       setNotice({
         tone: "success",
         message: scheduleMode === "golden"
@@ -1633,6 +1720,22 @@ export default function ContentWorkspacePage() {
   function updateEditorBody(value: string) {
     if (!selectedItem) return;
     setEditorDraft({ itemId: selectedItem.id, body: value, assetsJson: editorAssets });
+  }
+
+  function openScheduleDialog(item: ContentItem) {
+    const activeSchedule = calendarItems.find((schedule) =>
+      schedule.contentItemId === item.id
+      && (normalize(schedule.status) === "pending" || normalize(schedule.status) === "held"),
+    );
+    const isExistingSchedule = Boolean(activeSchedule)
+      || normalize(item.status) === "scheduled"
+      || normalize(item.workflowState) === "scheduled";
+    setScheduleTarget({
+      isExistingSchedule,
+      originalMetaAssetId: activeSchedule?.metaAssetId ?? null,
+      explicitMetaAssetId: null,
+    });
+    setScheduleItem(item);
   }
 
   function newBrief() {
@@ -1836,11 +1939,7 @@ export default function ContentWorkspacePage() {
                     }}
                     onRetryReview={() => { if (selectedItem) retryReviewMutation.mutate(selectedItem); }}
                     onSchedule={() => {
-                      if (selectedItem) {
-                        const defaultTarget = (publishTargetsQuery.data ?? []).find((target) => target.isDefault) ?? (publishTargetsQuery.data ?? [])[0] ?? null;
-                        setScheduleMetaAssetId(requiresMetaTarget(selectedItem.platform) ? defaultTarget?.id ?? null : null);
-                        setScheduleItem(selectedItem);
-                      }
+                      if (selectedItem) openScheduleDialog(selectedItem);
                     }}
                     onRepurpose={(targets) => { if (selectedItem) repurposeMutation.mutate({ id: selectedItem.id, targets }); }}
                     onDelete={() => { if (selectedItem) deleteItemMutation.mutate(selectedItem.id); }}
@@ -2070,13 +2169,19 @@ export default function ContentWorkspacePage() {
           time={scheduleTime}
           saving={scheduleMutation.isPending}
           error={scheduleMutation.error ?? (requiresMetaTarget(scheduleItem.platform) ? publishTargetsQuery.error : null)}
-          targets={publishTargetsQuery.data ?? []}
+          targets={publishTargetsQuery.data?.items ?? []}
           targetsLoading={publishTargetsQuery.isLoading}
-          selectedTargetId={scheduleMetaAssetId}
+          targetMode={publishTargetsQuery.data?.mode}
+          selectedTargetId={selectedScheduleTargetId}
+          preserveExistingTarget={isPreservingScheduleTarget}
+          originalTargetUnavailable={isOriginalScheduleTargetUnavailable}
           onMode={setScheduleMode}
           onDate={setScheduleDate}
           onTime={setScheduleTime}
-          onTarget={setScheduleMetaAssetId}
+          onTarget={(metaAssetId) => setScheduleTarget((current) => ({
+            ...current,
+            explicitMetaAssetId: metaAssetId,
+          }))}
           onClose={() => setScheduleItem(null)}
           onSubmit={() => scheduleMutation.mutate(scheduleItem)}
         />

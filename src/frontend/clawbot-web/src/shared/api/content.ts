@@ -142,6 +142,13 @@ export interface ContentPublishTarget {
   readonly isDefault: boolean;
 }
 
+export type ContentPublishTargetMode = "linked_meta" | "standalone" | "invalid" | "unsupported";
+
+export interface ContentPublishTargetsResponse {
+  readonly mode: ContentPublishTargetMode;
+  readonly items: readonly ContentPublishTarget[];
+}
+
 export interface ContentCalendarResponse {
   readonly items: readonly ContentCalendarItem[];
 }
@@ -383,9 +390,18 @@ export async function scheduleContentItem(id: string, scheduledAt: string | null
   return res.data;
 }
 
-export async function getContentPublishTargets(platform: string): Promise<readonly ContentPublishTarget[]> {
-  const res = await apiClient.get<readonly ContentPublishTarget[]>("/api/content/publish-targets", { params: { platform } });
-  return res.data;
+export async function getContentPublishTargets(platform: string): Promise<ContentPublishTargetsResponse> {
+  const res = await apiClient.get<ContentPublishTargetsResponse | readonly ContentPublishTarget[]>("/api/content/publish-targets", { params: { platform } });
+  if (Array.isArray(res.data)) {
+    const headerMode = res.headers["x-clawbot-publish-target-mode"];
+    const mode: ContentPublishTargetMode = headerMode === "standalone"
+      || headerMode === "invalid"
+      || headerMode === "unsupported"
+      ? headerMode
+      : "linked_meta";
+    return { mode, items: res.data };
+  }
+  return res.data as ContentPublishTargetsResponse;
 }
 
 export async function repurposeContentItem(id: string, targetPlatforms: readonly string[]): Promise<JobAccepted> {

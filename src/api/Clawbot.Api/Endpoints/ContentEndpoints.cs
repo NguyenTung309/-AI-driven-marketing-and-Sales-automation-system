@@ -11,6 +11,7 @@ using Clawbot.Api.Jobs;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.Domain.Content;
+using Clawbot.Infrastructure.Content.Publishing;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.Infrastructure.Integrations.Meta;
@@ -765,6 +766,7 @@ public static class ContentEndpoints
         IGoldenHourResolver goldenHour,
         Clawbot.Infrastructure.Content.IContentAutoScheduler autoScheduler,
         IMetaIntegrationService metaIntegrations,
+        IInstagramCredentialResolver instagramCredentials,
         HttpContext http,
         CancellationToken ct)
     {
@@ -781,9 +783,29 @@ public static class ContentEndpoints
         if (resolution.ErrorCode is not null)
             return Error(http, StatusCodes.Status400BadRequest, resolution.ErrorCode, resolution.Message ?? "Invalid schedule.");
 
+        var isFacebook = string.Equals(item.Platform, "facebook", StringComparison.OrdinalIgnoreCase);
+        var isInstagram = string.Equals(item.Platform, "instagram", StringComparison.OrdinalIgnoreCase);
+        ContentSchedule? activeSchedule = null;
+        if (!body.MetaAssetId.HasValue && (isFacebook || isInstagram))
+        {
+            activeSchedule = await db.ContentSchedules
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    schedule => schedule.TenantId == item.TenantId
+                        && schedule.ContentItemId == item.Id
+                        && schedule.ActiveRevisionSlot == item.ContentRevision,
+                    ct)
+                .ConfigureAwait(false);
+        }
+
+        var preserveExistingTarget = activeSchedule is not null
+            && (isFacebook
+                ? activeSchedule.MetaAssetId.HasValue
+                : !string.IsNullOrWhiteSpace(activeSchedule.ProviderTargetId));
         Guid? metaAssetId = null;
         string? providerTargetId = null;
-        if (string.Equals(item.Platform, "facebook", StringComparison.OrdinalIgnoreCase))
+        if (!preserveExistingTarget && isFacebook)
         {
             var pages = await metaIntegrations.GetPublishablePagesAsync(item.TenantId, ct).ConfigureAwait(false);
             var page = body.MetaAssetId.HasValue
@@ -793,31 +815,60 @@ public static class ContentEndpoints
                 return Error(http, StatusCodes.Status400BadRequest, "content.meta_page_required", "Hãy kết nối và chọn Facebook Page trước khi lên lịch.");
             metaAssetId = page.Id;
         }
-        else if (string.Equals(item.Platform, "instagram", StringComparison.OrdinalIgnoreCase))
+        else if (!preserveExistingTarget && isInstagram)
         {
-            if (!body.MetaAssetId.HasValue)
-                return Error(http, StatusCodes.Status400BadRequest, "content.instagram_target_required", "Hãy chọn Meta Page đã liên kết Instagram trước khi lên lịch.");
-
-            var instagram = await metaIntegrations
-                .ResolveInstagramAsync(item.TenantId, body.MetaAssetId.Value, ct)
-                .ConfigureAwait(false);
-            if (instagram.Status != MetaInstagramResolutionStatus.Resolved || instagram.Credential is null)
+            var standalone = await instagramCredentials.ResolveAsync(item.TenantId, ct).ConfigureAwait(false);
+            if (standalone.Status == InstagramCredentialResolutionStatus.Invalid
+                || (standalone.Status == InstagramCredentialResolutionStatus.Resolved
+                    && standalone.Credential is null))
             {
-                var errorCode = instagram.Status switch
-                {
-                    MetaInstagramResolutionStatus.ReconnectRequired => "content.instagram_reconnect_required",
-                    MetaInstagramResolutionStatus.MissingScopes => "content.instagram_permissions_missing",
-                    MetaInstagramResolutionStatus.NotLinked => "content.instagram_not_linked",
-                    MetaInstagramResolutionStatus.PageUnavailable => "content.instagram_target_unavailable",
-                    _ => "content.instagram_meta_unavailable",
-                };
-                return Error(http, StatusCodes.Status400BadRequest, errorCode, "Meta Page đã chọn chưa sẵn sàng để đăng Instagram.");
+                return Error(
+                    http,
+                    StatusCodes.Status400BadRequest,
+                    "content.instagram_credentials_invalid",
+                    "Thông tin Instagram độc lập không hợp lệ. Hãy sửa hoặc tắt ghi đè trong Quản trị hệ thống.");
             }
 
-            metaAssetId = instagram.Credential.PageAssetId;
-            providerTargetId = instagram.Credential.InstagramUserId;
+            if (standalone.Status == InstagramCredentialResolutionStatus.Resolved
+                && standalone.Credential is not null)
+            {
+                if (body.MetaAssetId.HasValue)
+                {
+                    return Error(
+                        http,
+                        StatusCodes.Status400BadRequest,
+                        "content.instagram_target_mode_conflict",
+                        "Không thể chọn Meta Page khi ghi đè Instagram độc lập đang được bật.");
+                }
+
+                providerTargetId = standalone.Credential.InstagramUserId;
+            }
+            else
+            {
+                if (!body.MetaAssetId.HasValue)
+                    return Error(http, StatusCodes.Status400BadRequest, "content.instagram_target_required", "Hãy chọn Meta Page đã liên kết Instagram trước khi lên lịch.");
+
+                var instagram = await metaIntegrations
+                    .ResolveInstagramAsync(item.TenantId, body.MetaAssetId.Value, ct)
+                    .ConfigureAwait(false);
+                if (instagram.Status != MetaInstagramResolutionStatus.Resolved || instagram.Credential is null)
+                {
+                    var errorCode = instagram.Status switch
+                    {
+                        MetaInstagramResolutionStatus.ReconnectRequired => "content.instagram_reconnect_required",
+                        MetaInstagramResolutionStatus.MissingScopes => "content.instagram_permissions_missing",
+                        MetaInstagramResolutionStatus.NotLinked => "content.instagram_not_linked",
+                        MetaInstagramResolutionStatus.PageUnavailable => "content.instagram_target_unavailable",
+                        _ => "content.instagram_meta_unavailable",
+                    };
+                    return Error(http, StatusCodes.Status400BadRequest, errorCode, "Meta Page đã chọn chưa sẵn sàng để đăng Instagram.");
+                }
+
+                metaAssetId = instagram.Credential.PageAssetId;
+                providerTargetId = instagram.Credential.InstagramUserId;
+            }
         }
-        else if (body.MetaAssetId.HasValue)
+        else if (!preserveExistingTarget && body.MetaAssetId.HasValue)
         {
             return Error(http, StatusCodes.Status400BadRequest, "content.meta_page_invalid", "Meta Page chỉ áp dụng cho nội dung Facebook hoặc Instagram.");
         }
@@ -896,22 +947,44 @@ public static class ContentEndpoints
         [FromQuery] string? platform,
         ITenantAccessor tenants,
         IMetaIntegrationService metaIntegrations,
+        IInstagramCredentialResolver instagramCredentials,
+        HttpContext http,
         CancellationToken ct)
     {
         var tenant = tenants.Require();
-        if (!string.Equals(platform, "facebook", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(platform, "instagram", StringComparison.OrdinalIgnoreCase))
+        var normalizedPlatform = platform?.Trim().ToLowerInvariant();
+        if (normalizedPlatform is not ("facebook" or "instagram"))
         {
+            http.Response.Headers["X-Clawbot-Publish-Target-Mode"] = "unsupported";
             return Results.Ok(Array.Empty<ContentPublishTargetDto>());
         }
 
+        if (normalizedPlatform == "instagram")
+        {
+            var standalone = await instagramCredentials.ResolveAsync(tenant.TenantId, ct).ConfigureAwait(false);
+            if (standalone.Status == InstagramCredentialResolutionStatus.Invalid
+                || (standalone.Status == InstagramCredentialResolutionStatus.Resolved
+                    && standalone.Credential is null))
+            {
+                http.Response.Headers["X-Clawbot-Publish-Target-Mode"] = "invalid";
+                return Results.Ok(Array.Empty<ContentPublishTargetDto>());
+            }
+            if (standalone.Status == InstagramCredentialResolutionStatus.Resolved)
+            {
+                http.Response.Headers["X-Clawbot-Publish-Target-Mode"] = "standalone";
+                return Results.Ok(Array.Empty<ContentPublishTargetDto>());
+            }
+        }
+
         var pages = await metaIntegrations.GetPublishablePagesAsync(tenant.TenantId, ct).ConfigureAwait(false);
-        return Results.Ok(pages.Select(x => new ContentPublishTargetDto(
+        var targets = pages.Select(x => new ContentPublishTargetDto(
             x.Id,
-            "facebook",
+            normalizedPlatform,
             x.ExternalId,
             x.Name,
-            x.IsDefault)).ToList());
+            x.IsDefault)).ToList();
+        http.Response.Headers["X-Clawbot-Publish-Target-Mode"] = "linked_meta";
+        return Results.Ok(targets);
     }
 
     private static async Task<IResult> DeleteScheduleAsync(

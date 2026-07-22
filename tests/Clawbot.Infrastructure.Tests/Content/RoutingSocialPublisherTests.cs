@@ -140,6 +140,9 @@ public sealed class RoutingSocialPublisherTests
         IMetaGraphClient graph)
     {
         var fallbackHandler = new CountingHandler();
+        var instagramCredentials = Substitute.For<IInstagramCredentialResolver>();
+        instagramCredentials.ResolveAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Absent));
         var nativePublisher = new GraphSocialPublisher(
             new HttpClient(),
             Options.Create(new GraphPublisherOptions
@@ -149,7 +152,8 @@ public sealed class RoutingSocialPublisherTests
             credentialResolver: null,
             NullLogger<GraphSocialPublisher>.Instance,
             integrations,
-            graph);
+            graph,
+            instagramCredentialResolver: instagramCredentials);
         var fallbackPublisher = new HttpSocialPublisher(
             new HttpClient(fallbackHandler),
             Options.Create(new PublisherOptions

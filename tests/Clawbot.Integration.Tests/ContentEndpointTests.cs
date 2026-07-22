@@ -260,7 +260,7 @@ public sealed class ContentEndpointTests : IClassFixture<SqlServerFixture>, IAsy
     public async Task Item_approval_schedule_calendar_and_cancel_roundtrip_uses_http_contract()
     {
         var itemId = Guid.NewGuid();
-        await InsertContentItemAsync(itemId, "instagram", "Initial carousel draft");
+        await InsertContentItemAsync(itemId, "zalo", "Initial carousel draft");
 
         var update = await _client.PutAsJsonAsync($"/api/content/items/{itemId}", new
         {
@@ -305,7 +305,7 @@ public sealed class ContentEndpointTests : IClassFixture<SqlServerFixture>, IAsy
         calendarJson.RootElement.GetProperty("items").EnumerateArray()
             .Should().Contain(e => e.GetProperty("scheduleId").GetGuid() == scheduleId);
 
-        var queue = await _client.GetAsync("/api/content/queue?status=scheduled&platform=instagram");
+        var queue = await _client.GetAsync("/api/content/queue?status=scheduled&platform=zalo");
         queue.StatusCode.Should().Be(HttpStatusCode.OK);
         var queueJson = await ReadJsonAsync(queue);
         queueJson.RootElement.GetProperty("items").EnumerateArray()
@@ -314,7 +314,7 @@ public sealed class ContentEndpointTests : IClassFixture<SqlServerFixture>, IAsy
         var cancel = await _client.DeleteAsync($"/api/content/schedule/{scheduleId}");
         cancel.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
-        var queueAfterCancel = await _client.GetAsync("/api/content/queue?status=approved&platform=instagram");
+        var queueAfterCancel = await _client.GetAsync("/api/content/queue?status=approved&platform=zalo");
         queueAfterCancel.StatusCode.Should().Be(HttpStatusCode.OK);
         var reverted = await ReadJsonAsync(queueAfterCancel);
         reverted.RootElement.GetProperty("items").EnumerateArray()

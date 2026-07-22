@@ -275,6 +275,15 @@ if (builder.Environment.IsDevelopment())
 
 var app = builder.Build();
 
+if (builder.Configuration.GetValue<bool>("Operations:MigrateMetaCredentialEnvelopes"))
+{
+    var migration = await Clawbot.Infrastructure.Integrations.Meta.MetaCredentialEnvelopeMigrator
+        .MigrateAsync(app.Services)
+        .ConfigureAwait(false);
+    Environment.ExitCode = migration.InvalidCount == 0 ? 0 : 1;
+    return;
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();

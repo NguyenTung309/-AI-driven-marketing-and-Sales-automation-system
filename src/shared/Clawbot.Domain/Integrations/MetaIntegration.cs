@@ -30,9 +30,32 @@ public sealed class MetaConnection : AggregateRoot<Guid>, ITenantOwned
         DateTimeOffset? expiresAt,
         DateTimeOffset? dataAccessExpiresAt,
         DateTimeOffset at) =>
+        Create(
+            Guid.NewGuid(),
+            tenantId,
+            clientBusinessId,
+            systemUserId,
+            tokenType,
+            encryptedAccessToken,
+            grantedScopesJson,
+            expiresAt,
+            dataAccessExpiresAt,
+            at);
+
+    public static MetaConnection Create(
+        Guid id,
+        Guid tenantId,
+        string clientBusinessId,
+        string systemUserId,
+        string tokenType,
+        string encryptedAccessToken,
+        string grantedScopesJson,
+        DateTimeOffset? expiresAt,
+        DateTimeOffset? dataAccessExpiresAt,
+        DateTimeOffset at) =>
         new()
         {
-            Id = Guid.NewGuid(),
+            Id = id,
             TenantId = tenantId,
             ClientBusinessId = clientBusinessId.Trim(),
             SystemUserId = systemUserId.Trim(),
@@ -66,6 +89,12 @@ public sealed class MetaConnection : AggregateRoot<Guid>, ITenantOwned
         LastValidatedAt = at;
         Status = "active";
         LastError = null;
+        UpdatedAt = at;
+    }
+
+    public void ReprotectAccessToken(string encryptedAccessToken, DateTimeOffset at)
+    {
+        AccessTokenEncrypted = encryptedAccessToken;
         UpdatedAt = at;
     }
 
@@ -134,9 +163,30 @@ public sealed class MetaAsset : AggregateRoot<Guid>, ITenantOwned
         string encryptedAccessToken,
         bool isDefault,
         DateTimeOffset at) =>
+        CreatePage(
+            Guid.NewGuid(),
+            tenantId,
+            connectionId,
+            externalId,
+            name,
+            tasksJson,
+            encryptedAccessToken,
+            isDefault,
+            at);
+
+    public static MetaAsset CreatePage(
+        Guid id,
+        Guid tenantId,
+        Guid connectionId,
+        string externalId,
+        string name,
+        string tasksJson,
+        string encryptedAccessToken,
+        bool isDefault,
+        DateTimeOffset at) =>
         new()
         {
-            Id = Guid.NewGuid(),
+            Id = id,
             TenantId = tenantId,
             ConnectionId = connectionId,
             AssetType = "page",
@@ -157,6 +207,12 @@ public sealed class MetaAsset : AggregateRoot<Guid>, ITenantOwned
         AccessTokenEncrypted = encryptedAccessToken;
         IsActive = true;
         LastSyncedAt = at;
+        UpdatedAt = at;
+    }
+
+    public void ReprotectAccessToken(string encryptedAccessToken, DateTimeOffset at)
+    {
+        AccessTokenEncrypted = encryptedAccessToken;
         UpdatedAt = at;
     }
 

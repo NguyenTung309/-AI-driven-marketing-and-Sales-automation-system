@@ -1,4 +1,6 @@
 using Clawbot.Domain.Content;
+using Clawbot.Domain.Integrations;
+using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Content;
 using Clawbot.Infrastructure.Content.Publishing;
 using Clawbot.Infrastructure.Jobs;
@@ -48,6 +50,58 @@ public sealed class ContentPublishJobTests
         savedItem.Status.Should().Be("published");
         savedItem.UpdatedAt.Should().Be(Now);
         await notifier.DidNotReceiveWithAnyArgs().NotifyPublishFailedAsync(default, default!, default);
+    }
+
+    [Fact]
+    public async Task RunAsync_forwards_frozen_target_snapshot_to_publisher()
+    {
+        var tenant = Tenant.Create("publish-target-test", "Publish Target Test", "free", Now);
+        using var fx = new TestAppDb(tenant.Id);
+        var connection = MetaConnection.Create(
+            tenant.Id,
+            "business-1",
+            "system-user-1",
+            "business_integration_system_user",
+            "encrypted-user-token",
+            "[]",
+            expiresAt: null,
+            dataAccessExpiresAt: null,
+            Now);
+        var asset = MetaAsset.CreatePage(
+            tenant.Id,
+            connection.Id,
+            "page-123",
+            "Test Page",
+            "[]",
+            "encrypted-page-token",
+            isDefault: true,
+            Now);
+        var item = ContentItem.Create(tenant.Id, "facebook", "Post body", createdBy: null, Now.AddHours(-2));
+        PrepareForScheduling(item);
+        var schedule = ContentSchedule.Schedule(
+            tenant.Id,
+            item.Id,
+            item.ContentRevision,
+            "facebook",
+            Now.AddMinutes(-5),
+            Now.AddHours(-1),
+            metaAssetId: asset.Id,
+            providerTargetId: "17841400000000000");
+        ApplyApprovalContext(schedule, item);
+        fx.Db.Tenants.Add(tenant);
+        fx.Db.MetaConnections.Add(connection);
+        fx.Db.MetaAssets.Add(asset);
+        fx.Db.ContentItems.Add(item);
+        fx.Db.ContentSchedules.Add(schedule);
+        await fx.Db.SaveChangesAsync();
+        var publisher = new RecordingPublisher(new PublishResult(true, "https://social.example/posts/1", null));
+        var job = BuildJob(fx, publisher, Substitute.For<IContentNotifier>());
+
+        await job.RunAsync(CancellationToken.None);
+
+        var request = publisher.Requests.Should().ContainSingle().Which;
+        request.MetaAssetId.Should().Be(asset.Id);
+        request.ProviderTargetId.Should().Be("17841400000000000");
     }
 
     [Fact]

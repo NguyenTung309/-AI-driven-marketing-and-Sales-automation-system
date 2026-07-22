@@ -67,6 +67,35 @@ public sealed class LocalRunDocumentationTests
         viteConfig.Should().NotContain("localhost:5001");
     }
 
+    [Fact]
+    public void Instagram_target_snapshot_migration_and_repair_hold_legacy_active_schedules()
+    {
+        var root = FindRepositoryRoot();
+        var migration = File.ReadAllText(Path.Combine(
+            root,
+            "deploy",
+            "migrations",
+            "0081_content_schedule_provider_target.sql"));
+        var repair = File.ReadAllText(Path.Combine(root, "deploy", "repair_tenant_runtime_columns.sql"));
+        var runner = File.ReadAllText(Path.Combine(root, "run-all.bat"));
+
+        foreach (var script in new[] { migration, repair })
+        {
+            script.Should().Contain("provider_target_id");
+            script.Should().Contain("instagram_target_reselection_required");
+            script.Should().Contain("next_attempt_at = NULL");
+            script.Should().Contain("NULLIF(LTRIM(RTRIM(provider_target_id))");
+            script.Should().Contain("pending");
+            script.Should().Contain("held");
+            script.Should().Contain("publishing");
+            script.Should().Contain("outcome_unknown");
+        }
+
+        migration.Should().Contain("DISABLE TRIGGER dbo.TR_content_schedule_writer_gate");
+        migration.Should().Contain("ENABLE TRIGGER dbo.TR_content_schedule_writer_gate");
+        runner.Should().Contain("0081_content_schedule_provider_target.sql");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

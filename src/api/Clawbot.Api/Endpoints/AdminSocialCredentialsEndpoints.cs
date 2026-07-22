@@ -14,6 +14,7 @@ namespace Clawbot.Api.Endpoints;
 
 public sealed record SocialCredentialDto(
     string Provider,
+    string ResolutionState,
     bool Enabled,
     string Endpoint,
     string PageId,
@@ -57,20 +58,59 @@ public static class AdminSocialCredentialsEndpoints
         ITenantAccessor tenants,
         CancellationToken ct)
     {
-        _ = tenants.Require();
+        var tenant = tenants.Require();
         var rows = await db.SocialCredentials.AsNoTracking()
-            .Where(c => Providers.Contains(c.Provider) && c.DeletedAt == null && c.PageId == null)
+            .Where(c => c.TenantId == tenant.TenantId
+                && Providers.Contains(c.Provider)
+                && c.DeletedAt == null
+                && c.PageId == null)
             .ToListAsync(ct).ConfigureAwait(false);
 
-        var items = Providers
-            .Select(provider =>
+        var items = new List<SocialCredentialDto>(Providers.Length);
+        foreach (var provider in Providers)
+        {
+            var row = rows.Find(r => string.Equals(r.Provider, provider, StringComparison.OrdinalIgnoreCase));
+            if (provider == "instagram")
             {
-                var row = rows.Find(r => string.Equals(r.Provider, provider, StringComparison.OrdinalIgnoreCase));
-                var stored = row is null ? null : Decrypt(encryptor, row.CredentialsEncrypted);
-                var effective = stored ?? Defaults(options.Value, provider);
-                return ToDto(provider, effective, row?.UpdatedAt);
-            })
-            .ToList();
+                if (row is null)
+                {
+                    items.Add(ToDto(provider, "absent", Defaults(options.Value, provider), updatedAt: null));
+                    continue;
+                }
+
+                if (!row.IsActive)
+                {
+                    items.Add(ToDto(provider, "invalid", new GraphChannelOptions(), row.UpdatedAt));
+                    continue;
+                }
+
+                var decoded = InstagramCredentialEnvelopeCodec.Decode(
+                    encryptor,
+                    tenant.TenantId,
+                    provider,
+                    row.PageId,
+                    row.CredentialsEncrypted);
+                if (decoded.Status == InstagramCredentialEnvelopeStatus.Invalid || decoded.Options is null)
+                {
+                    items.Add(ToDto(provider, "invalid", new GraphChannelOptions(), row.UpdatedAt));
+                    continue;
+                }
+
+                if (!IsValidInstagram(decoded.Options))
+                {
+                    items.Add(ToDto(provider, "invalid", new GraphChannelOptions(), row.UpdatedAt));
+                    continue;
+                }
+
+                items.Add(ToDto(provider, InstagramResolutionState(decoded.Options), decoded.Options, row.UpdatedAt));
+                continue;
+            }
+
+            var stored = row is null ? null : Decrypt(encryptor, row.CredentialsEncrypted);
+            var effective = stored ?? Defaults(options.Value, provider);
+            var resolutionState = row is null ? "absent" : stored is null ? "invalid" : "resolved";
+            items.Add(ToDto(provider, resolutionState, effective, row?.UpdatedAt));
+        }
 
         return Results.Ok(new { items });
     }
@@ -95,6 +135,16 @@ public static class AdminSocialCredentialsEndpoints
             return Error(http, StatusCodes.Status400BadRequest, "admin.social_field_too_long", $"fields must be at most {MaxFieldChars} characters.");
         if (normalized == "instagram" && HasInstagramForeignFields(body))
             return Error(http, StatusCodes.Status400BadRequest, "admin.instagram_fields_invalid", "Instagram accepts only enabled, pageId, and pageAccessToken.");
+        if (normalized == "instagram"
+            && body.PageId is { } instagramUserId
+            && instagramUserId.Trim().Length > ContentSchedule.MaxProviderTargetIdLength)
+        {
+            return Error(
+                http,
+                StatusCodes.Status400BadRequest,
+                "admin.instagram_user_id_too_long",
+                $"Instagram user ID must be at most {ContentSchedule.MaxProviderTargetIdLength} characters.");
+        }
         if (normalized == "zalo"
             && body.Endpoint is not null
             && !string.IsNullOrWhiteSpace(body.Endpoint)
@@ -104,15 +154,44 @@ public static class AdminSocialCredentialsEndpoints
         }
 
         var row = await db.SocialCredentials
-            .FirstOrDefaultAsync(c => c.Provider == normalized && c.DeletedAt == null && c.PageId == null, ct)
+            .FirstOrDefaultAsync(
+                c => c.TenantId == tenant.TenantId
+                    && c.Provider == normalized
+                    && c.DeletedAt == null
+                    && c.PageId == null,
+                ct)
             .ConfigureAwait(false);
-        var stored = row is null ? null : Decrypt(encryptor, row.CredentialsEncrypted);
+        GraphChannelOptions? stored;
+        if (normalized == "instagram" && row is not null)
+        {
+            if (!row.IsActive)
+            {
+                stored = null;
+            }
+            else
+            {
+                var decoded = InstagramCredentialEnvelopeCodec.Decode(
+                    encryptor,
+                    tenant.TenantId,
+                    normalized,
+                    row.PageId,
+                    row.CredentialsEncrypted);
+                stored = decoded.Status == InstagramCredentialEnvelopeStatus.Resolved
+                    ? decoded.Options
+                    : null;
+            }
+        }
+        else
+        {
+            stored = row is null ? null : Decrypt(encryptor, row.CredentialsEncrypted);
+        }
+
         if (normalized == "instagram"
             && row is not null
             && stored is null
-            && !IsFullInstagramReplacement(body))
+            && !CanRepairInvalidInstagram(body))
         {
-            return Error(http, StatusCodes.Status400BadRequest, "admin.instagram_credentials_invalid", "Replace all Instagram credential fields before enabling the standalone override.");
+            return Error(http, StatusCodes.Status400BadRequest, "admin.instagram_credentials_invalid", "Disable the standalone override or replace all Instagram credential fields.");
         }
 
         var current = stored ?? Defaults(options.Value, normalized);
@@ -122,7 +201,14 @@ public static class AdminSocialCredentialsEndpoints
         if (normalized == "instagram" && !IsValidInstagram(merged))
             return Error(http, StatusCodes.Status400BadRequest, "admin.instagram_credentials_invalid", "Enabled Instagram credentials require a numeric user ID and access token.");
 
-        var encrypted = encryptor.Encrypt(JsonSerializer.Serialize(merged, JsonOpts));
+        var encrypted = normalized == "instagram"
+            ? InstagramCredentialEnvelopeCodec.Encode(
+                encryptor,
+                tenant.TenantId,
+                normalized,
+                row?.PageId,
+                merged)
+            : encryptor.Encrypt(JsonSerializer.Serialize(merged, JsonOpts));
         var now = clock.UtcNow;
         if (row is null)
         {
@@ -135,7 +221,10 @@ public static class AdminSocialCredentialsEndpoints
         }
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return Results.Ok(ToDto(normalized, merged, now));
+        var resolutionState = normalized == "instagram"
+            ? InstagramResolutionState(merged)
+            : "resolved";
+        return Results.Ok(ToDto(normalized, resolutionState, merged, now));
     }
 
     private static GraphChannelOptions Defaults(GraphPublisherOptions options, string provider) =>
@@ -170,9 +259,12 @@ public static class AdminSocialCredentialsEndpoints
         };
 
     private static bool HasInstagramForeignFields(UpdateSocialCredentialRequest update) =>
-        !string.IsNullOrWhiteSpace(update.Endpoint)
-        || !string.IsNullOrWhiteSpace(update.OaId)
-        || !string.IsNullOrWhiteSpace(update.OaAccessToken);
+        update.Endpoint is not null
+        || update.OaId is not null
+        || update.OaAccessToken is not null;
+
+    private static bool CanRepairInvalidInstagram(UpdateSocialCredentialRequest update) =>
+        update.Enabled == false || IsFullInstagramReplacement(update);
 
     private static bool IsFullInstagramReplacement(UpdateSocialCredentialRequest update) =>
         update.Enabled.HasValue
@@ -192,7 +284,8 @@ public static class AdminSocialCredentialsEndpoints
 
         try
         {
-            return JsonSerializer.Deserialize<GraphChannelOptions>(encryptor.Decrypt(encrypted), JsonOpts);
+            var options = JsonSerializer.Deserialize<GraphChannelOptions>(encryptor.Decrypt(encrypted), JsonOpts);
+            return options is null ? null : InstagramCredentialEnvelopeCodec.Normalize(options);
         }
         catch (JsonException)
         {
@@ -208,9 +301,17 @@ public static class AdminSocialCredentialsEndpoints
         }
     }
 
-    private static SocialCredentialDto ToDto(string provider, GraphChannelOptions value, DateTimeOffset? updatedAt) =>
+    private static string InstagramResolutionState(GraphChannelOptions value) =>
+        !value.Enabled ? "disabled" : IsValidInstagram(value) ? "resolved" : "invalid";
+
+    private static SocialCredentialDto ToDto(
+        string provider,
+        string resolutionState,
+        GraphChannelOptions value,
+        DateTimeOffset? updatedAt) =>
         new(
             provider,
+            resolutionState,
             value.Enabled,
             value.Endpoint,
             value.PageId,

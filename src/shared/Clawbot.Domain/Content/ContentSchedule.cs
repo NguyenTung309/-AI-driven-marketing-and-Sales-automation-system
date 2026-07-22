@@ -19,9 +19,10 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
     public const string ErrorCanceledByUser = "canceled_by_user";
     public const string ErrorPublisherFailure = "publisher_error";
     public const string ErrorStaleItemPrefix = "stale_item_status:";
+    public const string ErrorInstagramTargetReselectionRequired = "instagram_target_reselection_required";
 
     private const int MaxErrorCodeLength = 128;
-    private const int MaxProviderTargetIdLength = 128;
+    public const int MaxProviderTargetIdLength = 128;
 
     public Guid TenantId { get; private set; }
     public Guid ContentItemId { get; private set; }
@@ -63,11 +64,7 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
         string? providerTargetId = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(contentRevision);
-        var normalizedProviderTargetId = string.IsNullOrWhiteSpace(providerTargetId)
-            ? null
-            : providerTargetId.Trim();
-        if (normalizedProviderTargetId?.Length > MaxProviderTargetIdLength)
-            throw new ArgumentOutOfRangeException(nameof(providerTargetId));
+        var normalizedProviderTargetId = NormalizeProviderTargetId(providerTargetId);
 
         return new ContentSchedule
         {
@@ -106,6 +103,28 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
         ApprovalMode = approvalMode;
         PublishingPolicyVersionApplied = publishingPolicyVersionApplied;
         PublishTargetId = publishTargetId;
+    }
+
+    public void Reschedule(
+        DateTimeOffset scheduledAt,
+        Guid? publishTargetId,
+        string? providerTargetId,
+        DateTimeOffset at)
+    {
+        if (Status is not (StatusPending or StatusHeld))
+            throw new InvalidOperationException("content_schedule_not_reschedulable");
+
+        MetaAssetId = publishTargetId;
+        PublishTargetId = publishTargetId;
+        ProviderTargetId = NormalizeProviderTargetId(providerTargetId);
+        ScheduledAt = scheduledAt;
+        Status = StatusPending;
+        ActiveRevisionSlot = ContentRevision;
+        RetryCount = 0;
+        NextAttemptAt = null;
+        LastErrorCode = null;
+        LastError = null;
+        UpdatedAt = at;
     }
 
     public void MarkPublishing(DateTimeOffset at)
@@ -256,6 +275,16 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
         CommentCount = commentCount;
         EngagementSyncedAt = at;
         UpdatedAt = at;
+    }
+
+    private static string? NormalizeProviderTargetId(string? providerTargetId)
+    {
+        var normalized = string.IsNullOrWhiteSpace(providerTargetId)
+            ? null
+            : providerTargetId.Trim();
+        if (normalized?.Length > MaxProviderTargetIdLength)
+            throw new ArgumentOutOfRangeException(nameof(providerTargetId));
+        return normalized;
     }
 
     private static string? NormalizeError(string? reason)

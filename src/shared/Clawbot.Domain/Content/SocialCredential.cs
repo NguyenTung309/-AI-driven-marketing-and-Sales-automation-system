@@ -19,10 +19,24 @@ public sealed class SocialCredential : AggregateRoot<Guid>, ITenantOwned
 
     private SocialCredential() { }
 
-    public static SocialCredential Create(Guid tenantId, string provider, string encrypted, DateTimeOffset createdAt, string? pageId = null) =>
+    public static SocialCredential Create(
+        Guid tenantId,
+        string provider,
+        string encrypted,
+        DateTimeOffset createdAt,
+        string? pageId = null) =>
+        Create(Guid.NewGuid(), tenantId, provider, encrypted, createdAt, pageId);
+
+    public static SocialCredential Create(
+        Guid id,
+        Guid tenantId,
+        string provider,
+        string encrypted,
+        DateTimeOffset createdAt,
+        string? pageId = null) =>
         new()
         {
-            Id = Guid.NewGuid(),
+            Id = id,
             TenantId = tenantId,
             Provider = provider.Trim().ToLowerInvariant(),
             PageId = string.IsNullOrWhiteSpace(pageId) ? null : pageId.Trim(),

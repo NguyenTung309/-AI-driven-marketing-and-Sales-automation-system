@@ -564,8 +564,12 @@ export async function runAdminScheduleJobNow(id: string): Promise<void> {
   await apiClient.post(`/api/admin/jobs/schedules/${encodeURIComponent(id)}/run-now`);
 }
 
+export type SocialChannelProvider = "zalo" | "instagram";
+export type SocialCredentialResolutionState = "absent" | "disabled" | "resolved" | "invalid";
+
 export interface SocialChannelCredential {
-  readonly provider: string;
+  readonly provider: SocialChannelProvider;
+  readonly resolutionState: SocialCredentialResolutionState;
   readonly enabled: boolean;
   readonly endpoint: string;
   readonly pageId: string;
@@ -585,13 +589,19 @@ export interface UpdateSocialChannelPayload {
   readonly oaAccessToken?: string | null;
 }
 
+export interface UpdateInstagramCredentialPayload {
+  readonly enabled: boolean;
+  readonly pageId: string;
+  readonly pageAccessToken: string | null;
+}
+
 export async function getSocialCredentials(): Promise<readonly SocialChannelCredential[]> {
   const res = await apiClient.get<{ items: readonly SocialChannelCredential[] }>("/api/admin/social-credentials");
   return res.data.items;
 }
 
 export async function updateSocialCredential(
-  provider: string,
+  provider: SocialChannelProvider,
   payload: UpdateSocialChannelPayload,
 ): Promise<SocialChannelCredential> {
   const res = await apiClient.put<SocialChannelCredential>(
@@ -599,6 +609,12 @@ export async function updateSocialCredential(
     payload,
   );
   return res.data;
+}
+
+export async function updateInstagramCredential(
+  payload: UpdateInstagramCredentialPayload,
+): Promise<SocialChannelCredential> {
+  return updateSocialCredential("instagram", payload);
 }
 
 export interface MetaAsset {

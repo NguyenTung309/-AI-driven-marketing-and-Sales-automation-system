@@ -164,6 +164,12 @@ public sealed class AuditSaveChangesInterceptor(
         if (ContentPayloadProps.Contains(name))
             return true;
 
+        if (entity is SocialCredential
+            && name == nameof(SocialCredential.CredentialsEncrypted))
+        {
+            return true;
+        }
+
         if (entity is ContentSchedule
             && name is nameof(ContentSchedule.PostUrl)
                 or nameof(ContentSchedule.LastError)

@@ -31,7 +31,7 @@ public sealed class MetaIntegrationServiceTests
         await service.CompleteAuthorizationAsync(tenant.Id, "oauth-code");
 
         var connection = await fx.Db.MetaConnections.IgnoreQueryFilters().SingleAsync();
-        connection.AccessTokenEncrypted.Should().Be("enc:root-token");
+        connection.AccessTokenEncrypted.Should().StartWith("enc:").And.NotContain("root-token");
         connection.ClientBusinessId.Should().Be("business-1");
         connection.TokenType.Should().Be(MetaConnectionTokenTypes.BusinessIntegrationSystemUser);
         var storedAssets = await fx.Db.MetaAssets.IgnoreQueryFilters().OrderBy(x => x.ExternalId).ToListAsync();
@@ -503,10 +503,18 @@ public sealed class MetaIntegrationServiceTests
         return configurations;
     }
 
-    private sealed class PrefixEncryptor : IEncryptor
+    private sealed class PrefixEncryptor : IAuthenticatedEncryptor
     {
-        public string Encrypt(string plaintext) => $"enc:{plaintext}";
-        public string Decrypt(string ciphertext) => ciphertext.StartsWith("enc:", StringComparison.Ordinal) ? ciphertext[4..] : throw new FormatException();
+        public string Encrypt(string plaintext) => $"enc:{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(plaintext))}";
+
+        public string Decrypt(string ciphertext)
+        {
+            if (!ciphertext.StartsWith("enc:", StringComparison.Ordinal))
+                throw new FormatException();
+            return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(ciphertext[4..]));
+        }
+
+        public string DecryptAuthenticated(string ciphertext) => Decrypt(ciphertext);
     }
 
     private sealed class FixedClock(DateTimeOffset now) : IClock

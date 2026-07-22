@@ -45,11 +45,43 @@ public sealed class ContentAutoScheduler(
     {
         ArgumentNullException.ThrowIfNull(item);
 
-        // Active intent (pending/held/publishing/outcome_unknown) — return winner, keep existing time.
         // Must run before CanSchedule: after the first call the item is already "scheduled".
         var active = await FindActiveIntentAsync(item, cancellationToken).ConfigureAwait(false);
         if (active is not null)
+        {
+            var hasTargetUpdate = publishTargetId.HasValue
+                || !string.IsNullOrWhiteSpace(providerTargetId);
+            if (!desiredPublishAt.HasValue && !hasTargetUpdate)
+                return active;
+            if (active.Status is not (ContentSchedule.StatusPending or ContentSchedule.StatusHeld))
+                return active;
+            if (desiredPublishAt is { } existingExplicitAt && existingExplicitAt <= at)
+                throw new InvalidOperationException("content_schedule_in_past");
+
+            var preserveInstagramReselectionHold = !hasTargetUpdate
+                && string.Equals(item.Platform, "instagram", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(
+                    active.LastErrorCode,
+                    ContentSchedule.ErrorInstagramTargetReselectionRequired,
+                    StringComparison.Ordinal);
+            var rescheduledAt = desiredPublishAt ?? _goldenHour.ResolveNext(item.Platform, at);
+            var rescheduledPublishTargetId = hasTargetUpdate ? publishTargetId : active.MetaAssetId;
+            var rescheduledProviderTargetId = hasTargetUpdate ? providerTargetId : active.ProviderTargetId;
+            active.Reschedule(
+                rescheduledAt,
+                rescheduledPublishTargetId,
+                rescheduledProviderTargetId,
+                at);
+            ApplyHoldState(
+                active,
+                item.Platform,
+                rescheduledPublishTargetId,
+                rescheduledProviderTargetId,
+                preserveInstagramReselectionHold,
+                at);
+            item.SetDesiredPublishAt(rescheduledAt, at);
             return active;
+        }
 
         if (!item.CanScheduleCurrentRevision())
             throw new InvalidOperationException("content_current_revision_not_schedulable");
@@ -94,17 +126,13 @@ public sealed class ContentAutoScheduler(
             item.PublishingPolicyVersionApplied.Value,
             publishTargetId);
 
-        if (RequiresPublishTarget(item.Platform)
-            && (publishTargetId is null
-                || (string.Equals(item.Platform, "instagram", StringComparison.OrdinalIgnoreCase)
-                    && string.IsNullOrWhiteSpace(providerTargetId))))
-        {
-            schedule.MarkHeld(ErrorAutoScheduleTargetMissing, at);
-        }
-        else if (InstagramPublishingGate.IsBlocked(item.Platform))
-        {
-            schedule.MarkHeld(ErrorInstagramPublishingUnavailable, at);
-        }
+        ApplyHoldState(
+            schedule,
+            item.Platform,
+            publishTargetId,
+            providerTargetId,
+            preserveInstagramReselectionHold: false,
+            at: at);
 
         item.SetDesiredPublishAt(scheduledAt, at);
         item.MarkScheduled(at);
@@ -128,7 +156,36 @@ public sealed class ContentAutoScheduler(
             .ConfigureAwait(false);
     }
 
-    private static bool RequiresPublishTarget(string platform) =>
-        string.Equals(platform, "facebook", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(platform, "instagram", StringComparison.OrdinalIgnoreCase);
+    private static void ApplyHoldState(
+        ContentSchedule schedule,
+        string platform,
+        Guid? publishTargetId,
+        string? providerTargetId,
+        bool preserveInstagramReselectionHold,
+        DateTimeOffset at)
+    {
+        if (!HasRequiredPublishTarget(platform, publishTargetId, providerTargetId))
+        {
+            var errorCode = preserveInstagramReselectionHold
+                ? ContentSchedule.ErrorInstagramTargetReselectionRequired
+                : ErrorAutoScheduleTargetMissing;
+            schedule.MarkHeld(errorCode, at);
+            return;
+        }
+
+        if (InstagramPublishingGate.IsBlocked(platform))
+            schedule.MarkHeld(ErrorInstagramPublishingUnavailable, at);
+    }
+
+    private static bool HasRequiredPublishTarget(
+        string platform,
+        Guid? publishTargetId,
+        string? providerTargetId)
+    {
+        if (string.Equals(platform, "facebook", StringComparison.OrdinalIgnoreCase))
+            return publishTargetId.HasValue;
+        if (string.Equals(platform, "instagram", StringComparison.OrdinalIgnoreCase))
+            return !string.IsNullOrWhiteSpace(providerTargetId);
+        return true;
+    }
 }

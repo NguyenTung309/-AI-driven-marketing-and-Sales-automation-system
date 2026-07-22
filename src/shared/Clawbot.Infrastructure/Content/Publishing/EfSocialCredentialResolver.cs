@@ -35,6 +35,22 @@ public sealed partial class EfSocialCredentialResolver(
         }
 
         var normalized = provider.Trim().ToLowerInvariant();
+        if (string.Equals(normalized, "instagram", StringComparison.Ordinal))
+        {
+            var resolution = await ResolveAsync(tenantId, ct).ConfigureAwait(false);
+            return resolution.Status switch
+            {
+                InstagramCredentialResolutionStatus.Disabled => new GraphChannelOptions(),
+                InstagramCredentialResolutionStatus.Resolved when resolution.Credential is not null => new GraphChannelOptions
+                {
+                    Enabled = true,
+                    PageId = resolution.Credential.InstagramUserId,
+                    PageAccessToken = resolution.Credential.AccessToken,
+                },
+                _ => null,
+            };
+        }
+
         var row = await _db.SocialCredentials
             .IgnoreQueryFilters()
             .AsNoTracking()
@@ -44,13 +60,13 @@ public sealed partial class EfSocialCredentialResolver(
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
         if (row is null) return null;
-
         var json = SafeDecrypt(row.CredentialsEncrypted);
         if (string.IsNullOrEmpty(json)) return null;
 
         try
         {
-            return JsonSerializer.Deserialize<GraphChannelOptions>(json, JsonOpts);
+            var options = JsonSerializer.Deserialize<GraphChannelOptions>(json, JsonOpts);
+            return options is null ? null : InstagramCredentialEnvelopeCodec.Normalize(options);
         }
         catch (JsonException ex)
         {
@@ -64,11 +80,11 @@ public sealed partial class EfSocialCredentialResolver(
         CancellationToken ct = default)
     {
         if (tenantId == Guid.Empty)
-            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Absent);
+            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
         if (_tenants.Current is { TenantId: var ambient } && ambient != tenantId)
         {
             LogTenantMismatch(_logger, tenantId, ambient);
-            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Absent);
+            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
         }
 
         var row = await _db.SocialCredentials
@@ -78,37 +94,24 @@ public sealed partial class EfSocialCredentialResolver(
                 credential => credential.TenantId == tenantId
                     && credential.Provider == "instagram"
                     && credential.PageId == null
-                    && credential.DeletedAt == null
-                    && credential.IsActive,
+                    && credential.DeletedAt == null,
                 ct)
             .ConfigureAwait(false);
         if (row is null)
             return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Absent);
+        if (!row.IsActive)
+            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
 
-        GraphChannelOptions? options;
-        try
-        {
-            var json = _encryptor.Decrypt(row.CredentialsEncrypted);
-            options = JsonSerializer.Deserialize<GraphChannelOptions>(json, JsonOpts);
-        }
-        catch (JsonException ex)
-        {
-            LogParseFailed(_logger, ex, tenantId, "instagram");
+        var decoded = InstagramCredentialEnvelopeCodec.Decode(
+            _encryptor,
+            tenantId,
+            "instagram",
+            row.PageId,
+            row.CredentialsEncrypted);
+        if (decoded.Status == InstagramCredentialEnvelopeStatus.Invalid || decoded.Options is null)
             return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
-        }
-        catch (FormatException ex)
-        {
-            LogDecryptFailed(_logger, ex, tenantId, "instagram");
-            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
-        }
-        catch (System.Security.Cryptography.CryptographicException ex)
-        {
-            LogDecryptFailed(_logger, ex, tenantId, "instagram");
-            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
-        }
 
-        if (options is null)
-            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
+        var options = decoded.Options;
         if (!options.Enabled)
             return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Disabled);
         if (!IsNumericInstagramUserId(options.PageId)
