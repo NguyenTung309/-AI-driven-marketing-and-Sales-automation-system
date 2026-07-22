@@ -31,10 +31,10 @@ public sealed record UpdateSocialCredentialRequest(
     string? OaId = null,
     string? OaAccessToken = null);
 
-// Zalo OA credentials remain manually managed here. Facebook publishing uses Meta OAuth endpoints.
+// Zalo OA and optional standalone Instagram credentials are managed here. Facebook uses Meta OAuth.
 public static class AdminSocialCredentialsEndpoints
 {
-    private static readonly string[] Providers = ["zalo"];
+    private static readonly string[] Providers = ["zalo", "instagram"];
     private const int MaxFieldChars = 512;
     private const int MaxEndpointChars = 2048;
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
@@ -90,26 +90,37 @@ public static class AdminSocialCredentialsEndpoints
         var tenant = tenants.Require();
         var normalized = provider.Trim().ToLowerInvariant();
         if (!Providers.Contains(normalized))
-            return Error(http, StatusCodes.Status400BadRequest, "admin.social_provider_invalid", "provider must be zalo; Facebook uses Meta OAuth.");
-        if (body.Endpoint is not null && !string.IsNullOrWhiteSpace(body.Endpoint) && !IsValidHttpsUrl(body.Endpoint))
-            return Error(http, StatusCodes.Status400BadRequest, "admin.social_endpoint_invalid", "endpoint must be an absolute https URL.");
+            return Error(http, StatusCodes.Status400BadRequest, "admin.social_provider_invalid", "provider must be zalo or instagram; Facebook uses Meta OAuth.");
         if (TooLong(body.PageId) || TooLong(body.PageAccessToken) || TooLong(body.OaId) || TooLong(body.OaAccessToken))
             return Error(http, StatusCodes.Status400BadRequest, "admin.social_field_too_long", $"fields must be at most {MaxFieldChars} characters.");
+        if (normalized == "instagram" && HasInstagramForeignFields(body))
+            return Error(http, StatusCodes.Status400BadRequest, "admin.instagram_fields_invalid", "Instagram accepts only enabled, pageId, and pageAccessToken.");
+        if (normalized == "zalo"
+            && body.Endpoint is not null
+            && !string.IsNullOrWhiteSpace(body.Endpoint)
+            && !IsValidHttpsUrl(body.Endpoint))
+        {
+            return Error(http, StatusCodes.Status400BadRequest, "admin.social_endpoint_invalid", "endpoint must be an absolute https URL.");
+        }
 
         var row = await db.SocialCredentials
             .FirstOrDefaultAsync(c => c.Provider == normalized && c.DeletedAt == null && c.PageId == null, ct)
             .ConfigureAwait(false);
-        var current = (row is null ? null : Decrypt(encryptor, row.CredentialsEncrypted)) ?? Defaults(options.Value, normalized);
-
-        var merged = new GraphChannelOptions
+        var stored = row is null ? null : Decrypt(encryptor, row.CredentialsEncrypted);
+        if (normalized == "instagram"
+            && row is not null
+            && stored is null
+            && !IsFullInstagramReplacement(body))
         {
-            Enabled = body.Enabled ?? current.Enabled,
-            Endpoint = MergeText(current.Endpoint, body.Endpoint),
-            PageId = MergeText(current.PageId, body.PageId),
-            PageAccessToken = MergeText(current.PageAccessToken, body.PageAccessToken),
-            OaId = MergeText(current.OaId, body.OaId),
-            OaAccessToken = MergeText(current.OaAccessToken, body.OaAccessToken),
-        };
+            return Error(http, StatusCodes.Status400BadRequest, "admin.instagram_credentials_invalid", "Replace all Instagram credential fields before enabling the standalone override.");
+        }
+
+        var current = stored ?? Defaults(options.Value, normalized);
+        var merged = normalized == "instagram"
+            ? MergeInstagram(current, body)
+            : MergeZalo(current, body);
+        if (normalized == "instagram" && !IsValidInstagram(merged))
+            return Error(http, StatusCodes.Status400BadRequest, "admin.instagram_credentials_invalid", "Enabled Instagram credentials require a numeric user ID and access token.");
 
         var encrypted = encryptor.Encrypt(JsonSerializer.Serialize(merged, JsonOpts));
         var now = clock.UtcNow;
@@ -128,7 +139,51 @@ public static class AdminSocialCredentialsEndpoints
     }
 
     private static GraphChannelOptions Defaults(GraphPublisherOptions options, string provider) =>
-        provider == "facebook" ? options.Facebook : options.Zalo;
+        provider switch
+        {
+            "zalo" => options.Zalo,
+            "instagram" => new GraphChannelOptions(),
+            _ => new GraphChannelOptions(),
+        };
+
+    private static GraphChannelOptions MergeInstagram(
+        GraphChannelOptions current,
+        UpdateSocialCredentialRequest update) =>
+        new()
+        {
+            Enabled = update.Enabled ?? current.Enabled,
+            PageId = MergeText(current.PageId, update.PageId),
+            PageAccessToken = MergeText(current.PageAccessToken, update.PageAccessToken),
+        };
+
+    private static GraphChannelOptions MergeZalo(
+        GraphChannelOptions current,
+        UpdateSocialCredentialRequest update) =>
+        new()
+        {
+            Enabled = update.Enabled ?? current.Enabled,
+            Endpoint = MergeText(current.Endpoint, update.Endpoint),
+            PageId = MergeText(current.PageId, update.PageId),
+            PageAccessToken = MergeText(current.PageAccessToken, update.PageAccessToken),
+            OaId = MergeText(current.OaId, update.OaId),
+            OaAccessToken = MergeText(current.OaAccessToken, update.OaAccessToken),
+        };
+
+    private static bool HasInstagramForeignFields(UpdateSocialCredentialRequest update) =>
+        !string.IsNullOrWhiteSpace(update.Endpoint)
+        || !string.IsNullOrWhiteSpace(update.OaId)
+        || !string.IsNullOrWhiteSpace(update.OaAccessToken);
+
+    private static bool IsFullInstagramReplacement(UpdateSocialCredentialRequest update) =>
+        update.Enabled.HasValue
+        && update.PageId is not null
+        && update.PageAccessToken is not null;
+
+    private static bool IsValidInstagram(GraphChannelOptions value) =>
+        !value.Enabled
+        || (!string.IsNullOrWhiteSpace(value.PageId)
+            && value.PageId.All(char.IsAsciiDigit)
+            && !string.IsNullOrWhiteSpace(value.PageAccessToken));
 
     private static GraphChannelOptions? Decrypt(IEncryptor encryptor, string encrypted)
     {

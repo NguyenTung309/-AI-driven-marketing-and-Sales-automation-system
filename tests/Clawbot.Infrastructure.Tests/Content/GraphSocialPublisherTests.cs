@@ -147,13 +147,17 @@ public sealed class GraphSocialPublisherTests
     }
 
     [Fact]
-    public async Task PublishAsync_Zalo_PostsArticleWithOaToken_AndReturnsPostUrl()
+    public async Task PublishAsync_Zalo_creates_then_verifies_article_and_preserves_provider_id()
     {
-        // EARS[WHEN publishing to Zalo THE SYSTEM SHALL POST the article with the OA token and return the post URL]
-        var handler = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent("""{"error":0,"message":"ok","data":{"token":"posttok"}}"""),
-        });
+        var handler = new RecordingHandler(
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"error":0,"message":"ok","data":{"token":"processtok"}}"""),
+            },
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"error":0,"message":"ok","data":{"id":"article-123"}}"""),
+            });
         var publisher = new GraphSocialPublisher(
             new HttpClient(handler),
             Options.Create(ZaloOptions()),
@@ -162,12 +166,25 @@ public sealed class GraphSocialPublisherTests
         var result = await publisher.PublishAsync(ZaloRequest(), CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        result.PostUrl.Should().Be("https://zalo.me/p/posttok");
-        handler.Method.Should().Be(HttpMethod.Post);
-        handler.RequestUri!.ToString().Should().EndWith("/article/verify_only");
-        using var payload = JsonDocument.Parse(handler.Body);
-        payload.RootElement.GetProperty("access_token").GetString().Should().Be("oa_tok");
-        payload.RootElement.GetProperty("body").GetString().Should().Be("Learn HSK today");
+        result.PostUrl.Should().BeNull("Zalo does not document a public permalink in create/verify responses");
+        result.ExternalId.Should().Be("article-123");
+        handler.Requests.Should().HaveCount(2);
+
+        var create = handler.Requests[0];
+        create.Method.Should().Be(HttpMethod.Post);
+        create.RequestUri!.AbsolutePath.Should().EndWith("/article/create");
+        create.AccessToken.Should().Be("oa_tok");
+        using var createPayload = JsonDocument.Parse(create.Body);
+        createPayload.RootElement.GetProperty("type").GetString().Should().Be("normal");
+        createPayload.RootElement.GetProperty("cover").GetProperty("photo_url").GetString().Should().Be("https://cdn.example/hsk.jpg");
+        createPayload.RootElement.GetProperty("body")[0].GetProperty("content").GetString().Should().Be("Learn HSK today");
+
+        var verify = handler.Requests[1];
+        verify.Method.Should().Be(HttpMethod.Post);
+        verify.RequestUri!.AbsolutePath.Should().EndWith("/article/verify");
+        verify.AccessToken.Should().Be("oa_tok");
+        using var verifyPayload = JsonDocument.Parse(verify.Body);
+        verifyPayload.RootElement.GetProperty("token").GetString().Should().Be("processtok");
     }
 
     [Fact]
@@ -258,7 +275,38 @@ public sealed class GraphSocialPublisherTests
 
         result.Success.Should().BeTrue();
         result.PostUrl.Should().Be("https://www.facebook.com/page-123_9");
+        result.ExternalId.Should().Be("page-123_9");
         handler.RequestCount.Should().Be(0, "the legacy Page token path must not run when a tenant Meta connection exists");
+    }
+
+    [Fact]
+    public async Task PublishAsync_Facebook_selected_missing_page_never_falls_back_to_legacy_target()
+    {
+        var assetId = Guid.NewGuid();
+        var handler = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"id":"legacy-page_1"}"""),
+        });
+        var integrations = Substitute.For<IMetaIntegrationService>();
+        integrations.ResolvePageAsync(TenantId, assetId, Arg.Any<CancellationToken>())
+            .Returns((MetaPageCredential?)null);
+        var graph = Substitute.For<IMetaGraphClient>();
+        var publisher = new GraphSocialPublisher(
+            new HttpClient(handler),
+            Options.Create(FacebookOptions()),
+            credentialResolver: null,
+            NullLogger<GraphSocialPublisher>.Instance,
+            integrations,
+            graph);
+
+        var result = await publisher.PublishAsync(
+            new PublishRequest(TenantId, ContentItemId, "facebook", "Learn HSK today", "[]", ScheduledAt, assetId),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be("facebook_target_unavailable");
+        handler.RequestCount.Should().Be(0);
+        await graph.DidNotReceiveWithAnyArgs().PublishPageAsync(default, default!, default!, default!, default, default);
     }
 
     [Fact]
@@ -269,7 +317,9 @@ public sealed class GraphSocialPublisherTests
         integrations.ResolvePageAsync(TenantId, assetId, Arg.Any<CancellationToken>())
             .Returns(new MetaPageCredential(assetId, "page-123", "Main Page", "expired-token"));
         integrations.RefreshPageAsync(TenantId, assetId, Arg.Any<CancellationToken>())
-            .Returns(new MetaPageCredential(assetId, "page-123", "Main Page", "fresh-token"));
+            .Returns(new MetaPageRefreshResult(
+                MetaPageRefreshStatus.Resolved,
+                new MetaPageCredential(assetId, "page-123", "Main Page", "fresh-token")));
         var graph = Substitute.For<IMetaGraphClient>();
         graph.PublishPageAsync(TenantId, "page-123", "expired-token", "Learn HSK today", null, Arg.Any<CancellationToken>())
             .Returns(Task.FromException<MetaPublishedPost>(new MetaGraphException("expired", code: 190, subcode: 463)));
@@ -294,7 +344,36 @@ public sealed class GraphSocialPublisherTests
     }
 
     [Fact]
-    public async Task PublishAsync_Instagram_returns_not_configured_when_feature_is_disabled()
+    public async Task PublishAsync_Facebook_missing_selected_page_after_refresh_does_not_disable_connection()
+    {
+        var assetId = Guid.NewGuid();
+        var integrations = Substitute.For<IMetaIntegrationService>();
+        integrations.ResolvePageAsync(TenantId, assetId, Arg.Any<CancellationToken>())
+            .Returns(new MetaPageCredential(assetId, "page-123", "Main Page", "expired-token"));
+        integrations.RefreshPageAsync(TenantId, assetId, Arg.Any<CancellationToken>())
+            .Returns(new MetaPageRefreshResult(MetaPageRefreshStatus.TargetUnavailable, null));
+        var graph = Substitute.For<IMetaGraphClient>();
+        graph.PublishPageAsync(TenantId, "page-123", "expired-token", "Learn HSK today", null, Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<MetaPublishedPost>(new MetaGraphException("expired", code: 190, subcode: 463)));
+        var publisher = new GraphSocialPublisher(
+            new HttpClient(new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK))),
+            Options.Create(new GraphPublisherOptions()),
+            credentialResolver: null,
+            NullLogger<GraphSocialPublisher>.Instance,
+            integrations,
+            graph);
+
+        var result = await publisher.PublishAsync(
+            new PublishRequest(TenantId, ContentItemId, "facebook", "Learn HSK today", "[]", ScheduledAt, assetId),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be("facebook_target_unavailable");
+        await integrations.DidNotReceiveWithAnyArgs().MarkReconnectRequiredAsync(default, default!, default);
+    }
+
+    [Fact]
+    public async Task PublishAsync_Instagram_returns_disabled_error_when_feature_is_disabled()
     {
         var integrations = Substitute.For<IMetaIntegrationService>();
         var graph = Substitute.For<IMetaGraphClient>();
@@ -309,7 +388,7 @@ public sealed class GraphSocialPublisherTests
         var result = await publisher.PublishAsync(InstagramRequest(), CancellationToken.None);
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Be("instagram_not_configured");
+        result.Error.Should().Be("instagram_publishing_disabled");
         await integrations.DidNotReceive().ResolveInstagramAsync(
             Arg.Any<Guid>(),
             Arg.Any<Guid?>(),
@@ -394,6 +473,7 @@ public sealed class GraphSocialPublisherTests
         result.Success.Should().BeTrue();
         result.PostUrl.Should().Be("https://www.instagram.com/p/provider-slug/");
         await integrations.Received(1).ResolveInstagramAsync(TenantId, assetId, Arg.Any<CancellationToken>());
+        result.ExternalId.Should().Be("media-123");
         await graph.Received(1).PublishInstagramAsync(
             TenantId,
             "ig-user-123",
@@ -403,16 +483,46 @@ public sealed class GraphSocialPublisherTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task PublishAsync_Instagram_fails_closed_when_linked_account_changed_after_scheduling()
+    {
+        var assetId = Guid.NewGuid();
+        var integrations = Substitute.For<IMetaIntegrationService>();
+        integrations.ResolveInstagramAsync(TenantId, assetId, Arg.Any<CancellationToken>())
+            .Returns(new MetaInstagramResolution(
+                MetaInstagramResolutionStatus.Resolved,
+                new MetaInstagramCredential(assetId, "ig-user-new", "page-token")));
+        var graph = Substitute.For<IMetaGraphClient>();
+        var publisher = new GraphSocialPublisher(
+            new HttpClient(new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK))),
+            Options.Create(InstagramOptions()),
+            credentialResolver: null,
+            NullLogger<GraphSocialPublisher>.Instance,
+            integrations,
+            graph);
+
+        var result = await publisher.PublishAsync(
+            InstagramRequest(metaAssetId: assetId, providerTargetId: "ig-user-original"),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be("instagram_target_unavailable");
+        await graph.DidNotReceiveWithAnyArgs().PublishInstagramAsync(default, default!, default!, default!, default!, default);
+    }
+
     [Theory]
+    [InlineData(MetaInstagramResolutionStatus.Disconnected, "instagram_meta_unavailable")]
+    [InlineData(MetaInstagramResolutionStatus.ReconnectRequired, "instagram_reconnect_required")]
+    [InlineData(MetaInstagramResolutionStatus.PageUnavailable, "instagram_target_unavailable")]
     [InlineData(MetaInstagramResolutionStatus.MissingScopes, "instagram_permissions_missing")]
     [InlineData(MetaInstagramResolutionStatus.NotLinked, "instagram_not_linked")]
-    [InlineData(MetaInstagramResolutionStatus.MetaOrPageUnavailable, "instagram_not_configured")]
     public async Task PublishAsync_Instagram_maps_resolution_failures_to_stable_safe_errors(
         MetaInstagramResolutionStatus status,
         string expectedError)
     {
+        var assetId = Guid.NewGuid();
         var integrations = Substitute.For<IMetaIntegrationService>();
-        integrations.ResolveInstagramAsync(TenantId, Arg.Any<Guid?>(), Arg.Any<CancellationToken>())
+        integrations.ResolveInstagramAsync(TenantId, assetId, Arg.Any<CancellationToken>())
             .Returns(new MetaInstagramResolution(status, null));
         var graph = Substitute.For<IMetaGraphClient>();
         var publisher = new GraphSocialPublisher(
@@ -423,7 +533,9 @@ public sealed class GraphSocialPublisherTests
             integrations,
             graph);
 
-        var result = await publisher.PublishAsync(InstagramRequest(), CancellationToken.None);
+        var result = await publisher.PublishAsync(
+            InstagramRequest(metaAssetId: assetId),
+            CancellationToken.None);
 
         result.Success.Should().BeFalse();
         result.Error.Should().Be(expectedError);
@@ -446,7 +558,9 @@ public sealed class GraphSocialPublisherTests
                 MetaInstagramResolutionStatus.Resolved,
                 new MetaInstagramCredential(assetId, "ig-user-123", "expired-page-token")));
         integrations.RefreshPageAsync(TenantId, assetId, Arg.Any<CancellationToken>())
-            .Returns(new MetaPageCredential(assetId, "page-123", "Main Page", "fresh-page-token"));
+            .Returns(new MetaPageRefreshResult(
+                MetaPageRefreshStatus.Resolved,
+                new MetaPageCredential(assetId, "page-123", "Main Page", "fresh-page-token")));
         var graph = Substitute.For<IMetaGraphClient>();
         graph.PublishInstagramAsync(
                 TenantId,
@@ -503,6 +617,44 @@ public sealed class GraphSocialPublisherTests
     }
 
     [Fact]
+    public async Task PublishAsync_Instagram_missing_selected_page_after_refresh_does_not_disable_connection()
+    {
+        var assetId = Guid.NewGuid();
+        var integrations = Substitute.For<IMetaIntegrationService>();
+        integrations.ResolveInstagramAsync(TenantId, assetId, Arg.Any<CancellationToken>())
+            .Returns(new MetaInstagramResolution(
+                MetaInstagramResolutionStatus.Resolved,
+                new MetaInstagramCredential(assetId, "ig-user-123", "expired-page-token")));
+        integrations.RefreshPageAsync(TenantId, assetId, Arg.Any<CancellationToken>())
+            .Returns(new MetaPageRefreshResult(MetaPageRefreshStatus.TargetUnavailable, null));
+        var graph = Substitute.For<IMetaGraphClient>();
+        graph.PublishInstagramAsync(
+                TenantId,
+                "ig-user-123",
+                "expired-page-token",
+                "Learn HSK today",
+                "https://cdn.example/hsk.jpg",
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<MetaInstagramPublishedMedia>(
+                new MetaGraphException("expired", code: 190, subcode: 463)));
+        var publisher = new GraphSocialPublisher(
+            new HttpClient(new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK))),
+            Options.Create(InstagramOptions()),
+            credentialResolver: null,
+            NullLogger<GraphSocialPublisher>.Instance,
+            integrations,
+            graph);
+
+        var result = await publisher.PublishAsync(
+            InstagramRequest(metaAssetId: assetId),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be("instagram_target_unavailable");
+        await integrations.DidNotReceiveWithAnyArgs().MarkReconnectRequiredAsync(default, default!, default);
+    }
+
+    [Fact]
     public async Task PublishAsync_Instagram_marks_reconnect_required_when_retry_token_also_fails()
     {
         var assetId = Guid.NewGuid();
@@ -512,7 +664,9 @@ public sealed class GraphSocialPublisherTests
                 MetaInstagramResolutionStatus.Resolved,
                 new MetaInstagramCredential(assetId, "ig-user-123", "expired-page-token")));
         integrations.RefreshPageAsync(TenantId, assetId, Arg.Any<CancellationToken>())
-            .Returns(new MetaPageCredential(assetId, "page-123", "Main Page", "fresh-page-token"));
+            .Returns(new MetaPageRefreshResult(
+                MetaPageRefreshStatus.Resolved,
+                new MetaPageCredential(assetId, "page-123", "Main Page", "fresh-page-token")));
         var graph = Substitute.For<IMetaGraphClient>();
         graph.PublishInstagramAsync(
                 TenantId,
@@ -604,30 +758,60 @@ public sealed class GraphSocialPublisherTests
         new(TenantId, ContentItemId, "facebook", "Learn HSK today", "[]", ScheduledAt);
 
     private static PublishRequest ZaloRequest() =>
-        new(TenantId, ContentItemId, "zalo", "Learn HSK today", "[]", ScheduledAt);
+        new(
+            TenantId,
+            ContentItemId,
+            "zalo",
+            "Learn HSK today",
+            "[{\"type\":\"image\",\"url\":\"https://cdn.example/hsk.jpg\"}]",
+            ScheduledAt);
 
     private static PublishRequest InstagramRequest(
         string assetsJson = "[{\"type\":\"image\",\"url\":\"https://cdn.example/hsk.jpg\"}]",
-        Guid? metaAssetId = null) =>
-        new(TenantId, ContentItemId, "instagram", "Learn HSK today", assetsJson, ScheduledAt, metaAssetId);
+        Guid? metaAssetId = null,
+        string? providerTargetId = null) =>
+        new(
+            TenantId,
+            ContentItemId,
+            "instagram",
+            "Learn HSK today",
+            assetsJson,
+            ScheduledAt,
+            metaAssetId,
+            providerTargetId ?? (metaAssetId.HasValue ? "ig-user-123" : null));
 
-    private sealed class RecordingHandler(HttpResponseMessage response) : HttpMessageHandler
+    private sealed class RecordingHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
     {
-        public HttpMethod Method { get; private set; } = HttpMethod.Get;
-        public Uri? RequestUri { get; private set; }
-        public string Body { get; private set; } = string.Empty;
-        public int RequestCount { get; private set; }
+        private int _responseIndex;
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        public List<RecordedRequest> Requests { get; } = [];
+        public HttpMethod Method => Requests.Count == 0 ? HttpMethod.Get : Requests[^1].Method;
+        public Uri? RequestUri => Requests.Count == 0 ? null : Requests[^1].RequestUri;
+        public string Body => Requests.Count == 0 ? string.Empty : Requests[^1].Body;
+        public int RequestCount => Requests.Count;
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
         {
-            RequestCount++;
-            Method = request.Method;
-            RequestUri = request.RequestUri;
-            if (request.Content is not null)
-                Body = request.Content.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult();
-            return Task.FromResult(response);
+            var body = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            var accessToken = request.Headers.TryGetValues("access_token", out var values)
+                ? values.SingleOrDefault()
+                : null;
+            Requests.Add(new RecordedRequest(request.Method, request.RequestUri, body, accessToken));
+            if (_responseIndex >= responses.Length)
+                throw new InvalidOperationException("No fake social response remains.");
+            return responses[_responseIndex++];
         }
     }
+
+    private sealed record RecordedRequest(
+        HttpMethod Method,
+        Uri? RequestUri,
+        string Body,
+        string? AccessToken);
 
     private sealed class RecordingLogger<T> : ILogger<T>
     {

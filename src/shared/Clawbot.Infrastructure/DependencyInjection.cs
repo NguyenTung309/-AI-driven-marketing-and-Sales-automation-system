@@ -201,7 +201,9 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException("ICommentChannelAdapter not available"));
         // Native Facebook/Zalo publishing is always available so DB-backed connections take effect without a restart.
         services.Configure<GraphPublisherOptions>(cfg.GetSection(GraphPublisherOptions.SectionName));
-        services.AddScoped<ISocialCredentialResolver, EfSocialCredentialResolver>();
+        services.AddScoped<EfSocialCredentialResolver>();
+        services.AddScoped<ISocialCredentialResolver>(sp => sp.GetRequiredService<EfSocialCredentialResolver>());
+        services.AddScoped<IInstagramCredentialResolver>(sp => sp.GetRequiredService<EfSocialCredentialResolver>());
         services.AddHttpClient<GraphSocialPublisher>()
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(15)));

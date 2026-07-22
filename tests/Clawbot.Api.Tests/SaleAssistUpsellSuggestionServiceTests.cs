@@ -97,9 +97,11 @@ internal sealed class TestApiAppDb : IDisposable
     private readonly SqliteConnection _connection;
 
     public AppDbContext Db { get; }
+    public Guid TenantId { get; }
 
     public TestApiAppDb(Guid tenantId)
     {
+        TenantId = tenantId;
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
 

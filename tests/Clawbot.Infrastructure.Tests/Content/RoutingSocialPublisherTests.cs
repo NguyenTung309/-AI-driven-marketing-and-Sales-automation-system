@@ -50,6 +50,9 @@ public sealed class RoutingSocialPublisherTests
     }
 
     [Theory]
+    [InlineData(MetaInstagramResolutionStatus.Disconnected, "instagram_meta_unavailable")]
+    [InlineData(MetaInstagramResolutionStatus.ReconnectRequired, "instagram_reconnect_required")]
+    [InlineData(MetaInstagramResolutionStatus.PageUnavailable, "instagram_target_unavailable")]
     [InlineData(MetaInstagramResolutionStatus.MissingScopes, "instagram_permissions_missing")]
     [InlineData(MetaInstagramResolutionStatus.NotLinked, "instagram_not_linked")]
     public async Task PublishAsync_instagram_resolution_errors_never_use_generic_fallback(
@@ -57,14 +60,15 @@ public sealed class RoutingSocialPublisherTests
         string expectedError)
     {
         var tenantId = Guid.NewGuid();
+        var assetId = Guid.NewGuid();
         var integrations = Substitute.For<IMetaIntegrationService>();
-        integrations.ResolveInstagramAsync(tenantId, Arg.Any<Guid?>(), Arg.Any<CancellationToken>())
+        integrations.ResolveInstagramAsync(tenantId, assetId, Arg.Any<CancellationToken>())
             .Returns(new MetaInstagramResolution(status, null));
         var graph = Substitute.For<IMetaGraphClient>();
         var (sut, fallbackHandler) = BuildPublisher(integrations, graph);
 
         var result = await sut.PublishAsync(
-            InstagramRequest(tenantId, null, "https://cdn.example/photo.jpg"),
+            InstagramRequest(tenantId, assetId, "https://cdn.example/photo.jpg"),
             CancellationToken.None);
 
         result.Success.Should().BeFalse();
@@ -107,7 +111,8 @@ public sealed class RoutingSocialPublisherTests
             .Returns(new MetaInstagramResolution(
                 MetaInstagramResolutionStatus.Resolved,
                 new MetaInstagramCredential(assetId, "ig-user-123", "expired-page-token")));
-        integrations.RefreshPageAsync(tenantId, assetId, Arg.Any<CancellationToken>()).Returns((MetaPageCredential?)null);
+        integrations.RefreshPageAsync(tenantId, assetId, Arg.Any<CancellationToken>())
+            .Returns(new MetaPageRefreshResult(MetaPageRefreshStatus.ReconnectRequired, null));
         var graph = Substitute.For<IMetaGraphClient>();
         graph.PublishInstagramAsync(
                 tenantId,
@@ -127,10 +132,7 @@ public sealed class RoutingSocialPublisherTests
         result.Success.Should().BeFalse();
         result.Error.Should().Be("instagram_reconnect_required");
         fallbackHandler.RequestCount.Should().Be(0);
-        await integrations.Received(1).MarkReconnectRequiredAsync(
-            tenantId,
-            "meta_page_token_refresh_failed",
-            Arg.Any<CancellationToken>());
+        await integrations.DidNotReceiveWithAnyArgs().MarkReconnectRequiredAsync(default, default!, default);
     }
 
     private static (RoutingSocialPublisher Publisher, CountingHandler FallbackHandler) BuildPublisher(
@@ -166,7 +168,8 @@ public sealed class RoutingSocialPublisherTests
             "Caption",
             $"[{{\"type\":\"image\",\"url\":\"{imageUrl}\"}}]",
             DateTimeOffset.UtcNow,
-            assetId);
+            assetId,
+            assetId.HasValue ? "ig-user-123" : null);
 
     private sealed class CountingHandler : HttpMessageHandler
     {

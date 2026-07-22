@@ -782,6 +782,7 @@ public static class ContentEndpoints
             return Error(http, StatusCodes.Status400BadRequest, resolution.ErrorCode, resolution.Message ?? "Invalid schedule.");
 
         Guid? metaAssetId = null;
+        string? providerTargetId = null;
         if (string.Equals(item.Platform, "facebook", StringComparison.OrdinalIgnoreCase))
         {
             var pages = await metaIntegrations.GetPublishablePagesAsync(item.TenantId, ct).ConfigureAwait(false);
@@ -792,9 +793,33 @@ public static class ContentEndpoints
                 return Error(http, StatusCodes.Status400BadRequest, "content.meta_page_required", "Hãy kết nối và chọn Facebook Page trước khi lên lịch.");
             metaAssetId = page.Id;
         }
+        else if (string.Equals(item.Platform, "instagram", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!body.MetaAssetId.HasValue)
+                return Error(http, StatusCodes.Status400BadRequest, "content.instagram_target_required", "Hãy chọn Meta Page đã liên kết Instagram trước khi lên lịch.");
+
+            var instagram = await metaIntegrations
+                .ResolveInstagramAsync(item.TenantId, body.MetaAssetId.Value, ct)
+                .ConfigureAwait(false);
+            if (instagram.Status != MetaInstagramResolutionStatus.Resolved || instagram.Credential is null)
+            {
+                var errorCode = instagram.Status switch
+                {
+                    MetaInstagramResolutionStatus.ReconnectRequired => "content.instagram_reconnect_required",
+                    MetaInstagramResolutionStatus.MissingScopes => "content.instagram_permissions_missing",
+                    MetaInstagramResolutionStatus.NotLinked => "content.instagram_not_linked",
+                    MetaInstagramResolutionStatus.PageUnavailable => "content.instagram_target_unavailable",
+                    _ => "content.instagram_meta_unavailable",
+                };
+                return Error(http, StatusCodes.Status400BadRequest, errorCode, "Meta Page đã chọn chưa sẵn sàng để đăng Instagram.");
+            }
+
+            metaAssetId = instagram.Credential.PageAssetId;
+            providerTargetId = instagram.Credential.InstagramUserId;
+        }
         else if (body.MetaAssetId.HasValue)
         {
-            return Error(http, StatusCodes.Status400BadRequest, "content.meta_page_invalid", "Facebook Page chỉ áp dụng cho nội dung Facebook.");
+            return Error(http, StatusCodes.Status400BadRequest, "content.meta_page_invalid", "Meta Page chỉ áp dụng cho nội dung Facebook hoặc Instagram.");
         }
 
         try
@@ -804,6 +829,7 @@ public static class ContentEndpoints
                 publishTargetId: metaAssetId,
                 at: now,
                 desiredPublishAt: resolution.ScheduledAt,
+                providerTargetId: providerTargetId,
                 cancellationToken: ct).ConfigureAwait(false);
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
             return Results.Created($"/api/content/schedule/{schedule.Id}", ToDto(schedule));
@@ -873,8 +899,11 @@ public static class ContentEndpoints
         CancellationToken ct)
     {
         var tenant = tenants.Require();
-        if (!string.Equals(platform, "facebook", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(platform, "facebook", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(platform, "instagram", StringComparison.OrdinalIgnoreCase))
+        {
             return Results.Ok(Array.Empty<ContentPublishTargetDto>());
+        }
 
         var pages = await metaIntegrations.GetPublishablePagesAsync(tenant.TenantId, ct).ConfigureAwait(false);
         return Results.Ok(pages.Select(x => new ContentPublishTargetDto(

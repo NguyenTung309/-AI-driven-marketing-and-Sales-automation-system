@@ -653,6 +653,7 @@ public sealed class ContentScheduleConfiguration : IEntityTypeConfiguration<Cont
             .HasDefaultValue(ContentSchedule.StatusPending)
             .IsRequired();
         builder.Property(x => x.PostUrl).HasMaxLength(512);
+        builder.Property(x => x.ProviderTargetId).HasColumnName("provider_target_id").HasMaxLength(128);
         builder.Property(x => x.LastError).HasColumnName("last_error").HasMaxLength(ContentSchedule.MaxLastErrorLength);
         builder.Property(x => x.LastErrorCode).HasMaxLength(128);
         builder.Property(x => x.RetryCount).HasColumnName("retry_count");

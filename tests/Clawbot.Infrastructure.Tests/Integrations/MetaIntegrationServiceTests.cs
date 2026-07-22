@@ -50,6 +50,46 @@ public sealed class MetaIntegrationServiceTests
     }
 
     [Fact]
+    public async Task CompleteAuthorizationAsync_replaces_authorization_and_active_assets_as_one_set()
+    {
+        var tenant = Tenant.Create("meta-oauth-replace", "Meta OAuth Replace", "pro", Now);
+        using var fx = new TestAppDb(tenant.Id);
+        fx.Db.Tenants.Add(tenant);
+        await fx.Db.SaveChangesAsync();
+        var pageScopes = new[] { "pages_show_list", "pages_read_engagement", "pages_manage_posts" };
+        var graph = Substitute.For<IMetaGraphClient>();
+        graph.ExchangeCodeAsync(tenant.Id, "code-a", Arg.Any<CancellationToken>())
+            .Returns(new MetaTokenResponse("root-a", "bearer", null));
+        graph.ExchangeCodeAsync(tenant.Id, "code-b", Arg.Any<CancellationToken>())
+            .Returns(new MetaTokenResponse("root-b", "bearer", null));
+        graph.DebugTokenAsync(tenant.Id, "root-a", Arg.Any<CancellationToken>())
+            .Returns(new MetaDebugToken(true, "app-123", "BUSINESS_INTEGRATION_SYSTEM_USER", "system-a", pageScopes, null, null));
+        graph.DebugTokenAsync(tenant.Id, "root-b", Arg.Any<CancellationToken>())
+            .Returns(new MetaDebugToken(true, "app-123", "BUSINESS_INTEGRATION_SYSTEM_USER", "system-b", pageScopes, null, null));
+        graph.GetIdentityAsync(tenant.Id, "root-a", Arg.Any<CancellationToken>())
+            .Returns(new MetaIdentity("system-a", "business-a"));
+        graph.GetIdentityAsync(tenant.Id, "root-b", Arg.Any<CancellationToken>())
+            .Returns(new MetaIdentity("system-b", "business-b"));
+        graph.GetPagesAsync(tenant.Id, "root-a", Arg.Any<CancellationToken>()).Returns(
+            [new MetaPageToken("page-a", "Page A", "page-token-a", ["CREATE_CONTENT"])]);
+        graph.GetPagesAsync(tenant.Id, "root-b", Arg.Any<CancellationToken>()).Returns(
+            [new MetaPageToken("page-b", "Page B", "page-token-b", ["CREATE_CONTENT"])]);
+        var service = BuildService(fx, graph);
+
+        await service.CompleteAuthorizationAsync(tenant.Id, "code-a");
+        await service.CompleteAuthorizationAsync(tenant.Id, "code-b");
+
+        var connection = await fx.Db.MetaConnections.IgnoreQueryFilters().SingleAsync();
+        connection.SystemUserId.Should().Be("system-b");
+        connection.ClientBusinessId.Should().Be("business-b");
+        var assets = await fx.Db.MetaAssets.IgnoreQueryFilters().OrderBy(asset => asset.ExternalId).ToListAsync();
+        assets.Should().HaveCount(2);
+        assets.Single(asset => asset.ExternalId == "page-a").IsActive.Should().BeFalse();
+        assets.Single(asset => asset.ExternalId == "page-b").IsActive.Should().BeTrue();
+        assets.Count(asset => asset.IsDefault).Should().Be(1);
+    }
+
+    [Fact]
     public async Task CompleteAuthorizationAsync_rejects_token_issued_for_another_app()
     {
         var tenant = Tenant.Create("meta-invalid", "Meta Invalid", "pro", Now);
@@ -219,6 +259,29 @@ public sealed class MetaIntegrationServiceTests
     }
 
     [Fact]
+    public async Task ValidateAsync_keeps_page_only_connection_active_and_reports_instagram_missing_scopes()
+    {
+        var tenant = Tenant.Create("meta-validate-page-only", "Meta Validate Page Only", "pro", Now);
+        using var fx = new TestAppDb(tenant.Id);
+        fx.Db.Tenants.Add(tenant);
+        await fx.Db.SaveChangesAsync();
+        var graph = AuthorizedGraph();
+        graph.GetPagesAsync(tenant.Id, "root-token", Arg.Any<CancellationToken>()).Returns(
+            [new MetaPageToken("page-write", "Writable", "page-token", ["CREATE_CONTENT"])]);
+        var service = BuildService(fx, graph);
+        await service.CompleteAuthorizationAsync(tenant.Id, "oauth-code");
+
+        await service.ValidateAsync(tenant.Id, CancellationToken.None);
+
+        var snapshot = await service.GetSnapshotAsync(tenant.Id);
+        snapshot.Connected.Should().BeTrue();
+        snapshot.Status.Should().Be("active");
+        (await service.ResolvePageAsync(tenant.Id, null)).Should().NotBeNull();
+        (await service.ResolveInstagramAsync(tenant.Id, null)).Status
+            .Should().Be(MetaInstagramResolutionStatus.MissingScopes);
+    }
+
+    [Fact]
     public async Task ResolveInstagramAsync_distinguishes_missing_usable_meta_page()
     {
         var tenant = Tenant.Create("meta-instagram-none", "Meta Instagram None", "pro", Now);
@@ -229,7 +292,7 @@ public sealed class MetaIntegrationServiceTests
 
         var result = await service.ResolveInstagramAsync(tenant.Id, null, CancellationToken.None);
 
-        result.Status.Should().Be(MetaInstagramResolutionStatus.MetaOrPageUnavailable);
+        result.Status.Should().Be(MetaInstagramResolutionStatus.Disconnected);
         result.Credential.Should().BeNull();
     }
 
@@ -257,7 +320,7 @@ public sealed class MetaIntegrationServiceTests
 
         var result = await service.ResolveInstagramAsync(tenant.Id, null, CancellationToken.None);
 
-        result.Status.Should().Be(MetaInstagramResolutionStatus.MetaOrPageUnavailable);
+        result.Status.Should().Be(MetaInstagramResolutionStatus.PageUnavailable);
         result.Credential.Should().BeNull();
         (await service.GetSnapshotAsync(tenant.Id)).Connected.Should().BeTrue();
         await graph.DidNotReceive().ResolveInstagramAccountAsync(
@@ -265,6 +328,26 @@ public sealed class MetaIntegrationServiceTests
             Arg.Any<string>(),
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ResolveInstagramAsync_preserves_reconnect_required_status()
+    {
+        var tenant = Tenant.Create("meta-instagram-reconnect", "Meta Instagram Reconnect", "pro", Now);
+        using var fx = new TestAppDb(tenant.Id);
+        fx.Db.Tenants.Add(tenant);
+        await fx.Db.SaveChangesAsync();
+        var graph = InstagramAuthorizedGraph(tenant.Id, "ig-user-123");
+        var service = BuildService(fx, graph);
+        await service.CompleteAuthorizationAsync(tenant.Id, "oauth-code");
+        var connection = await fx.Db.MetaConnections.IgnoreQueryFilters().SingleAsync();
+        connection.RequireReconnect("meta_token_190_463", Now.AddMinutes(1));
+        await fx.Db.SaveChangesAsync();
+
+        var result = await service.ResolveInstagramAsync(tenant.Id, null, CancellationToken.None);
+
+        result.Status.Should().Be(MetaInstagramResolutionStatus.ReconnectRequired);
+        result.Credential.Should().BeNull();
     }
 
     [Theory]

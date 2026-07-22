@@ -39,11 +39,25 @@ public sealed record MetaPageCredential(
 
 public enum MetaInstagramResolutionStatus
 {
-    MetaOrPageUnavailable,
+    Disconnected,
+    ReconnectRequired,
+    PageUnavailable,
     MissingScopes,
     NotLinked,
     Resolved,
 }
+
+public enum MetaPageRefreshStatus
+{
+    ConnectionUnavailable,
+    ReconnectRequired,
+    TargetUnavailable,
+    Resolved,
+}
+
+public sealed record MetaPageRefreshResult(
+    MetaPageRefreshStatus Status,
+    MetaPageCredential? Credential);
 
 public sealed record MetaInstagramCredential(
     Guid PageAssetId,
@@ -66,7 +80,7 @@ public interface IMetaIntegrationService
     Task<string?> ResolveRootTokenAsync(Guid tenantId, CancellationToken ct = default);
     Task<MetaPageCredential?> ResolvePageAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default);
     Task<MetaInstagramResolution> ResolveInstagramAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default);
-    Task<MetaPageCredential?> RefreshPageAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default);
+    Task<MetaPageRefreshResult> RefreshPageAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default);
     Task MarkReconnectRequiredAsync(Guid tenantId, string reason, CancellationToken ct = default);
 }
 
@@ -110,6 +124,7 @@ public sealed class MetaIntegrationService(
         if (MetaAuthorizationModes.NormalizeOrDefault(configuration.AuthorizationMode) == MetaAuthorizationModes.BusinessSystemUser
             && string.IsNullOrWhiteSpace(identity.ClientBusinessId))
             throw new MetaGraphException("meta_business_system_user_token_required");
+        var pages = await _graph.GetPagesAsync(tenantId, token.AccessToken, ct).ConfigureAwait(false);
 
         var now = _clock.UtcNow;
         var expiresAt = debug.ExpiresAt
@@ -117,6 +132,8 @@ public sealed class MetaIntegrationService(
         var scopesJson = JsonSerializer.Serialize(debug.Scopes.Order(StringComparer.Ordinal), JsonOptions);
         var encryptedToken = _encryptor.Encrypt(token.AccessToken);
 
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await AcquireAuthorizationLockAsync(tenantId, ct).ConfigureAwait(false);
         var connection = await ConnectionQuery(tenantId).FirstOrDefaultAsync(ct).ConfigureAwait(false);
         if (connection is null)
         {
@@ -145,7 +162,8 @@ public sealed class MetaIntegrationService(
                 now);
         }
 
-        await SyncPagesCoreAsync(connection, token.AccessToken, ct).ConfigureAwait(false);
+        await ApplyPagesCoreAsync(connection, pages, ct).ConfigureAwait(false);
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<MetaIntegrationSnapshot> GetSnapshotAsync(Guid tenantId, CancellationToken ct = default)
@@ -417,21 +435,22 @@ public sealed class MetaIntegrationService(
         Guid? assetId,
         CancellationToken ct = default)
     {
-        var connection = await GetUsableConnectionAsync(tenantId, ct).ConfigureAwait(false);
-        if (connection is null)
-        {
-            return new MetaInstagramResolution(
-                MetaInstagramResolutionStatus.MetaOrPageUnavailable,
-                null);
-        }
+        var configuration = await _configurations.ResolveAsync(tenantId, ct).ConfigureAwait(false);
+        if (!configuration.IsConfigured)
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.Disconnected, null);
+
+        var connection = await ConnectionQuery(tenantId)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (connection is null || string.Equals(connection.Status, "disconnected", StringComparison.Ordinal))
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.Disconnected, null);
+        if (!IsConnectionUsable(connection, configuration))
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.ReconnectRequired, null);
 
         var page = await ResolvePageAsync(tenantId, assetId, ct).ConfigureAwait(false);
         if (page is null)
-        {
-            return new MetaInstagramResolution(
-                MetaInstagramResolutionStatus.MetaOrPageUnavailable,
-                null);
-        }
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.PageUnavailable, null);
 
         if (MissingInstagramScopes(DeserializeStrings(connection.GrantedScopesJson)).Length > 0)
             return new MetaInstagramResolution(MetaInstagramResolutionStatus.MissingScopes, null);
@@ -448,17 +467,30 @@ public sealed class MetaIntegrationService(
                 new MetaInstagramCredential(page.AssetId, instagramUserId, page.PageAccessToken));
     }
 
-    public async Task<MetaPageCredential?> RefreshPageAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default)
+    public async Task<MetaPageRefreshResult> RefreshPageAsync(
+        Guid tenantId,
+        Guid? assetId,
+        CancellationToken ct = default)
     {
-        var rootToken = await ResolveRootTokenAsync(tenantId, ct).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(rootToken))
-            return null;
+        var configuration = await _configurations.ResolveAsync(tenantId, ct).ConfigureAwait(false);
+        if (!configuration.IsConfigured)
+            return new MetaPageRefreshResult(MetaPageRefreshStatus.ConnectionUnavailable, null);
 
         var connection = await ConnectionQuery(tenantId).FirstOrDefaultAsync(ct).ConfigureAwait(false);
-        if (connection is null)
-            return null;
+        if (connection is null || string.Equals(connection.Status, "disconnected", StringComparison.Ordinal))
+            return new MetaPageRefreshResult(MetaPageRefreshStatus.ConnectionUnavailable, null);
+        if (!IsConnectionUsable(connection, configuration))
+            return new MetaPageRefreshResult(MetaPageRefreshStatus.ReconnectRequired, null);
+
+        var rootToken = Decrypt(connection.AccessTokenEncrypted);
+        if (string.IsNullOrWhiteSpace(rootToken))
+            return new MetaPageRefreshResult(MetaPageRefreshStatus.ReconnectRequired, null);
+
         await SyncPagesCoreAsync(connection, rootToken, ct).ConfigureAwait(false);
-        return await ResolvePageAsync(tenantId, assetId, ct).ConfigureAwait(false);
+        var credential = await ResolvePageAsync(tenantId, assetId, ct).ConfigureAwait(false);
+        return credential is null
+            ? new MetaPageRefreshResult(MetaPageRefreshStatus.TargetUnavailable, null)
+            : new MetaPageRefreshResult(MetaPageRefreshStatus.Resolved, credential);
     }
 
     public async Task MarkReconnectRequiredAsync(Guid tenantId, string reason, CancellationToken ct = default)
@@ -470,9 +502,35 @@ public sealed class MetaIntegrationService(
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
+    private async Task AcquireAuthorizationLockAsync(Guid tenantId, CancellationToken ct)
+    {
+        if (!_db.Database.IsSqlServer())
+            return;
+
+        var resource = $"clawbot:meta-authorization:{tenantId:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"""
+            DECLARE @result int;
+            EXEC @result = sys.sp_getapplock
+                @Resource={resource},
+                @LockMode='Exclusive',
+                @LockOwner='Transaction',
+                @LockTimeout=15000;
+            IF @result < 0
+                THROW 51000, 'meta_authorization_lock_failed', 1;
+            """, ct).ConfigureAwait(false);
+    }
+
     private async Task SyncPagesCoreAsync(MetaConnection connection, string rootToken, CancellationToken ct)
     {
         var pages = await _graph.GetPagesAsync(connection.TenantId, rootToken, ct).ConfigureAwait(false);
+        await ApplyPagesCoreAsync(connection, pages, ct).ConfigureAwait(false);
+    }
+
+    private async Task ApplyPagesCoreAsync(
+        MetaConnection connection,
+        IReadOnlyList<MetaPageToken> pages,
+        CancellationToken ct)
+    {
         var existing = await AssetQuery(connection.TenantId)
             .Where(x => x.ConnectionId == connection.Id && x.AssetType == "page")
             .ToListAsync(ct)

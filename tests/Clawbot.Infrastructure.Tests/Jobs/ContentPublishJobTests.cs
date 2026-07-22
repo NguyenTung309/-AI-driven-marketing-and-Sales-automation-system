@@ -51,6 +51,29 @@ public sealed class ContentPublishJobTests
     }
 
     [Fact]
+    public async Task RunAsync_persists_provider_external_id_when_no_public_post_url_exists()
+    {
+        using var fx = new TestAppDb();
+        var item = ContentItem.Create(fx.TenantId, "zalo", "Article body", createdBy: null, Now.AddHours(-2));
+        PrepareForScheduling(item);
+        var schedule = ContentSchedule.Schedule(fx.TenantId, item.Id, item.ContentRevision, "zalo", Now.AddMinutes(-5), Now.AddHours(-1));
+        ApplyApprovalContext(schedule, item);
+        fx.Db.ContentItems.Add(item);
+        fx.Db.ContentSchedules.Add(schedule);
+        await fx.Db.SaveChangesAsync();
+        var publisher = new RecordingPublisher(new PublishResult(true, null, null, "zalo-article-123"));
+        var job = BuildJob(fx, publisher, Substitute.For<IContentNotifier>());
+
+        await job.RunAsync(CancellationToken.None);
+
+        var attempt = await fx.Db.ContentPublishAttempts.IgnoreQueryFilters().SingleAsync();
+        attempt.ExternalPostId.Should().Be("zalo-article-123");
+        var savedSchedule = await fx.Db.ContentSchedules.IgnoreQueryFilters().SingleAsync();
+        savedSchedule.Status.Should().Be(ContentSchedule.StatusPosted);
+        savedSchedule.PostUrl.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task RunAsync_retries_on_first_failure_and_does_not_notify()
     {
         using var fx = new TestAppDb();
@@ -281,8 +304,11 @@ public sealed class ContentPublishJobTests
     [Theory]
     [InlineData("publisher_timeout")]
     [InlineData("facebook_timeout")]
+    [InlineData("instagram_timeout")]
+    [InlineData("instagram_unavailable")]
+    [InlineData("instagram_error")]
     [InlineData("zalo_timeout")]
-    public async Task RunAsync_timeout_after_claim_keeps_item_locked_for_reconciliation(string timeoutCode)
+    public async Task RunAsync_uncertain_result_after_claim_keeps_item_locked_for_reconciliation(string timeoutCode)
     {
         using var fx = new TestAppDb();
         var item = ContentItem.Create(fx.TenantId, "facebook", "Post body", createdBy: null, Now.AddHours(-2));

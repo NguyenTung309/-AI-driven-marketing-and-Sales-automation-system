@@ -16,7 +16,7 @@ public sealed partial class EfSocialCredentialResolver(
     AppDbContext db,
     IEncryptor encryptor,
     ITenantAccessor tenants,
-    ILogger<EfSocialCredentialResolver> logger) : ISocialCredentialResolver
+    ILogger<EfSocialCredentialResolver> logger) : ISocialCredentialResolver, IInstagramCredentialResolver
 {
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private readonly AppDbContext _db = db;
@@ -59,6 +59,72 @@ public sealed partial class EfSocialCredentialResolver(
         }
     }
 
+    public async Task<InstagramCredentialResolution> ResolveAsync(
+        Guid tenantId,
+        CancellationToken ct = default)
+    {
+        if (tenantId == Guid.Empty)
+            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Absent);
+        if (_tenants.Current is { TenantId: var ambient } && ambient != tenantId)
+        {
+            LogTenantMismatch(_logger, tenantId, ambient);
+            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Absent);
+        }
+
+        var row = await _db.SocialCredentials
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                credential => credential.TenantId == tenantId
+                    && credential.Provider == "instagram"
+                    && credential.PageId == null
+                    && credential.DeletedAt == null
+                    && credential.IsActive,
+                ct)
+            .ConfigureAwait(false);
+        if (row is null)
+            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Absent);
+
+        GraphChannelOptions? options;
+        try
+        {
+            var json = _encryptor.Decrypt(row.CredentialsEncrypted);
+            options = JsonSerializer.Deserialize<GraphChannelOptions>(json, JsonOpts);
+        }
+        catch (JsonException ex)
+        {
+            LogParseFailed(_logger, ex, tenantId, "instagram");
+            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
+        }
+        catch (FormatException ex)
+        {
+            LogDecryptFailed(_logger, ex, tenantId, "instagram");
+            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
+        }
+        catch (System.Security.Cryptography.CryptographicException ex)
+        {
+            LogDecryptFailed(_logger, ex, tenantId, "instagram");
+            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
+        }
+
+        if (options is null)
+            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
+        if (!options.Enabled)
+            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Disabled);
+        if (!IsNumericInstagramUserId(options.PageId)
+            || string.IsNullOrWhiteSpace(options.PageAccessToken))
+        {
+            return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
+        }
+
+        return new InstagramCredentialResolution(
+            InstagramCredentialResolutionStatus.Resolved,
+            new InstagramCredential(options.PageId, options.PageAccessToken));
+    }
+
+    private static bool IsNumericInstagramUserId(string value) =>
+        !string.IsNullOrWhiteSpace(value) && value.All(char.IsAsciiDigit);
+
     private string SafeDecrypt(string cipher)
     {
         if (string.IsNullOrEmpty(cipher)) return string.Empty;
@@ -72,6 +138,9 @@ public sealed partial class EfSocialCredentialResolver(
 
     [LoggerMessage(EventId = 5211, Level = LogLevel.Error, Message = "SocialCredentialResolver: failed to parse decrypted credentials for tenant {tenantId} provider {provider}")]
     private static partial void LogParseFailed(ILogger logger, Exception ex, Guid tenantId, string provider);
+
+    [LoggerMessage(EventId = 5212, Level = LogLevel.Error, Message = "SocialCredentialResolver: failed to decrypt credentials for tenant {tenantId} provider {provider}")]
+    private static partial void LogDecryptFailed(ILogger logger, Exception ex, Guid tenantId, string provider);
 }
 
 public interface ISocialCredentialResolver

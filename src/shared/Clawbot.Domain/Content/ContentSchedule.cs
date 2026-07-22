@@ -21,6 +21,7 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
     public const string ErrorStaleItemPrefix = "stale_item_status:";
 
     private const int MaxErrorCodeLength = 128;
+    private const int MaxProviderTargetIdLength = 128;
 
     public Guid TenantId { get; private set; }
     public Guid ContentItemId { get; private set; }
@@ -28,6 +29,7 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
     public int? ActiveRevisionSlot { get; private set; }
     public Guid? MetaAssetId { get; private set; }
     public Guid? PublishTargetId { get; private set; }
+    public string? ProviderTargetId { get; private set; }
     public string? ApprovalMode { get; private set; }
     public long? PublishingPolicyVersionApplied { get; private set; }
     public string Platform { get; private set; } = string.Empty;
@@ -57,9 +59,16 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
         string platform,
         DateTimeOffset scheduledAt,
         DateTimeOffset createdAt,
-        Guid? metaAssetId = null)
+        Guid? metaAssetId = null,
+        string? providerTargetId = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(contentRevision);
+        var normalizedProviderTargetId = string.IsNullOrWhiteSpace(providerTargetId)
+            ? null
+            : providerTargetId.Trim();
+        if (normalizedProviderTargetId?.Length > MaxProviderTargetIdLength)
+            throw new ArgumentOutOfRangeException(nameof(providerTargetId));
+
         return new ContentSchedule
         {
             Id = Guid.NewGuid(),
@@ -69,6 +78,7 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
             ActiveRevisionSlot = contentRevision,
             MetaAssetId = metaAssetId,
             PublishTargetId = metaAssetId,
+            ProviderTargetId = normalizedProviderTargetId,
             Platform = platform,
             ScheduledAt = scheduledAt,
             CreatedAt = createdAt,

@@ -184,7 +184,8 @@ public sealed partial class ContentPublishJob(
             attempt.BodySnapshot,
             attempt.AssetsSnapshotJson,
             schedule.ScheduledAt,
-            schedule.MetaAssetId);
+            schedule.MetaAssetId,
+            schedule.ProviderTargetId);
         PublishResult result;
         try
         {
@@ -208,9 +209,11 @@ public sealed partial class ContentPublishJob(
 
         if (result.Success)
         {
-            var externalId = string.IsNullOrWhiteSpace(result.PostUrl)
-                ? attempt.IdempotencyKey
-                : result.PostUrl!;
+            var externalId = !string.IsNullOrWhiteSpace(result.ExternalId)
+                ? result.ExternalId!
+                : !string.IsNullOrWhiteSpace(result.PostUrl)
+                    ? result.PostUrl!
+                    : attempt.IdempotencyKey;
             attempt.MarkSucceeded(attempt.LeaseToken!.Value, externalId, now);
             item.MarkPublished(attempt.Id, now);
             schedule.MarkPosted(result.PostUrl ?? string.Empty, now);
@@ -314,7 +317,15 @@ public sealed partial class ContentPublishJob(
     }
 
     private static bool IsAmbiguousPublishOutcome(string reason) =>
-        reason is "publisher_timeout" or "facebook_timeout" or "zalo_timeout";
+        reason is "publisher_timeout"
+            or "facebook_timeout"
+            or "facebook_unavailable"
+            or "facebook_response_invalid"
+            or "facebook_response_missing_id"
+            or "instagram_timeout"
+            or "instagram_unavailable"
+            or "instagram_error"
+            or "zalo_timeout";
 
     private static string? ResolvePublishHoldReason(ContentSchedule schedule, ContentItem item)
     {

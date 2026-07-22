@@ -33,7 +33,7 @@ public sealed class MetaGraphClientTests
     }
 
     [Fact]
-    public async Task ExchangeCodeAsync_calls_v25_oauth_endpoint_server_to_server()
+    public async Task ExchangeCodeAsync_posts_secrets_in_form_body_not_request_uri()
     {
         var handler = new SequenceHandler(_ => Json(HttpStatusCode.OK, """{"access_token":"root-token","token_type":"bearer","expires_in":3600}"""));
         var client = BuildClient(handler);
@@ -42,12 +42,32 @@ public sealed class MetaGraphClientTests
 
         token.AccessToken.Should().Be("root-token");
         token.ExpiresIn.Should().Be(3600);
-        handler.Requests.Should().ContainSingle();
-        var uri = handler.Requests[0].RequestUri!.ToString();
-        uri.Should().Contain("/v25.0/oauth/access_token?");
-        uri.Should().Contain("client_id=app-123");
-        uri.Should().Contain("client_secret=server-secret");
-        uri.Should().Contain("code=oauth-code");
+        var request = handler.Requests.Should().ContainSingle().Which;
+        request.Method.Should().Be(HttpMethod.Post);
+        request.RequestUri!.AbsolutePath.Should().Be("/v25.0/oauth/access_token");
+        request.RequestUri!.Query.Should().BeEmpty();
+        request.Body.Should().Contain("client_id=app-123");
+        request.Body.Should().Contain("client_secret=server-secret");
+        request.Body.Should().Contain("code=oauth-code");
+    }
+
+    [Fact]
+    public async Task DebugTokenAsync_keeps_app_secret_out_of_request_uri()
+    {
+        var handler = new SequenceHandler(_ => Json(HttpStatusCode.OK, """
+            {"data":{"is_valid":true,"app_id":"app-123","type":"USER","user_id":"user-1","scopes":[]}}
+            """));
+        var client = BuildClient(handler);
+
+        var debug = await client.DebugTokenAsync(TenantId, "root-token");
+
+        debug.IsValid.Should().BeTrue();
+        var request = handler.Requests.Should().ContainSingle().Which;
+        request.RequestUri!.AbsolutePath.Should().Be("/v25.0/debug_token");
+        request.RequestUri!.Query.Should().Contain("input_token=root-token");
+        request.RequestUri!.Query.Should().NotContain("server-secret");
+        request.RequestUri!.Query.Should().NotContain("access_token");
+        request.Authorization.Should().Be("Bearer app-123|server-secret");
     }
 
     [Fact]
@@ -89,7 +109,7 @@ public sealed class MetaGraphClientTests
         foreach (var request in handler.Requests)
         {
             request.RequestUri!.Query.Should().Contain($"appsecret_proof={Proof(RootToken)}");
-            request.RequestUri.Query.Should().NotContain("appsecret_time");
+            request.RequestUri!.Query.Should().NotContain("appsecret_time");
         }
     }
 
@@ -109,6 +129,26 @@ public sealed class MetaGraphClientTests
         request.Body.Should().Contain("url=https%3A%2F%2Fcdn.example%2Fphoto.jpg");
         request.Body.Should().Contain($"appsecret_proof={Proof("page-token")}");
         request.Body.Should().NotContain("appsecret_time");
+    }
+
+    [Fact]
+    public async Task PublishPageAsync_text_post_uses_exact_feed_path()
+    {
+        var handler = new SequenceHandler(_ => Json(HttpStatusCode.OK, """{"id":"page-1_100"}"""));
+        var client = BuildClient(handler);
+
+        var published = await client.PublishPageAsync(
+            TenantId,
+            "page-1",
+            "page-token",
+            "Text only",
+            imageUrl: null);
+
+        published.PostId.Should().Be("page-1_100");
+        var request = handler.Requests.Should().ContainSingle().Which;
+        request.RequestUri!.AbsolutePath.Should().Be("/v25.0/page-1/feed");
+        request.RequestUri.AbsolutePath.Should().NotContain("%0C");
+        request.Body.Should().Contain("message=Text+only");
     }
 
     [Fact]
@@ -133,9 +173,10 @@ public sealed class MetaGraphClientTests
         request.Method.Should().Be(HttpMethod.Get);
         request.RequestUri!.GetLeftPart(UriPartial.Path)
             .Should().Be("https://meta-proxy.example/graph/v99.0/page-123");
-        request.RequestUri.Query.Should().Contain("fields=instagram_business_account%7Bid%7D");
-        request.RequestUri.Query.Should().Contain("access_token=page-token");
-        request.RequestUri.Query.Should().Contain($"appsecret_proof={Proof("page-token")}");
+        request.RequestUri!.Query.Should().Contain("fields=instagram_business_account%7Bid%7D");
+        request.RequestUri!.Query.Should().NotContain("access_token");
+        request.Authorization.Should().Be("Bearer page-token");
+        request.RequestUri!.Query.Should().Contain($"appsecret_proof={Proof("page-token")}");
     }
 
     [Theory]
@@ -158,13 +199,17 @@ public sealed class MetaGraphClientTests
     }
 
     [Fact]
-    public async Task PublishInstagramAsync_creates_container_publishes_and_resolves_provider_permalink()
+    public async Task PublishInstagramAsync_creates_ready_container_publishes_and_resolves_provider_permalink()
     {
         var handler = new SequenceHandler(
             _ => Json(HttpStatusCode.OK, """{"id":"creation-123"}"""),
+            _ => Json(HttpStatusCode.OK, """{"status_code":"FINISHED","status":"Finished"}"""),
             _ => Json(HttpStatusCode.OK, """{"id":"media-456"}"""),
             _ => Json(HttpStatusCode.OK, """{"permalink":"https://www.instagram.com/p/provider-slug/"}"""));
-        var client = BuildClient(handler);
+        var client = BuildClient(
+            handler,
+            baseUrl: "https://meta-proxy.example/graph/",
+            apiVersion: "/v99.0/");
 
         var result = await client.PublishInstagramAsync(
             TenantId,
@@ -176,23 +221,33 @@ public sealed class MetaGraphClientTests
 
         result.MediaId.Should().Be("media-456");
         result.Permalink.Should().Be("https://www.instagram.com/p/provider-slug/");
-        handler.Requests.Should().HaveCount(3);
+        handler.Requests.Should().HaveCount(4);
+        handler.Requests.Should().OnlyContain(request =>
+            request.RequestUri!.GetLeftPart(UriPartial.Authority) == "https://meta-proxy.example");
+        handler.Requests.Should().OnlyContain(request =>
+            request.RequestUri!.AbsolutePath.StartsWith("/graph/v99.0/", StringComparison.Ordinal));
 
         handler.Requests[0].Method.Should().Be(HttpMethod.Post);
-        handler.Requests[0].RequestUri!.AbsolutePath.Should().Be("/v25.0/ig-user-123/media");
+        handler.Requests[0].RequestUri!.AbsolutePath.Should().Be("/graph/v99.0/ig-user-123/media");
         handler.Requests[0].Body.Should().Contain("image_url=https%3A%2F%2Fcdn.example%2Fphoto.jpg%3Fsignature%3Dimage-secret");
         handler.Requests[0].Body.Should().Contain("caption=Caption+with+spaces");
         handler.Requests[0].Body.Should().Contain($"appsecret_proof={Proof("page-token")}");
 
-        handler.Requests[1].Method.Should().Be(HttpMethod.Post);
-        handler.Requests[1].RequestUri!.AbsolutePath.Should().Be("/v25.0/ig-user-123/media_publish");
-        handler.Requests[1].Body.Should().Contain("creation_id=creation-123");
-        handler.Requests[1].Body.Should().Contain($"appsecret_proof={Proof("page-token")}");
+        handler.Requests[1].Method.Should().Be(HttpMethod.Get);
+        handler.Requests[1].RequestUri!.AbsolutePath.Should().Be("/graph/v99.0/creation-123");
+        handler.Requests[1].RequestUri!.Query.Should().Contain("fields=status_code%2Cstatus");
+        handler.Requests[1].Authorization.Should().Be("Bearer page-token");
 
-        handler.Requests[2].Method.Should().Be(HttpMethod.Get);
-        handler.Requests[2].RequestUri!.AbsolutePath.Should().Be("/v25.0/media-456");
-        handler.Requests[2].RequestUri!.Query.Should().Contain("fields=permalink");
-        handler.Requests[2].RequestUri!.Query.Should().Contain("access_token=page-token");
+        handler.Requests[2].Method.Should().Be(HttpMethod.Post);
+        handler.Requests[2].RequestUri!.AbsolutePath.Should().Be("/graph/v99.0/ig-user-123/media_publish");
+        handler.Requests[2].Body.Should().Contain("creation_id=creation-123");
+        handler.Requests[2].Body.Should().Contain($"appsecret_proof={Proof("page-token")}");
+
+        handler.Requests[3].Method.Should().Be(HttpMethod.Get);
+        handler.Requests[3].RequestUri!.AbsolutePath.Should().Be("/graph/v99.0/media-456");
+        handler.Requests[3].RequestUri!.Query.Should().Contain("fields=permalink");
+        handler.Requests[3].RequestUri!.Query.Should().NotContain("access_token");
+        handler.Requests[3].Authorization.Should().Be("Bearer page-token");
     }
 
     [Fact]
@@ -200,6 +255,7 @@ public sealed class MetaGraphClientTests
     {
         var handler = new SequenceHandler(
             _ => Json(HttpStatusCode.OK, """{"id":"creation-123"}"""),
+            _ => Json(HttpStatusCode.OK, """{"status_code":"FINISHED"}"""),
             _ => Json(HttpStatusCode.OK, """{"id":"opaque-media-id"}"""),
             _ => Json(HttpStatusCode.OK, "{}"));
         var client = BuildClient(handler);
@@ -240,6 +296,7 @@ public sealed class MetaGraphClientTests
     {
         var handler = new SequenceHandler(
             _ => Json(HttpStatusCode.OK, """{"id":"creation-123"}"""),
+            _ => Json(HttpStatusCode.OK, """{"status_code":"FINISHED"}"""),
             _ => Json(HttpStatusCode.OK, """{"status":"published"}"""));
         var client = BuildClient(handler);
 
@@ -253,7 +310,7 @@ public sealed class MetaGraphClientTests
 
         var error = await action.Should().ThrowAsync<MetaGraphException>();
         error.Which.Message.Should().Be("meta_response_missing_id");
-        handler.Requests.Should().HaveCount(2);
+        handler.Requests.Should().HaveCount(3);
     }
 
     [Fact]
@@ -261,6 +318,7 @@ public sealed class MetaGraphClientTests
     {
         var handler = new SequenceHandler(
             _ => Json(HttpStatusCode.OK, """{"id":"creation-123"}"""),
+            _ => Json(HttpStatusCode.OK, """{"status_code":"FINISHED"}"""),
             _ => Json(HttpStatusCode.BadRequest, """
                 {"error":{"message":"Session expired","type":"OAuthException","code":190,"error_subcode":463}}
                 """));
@@ -278,6 +336,85 @@ public sealed class MetaGraphClientTests
         error.Which.Code.Should().Be(190);
         error.Which.Subcode.Should().Be(463);
         error.Which.IsTokenError.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task PublishInstagramAsync_retries_same_ready_container_after_not_ready_response()
+    {
+        var handler = new SequenceHandler(
+            _ => Json(HttpStatusCode.OK, """{"id":"creation-123"}"""),
+            _ => Json(HttpStatusCode.OK, """{"status_code":"FINISHED"}"""),
+            _ => Json(HttpStatusCode.BadRequest, """
+                {"error":{"message":"Media ID is not available","type":"OAuthException","code":9007,"error_subcode":2207027}}
+                """),
+            _ => Json(HttpStatusCode.OK, """{"status_code":"FINISHED"}"""),
+            _ => Json(HttpStatusCode.OK, """{"id":"media-456"}"""),
+            _ => Json(HttpStatusCode.OK, "{}"));
+        var client = BuildClient(handler);
+
+        var result = await client.PublishInstagramAsync(
+            TenantId,
+            "ig-user-123",
+            "page-token",
+            "Caption",
+            "https://cdn.example/photo.jpg",
+            CancellationToken.None);
+
+        result.MediaId.Should().Be("media-456");
+        handler.Requests.Count(request => request.RequestUri!.AbsolutePath.EndsWith("/media", StringComparison.Ordinal)).Should().Be(1);
+        handler.Requests.Count(request => request.RequestUri!.AbsolutePath.EndsWith("/media_publish", StringComparison.Ordinal)).Should().Be(2);
+        handler.Requests.Where(request => request.RequestUri!.AbsolutePath.EndsWith("/media_publish", StringComparison.Ordinal))
+            .Should().OnlyContain(request => request.Body.Contains("creation_id=creation-123", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PublishInstagramAsync_keeps_success_when_permalink_graph_lookup_fails()
+    {
+        var handler = new SequenceHandler(
+            _ => Json(HttpStatusCode.OK, """{"id":"creation-123"}"""),
+            _ => Json(HttpStatusCode.OK, """{"status_code":"FINISHED"}"""),
+            _ => Json(HttpStatusCode.OK, """{"id":"media-456"}"""),
+            _ => Json(HttpStatusCode.BadRequest, """{"error":{"message":"lookup failed","code":4}}"""));
+        var client = BuildClient(handler);
+
+        var result = await client.PublishInstagramAsync(
+            TenantId,
+            "ig-user-123",
+            "page-token",
+            "Caption",
+            "https://cdn.example/photo.jpg",
+            CancellationToken.None);
+
+        result.Should().Be(new MetaInstagramPublishedMedia("media-456", null));
+        handler.Requests.Count(request => request.RequestUri!.AbsolutePath.EndsWith("/media", StringComparison.Ordinal)).Should().Be(1);
+        handler.Requests.Count(request => request.RequestUri!.AbsolutePath.EndsWith("/media_publish", StringComparison.Ordinal)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task PublishInstagramAsync_keeps_success_when_permalink_transport_is_canceled()
+    {
+        using var callerCts = new CancellationTokenSource();
+        var handler = new SequenceHandler(
+            _ => Json(HttpStatusCode.OK, """{"id":"creation-123"}"""),
+            _ => Json(HttpStatusCode.OK, """{"status_code":"FINISHED"}"""),
+            _ => Json(HttpStatusCode.OK, """{"id":"media-456"}"""),
+            _ =>
+            {
+                callerCts.Cancel();
+                throw new OperationCanceledException(callerCts.Token);
+            });
+        var client = BuildClient(handler);
+
+        var result = await client.PublishInstagramAsync(
+            TenantId,
+            "ig-user-123",
+            "page-token",
+            "Caption",
+            "https://cdn.example/photo.jpg",
+            callerCts.Token);
+
+        result.Should().Be(new MetaInstagramPublishedMedia("media-456", null));
+        callerCts.IsCancellationRequested.Should().BeTrue();
     }
 
     [Fact]
@@ -358,12 +495,20 @@ public sealed class MetaGraphClientTests
             var body = request.Content is null
                 ? string.Empty
                 : await request.Content.ReadAsStringAsync(cancellationToken);
-            Requests.Add(new RecordedRequest(request.Method, request.RequestUri, body));
+            Requests.Add(new RecordedRequest(
+                request.Method,
+                request.RequestUri,
+                body,
+                request.Headers.Authorization?.ToString()));
             if (_index >= responses.Length)
                 throw new InvalidOperationException("No fake Meta response remains.");
             return responses[_index++](request);
         }
     }
 
-    private sealed record RecordedRequest(HttpMethod Method, Uri? RequestUri, string Body);
+    private sealed record RecordedRequest(
+        HttpMethod Method,
+        Uri? RequestUri,
+        string Body,
+        string? Authorization);
 }

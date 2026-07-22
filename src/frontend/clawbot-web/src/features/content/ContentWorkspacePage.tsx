@@ -166,6 +166,11 @@ function canRetrySchedule(status: string): boolean {
   return value === "pending" || value === "failed" || value === "held";
 }
 
+function requiresMetaTarget(platform: string | null | undefined): boolean {
+  const value = normalize(platform);
+  return value === "facebook" || value === "instagram";
+}
+
 function lastErrorLabel(lastError: string | null | undefined): string | null {
   if (!lastError) return null;
   const value = normalize(lastError);
@@ -175,8 +180,19 @@ function lastErrorLabel(lastError: string | null | undefined): string | null {
   if (value === "item_missing") return "Bài gắn với lịch không còn tồn tại.";
   if (value === "facebook_not_configured" || value === "publisher_not_configured") return "Chưa cấu hình kênh đăng Facebook.";
   if (value === "facebook_reconnect_required") return "Token Facebook hết hạn — cần kết nối lại Meta.";
-  if (value === "instagram_not_configured") return "Đăng Instagram đang tạm khóa cho đến khi kênh media-native được cấu hình.";
+  if (value === "instagram_not_configured") return "Đăng Instagram theo lịch đang tạm khóa cho đến khi kênh media-native được cấu hình.";
+  if (value === "instagram_publishing_disabled") return "Tính năng đăng Instagram trực tiếp đang bị tắt.";
   if (value === "instagram_media_required") return "Instagram cần ít nhất một ảnh trước khi đăng.";
+  if (value === "instagram_media_invalid") return "Ảnh Instagram không hợp lệ hoặc không thể được Meta truy cập.";
+  if (value === "instagram_target_required") return "Hãy chọn Meta Page đã liên kết Instagram trước khi đăng.";
+  if (value === "instagram_target_unavailable") return "Meta Page hoặc tài khoản Instagram đã chọn không còn khả dụng. Hãy chọn lại đích đăng.";
+  if (value === "instagram_permissions_missing") return "Kết nối Meta thiếu quyền đăng Instagram. Hãy cấp lại quyền cần thiết.";
+  if (value === "instagram_not_linked") return "Meta Page đã chọn chưa liên kết tài khoản Instagram chuyên nghiệp.";
+  if (value === "instagram_reconnect_required") return "Phiên Meta đã hết hạn hoặc không hợp lệ. Hãy kết nối lại Meta.";
+  if (value === "instagram_meta_unavailable") return "Kết nối Meta chưa sẵn sàng để đăng Instagram.";
+  if (value === "instagram_unavailable") return "Meta tạm thời không phản hồi. Trạng thái đăng cần được kiểm tra trước khi thử lại.";
+  if (value === "instagram_timeout") return "Yêu cầu Instagram hết thời gian chờ. Hệ thống giữ trạng thái chưa xác định để tránh đăng trùng.";
+  if (value.startsWith("instagram_graph_")) return "Meta từ chối yêu cầu đăng Instagram. Hãy kiểm tra quyền, media và kết nối Meta.";
   return lastError;
 }
 
@@ -1125,7 +1141,7 @@ function ScheduleDialog({
           <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
             Hủy bỏ
           </Button>
-          <Button type="button" onClick={onSubmit} disabled={saving || (normalize(item.platform) === "facebook" && !selectedTargetId)}>
+          <Button type="button" onClick={onSubmit} disabled={saving || (requiresMetaTarget(item.platform) && !selectedTargetId)}>
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">event_available</span>
             {saving ? "Đang lên lịch..." : "Xác nhận lên lịch"}
           </Button>
@@ -1138,9 +1154,11 @@ function ScheduleDialog({
           <p className="mb-2 text-label-caps uppercase text-secondary">Kênh đăng tải</p>
           <PlatformBadge platform={item.platform} />
         </div>
-        {normalize(item.platform) === "facebook" ? (
+        {requiresMetaTarget(item.platform) ? (
           <label className="block">
-            <span className="mb-1 block text-label-caps uppercase text-secondary">Facebook Page</span>
+            <span className="mb-1 block text-label-caps uppercase text-secondary">
+              {normalize(item.platform) === "instagram" ? "Meta Page liên kết Instagram" : "Facebook Page"}
+            </span>
             {targetsLoading ? (
               <p className="rounded border border-outline bg-surface px-3 py-2 text-body-md text-on-surface-variant">Đang tải danh sách Page...</p>
             ) : targets.length ? (
@@ -1155,7 +1173,7 @@ function ScheduleDialog({
                 ))}
               </select>
             ) : (
-              <Alert tone="warning">Chưa có Facebook Page khả dụng. Hãy kết nối Meta trong phần Quản trị hệ thống.</Alert>
+              <Alert tone="warning">Chưa có Meta Page khả dụng. Hãy kết nối Meta trong phần Quản trị hệ thống.</Alert>
             )}
           </label>
         ) : null}
@@ -1513,7 +1531,7 @@ export default function ContentWorkspacePage() {
     mutationFn: (item: ContentItem) => scheduleContentItem(
       item.id,
       scheduledAtIso(scheduleMode, scheduleDate, scheduleTime),
-      normalize(item.platform) === "facebook" ? scheduleMetaAssetId : null,
+      requiresMetaTarget(item.platform) ? scheduleMetaAssetId : null,
     ),
     onSuccess: async () => {
       setScheduleItem(null);
@@ -1820,7 +1838,7 @@ export default function ContentWorkspacePage() {
                     onSchedule={() => {
                       if (selectedItem) {
                         const defaultTarget = (publishTargetsQuery.data ?? []).find((target) => target.isDefault) ?? (publishTargetsQuery.data ?? [])[0] ?? null;
-                        setScheduleMetaAssetId(normalize(selectedItem.platform) === "facebook" ? defaultTarget?.id ?? null : null);
+                        setScheduleMetaAssetId(requiresMetaTarget(selectedItem.platform) ? defaultTarget?.id ?? null : null);
                         setScheduleItem(selectedItem);
                       }
                     }}
@@ -2051,7 +2069,7 @@ export default function ContentWorkspacePage() {
           date={scheduleDate}
           time={scheduleTime}
           saving={scheduleMutation.isPending}
-          error={scheduleMutation.error ?? (normalize(scheduleItem.platform) === "facebook" ? publishTargetsQuery.error : null)}
+          error={scheduleMutation.error ?? (requiresMetaTarget(scheduleItem.platform) ? publishTargetsQuery.error : null)}
           targets={publishTargetsQuery.data ?? []}
           targetsLoading={publishTargetsQuery.isLoading}
           selectedTargetId={scheduleMetaAssetId}

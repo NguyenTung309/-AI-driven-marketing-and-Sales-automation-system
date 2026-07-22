@@ -21,6 +21,7 @@ public interface IContentAutoScheduler
         Guid? publishTargetId,
         DateTimeOffset at,
         DateTimeOffset? desiredPublishAt = null,
+        string? providerTargetId = null,
         CancellationToken cancellationToken = default);
 }
 
@@ -39,6 +40,7 @@ public sealed class ContentAutoScheduler(
         Guid? publishTargetId,
         DateTimeOffset at,
         DateTimeOffset? desiredPublishAt = null,
+        string? providerTargetId = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -85,16 +87,24 @@ public sealed class ContentAutoScheduler(
             item.Platform,
             scheduledAt,
             at,
-            metaAssetId: publishTargetId);
+            metaAssetId: publishTargetId,
+            providerTargetId: providerTargetId);
         schedule.SetApprovalContext(
             item.ApprovalMode!,
             item.PublishingPolicyVersionApplied.Value,
             publishTargetId);
 
-        if (RequiresPublishTarget(item.Platform) && publishTargetId is null)
+        if (RequiresPublishTarget(item.Platform)
+            && (publishTargetId is null
+                || (string.Equals(item.Platform, "instagram", StringComparison.OrdinalIgnoreCase)
+                    && string.IsNullOrWhiteSpace(providerTargetId))))
+        {
             schedule.MarkHeld(ErrorAutoScheduleTargetMissing, at);
-        if (InstagramPublishingGate.IsBlocked(item.Platform))
+        }
+        else if (InstagramPublishingGate.IsBlocked(item.Platform))
+        {
             schedule.MarkHeld(ErrorInstagramPublishingUnavailable, at);
+        }
 
         item.SetDesiredPublishAt(scheduledAt, at);
         item.MarkScheduled(at);
@@ -119,5 +129,6 @@ public sealed class ContentAutoScheduler(
     }
 
     private static bool RequiresPublishTarget(string platform) =>
-        string.Equals(platform, "facebook", StringComparison.OrdinalIgnoreCase);
+        string.Equals(platform, "facebook", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(platform, "instagram", StringComparison.OrdinalIgnoreCase);
 }

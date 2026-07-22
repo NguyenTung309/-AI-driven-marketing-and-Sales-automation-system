@@ -432,6 +432,11 @@ if errorlevel 1 (
     echo [ERROR] Content workflow runtime gate repair failed.
     exit /b 1
 )
+type "%ROOT%deploy\migrations\0081_content_schedule_provider_target.sql" | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
+if errorlevel 1 (
+    echo [ERROR] Content schedule provider target repair failed.
+    exit /b 1
+)
 exit /b 0
 
 :verify_tenant_runtime_columns

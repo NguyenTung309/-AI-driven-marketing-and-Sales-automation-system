@@ -26,6 +26,13 @@ interface ZaloFormState {
   readonly clearToken: boolean;
 }
 
+interface InstagramFormState {
+  readonly enabled: boolean;
+  readonly userId: string;
+  readonly token: string;
+  readonly clearToken: boolean;
+}
+
 interface MetaAppFormState {
   readonly appId: string;
   readonly appSecret: string;
@@ -37,6 +44,7 @@ interface MetaAppFormState {
 }
 
 const EMPTY_ZALO: ZaloFormState = { enabled: false, endpoint: "", oaId: "", token: "", clearToken: false };
+const EMPTY_INSTAGRAM: InstagramFormState = { enabled: false, userId: "", token: "", clearToken: false };
 const EMPTY_META_APP: MetaAppFormState = {
   appId: "",
   appSecret: "",
@@ -349,6 +357,106 @@ function MetaCard({
   );
 }
 
+function InstagramCard({ credential, saving, onSave }: {
+  readonly credential: SocialChannelCredential | undefined;
+  readonly saving: boolean;
+  readonly onSave: (form: InstagramFormState) => void;
+}) {
+  const [form, setForm] = useState<InstagramFormState>(() => credential ? {
+    enabled: credential.enabled,
+    userId: credential.pageId,
+    token: "",
+    clearToken: false,
+  } : EMPTY_INSTAGRAM);
+  const hasTokenAfterSave = !form.clearToken
+    && (form.token.trim().length > 0 || credential?.hasPageAccessToken === true);
+  const hasValidEnabledCredentials = !form.enabled
+    || (/^\d+$/.test(form.userId.trim()) && hasTokenAfterSave);
+
+  return (
+    <Card>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-headline-sm text-secondary">Instagram độc lập (tùy chọn)</h3>
+          <p className="mt-1 max-w-2xl text-body-md text-on-surface-variant">
+            Khi tắt, ClawBot dùng tài khoản Instagram liên kết trong Meta. Bật chỉ khi bạn muốn ghi đè bằng tài khoản riêng.
+          </p>
+        </div>
+        <StatusPill tone={form.enabled ? "success" : "neutral"}>
+          {form.enabled ? "Đang dùng thông tin riêng" : "Đang dùng mặc định"}
+        </StatusPill>
+      </div>
+
+      <div className="mb-4">
+        <ToggleSwitch
+          checked={form.enabled}
+          disabled={saving}
+          onChange={(enabled) => setForm((current) => ({ ...current, enabled }))}
+          label="Dùng thông tin Instagram riêng"
+        />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field label="Instagram User ID">
+          <input
+            className={inputClass}
+            inputMode="numeric"
+            pattern="[0-9]*"
+            disabled={saving}
+            placeholder="17841400000000000"
+            value={form.userId}
+            onChange={(event) => setForm((current) => ({ ...current, userId: event.target.value }))}
+          />
+        </Field>
+        <Field label="Access token Instagram">
+          <input
+            type="password"
+            autoComplete="new-password"
+            className={inputClass}
+            disabled={saving || form.clearToken}
+            placeholder={credential?.hasPageAccessToken ? "Đã lưu — nhập để thay" : "Nhập access token"}
+            value={form.token}
+            onChange={(event) => setForm((current) => ({ ...current, token: event.target.value }))}
+          />
+        </Field>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-body-sm text-on-surface-variant">
+            Để trống để giữ mã truy cập đã lưu. Mã không bao giờ được hiển thị lại.
+          </p>
+          {credential?.hasPageAccessToken ? (
+            <label className="mt-2 inline-flex items-center gap-2 text-body-sm text-on-surface-variant">
+              <input
+                type="checkbox"
+                checked={form.clearToken}
+                disabled={saving}
+                onChange={(event) => setForm((current) => ({
+                  ...current,
+                  clearToken: event.target.checked,
+                  token: event.target.checked ? "" : current.token,
+                }))}
+              />
+              Xóa mã truy cập đã lưu
+            </label>
+          ) : null}
+          {!hasValidEnabledCredentials ? (
+            <p className="mt-2 text-body-sm text-error">Cần Instagram User ID dạng số và access token để bật ghi đè.</p>
+          ) : null}
+        </div>
+        <Button
+          type="button"
+          disabled={saving || !hasValidEnabledCredentials}
+          onClick={() => onSave({ ...form, userId: form.userId.trim(), token: form.token.trim() })}
+        >
+          {saving ? "Đang lưu..." : "Lưu Instagram"}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 function ZaloCard({ credential, saving, onSave }: {
   readonly credential: SocialChannelCredential | undefined;
   readonly saving: boolean;
@@ -411,6 +519,7 @@ export function AdminSocialChannelsSection() {
   const queryClient = useQueryClient();
   const metaQuery = useQuery({ queryKey: ["admin", "meta"], queryFn: getMetaIntegrationStatus });
   const credentialsQuery = useQuery({ queryKey: ["admin", "social-credentials"], queryFn: getSocialCredentials });
+  const instagram = credentialsQuery.data?.find((credential) => credential.provider === "instagram");
   const zalo = credentialsQuery.data?.find((credential) => credential.provider === "zalo");
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["admin", "meta"] });
@@ -448,9 +557,17 @@ export function AdminSocialChannelsSection() {
     }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "social-credentials"] }),
   });
+  const instagramMutation = useMutation({
+    mutationFn: (form: InstagramFormState) => updateSocialCredential("instagram", {
+      enabled: form.enabled,
+      pageId: form.userId,
+      pageAccessToken: form.clearToken ? "" : form.token || null,
+    }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "social-credentials"] }),
+  });
 
   const metaBusy = configMutation.isPending || connectMutation.isPending || syncMutation.isPending || validateMutation.isPending || defaultMutation.isPending || disconnectMutation.isPending;
-  const error = metaQuery.error ?? credentialsQuery.error ?? configMutation.error ?? connectMutation.error ?? syncMutation.error ?? validateMutation.error ?? defaultMutation.error ?? disconnectMutation.error ?? zaloMutation.error;
+  const error = metaQuery.error ?? credentialsQuery.error ?? configMutation.error ?? connectMutation.error ?? syncMutation.error ?? validateMutation.error ?? defaultMutation.error ?? disconnectMutation.error ?? instagramMutation.error ?? zaloMutation.error;
   const callbackParams = typeof window === "undefined" ? null : new URLSearchParams(window.location.search);
   const callbackResult = callbackParams?.get("meta") ?? null;
   const callbackReason = callbackParams?.get("meta_reason") ?? null;
@@ -478,6 +595,12 @@ export function AdminSocialChannelsSection() {
             disconnectMutation.mutate();
           }
         }}
+      />
+      <InstagramCard
+        key={instagram ? `${instagram.updatedAt ?? "configured"}:${instagram.enabled}:${instagram.pageId}:${instagram.hasPageAccessToken}` : "instagram-loading"}
+        credential={instagram}
+        saving={instagramMutation.isPending}
+        onSave={(form) => instagramMutation.mutate(form)}
       />
       <ZaloCard
         key={zalo ? `${zalo.updatedAt ?? "configured"}:${zalo.enabled}:${zalo.endpoint}:${zalo.oaId}` : "zalo-loading"}

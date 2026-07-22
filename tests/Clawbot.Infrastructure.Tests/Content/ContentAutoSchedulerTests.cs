@@ -176,11 +176,18 @@ public sealed class ContentAutoSchedulerTests
         golden.ResolveNext("instagram", Now).Returns(goldenAt);
         var scheduler = new ContentAutoScheduler(fx.Db, golden);
 
-        var schedule = await scheduler.CreateIntentAsync(item, publishTargetId: null, Now);
+        var pageAssetId = Guid.NewGuid();
+        var schedule = await scheduler.CreateIntentAsync(
+            item,
+            publishTargetId: pageAssetId,
+            Now,
+            providerTargetId: "ig-user-123");
 
         schedule.Status.Should().Be(ContentSchedule.StatusHeld);
         schedule.LastErrorCode.Should().Be(ContentAutoScheduler.ErrorInstagramPublishingUnavailable);
         schedule.ScheduledAt.Should().Be(goldenAt);
+        schedule.MetaAssetId.Should().Be(pageAssetId);
+        schedule.ProviderTargetId.Should().Be("ig-user-123");
         item.Status.Should().Be("scheduled");
     }
 
