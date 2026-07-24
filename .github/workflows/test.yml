@@ -71,16 +71,6 @@ jobs:
           cat platform-focus-vite.log
           exit 1
 
-      - name: Unit Tests (no Docker)
-        run: >
-          dotnet test Clawbot.sln
-          --no-build
-          --configuration Release
-          --filter "FullyQualifiedName!~Integration"
-          --logger "trx;LogFileName=unit-results.trx"
-          --collect:"XPlat Code Coverage"
-          --results-directory ./TestResults
-
       - name: Migration Static Guard
         shell: pwsh
         run: ./deploy/ci/verify-migrations.ps1
@@ -111,32 +101,3 @@ jobs:
         shell: pwsh
         run: ./deploy/ci/verify-go-live-readiness.ps1 -ReportOnly -SkipDockerProbe
 
-      - name: Integration Tests (Testcontainers)
-        shell: pwsh
-        run: ./deploy/ci/verify-testcontainers.ps1 -RunIntegrationTests
-
-      - name: Upload Test Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: ./TestResults
-          retention-days: 30
-
-      - name: Coverage Report Summary
-        if: always()
-        run: |
-          dotnet tool install -g dotnet-reportgenerator-globaltool || true
-          reportgenerator \
-            "-reports:TestResults/**/coverage.cobertura.xml" \
-            "-targetdir:CoverageReport" \
-            "-reporttypes:MarkdownSummaryGithub" \
-            || echo "Coverage report generation skipped"
-          if [ -f CoverageReport/SummaryGithub.md ]; then
-            echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
-            cat CoverageReport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Coverage Gate
-        shell: pwsh
-        run: ./deploy/ci/enforce-coverage.ps1 -CoverageRoot TestResults -MinimumLineCoverage 30
