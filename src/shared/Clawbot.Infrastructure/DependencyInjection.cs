@@ -1,4 +1,4 @@
-﻿using Clawbot.Agents.Core.Ads;
+using Clawbot.Agents.Core.Ads;
 using Clawbot.Agents.Core.Lead;
 using Clawbot.Agents.Core.Rag;
 using Clawbot.Agents.Core.Skills;
@@ -46,8 +46,16 @@ public static class DependencyInjection
 
         services.AddScoped<IAuditContext, HttpAuditContext>();
         services.AddScoped<AuditSaveChangesInterceptor>();
+        services.AddSingleton<Clawbot.Infrastructure.Observability.RequestStatsCounter>();
         services.AddClawbotPiiRedactor(); // AuditSaveChangesInterceptor depends on IPiiRedactor.
         services.AddScoped<Messaging.DomainEventDispatchInterceptor>();
+        // Phase 6.1: stamp SESSION_CONTEXT writer version on every AppDbContext SQL connection.
+        services.Configure<Clawbot.Infrastructure.Content.ContentWorkflowWriterOptions>(
+            cfg.GetSection(Clawbot.Infrastructure.Content.ContentWorkflowWriterOptions.SectionName));
+        services.AddSingleton<ContentWorkflowWriterSessionInterceptor>();
+        services.AddMemoryCache();
+        services.AddScoped<Clawbot.Infrastructure.Content.IContentWorkflowRuntimeGate,
+            Clawbot.Infrastructure.Content.ContentWorkflowRuntimeGate>();
         // ai-self-learning-memory Lớp 3: memory theo agent — ContentReviewer nạp "lỗi hay gặp" vào persona.
         // Đăng ký ở đây để CẢ 2 host (API + AgentService) đều có; reviewer coi provider là optional.
         services.AddScoped<Clawbot.Agents.Core.Learning.IAgentMemoryProvider, Clawbot.Infrastructure.Learning.EfAgentMemoryProvider>();
@@ -57,11 +65,12 @@ public static class DependencyInjection
             opt.UseSqlServer(cfg.GetConnectionString("SqlServer"));
             opt.AddInterceptors(
                 sp.GetRequiredService<AuditSaveChangesInterceptor>(),
-                sp.GetRequiredService<Messaging.DomainEventDispatchInterceptor>());
+                sp.GetRequiredService<Messaging.DomainEventDispatchInterceptor>(),
+                sp.GetRequiredService<ContentWorkflowWriterSessionInterceptor>());
         });
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
-         // Identity and Auth    
+        // Identity and Auth
         services.AddIdentityCore<AppUser>(opt =>
             {
                 opt.User.RequireUniqueEmail = true;
@@ -95,6 +104,8 @@ public static class DependencyInjection
             bus.AddConsumer<Messaging.ConversationEscalatedConsumer>();
             bus.AddConsumer<Messaging.LeadBecameHotConsumer>();
             bus.AddConsumer<Messaging.LeadBecameWarmConsumer>();
+            bus.AddConsumer<Messaging.LeadBecameCustomerConsumer>();
+            bus.AddConsumer<Messaging.LeadReactivatedConsumer>();
             // Chat inbound pipeline: polling publishes, this consumer ingests (ordered, retried)
             bus.AddConsumer<Messaging.ChannelInboundMessageConsumer, Messaging.ChannelInboundMessageConsumerDefinition>();
 
@@ -151,6 +162,9 @@ public static class DependencyInjection
         services.AddScoped<IKbContentReader, Agents.KbContentReader>();
         services.Configure<PublisherOptions>(cfg.GetSection(PublisherOptions.SectionName));
         services.AddSingleton<IGoldenHourResolver, DefaultGoldenHourResolver>();
+        // Phase 3.2: revision-bound golden-hour schedule intent in the approval transaction.
+        services.AddScoped<Clawbot.Infrastructure.Content.IContentAutoScheduler,
+            Clawbot.Infrastructure.Content.ContentAutoScheduler>();
         services.AddClawbotLead(); // Lead-2: least-busy assignment for API endpoints + hot-lead consumer
 
         services.AddCompetitorMonitor(); // Research-2: competitor feed scanner (typed HttpClient)
@@ -161,6 +175,8 @@ public static class DependencyInjection
         services.AddClawbotLead(); // ILeadAssignmentService, consumed by LeadsEndpoints.
         services.AddSingleton<Clawbot.Agents.Core.Skills.Lead.KeywordLeadSignalClassifier>();
         services.AddScoped<Clawbot.Infrastructure.Leads.LeadBatchRescorer>();
+        services.AddScoped<Clawbot.Infrastructure.Leads.ILeadNotificationRecipientResolver,
+            Clawbot.Infrastructure.Leads.LeadNotificationRecipientResolver>();
         services.AddScoped<IPancakeConfigResolver, PancakeConfigResolver>();
         // SPEC-16 §5.1: per-page Pancake token model — page-token read resolver + mint/store service + HTTP gateway.
         var pancakeUserApi = cfg.GetSection(PancakeUserApiOptions.SectionName).Get<PancakeUserApiOptions>() ?? new PancakeUserApiOptions();
@@ -185,7 +201,31 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException("ICommentChannelAdapter not available"));
         // Native Facebook/Zalo publishing is always available so DB-backed connections take effect without a restart.
         services.Configure<GraphPublisherOptions>(cfg.GetSection(GraphPublisherOptions.SectionName));
-        services.AddScoped<ISocialCredentialResolver, EfSocialCredentialResolver>();
+        services.AddScoped<EfSocialCredentialResolver>();
+        services.AddScoped<ISocialCredentialResolver>(sp => sp.GetRequiredService<EfSocialCredentialResolver>());
+        services.AddScoped<IInstagramCredentialResolver>(sp => sp.GetRequiredService<EfSocialCredentialResolver>());
+        services.AddSingleton<IHostAddressResolver, SystemHostAddressResolver>();
+        services.AddSingleton<IPublicUrlSafetyValidator, DnsPublicUrlSafetyValidator>();
+        services.AddTransient<ZaloResponseBufferingHandler>();
+        services.AddHttpClient(
+                GraphSocialPublisher.ZaloHttpClientName,
+                static client =>
+                {
+                    client.Timeout = Timeout.InfiniteTimeSpan;
+                    client.MaxResponseContentBufferSize = GraphSocialPublisher.ZaloMaxResponseContentBufferSize;
+                })
+            .RedactLoggedHeaders(static headerName =>
+                string.Equals(headerName, "access_token", StringComparison.OrdinalIgnoreCase))
+            .ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler
+            {
+                AllowAutoRedirect = false,
+                MaxResponseHeadersLength = checked(
+                    (int)(GraphSocialPublisher.ZaloMaxResponseContentBufferSize / 1024)),
+                UseCookies = false,
+            })
+            .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
+            .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(15)))
+            .AddHttpMessageHandler<ZaloResponseBufferingHandler>();
         services.AddHttpClient<GraphSocialPublisher>()
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(15)));

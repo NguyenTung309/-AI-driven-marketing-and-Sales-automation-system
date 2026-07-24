@@ -17,6 +17,7 @@ using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.Llm;
 using Clawbot.Domain.Notifications;
+using Clawbot.Domain.Observability;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
@@ -42,6 +43,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<SystemLogEntry> SystemLogs => Set<SystemLogEntry>();
+    public DbSet<RequestStatsHourly> RequestStatsHourly => Set<RequestStatsHourly>();
     public DbSet<Auth.RefreshToken> RefreshTokens => Set<Auth.RefreshToken>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<Clawbot.Domain.Jobs.BackgroundJob> BackgroundJobs => Set<Clawbot.Domain.Jobs.BackgroundJob>();
@@ -61,6 +64,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     // Leads
     public DbSet<Lead> Leads => Set<Lead>();
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
+    public DbSet<LeadRevenue> LeadRevenues => Set<LeadRevenue>();
     public DbSet<LeadScoringRule> LeadScoringRules => Set<LeadScoringRule>();
     public DbSet<DripSequence> DripSequences => Set<DripSequence>();
     public DbSet<DripSequenceStep> DripSequenceSteps => Set<DripSequenceStep>();
@@ -103,6 +107,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<ContentBrief> ContentBriefs => Set<ContentBrief>();
     public DbSet<ContentItem> ContentItems => Set<ContentItem>();
     public DbSet<ContentSchedule> ContentSchedules => Set<ContentSchedule>();
+    public DbSet<ContentReviewTask> ContentReviewTasks => Set<ContentReviewTask>();
+    public DbSet<ContentRenderTask> ContentRenderTasks => Set<ContentRenderTask>();
+    public DbSet<ContentAsset> ContentAssets => Set<ContentAsset>();
+    public DbSet<ContentPublishAttempt> ContentPublishAttempts => Set<ContentPublishAttempt>();
+    public DbSet<ContentWorkflowMetricsHourly> ContentWorkflowMetricsHourly => Set<ContentWorkflowMetricsHourly>();
     public DbSet<SocialCredential> SocialCredentials => Set<SocialCredential>();
 
     // Meta business integrations
@@ -142,6 +151,39 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
     Task<int> IAppDbContext.SaveChangesAsync(CancellationToken ct) => base.SaveChangesAsync(ct);
 
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        RefreshSqliteContentRenderTaskConcurrencyTokens();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        RefreshSqliteContentRenderTaskConcurrencyTokens();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void RefreshSqliteContentRenderTaskConcurrencyTokens()
+    {
+        if (!string.Equals(
+                Database.ProviderName,
+                "Microsoft.EntityFrameworkCore.Sqlite",
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        foreach (var entry in ChangeTracker.Entries<ContentRenderTask>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Property(x => x.RowVersion).CurrentValue = Guid.NewGuid().ToByteArray();
+            }
+        }
+    }
+
     private sealed class EfConversationSet(DbSet<Conversation> set) : IConversationSet
     {
         public void Add(Conversation conversation) => set.Add(conversation);
@@ -154,6 +196,41 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     {
         base.OnModelCreating(builder);
         builder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+
+        if (string.Equals(Database.ProviderName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))
+        {
+            builder.Entity<ContentItem>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            builder.Entity<ContentSchedule>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            builder.Entity<ContentReviewTask>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            builder.Entity<ContentRenderTask>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            builder.Entity<ContentAsset>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            builder.Entity<ContentPublishAttempt>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            builder.Entity<AgentSession>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+        }
+        else
+        {
+            builder.Entity<ContentItem>().Property(x => x.RowVersion).IsRowVersion();
+            builder.Entity<ContentSchedule>().Property(x => x.RowVersion).IsRowVersion();
+            builder.Entity<ContentReviewTask>().Property(x => x.RowVersion).IsRowVersion();
+            builder.Entity<ContentRenderTask>().Property(x => x.RowVersion).IsRowVersion();
+            builder.Entity<ContentAsset>().Property(x => x.RowVersion).IsRowVersion();
+            builder.Entity<ContentPublishAttempt>().Property(x => x.RowVersion).IsRowVersion();
+            builder.Entity<AgentSession>().Property(x => x.RowVersion).IsRowVersion();
+        }
 
         builder.AddInboxStateEntity();
 

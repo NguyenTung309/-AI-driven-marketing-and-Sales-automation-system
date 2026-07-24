@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Clawbot.Domain.Channels;
 
-public sealed class ProcessedMessage
+public sealed class ProcessedMessage : Clawbot.Domain.Common.IAuditExempt
 {
     public Guid Id { get; private set; }
 

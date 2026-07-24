@@ -91,7 +91,10 @@ public sealed partial class LlmConfigResolver(
             cfg.InputUsdPer1M,
             cfg.OutputUsdPer1M,
             cfg.TimeoutSeconds,
-            cfg.MaxOutputTokens);
+            cfg.MaxOutputTokens,
+            ConfigId: cfg.Id,
+            ConfigUpdatedAt: cfg.UpdatedAt,
+            SupportsVision: cfg.SupportsVision);
     }
 
     [LoggerMessage(EventId = 7301, Level = LogLevel.Warning,

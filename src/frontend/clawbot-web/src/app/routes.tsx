@@ -68,6 +68,15 @@ export const router = createBrowserRouter([
     ),
   },
   {
+    // Deep-link từ notification: /leads/{id} mở drawer lead đó.
+    path: "/leads/:leadId",
+    element: (
+      <RequireAuth>
+        <LeadsPage />
+      </RequireAuth>
+    ),
+  },
+  {
     path: "/content",
     element: (
       <RequireAuth>

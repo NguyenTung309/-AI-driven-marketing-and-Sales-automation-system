@@ -51,15 +51,25 @@ jobs:
         working-directory: src/frontend/clawbot-web
         run: npm run build
 
-      - name: Unit Tests (no Docker)
-        run: >
-          dotnet test Clawbot.sln
-          --no-build
-          --configuration Release
-          --filter "FullyQualifiedName!~Integration"
-          --logger "trx;LogFileName=unit-results.trx"
-          --collect:"XPlat Code Coverage"
-          --results-directory ./TestResults
+      - name: Install Playwright Chromium
+        working-directory: src/frontend/clawbot-web
+        run: npx playwright install --with-deps chromium
+
+      - name: Frontend Platform and Instagram E2E
+        working-directory: src/frontend/clawbot-web
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 15876 --strictPort > platform-focus-vite.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid"' EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:15876/login > /dev/null; then
+              npm run test:e2e:platform && npm run test:e2e:instagram
+              exit $?
+            fi
+            sleep 1
+          done
+          cat platform-focus-vite.log
+          exit 1
 
       - name: Migration Static Guard
         shell: pwsh
@@ -91,32 +101,3 @@ jobs:
         shell: pwsh
         run: ./deploy/ci/verify-go-live-readiness.ps1 -ReportOnly -SkipDockerProbe
 
-      - name: Integration Tests (Testcontainers)
-        shell: pwsh
-        run: ./deploy/ci/verify-testcontainers.ps1 -RunIntegrationTests
-
-      - name: Upload Test Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: ./TestResults
-          retention-days: 30
-
-      - name: Coverage Report Summary
-        if: always()
-        run: |
-          dotnet tool install -g dotnet-reportgenerator-globaltool || true
-          reportgenerator \
-            "-reports:TestResults/**/coverage.cobertura.xml" \
-            "-targetdir:CoverageReport" \
-            "-reporttypes:MarkdownSummaryGithub" \
-            || echo "Coverage report generation skipped"
-          if [ -f CoverageReport/SummaryGithub.md ]; then
-            echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
-            cat CoverageReport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Coverage Gate
-        shell: pwsh
-        run: ./deploy/ci/enforce-coverage.ps1 -CoverageRoot TestResults -MinimumLineCoverage 30

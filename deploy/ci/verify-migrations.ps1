@@ -46,6 +46,12 @@ function Extract-AlterAddedColumns {
     return $result
 }
 
+function Remove-SqlStringLiterals {
+    param([Parameter(Mandatory = $true)][string]$Content)
+
+    return [regex]::Replace($Content, "(?is)N?'(?:''|[^'])*'", "''")
+}
+
 function Assert-NoSameBatchIndexOnAlterAddedColumn {
     param(
         [Parameter(Mandatory = $true)][string]$FileName,
@@ -57,8 +63,9 @@ function Assert-NoSameBatchIndexOnAlterAddedColumn {
         return
     }
 
+    $contentWithoutStringLiterals = Remove-SqlStringLiterals $Content
     $indexMatches = [regex]::Matches(
-        $Content,
+        $contentWithoutStringLiterals,
         '(?is)\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+\S+\s+ON\s+(?<table>(?:dbo\.)?\[?[A-Za-z_][A-Za-z0-9_]*\]?)\s*\((?<columns>[^)]*)\)')
 
     foreach ($indexMatch in $indexMatches) {

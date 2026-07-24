@@ -7,7 +7,7 @@ namespace Clawbot.Infrastructure.Auth;
 /// Intentionally has no EF navigation/FK to AspNetUsers — the prod DDL owns the FK to
 /// users(id); runtime never relies on it.
 /// </summary>
-public sealed class RefreshToken
+public sealed class RefreshToken : Clawbot.Domain.Common.IAuditExempt
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid UserId { get; set; }

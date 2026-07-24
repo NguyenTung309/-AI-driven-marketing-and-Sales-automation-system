@@ -29,6 +29,7 @@ import {
   listPermissions,
   listRolePermissions,
   listRoles,
+  listSystemLogs,
   resetAdminUserPassword,
   revokeApiKey,
   setAdminUserActive,
@@ -49,6 +50,8 @@ import {
   type Permission,
   type Role,
   type SimpleUser,
+  type SystemLogCursorPage,
+  type SystemLogEntry,
   type UpdatePancakeChannelRequest,
 } from "@/shared/api/admin";
 import { AdminAuditTab } from "./AdminAuditTab";
@@ -59,6 +62,7 @@ import { AdminPancakeChannelModal, type PancakeChannelTarget } from "./AdminPanc
 import { AdminKeysTab } from "./AdminKeysTab";
 import { AdminRoleModal, type RoleModalMode } from "./AdminRoleModal";
 import { AdminRolesTab } from "./AdminRolesTab";
+import { AdminSystemLogsTab } from "./AdminSystemLogsTab";
 import { AdminUserModal, type UserModalMode } from "./AdminUserModal";
 import { AdminUsersTab } from "./AdminUsersTab";
 import {
@@ -74,13 +78,14 @@ import {
 } from "./adminHelpers";
 import { MetricTile, TabButton } from "./adminUi";
 
-type AdminTab = "users" | "roles" | "keys" | "integrations" | "audit" | "jobs";
+type AdminTab = "users" | "roles" | "keys" | "integrations" | "errors" | "audit" | "jobs";
 
 const EMPTY_USERS: readonly AdminUser[] = [];
 const EMPTY_ROLES: readonly Role[] = [];
 const EMPTY_PERMISSIONS: readonly Permission[] = [];
 const EMPTY_KEYS: readonly ApiKeyItem[] = [];
 const EMPTY_AUDIT_LOGS: readonly AuditLog[] = [];
+const EMPTY_SYSTEM_LOGS: readonly SystemLogEntry[] = [];
 const EMPTY_SIMPLE_USERS: readonly SimpleUser[] = [];
 
 export default function AdminConsolePage() {
@@ -89,8 +94,19 @@ export default function AdminConsolePage() {
   const canManageUsers = authPermissions.includes("admin.system");
   const canManagePancakeToken = canManageUsers || authPermissions.includes("users:pancake-token:manage");
   const canManageInboxOwners = authPermissions.includes("admin:inboxes");
+  // Must match BE gate (system.logs only) — do not open the tab on legacy admin.* alone.
+  const canViewSystemLogs = authPermissions.includes("system.logs");
   const [tab, setTab] = useState<AdminTab>("users");
   const [search, setSearch] = useState("");
+  const [auditAction, setAuditAction] = useState("");
+  const [auditResourceType, setAuditResourceType] = useState("");
+  const [systemLevel, setSystemLevel] = useState("");
+  const [systemStatusGroup, setSystemStatusGroup] = useState("");
+  const [systemSource, setSystemSource] = useState("");
+  const [systemFrom, setSystemFrom] = useState("");
+  const [systemTo, setSystemTo] = useState("");
+  const [systemSearch, setSystemSearch] = useState("");
+  const debouncedSystemSearch = useDebounce(systemSearch, 300);
   const [notice, setNotice] = useState<string | null>(null);
   const [userModal, setUserModal] = useState<UserModalMode>(null);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
@@ -167,16 +183,47 @@ export default function AdminConsolePage() {
     enabled: tab === "integrations",
   });
   const auditList = useInfiniteList<AuditLog, PagedResponse<AuditLog>>({
-    queryKey: ["admin", "audit-logs"],
+    queryKey: ["admin", "audit-logs", auditAction, auditResourceType],
     initialPageParam: 1,
     queryFn: (pageParam) =>
       listAuditLogs({
         page: typeof pageParam === "number" ? pageParam : 1,
         pageSize: 50,
+        action: auditAction || undefined,
+        resourceType: auditResourceType || undefined,
       }),
-    enabled: tab === "audit",
+    enabled: tab === "audit" && canViewSystemLogs,
   });
   const auditQuery = auditList.query;
+  const systemFromIso = systemFrom ? new Date(systemFrom).toISOString() : undefined;
+  const systemToIso = systemTo ? new Date(systemTo).toISOString() : undefined;
+  const systemLogsList = useInfiniteList<SystemLogEntry, SystemLogCursorPage>({
+    queryKey: [
+      "admin",
+      "system-logs",
+      systemLevel,
+      systemStatusGroup,
+      systemSource,
+      systemFrom,
+      systemTo,
+      debouncedSystemSearch,
+    ],
+    initialPageParam: null,
+    queryFn: (pageParam) =>
+      listSystemLogs({
+        cursor: typeof pageParam === "string" ? pageParam : null,
+        pageSize: 50,
+        level: systemLevel || undefined,
+        statusGroup: systemStatusGroup || undefined,
+        source: systemSource || undefined,
+        from: systemFromIso,
+        to: systemToIso,
+        q: debouncedSystemSearch || undefined,
+      }),
+    enabled: tab === "errors" && canViewSystemLogs,
+  });
+  const systemLogsQuery = systemLogsList.query;
+  const systemSummary = systemLogsQuery.data?.pages[0]?.summary ?? null;
 
   const users = usersList.items.length ? usersList.items : EMPTY_USERS;
   const roles = rolesQuery.data ?? EMPTY_ROLES;
@@ -184,6 +231,7 @@ export default function AdminConsolePage() {
   const ownerOptions = ownerOptionsQuery.data ?? EMPTY_SIMPLE_USERS;
   const apiKeys = apiKeysQuery.data ?? EMPTY_KEYS;
   const auditLogs = auditList.items.length ? auditList.items : EMPTY_AUDIT_LOGS;
+  const systemLogs = systemLogsList.items.length ? systemLogsList.items : EMPTY_SYSTEM_LOGS;
   const effectiveSelectedRoleId = selectedRoleId ?? roles[0]?.id ?? null;
   const rolePermissionsQuery = useQuery({
     queryKey: ["admin", "role-permissions", effectiveSelectedRoleId],
@@ -205,7 +253,8 @@ export default function AdminConsolePage() {
     brandingQuery.error ??
     pancakeQuery.error ??
     webhookQuery.error ??
-    auditQuery.error;
+    auditQuery.error ??
+    systemLogsQuery.error;
 
   const permissionsByGroup = useMemo(() => {
     const groups = new Map<string, Permission[]>();
@@ -614,8 +663,13 @@ export default function AdminConsolePage() {
             <TabButton active={tab === "roles"} icon="admin_panel_settings" label="Phân quyền" onClick={() => setTab("roles")} />
             <TabButton active={tab === "keys"} icon="vpn_key" label="Khóa tích hợp" onClick={() => setTab("keys")} />
             <TabButton active={tab === "integrations"} icon="hub" label="Tích hợp" onClick={() => setTab("integrations")} />
-            <TabButton active={tab === "audit"} icon="receipt_long" label="Nhật ký quản trị" onClick={() => setTab("audit")} />
             <TabButton active={tab === "jobs"} icon="schedule" label="Tác vụ tự động" onClick={() => setTab("jobs")} />
+          </>
+        ) : null}
+        {canViewSystemLogs ? (
+          <>
+            <TabButton active={tab === "errors"} icon="bug_report" label="Lỗi hệ thống" onClick={() => setTab("errors")} />
+            <TabButton active={tab === "audit"} icon="receipt_long" label="Nhật ký quản trị" onClick={() => setTab("audit")} />
           </>
         ) : null}
       </div>
@@ -697,9 +751,43 @@ export default function AdminConsolePage() {
         />
       ) : null}
 
+      {tab === "errors" ? (
+        <>
+          <AdminSystemLogsTab
+            logs={systemLogs}
+            summary={systemSummary}
+            level={systemLevel}
+            statusGroup={systemStatusGroup}
+            source={systemSource}
+            from={systemFrom}
+            to={systemTo}
+            q={systemSearch}
+            onLevelChange={setSystemLevel}
+            onStatusGroupChange={setSystemStatusGroup}
+            onSourceChange={setSystemSource}
+            onFromChange={setSystemFrom}
+            onToChange={setSystemTo}
+            onSearchChange={setSystemSearch}
+            isLoading={systemLogsList.isLoading}
+            canLoadStats={canViewSystemLogs}
+          />
+          <InfiniteScrollSentinel
+            hasNextPage={systemLogsList.hasNextPage}
+            isFetchingNextPage={systemLogsList.isFetchingNextPage}
+            onLoadMore={systemLogsList.fetchNextPage}
+          />
+        </>
+      ) : null}
+
       {tab === "audit" ? (
         <>
-          <AdminAuditTab auditLogs={auditLogs} />
+          <AdminAuditTab
+            auditLogs={auditLogs}
+            action={auditAction}
+            resourceType={auditResourceType}
+            onActionChange={setAuditAction}
+            onResourceTypeChange={setAuditResourceType}
+          />
           <InfiniteScrollSentinel
             hasNextPage={auditList.hasNextPage}
             isFetchingNextPage={auditList.isFetchingNextPage}

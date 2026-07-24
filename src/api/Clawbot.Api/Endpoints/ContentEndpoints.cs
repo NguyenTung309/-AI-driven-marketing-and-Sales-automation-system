@@ -9,7 +9,10 @@ using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Content;
 using Clawbot.Api.Jobs;
 using Clawbot.Api.Middleware;
+using Clawbot.Api.Services;
 using Clawbot.Domain.Content;
+using Clawbot.Infrastructure.Content.Publishing;
+using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.Infrastructure.Integrations.Meta;
 using Clawbot.SharedKernel.Content;
@@ -59,14 +62,23 @@ public static class ContentEndpoints
             .RequirePermission("content:write")
             .RequireRateLimiting(RateLimitingExtensions.UploadPolicy)
             .DisableAntiforgery();
+        grp.MapDelete("/items/{id:guid}/assets/{assetId:guid}", DeleteItemAssetAsync)
+            .RequirePermission("content:write");
         grp.MapDelete("/items/{id:guid}", DeleteItemAsync).RequirePermission("content:write");
-        grp.MapPost("/items/{id:guid}/approve", ApproveItemAsync).RequirePermission("content:write");
-        grp.MapPost("/items/{id:guid}/reject", RejectItemAsync).RequirePermission("content:write");
+        // Phase 4.4: human publishing decisions (not Agent review).
+        grp.MapPost("/items/{id:guid}/approve", ApproveItemAsync).RequirePermission("content:approve");
+        grp.MapPost("/items/{id:guid}/reject", RejectItemAsync).RequirePermission("content:approve");
+        // Phase 4.5: upsert durable review task only — no inline LLM call.
+        grp.MapPost("/items/{id:guid}/agent-review/retry", RetryAgentReviewAsync).RequirePermission("content:write");
         grp.MapPost("/items/{id:guid}/schedule", ScheduleItemAsync).RequirePermission("content:write");
         grp.MapPost("/items/{id:guid}/repurpose", RepurposeItemAsync).RequirePermission("content:write");
         grp.MapGet("/calendar", CalendarAsync).RequirePermission("content:read");
         grp.MapGet("/publish-targets", PublishTargetsAsync).RequirePermission("content:read");
         grp.MapDelete("/schedule/{id:guid}", DeleteScheduleAsync).RequirePermission("content:write");
+        // Phase 4.6: privileged durable-state transitions only (never provider inline).
+        grp.MapPost("/schedules/{id:guid}/publish/retry", RetryPublishScheduleAsync).RequirePermission("content:publish");
+        grp.MapPost("/schedules/{id:guid}/publish/reconcile", ReconcilePublishScheduleAsync).RequirePermission("content:publish");
+        ContentPublishingPolicyEndpoints.Map(grp);
 
         return app;
     }
@@ -129,9 +141,11 @@ public static class ContentEndpoints
         var tenant = tenants.Require();
         if (string.IsNullOrWhiteSpace(body.Platform) || string.IsNullOrWhiteSpace(body.Brief))
             return Error(http, StatusCodes.Status400BadRequest, "content.brief_invalid", "platform and brief required.");
+        if (!ContentPlatformCatalog.TryNormalizeWritable(body.Platform, out var platform))
+            return UnsupportedPlatform(http);
 
         var brief = ContentBrief.Create(
-            tenant.TenantId, body.Platform.Trim(), body.Brief.Trim(), CurrentUserId(user), clock.UtcNow);
+            tenant.TenantId, platform!, body.Brief.Trim(), CurrentUserId(user), clock.UtcNow);
         db.ContentBriefs.Add(brief);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -155,7 +169,22 @@ public static class ContentEndpoints
         if (brief is null)
             return Error(http, StatusCodes.Status404NotFound, "content.brief_not_found", "Content brief not found.");
 
-        brief.Update(body.Platform.Trim(), body.Brief.Trim(), clock.UtcNow);
+        string platform;
+        if (ContentPlatformCatalog.TryNormalizeWritable(body.Platform, out var normalizedPlatform))
+        {
+            platform = normalizedPlatform!;
+        }
+        else if (string.Equals(body.Platform.Trim(), brief.Platform.Trim(), StringComparison.OrdinalIgnoreCase)
+                 && !ContentPlatformCatalog.TryNormalizeWritable(brief.Platform, out _))
+        {
+            platform = brief.Platform;
+        }
+        else
+        {
+            return UnsupportedPlatform(http);
+        }
+
+        brief.Update(platform, body.Brief.Trim(), clock.UtcNow);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.Ok(ToDto(brief));
     }
@@ -216,11 +245,13 @@ public static class ContentEndpoints
     {
         if (string.IsNullOrWhiteSpace(body.Brief))
             return Error(http, StatusCodes.Status400BadRequest, "content.image_prompt_invalid", "brief required.");
+        if (!ContentPlatformCatalog.TryNormalizeWritable(body.Platform, out var platform))
+            return UnsupportedPlatform(http);
 
         var jobId = await jobs.LaunchAsync(
             ContentImagePromptJobHandler.JobType,
             "Sinh prompt ảnh cho bài đăng",
-            new ContentImagePromptJobPayload(body),
+            new ContentImagePromptJobPayload(body with { Platform = platform }),
             CurrentUserId(http),
             ct: ct).ConfigureAwait(false);
 
@@ -306,7 +337,7 @@ public static class ContentEndpoints
         HttpContext http,
         CancellationToken ct)
     {
-        _ = tenants.Require();
+        var tenantId = tenants.Require().TenantId;
         if (string.IsNullOrWhiteSpace(body.Body))
             return Error(http, StatusCodes.Status400BadRequest, "content.item_invalid", "body required.");
 
@@ -315,16 +346,37 @@ public static class ContentEndpoints
         if (item is null)
             return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
 
-        item.UpdateBody(body.Body, clock.UtcNow);
-        if (body.AssetsJson is not null)
+        try
         {
-            if (!TryNormalizeAssetsJson(body.AssetsJson, out var normalizedAssetsJson))
-                return Error(http, StatusCodes.Status400BadRequest, "content.assets_invalid", "assetsJson must be an image asset array.");
-            item.SetAssets(normalizedAssetsJson, clock.UtcNow);
-        }
+            var revisionBefore = item.ContentRevision;
+            var now = clock.UtcNow;
+            item.UpdateBody(body.Body, now);
+            if (body.AssetsJson is not null)
+            {
+                if (!TryNormalizeAssetsJson(body.AssetsJson, out var normalizedAssetsJson))
+                    return Error(http, StatusCodes.Status400BadRequest, "content.assets_invalid", "assetsJson must be an image asset array.");
+                // AssetsJson remains a derived compatibility view; authoritative set is content_assets.
+                item.SetAssets(normalizedAssetsJson, now);
+            }
 
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return Results.Ok(ToDto(item));
+            if (item.ContentRevision != revisionBefore)
+            {
+                await CancelStaleScheduleIntentsAsync(db, item.Id, revisionBefore, now, ct).ConfigureAwait(false);
+                db.ContentReviewTasks.Add(ContentAssetLifecycle.CreateQuietPeriodReviewTask(
+                    tenantId,
+                    item.Id,
+                    item.ContentRevision,
+                    now));
+            }
+
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return Results.Ok(ToDto(item));
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message is "content_published_item_immutable" or "content_publish_attempt_active")
+        {
+            return Error(http, StatusCodes.Status409Conflict, exception.Message, exception.Message);
+        }
     }
 
     private static async Task<IResult> UploadItemAssetAsync(
@@ -337,7 +389,7 @@ public static class ContentEndpoints
         HttpContext http,
         CancellationToken ct)
     {
-        _ = tenants.Require();
+        var tenantId = tenants.Require().TenantId;
         if (file is null || file.Length == 0)
             return Error(http, StatusCodes.Status400BadRequest, "content.asset_missing", "Thiếu file ảnh.");
         if (file.Length > MaxAssetUploadBytes)
@@ -349,6 +401,17 @@ public static class ContentEndpoints
             .ConfigureAwait(false);
         if (item is null)
             return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+        if (string.Equals(item.Status, "published", StringComparison.OrdinalIgnoreCase)
+            || item.ActivePublishAttemptId is not null)
+        {
+            return Error(
+                http,
+                StatusCodes.Status409Conflict,
+                item.ActivePublishAttemptId is not null
+                    ? "content_publish_attempt_active"
+                    : "content_published_item_immutable",
+                "Published or actively-claimed content cannot receive new assets.");
+        }
 
         using var ms = new MemoryStream();
         await file.CopyToAsync(ms, ct).ConfigureAwait(false);
@@ -356,13 +419,164 @@ public static class ContentEndpoints
         if (!LooksLikeAllowedImage(bytes, file.ContentType))
             return Error(http, StatusCodes.Status400BadRequest, "content.asset_invalid_type", "File không khớp định dạng ảnh.");
 
-        var fileName = $"content-{item.Id}-{Guid.NewGuid():N}{ResolveAssetExtension(file)}";
-        var url = await storage.SaveAsync(bytes, fileName, file.ContentType, ct).ConfigureAwait(false);
-        var assetsJson = AddImageAsset(item.AssetsJson, url, file.FileName, file.ContentType);
-        item.SetAssets(assetsJson, clock.UtcNow);
+        var now = clock.UtcNow;
+        var existing = await db.ContentAssets
+            .Where(a => a.TenantId == tenantId && a.ContentItemId == item.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (existing.Count(a => a.Status == ContentAsset.StatusReady) >= MaxAssetsPerContentItem)
+            return Error(http, StatusCodes.Status400BadRequest, "content.asset_limit", "Tối đa 10 ảnh mỗi bài.");
+
+        // Phase 2.9: reserve server-owned row + storage key first; object upload outside the final txn.
+        var asset = ContentAsset.Reserve(
+            tenantId,
+            item.Id,
+            file.FileName,
+            ContentAssetLifecycle.NextSortOrder(existing),
+            now);
+        db.ContentAssets.Add(asset);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return Results.Ok(new ContentAssetUploadResponse(url, assetsJson));
+        string url;
+        try
+        {
+            // Storage key is the authority; local backend flattens path segments safely.
+            url = await storage.SaveAsync(bytes, asset.StorageKey, file.ContentType, ct).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            asset.MarkFailed("content_asset_upload_failed", clock.UtcNow);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return Error(http, StatusCodes.Status502BadGateway, "content.asset_upload_failed", "Không lưu được ảnh.");
+        }
+
+        try
+        {
+            var readyAt = clock.UtcNow;
+            asset.MarkReady(
+                ContentAssetLifecycle.ComputeSha256(bytes),
+                bytes.LongLength,
+                file.ContentType ?? "application/octet-stream",
+                readyAt);
+
+            var readyAssets = existing
+                .Where(a => a.Status == ContentAsset.StatusReady)
+                .Append(asset)
+                .ToList();
+            var displayUrls = BuildDisplayUrlMap(item.AssetsJson, readyAssets, asset.Id, url);
+            var assetsJson = ContentAssetLifecycle.BuildDerivedAssetsJson(readyAssets, displayUrls);
+            var revisionBefore = item.ContentRevision;
+            item.ReviseAssets(assetsJson, readyAt);
+            if (item.ContentRevision != revisionBefore)
+                await CancelStaleScheduleIntentsAsync(db, item.Id, revisionBefore, readyAt, ct).ConfigureAwait(false);
+            db.ContentReviewTasks.Add(ContentAssetLifecycle.CreateQuietPeriodReviewTask(
+                tenantId,
+                item.Id,
+                item.ContentRevision,
+                readyAt));
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            return Results.Ok(new ContentAssetUploadResponse(url, assetsJson, asset.Id));
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message is "content_published_item_immutable" or "content_publish_attempt_active")
+        {
+            return Error(http, StatusCodes.Status409Conflict, exception.Message, exception.Message);
+        }
+    }
+
+    private static async Task<IResult> DeleteItemAssetAsync(
+        Guid id,
+        Guid assetId,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (item is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+
+        var asset = await db.ContentAssets
+            .FirstOrDefaultAsync(
+                a => a.Id == assetId && a.TenantId == tenantId && a.ContentItemId == item.Id,
+                ct)
+            .ConfigureAwait(false);
+        if (asset is null || asset.Status is ContentAsset.StatusDeleted or ContentAsset.StatusDeletePending)
+            return Error(http, StatusCodes.Status404NotFound, "content.asset_not_found", "Asset not found.");
+
+        var now = clock.UtcNow;
+        asset.MarkDeletePending("asset_removed", now);
+
+        var readyAssets = await db.ContentAssets
+            .Where(a => a.TenantId == tenantId
+                && a.ContentItemId == item.Id
+                && a.Status == ContentAsset.StatusReady
+                && a.Id != asset.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var displayUrls = BuildDisplayUrlMap(item.AssetsJson, readyAssets, Guid.Empty, string.Empty);
+        var assetsJson = ContentAssetLifecycle.BuildDerivedAssetsJson(readyAssets, displayUrls);
+        item.ReviseAssets(assetsJson, now);
+        db.ContentReviewTasks.Add(ContentAssetLifecycle.CreateQuietPeriodReviewTask(
+            tenantId,
+            item.Id,
+            item.ContentRevision,
+            now));
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.NoContent();
+    }
+
+    private static Dictionary<Guid, string> BuildDisplayUrlMap(
+        string existingAssetsJson,
+        List<ContentAsset> readyAssets,
+        Guid newAssetId,
+        string newUrl)
+    {
+        var map = new Dictionary<Guid, string>();
+        if (TryNormalizeAssetsJson(existingAssetsJson, out var normalized)
+            && JsonNode.Parse(normalized) is JsonArray arr)
+        {
+            foreach (var node in arr.OfType<JsonObject>())
+            {
+                var assetIdText = node["assetId"]?.GetValue<string>();
+                var url = node["url"]?.GetValue<string>();
+                if (Guid.TryParse(assetIdText, out var assetId)
+                    && !string.IsNullOrWhiteSpace(url)
+                    && readyAssets.Any(a => a.Id == assetId))
+                {
+                    map[assetId] = url!;
+                }
+            }
+        }
+
+        // Legacy AssetsJson without assetId: assign URLs in sort order for ready assets missing a map entry.
+        if (map.Count < readyAssets.Count
+            && TryNormalizeAssetsJson(existingAssetsJson, out var legacyNormalized)
+            && JsonNode.Parse(legacyNormalized) is JsonArray legacyArr)
+        {
+            var orphanUrls = legacyArr
+                .OfType<JsonObject>()
+                .Select(n => n["url"]?.GetValue<string>())
+                .Where(u => !string.IsNullOrWhiteSpace(u))
+                .Cast<string>()
+                .Where(u => !map.ContainsValue(u))
+                .ToList();
+            var missing = readyAssets
+                .Where(a => a.Id != newAssetId && !map.ContainsKey(a.Id))
+                .OrderBy(a => a.SortOrder)
+                .ToList();
+            for (var i = 0; i < missing.Count && i < orphanUrls.Count; i++)
+                map[missing[i].Id] = orphanUrls[i];
+        }
+
+        if (newAssetId != Guid.Empty && !string.IsNullOrWhiteSpace(newUrl))
+            map[newAssetId] = newUrl;
+
+        return map;
     }
 
     private static async Task<IResult> DeleteItemAsync(
@@ -386,6 +600,65 @@ public static class ContentEndpoints
 
     private static async Task<IResult> ApproveItemAsync(
         Guid id,
+        ApproveContentItemRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        Clawbot.Infrastructure.Content.IContentAutoScheduler autoScheduler,
+        ClaimsPrincipal user,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var tenantContext = tenants.Require();
+        var userId = CurrentUserId(user);
+        if (userId is null)
+            return Error(http, StatusCodes.Status400BadRequest, "content.user_missing", "Authenticated user id is required.");
+        if (body is null || body.ExpectedRevision <= 0)
+            return Error(http, StatusCodes.Status400BadRequest, "content.expected_revision_required", "expectedRevision is required.");
+
+        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == tenantContext.TenantId, ct)
+            .ConfigureAwait(false);
+        if (item is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+        if (tenant is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.tenant_not_found", "Tenant not found.");
+        if (!ContentPlatformCatalog.TryNormalizeWritable(item.Platform, out _))
+            return UnsupportedPlatform(http);
+
+        try
+        {
+            var now = clock.UtcNow;
+            // Phase 3.5: human approve/override + revision-bound schedule intent in one transaction.
+            item.ApproveForPublishing(
+                body.ExpectedRevision,
+                userId.Value,
+                tenant.ContentPublishingApprovalPolicy,
+                tenant.ContentPublishingPolicyVersion,
+                body.OverrideReason,
+                now);
+            await autoScheduler.CreateIntentAsync(item, publishTargetId: null, now, cancellationToken: ct).ConfigureAwait(false);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return Results.Ok(ToDto(item));
+        }
+        catch (ArgumentException exception)
+        {
+            return Error(http, StatusCodes.Status400BadRequest, exception.Message, exception.Message);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Error(http, StatusCodes.Status409Conflict, exception.Message, exception.Message);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Error(http, StatusCodes.Status409Conflict, "content.revision_changed", "Content revision changed.");
+        }
+    }
+
+    private static async Task<IResult> RejectItemAsync(
+        Guid id,
+        RejectContentItemRequest body,
         AppDbContext db,
         ITenantAccessor tenants,
         IClock clock,
@@ -397,52 +670,77 @@ public static class ContentEndpoints
         var userId = CurrentUserId(user);
         if (userId is null)
             return Error(http, StatusCodes.Status400BadRequest, "content.user_missing", "Authenticated user id is required.");
+        if (body is null || body.ExpectedRevision <= 0)
+            return Error(http, StatusCodes.Status400BadRequest, "content.expected_revision_required", "expectedRevision is required.");
 
         var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
             .ConfigureAwait(false);
         if (item is null)
             return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
 
-        // G9: đã scheduled/published thì không approve lại được — tránh revert ngoài luồng.
-        if (string.Equals(item.Status, "scheduled", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(item.Status, "published", StringComparison.OrdinalIgnoreCase))
-            return Error(http, StatusCodes.Status400BadRequest, "content.item_not_approvable", $"Content item is '{item.Status}' and cannot be re-approved.");
-
-        item.Approve(userId.Value, clock.UtcNow);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return Results.Ok(ToDto(item));
-    }
-
-    private static async Task<IResult> RejectItemAsync(
-        Guid id,
-        RejectContentItemRequest body,
-        AppDbContext db,
-        ITenantAccessor tenants,
-        IClock clock,
-        HttpContext http,
-        CancellationToken ct)
-    {
-        _ = tenants.Require();
-        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
-            .ConfigureAwait(false);
-        if (item is null)
-            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
-
-        item.Reject(clock.UtcNow, body?.Reason);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return Results.Ok(ToDto(item));
+        try
+        {
+            var now = clock.UtcNow;
+            // Phase 3.6: final publishing rejection; cancel any active schedule intent for this revision.
+            item.RejectForPublishing(
+                body.ExpectedRevision,
+                userId.Value,
+                body.Reason ?? string.Empty,
+                now);
+            // Only cancel recoverable intents; publishing/outcome_unknown are claim-bound and stay locked.
+            var activeSchedules = await db.ContentSchedules
+                .Where(schedule =>
+                    schedule.ContentItemId == item.Id
+                    && schedule.ContentRevision == body.ExpectedRevision
+                    && (schedule.Status == ContentSchedule.StatusPending
+                        || schedule.Status == ContentSchedule.StatusHeld
+                        || schedule.Status == ContentSchedule.StatusFailed))
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            foreach (var schedule in activeSchedules)
+                schedule.Cancel(now, ContentSchedule.ErrorCanceledByUser);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return Results.Ok(ToDto(item));
+        }
+        catch (ArgumentException exception)
+        {
+            return Error(http, StatusCodes.Status400BadRequest, exception.Message, exception.Message);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Error(http, StatusCodes.Status409Conflict, exception.Message, exception.Message);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Error(http, StatusCodes.Status409Conflict, "content.revision_changed", "Content revision changed.");
+        }
     }
 
     private static async Task<IResult> RepurposeItemAsync(
         Guid id,
-        RepurposeContentItemRequest body,
+        RepurposeContentItemRequest? body,
         AppDbContext db,
         IJobLauncher jobs,
         HttpContext http,
         CancellationToken ct)
     {
-        if (body.TargetPlatforms.Count == 0 || body.TargetPlatforms.Any(string.IsNullOrWhiteSpace))
+        var requestedTargets = body?.TargetPlatforms;
+        if (requestedTargets is null
+            || requestedTargets.Count == 0
+            || requestedTargets.Any(string.IsNullOrWhiteSpace))
+        {
             return Error(http, StatusCodes.Status400BadRequest, "content.repurpose_invalid", "targetPlatforms required.");
+        }
+
+        IReadOnlyList<string> targetPlatforms;
+        try
+        {
+            targetPlatforms = ContentPlatformCatalog.NormalizeWritable(requestedTargets);
+        }
+        catch (ArgumentException)
+        {
+            return UnsupportedPlatform(http);
+        }
 
         var exists = await db.ContentItems.AsNoTracking()
             .AnyAsync(i => i.Id == id && i.DeletedAt == null, ct).ConfigureAwait(false);
@@ -451,8 +749,8 @@ public static class ContentEndpoints
 
         var jobId = await jobs.LaunchAsync(
             ContentRepurposeJobHandler.JobType,
-            $"Chuyển thể bài sang {body.TargetPlatforms.Count} nền tảng",
-            new ContentRepurposeJobPayload(id, body.TargetPlatforms),
+            $"Chuyển thể bài sang {targetPlatforms.Count} nền tảng",
+            new ContentRepurposeJobPayload(id, targetPlatforms),
             CurrentUserId(http),
             ct: ct).ConfigureAwait(false);
 
@@ -466,63 +764,61 @@ public static class ContentEndpoints
         ITenantAccessor tenants,
         IClock clock,
         IGoldenHourResolver goldenHour,
-        Clawbot.SharedKernel.Content.IContentReviewPolicyResolver reviewPolicy,
+        Clawbot.Infrastructure.Content.IContentAutoScheduler autoScheduler,
         IMetaIntegrationService metaIntegrations,
-        ContentAgent.ContentAgentClient grpc,
+        IInstagramCredentialResolver instagramCredentials,
         HttpContext http,
         CancellationToken ct)
     {
-        _ = tenants.Require();
-        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
+        var tenant = tenants.Require();
+        var item = await db.ContentItems
+            .FirstOrDefaultAsync(
+                i => i.TenantId == tenant.TenantId && i.Id == id && i.DeletedAt == null,
+                ct)
             .ConfigureAwait(false);
         if (item is null)
             return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
-        if (!string.Equals(item.Status, "approved", StringComparison.OrdinalIgnoreCase))
-            return Error(http, StatusCodes.Status400BadRequest, "content.item_not_approved", "Only approved content can be scheduled.");
-
         var now = clock.UtcNow;
+        // Calendar/manual schedule still allows an explicit time; default remains golden hour.
+        // Durable path only: revision-bound approval context via ContentAutoScheduler — no gRPC review gate,
+        // no ApprovedByAgentId, no RequireContentReview toggle.
         var resolution = ResolveScheduledAt(body, item, now, goldenHour);
         if (resolution.ErrorCode is not null)
             return Error(http, StatusCodes.Status400BadRequest, resolution.ErrorCode, resolution.Message ?? "Invalid schedule.");
 
-        var exists = await db.ContentSchedules.AsNoTracking()
-            .AnyAsync(s => s.ContentItemId == id && s.Status == "pending", ct).ConfigureAwait(false);
-        if (exists)
-            return Error(http, StatusCodes.Status409Conflict, "content.schedule_exists", "Content item already has a pending schedule.");
-
-        // Review-gate P4 (SLA): lưu deadline mong muốn TRƯỚC khi qua review-gate — review fail thì
-        // ContentReviewSlaJob vẫn có mốc để nhắc người duyệt kịp giờ đăng.
-        item.SetDesiredPublishAt(resolution.ScheduledAt, now);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        // Review-gate P1: human approve xong vẫn phải có chữ ký reviewer agent trước khi lên lịch.
-        // Sync review bounded; mọi lỗi/timeout => KHÔNG tạo schedule (fail-closed, QĐ3) — item giữ
-        // trạng thái approved-chưa-ký, SLA job (Phase 4) nhắc người xử lý theo DesiredPublishAt vừa lưu.
-        if (item.ApprovedByAgentId is null
-            && await reviewPolicy.IsRequiredAsync(item.TenantId, ct).ConfigureAwait(false))
+        var isFacebook = string.Equals(item.Platform, "facebook", StringComparison.OrdinalIgnoreCase);
+        var isInstagram = string.Equals(item.Platform, "instagram", StringComparison.OrdinalIgnoreCase);
+        ContentSchedule? activeSchedule = null;
+        if (!body.MetaAssetId.HasValue && (isFacebook || isInstagram))
         {
-            try
-            {
-                var review = await grpc.ReviewAsync(
-                    new ReviewContentRequest { TenantId = item.TenantId.ToString(), ContentId = item.Id.ToString() },
-                    deadline: DateTime.UtcNow.AddSeconds(25),
-                    cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
-                if (!string.Equals(review.Verdict, "approve", StringComparison.OrdinalIgnoreCase))
-                    return Error(http, StatusCodes.Status422UnprocessableEntity,
-                        "content.review_" + review.Verdict,
-                        string.IsNullOrWhiteSpace(review.Reason) ? "Nội dung chưa qua agent review." : review.Reason);
-                // Reviewer đã stamp ApprovedByAgentId ở AgentService; entity local chỉ cần đi tiếp tạo schedule.
-            }
-            catch (RpcException)
-            {
-                return Error(http, StatusCodes.Status422UnprocessableEntity,
-                    "content.review_unavailable",
-                    "Không gọi được agent review — bài chưa được lên lịch. Thử lại hoặc chờ duyệt tay.");
-            }
+            activeSchedule = await db.ContentSchedules
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    schedule => schedule.TenantId == item.TenantId
+                        && schedule.ContentItemId == item.Id
+                        && schedule.ActiveRevisionSlot == item.ContentRevision,
+                    ct)
+                .ConfigureAwait(false);
         }
 
+        if (activeSchedule?.RequiresInstagramTargetReselection() == true
+            && !body.ConfirmInstagramAccount)
+        {
+            return Error(
+                http,
+                StatusCodes.Status409Conflict,
+                "content.instagram_target_reselection_required",
+                "Instagram target must be explicitly reselected before this schedule can be changed.");
+        }
+
+        var preserveExistingTarget = activeSchedule is not null
+            && (isFacebook
+                ? activeSchedule.MetaAssetId.HasValue
+                : !string.IsNullOrWhiteSpace(activeSchedule.ProviderTargetId));
         Guid? metaAssetId = null;
-        if (string.Equals(item.Platform, "facebook", StringComparison.OrdinalIgnoreCase))
+        string? providerTargetId = null;
+        if (!preserveExistingTarget && isFacebook)
         {
             var pages = await metaIntegrations.GetPublishablePagesAsync(item.TenantId, ct).ConfigureAwait(false);
             var page = body.MetaAssetId.HasValue
@@ -532,17 +828,110 @@ public static class ContentEndpoints
                 return Error(http, StatusCodes.Status400BadRequest, "content.meta_page_required", "Hãy kết nối và chọn Facebook Page trước khi lên lịch.");
             metaAssetId = page.Id;
         }
-        else if (body.MetaAssetId.HasValue)
+        else if (!preserveExistingTarget && isInstagram)
         {
-            return Error(http, StatusCodes.Status400BadRequest, "content.meta_page_invalid", "Facebook Page chỉ áp dụng cho nội dung Facebook.");
+            var standalone = await instagramCredentials.ResolveAsync(item.TenantId, ct).ConfigureAwait(false);
+            if (standalone.Status == InstagramCredentialResolutionStatus.Invalid
+                || (standalone.Status == InstagramCredentialResolutionStatus.Resolved
+                    && standalone.Credential is null))
+            {
+                return Error(
+                    http,
+                    StatusCodes.Status400BadRequest,
+                    "content.instagram_credentials_invalid",
+                    "Thông tin Instagram độc lập không hợp lệ. Hãy sửa hoặc tắt ghi đè trong Quản trị hệ thống.");
+            }
+
+            if (standalone.Status == InstagramCredentialResolutionStatus.Resolved
+                && standalone.Credential is not null)
+            {
+                if (body.MetaAssetId.HasValue)
+                {
+                    return Error(
+                        http,
+                        StatusCodes.Status400BadRequest,
+                        "content.instagram_target_mode_conflict",
+                        "Không thể chọn Meta Page khi ghi đè Instagram độc lập đang được bật.");
+                }
+
+                providerTargetId = standalone.Credential.InstagramUserId;
+            }
+            else
+            {
+                if (!body.MetaAssetId.HasValue)
+                    return Error(http, StatusCodes.Status400BadRequest, "content.instagram_target_required", "Hãy chọn Meta Page đã liên kết Instagram trước khi lên lịch.");
+
+                var instagram = await metaIntegrations
+                    .ResolveInstagramAsync(item.TenantId, body.MetaAssetId.Value, ct)
+                    .ConfigureAwait(false);
+                if (instagram.Status != MetaInstagramResolutionStatus.Resolved || instagram.Credential is null)
+                {
+                    var errorCode = instagram.Status switch
+                    {
+                        MetaInstagramResolutionStatus.ReconnectRequired => "content.instagram_reconnect_required",
+                        MetaInstagramResolutionStatus.MissingScopes => "content.instagram_permissions_missing",
+                        MetaInstagramResolutionStatus.NotLinked => "content.instagram_not_linked",
+                        MetaInstagramResolutionStatus.PageUnavailable => "content.instagram_target_unavailable",
+                        _ => "content.instagram_meta_unavailable",
+                    };
+                    return Error(http, StatusCodes.Status400BadRequest, errorCode, "Meta Page đã chọn chưa sẵn sàng để đăng Instagram.");
+                }
+
+                metaAssetId = instagram.Credential.PageAssetId;
+                providerTargetId = instagram.Credential.InstagramUserId;
+            }
+        }
+        else if (!preserveExistingTarget && body.MetaAssetId.HasValue)
+        {
+            return Error(http, StatusCodes.Status400BadRequest, "content.meta_page_invalid", "Meta Page chỉ áp dụng cho nội dung Facebook hoặc Instagram.");
         }
 
-        var schedule = ContentSchedule.Schedule(item.TenantId, item.Id, item.Platform, resolution.ScheduledAt, now, metaAssetId);
-        item.MarkScheduled(now);
-        db.ContentSchedules.Add(schedule);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        return Results.Created($"/api/content/schedule/{schedule.Id}", ToDto(schedule));
+        try
+        {
+            var schedule = await autoScheduler.CreateIntentAsync(
+                item,
+                publishTargetId: metaAssetId,
+                at: now,
+                desiredPublishAt: resolution.ScheduledAt,
+                providerTargetId: providerTargetId,
+                cancellationToken: ct).ConfigureAwait(false);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return Results.Created($"/api/content/schedule/{schedule.Id}", ToDto(schedule));
+        }
+        catch (InvalidOperationException exception) when (exception.Message is "content_current_revision_not_schedulable"
+            or "content_approval_context_missing")
+        {
+            return Error(
+                http,
+                StatusCodes.Status400BadRequest,
+                "content.item_not_schedulable",
+                "Only content with a completed Agent review and publishing approval for the current revision can be scheduled.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message == "content_schedule_canceled_by_user")
+        {
+            return Error(
+                http,
+                StatusCodes.Status409Conflict,
+                "content.schedule_canceled_by_user",
+                "User-canceled schedule for this revision cannot be recreated automatically. Create a new revision or explicit reschedule flow.");
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message == "content_schedule_instagram_target_reselection_required")
+        {
+            return Error(
+                http,
+                StatusCodes.Status409Conflict,
+                "content.instagram_target_reselection_required",
+                "Instagram target must be explicitly reselected before this schedule can be changed.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message == "content_schedule_in_past")
+        {
+            return Error(http, StatusCodes.Status400BadRequest, "content.schedule_in_past", "scheduledAt must be in the future.");
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Error(http, StatusCodes.Status409Conflict, "content.revision_changed", "Content revision changed.");
+        }
     }
 
     private static async Task<IResult> CalendarAsync(
@@ -580,19 +969,44 @@ public static class ContentEndpoints
         [FromQuery] string? platform,
         ITenantAccessor tenants,
         IMetaIntegrationService metaIntegrations,
+        IInstagramCredentialResolver instagramCredentials,
+        HttpContext http,
         CancellationToken ct)
     {
         var tenant = tenants.Require();
-        if (!string.Equals(platform, "facebook", StringComparison.OrdinalIgnoreCase))
+        var normalizedPlatform = platform?.Trim().ToLowerInvariant();
+        if (normalizedPlatform is not ("facebook" or "instagram"))
+        {
+            http.Response.Headers["X-Clawbot-Publish-Target-Mode"] = "unsupported";
             return Results.Ok(Array.Empty<ContentPublishTargetDto>());
+        }
+
+        if (normalizedPlatform == "instagram")
+        {
+            var standalone = await instagramCredentials.ResolveAsync(tenant.TenantId, ct).ConfigureAwait(false);
+            if (standalone.Status == InstagramCredentialResolutionStatus.Invalid
+                || (standalone.Status == InstagramCredentialResolutionStatus.Resolved
+                    && standalone.Credential is null))
+            {
+                http.Response.Headers["X-Clawbot-Publish-Target-Mode"] = "invalid";
+                return Results.Ok(Array.Empty<ContentPublishTargetDto>());
+            }
+            if (standalone.Status == InstagramCredentialResolutionStatus.Resolved)
+            {
+                http.Response.Headers["X-Clawbot-Publish-Target-Mode"] = "standalone";
+                return Results.Ok(Array.Empty<ContentPublishTargetDto>());
+            }
+        }
 
         var pages = await metaIntegrations.GetPublishablePagesAsync(tenant.TenantId, ct).ConfigureAwait(false);
-        return Results.Ok(pages.Select(x => new ContentPublishTargetDto(
+        var targets = pages.Select(x => new ContentPublishTargetDto(
             x.Id,
-            "facebook",
+            normalizedPlatform,
             x.ExternalId,
             x.Name,
-            x.IsDefault)).ToList());
+            x.IsDefault)).ToList();
+        http.Response.Headers["X-Clawbot-Publish-Target-Mode"] = "linked_meta";
+        return Results.Ok(targets);
     }
 
     private static async Task<IResult> DeleteScheduleAsync(
@@ -607,10 +1021,10 @@ public static class ContentEndpoints
         var schedule = await db.ContentSchedules.FirstOrDefaultAsync(s => s.Id == id, ct).ConfigureAwait(false);
         if (schedule is null)
             return Error(http, StatusCodes.Status404NotFound, "content.schedule_not_found", "Content schedule not found.");
-        if (!string.Equals(schedule.Status, "pending", StringComparison.OrdinalIgnoreCase))
-            return Error(http, StatusCodes.Status400BadRequest, "content.schedule_not_pending", "Only pending schedules can be canceled.");
+        if (schedule.Status is not (ContentSchedule.StatusPending or ContentSchedule.StatusHeld or ContentSchedule.StatusFailed))
+            return Error(http, StatusCodes.Status400BadRequest, "content.schedule_not_cancelable", "Only pending, held, or failed schedules can be canceled.");
 
-        schedule.Cancel(clock.UtcNow);
+        schedule.Cancel(clock.UtcNow, "canceled_by_user");
         var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == schedule.ContentItemId && i.DeletedAt == null, ct)
             .ConfigureAwait(false);
         if (item is not null && string.Equals(item.Status, "scheduled", StringComparison.OrdinalIgnoreCase))
@@ -618,6 +1032,219 @@ public static class ContentEndpoints
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.NoContent();
+    }
+
+    // Phase 4.5: enqueue durable agent review for the current revision — never runs LLM inline.
+    private static async Task<IResult> RetryAgentReviewAsync(
+        Guid id,
+        RetryAgentReviewRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        if (body is null || body.ExpectedRevision <= 0)
+        {
+            return Error(
+                http,
+                StatusCodes.Status400BadRequest,
+                "content.expected_revision_required",
+                "expectedRevision is required.");
+        }
+
+        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (item is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+        if (item.ContentRevision != body.ExpectedRevision)
+            return Error(http, StatusCodes.Status409Conflict, "content.revision_changed", "Content revision changed.");
+        if (string.Equals(item.Status, "published", StringComparison.OrdinalIgnoreCase)
+            || item.ActivePublishAttemptId is not null)
+        {
+            return Error(
+                http,
+                StatusCodes.Status409Conflict,
+                item.ActivePublishAttemptId is not null
+                    ? "content_publish_attempt_active"
+                    : "content_published_item_immutable",
+                "Published or actively-claimed content cannot retry agent review.");
+        }
+
+        if (item.AgentReviewAttemptCount >= ContentItem.MaxAgentReviewAttempts)
+        {
+            return Error(
+                http,
+                StatusCodes.Status429TooManyRequests,
+                "content.review_attempt_limit_reached",
+                "Agent review attempt limit reached for this revision.");
+        }
+
+        var now = clock.UtcNow;
+        var activeTask = await db.ContentReviewTasks
+            .Where(t => t.ContentItemId == item.Id
+                && t.ContentRevision == item.ContentRevision
+                && (t.Status == ContentReviewTask.StatusPending
+                    || t.Status == ContentReviewTask.StatusLeased))
+            .OrderByDescending(t => t.CreatedAt)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        // Cooldown: if a pending task is not yet due, surface 429 instead of spawning duplicates.
+        if (activeTask is not null
+            && activeTask.Status == ContentReviewTask.StatusPending
+            && activeTask.NextAttemptAt > now)
+        {
+            return Error(
+                http,
+                StatusCodes.Status429TooManyRequests,
+                "content.review_retry_cooldown",
+                "Agent review retry is cooling down for this item.");
+        }
+
+        if (activeTask is null)
+        {
+            db.ContentReviewTasks.Add(ContentAssetLifecycle.CreateQuietPeriodReviewTask(
+                tenantId,
+                item.Id,
+                item.ContentRevision,
+                now));
+        }
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.Ok(ToDto(item));
+    }
+
+    // Phase 4.6: reset durable schedule state only — Hangfire ContentPublishJob transmits later.
+    private static async Task<IResult> RetryPublishScheduleAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        var schedule = await db.ContentSchedules
+            .FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId && s.Id == id, ct)
+            .ConfigureAwait(false);
+        if (schedule is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.schedule_not_found", "Content schedule not found.");
+        if (schedule.RequiresInstagramTargetReselection())
+        {
+            return Error(
+                http,
+                StatusCodes.Status422UnprocessableEntity,
+                "content.instagram_target_reselection_required",
+                "Instagram target must be reselected before publishing can be retried.");
+        }
+
+        if (!schedule.TryResetForRetry(clock.UtcNow))
+        {
+            return Error(
+                http,
+                StatusCodes.Status422UnprocessableEntity,
+                "content.schedule_not_retryable",
+                "Chỉ thử lại được lịch đang chờ đăng, bị giữ, hoặc đã thất bại. outcome_unknown cần reconcile.");
+        }
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.Ok(ToDto(schedule));
+    }
+
+    // Phase 4.6: privileged operator decision after verification — never calls the provider.
+    private static async Task<IResult> ReconcilePublishScheduleAsync(
+        Guid id,
+        ReconcilePublishRequest body,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        if (body is null || string.IsNullOrWhiteSpace(body.Outcome))
+        {
+            return Error(
+                http,
+                StatusCodes.Status400BadRequest,
+                "content.reconcile_outcome_required",
+                "outcome is required (succeeded|failed).");
+        }
+
+        var outcome = body.Outcome.Trim().ToLowerInvariant();
+        if (outcome is not ("succeeded" or "failed"))
+        {
+            return Error(
+                http,
+                StatusCodes.Status400BadRequest,
+                "content.reconcile_outcome_invalid",
+                "outcome must be succeeded or failed.");
+        }
+
+        var schedule = await db.ContentSchedules.FirstOrDefaultAsync(s => s.Id == id, ct)
+            .ConfigureAwait(false);
+        if (schedule is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.schedule_not_found", "Content schedule not found.");
+        if (!string.Equals(schedule.Status, ContentSchedule.StatusOutcomeUnknown, StringComparison.Ordinal))
+        {
+            return Error(
+                http,
+                StatusCodes.Status422UnprocessableEntity,
+                "content.schedule_not_outcome_unknown",
+                "Only outcome_unknown schedules can be reconciled.");
+        }
+
+        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == schedule.ContentItemId && i.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (item is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+
+        var attempt = await db.ContentPublishAttempts
+            .Where(a => a.ScheduleId == schedule.Id
+                && a.Status == ContentPublishAttempt.StatusOutcomeUnknown)
+            .OrderByDescending(a => a.CompletedAt)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        var now = clock.UtcNow;
+        try
+        {
+            if (outcome == "succeeded")
+            {
+                var externalId = string.IsNullOrWhiteSpace(body.ExternalPostId)
+                    ? schedule.PostUrl ?? attempt?.IdempotencyKey ?? schedule.Id.ToString("N")
+                    : body.ExternalPostId.Trim();
+                attempt?.ReconcileSucceeded(externalId, now);
+                schedule.MarkReconciledPosted(externalId, now);
+                if (item.ActivePublishAttemptId is not null)
+                    item.MarkPublished(item.ActivePublishAttemptId.Value, now);
+                else if (item.Status != "published")
+                    item.MarkPublished(now);
+            }
+            else
+            {
+                var errorCode = string.IsNullOrWhiteSpace(body.ErrorCode)
+                    ? "publish_reconciled_failed"
+                    : body.ErrorCode.Trim();
+                attempt?.ReconcileFailed(errorCode, now);
+                schedule.MarkReconciledFailed(now, errorCode);
+                if (item.ActivePublishAttemptId is not null)
+                    item.ReleasePublishAttempt(item.ActivePublishAttemptId.Value, now);
+            }
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Error(http, StatusCodes.Status422UnprocessableEntity, exception.Message, exception.Message);
+        }
+        catch (ArgumentException exception)
+        {
+            return Error(http, StatusCodes.Status400BadRequest, exception.Message, exception.Message);
+        }
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.Ok(ToDto(schedule));
     }
 
     private static async Task<IResult> TrendsAsync(
@@ -695,10 +1322,13 @@ public static class ContentEndpoints
                 return new GenerateInput(null, string.Empty, string.Empty,
                     Error(http, StatusCodes.Status404NotFound, "content.brief_not_found", "Content brief not found."));
 
-            // Trend-scan briefs carry the trend source (e.g. "google_trends") in Platform, which has no
-            // prompt template — let the request pick the target platform, brief only provides the default.
-            var platform = string.IsNullOrWhiteSpace(body.Platform) ? brief.Platform : body.Platform.Trim();
-            return new GenerateInput(brief.Id, platform, brief.Brief, null);
+            var requestedPlatform = string.IsNullOrWhiteSpace(body.Platform) ? brief.Platform : body.Platform;
+            if (!ContentPlatformCatalog.TryNormalizeWritable(requestedPlatform, out var platform))
+            {
+                return new GenerateInput(null, string.Empty, string.Empty, UnsupportedPlatform(http));
+            }
+
+            return new GenerateInput(brief.Id, platform!, brief.Brief, null);
         }
 
         if (string.IsNullOrWhiteSpace(body.Platform) || string.IsNullOrWhiteSpace(body.BriefText))
@@ -706,8 +1336,10 @@ public static class ContentEndpoints
             return new GenerateInput(null, string.Empty, string.Empty,
                 Error(http, StatusCodes.Status400BadRequest, "content.generate_invalid", "briefId or platform and briefText required."));
         }
+        if (!ContentPlatformCatalog.TryNormalizeWritable(body.Platform, out var normalizedPlatform))
+            return new GenerateInput(null, string.Empty, string.Empty, UnsupportedPlatform(http));
 
-        return new GenerateInput(null, body.Platform.Trim(), body.BriefText.Trim(), null);
+        return new GenerateInput(null, normalizedPlatform!, body.BriefText.Trim(), null);
     }
 
     private static async Task<ContentItemDto?> LoadItemAsync(Guid id, AppDbContext db, CancellationToken ct) =>
@@ -734,8 +1366,38 @@ public static class ContentEndpoints
     private static ContentBriefDto ToDto(ContentBrief brief) =>
         new(brief.Id, brief.Platform, brief.Brief, brief.Status, brief.CreatedBy, brief.CreatedAt, brief.UpdatedAt);
 
-    private static ContentItemDto ToDto(ContentItem item) =>
-        new(
+    private static ContentItemDto ToDto(ContentItem item)
+    {
+        var agentReview = new ContentAgentReviewDto(
+            item.AgentReviewStatus,
+            item.AgentReviewedRevision,
+            item.ReviewedByAgentId,
+            item.AgentReviewedAt,
+            item.AgentReviewReason,
+            item.ImageReviewStatus,
+            item.ReviewedImageCount);
+
+        var publishingStatus = ResolvePublishingApprovalStatus(item);
+        var publishingApproval = new ContentPublishingApprovalDto(
+            publishingStatus,
+            item.PublishingPolicyApplied,
+            item.PublishingPolicyVersionApplied,
+            item.ApprovedRevision,
+            item.ApprovalMode,
+            item.ApprovedBy,
+            item.ApprovedAt,
+            item.ApprovalReason,
+            item.HumanApprovalRequirementReason);
+
+        var workflowState = ResolveWorkflowState(item);
+        var reviewCompleteForCurrent =
+            item.AgentReviewedRevision == item.ContentRevision
+            && item.AgentReviewStatus is ContentItem.ReviewStatusPassed
+                or ContentItem.ReviewStatusRejected
+                or ContentItem.ReviewStatusNeedsHuman
+                or ContentItem.ReviewStatusFailed;
+
+        return new ContentItemDto(
             item.Id,
             item.BriefId,
             item.Platform,
@@ -746,7 +1408,93 @@ public static class ContentEndpoints
             item.ApprovedBy,
             item.ApprovedAt,
             item.CreatedAt,
-            item.UpdatedAt);
+            item.UpdatedAt,
+            item.ContentRevision,
+            agentReview,
+            publishingApproval,
+            workflowState,
+            CanApprove: reviewCompleteForCurrent
+                && item.Status == "draft"
+                && item.DeletedAt is null
+                && item.ActivePublishAttemptId is null,
+            CanReject: reviewCompleteForCurrent
+                && item.Status is "draft" or "approved"
+                && item.DeletedAt is null
+                && item.ActivePublishAttemptId is null,
+            CanRetryReview: item.Status is not "published" and not "rejected"
+                && item.DeletedAt is null
+                && item.ActivePublishAttemptId is null
+                && item.AgentReviewAttemptCount < ContentItem.MaxAgentReviewAttempts
+                && item.AgentReviewStatus is not ContentItem.ReviewStatusRunning,
+            CanSchedule: item.CanScheduleCurrentRevision(),
+            CanPublish: item.CanPublishCurrentRevision());
+    }
+
+    private static string ResolvePublishingApprovalStatus(ContentItem item)
+    {
+        if (item.Status == "rejected")
+            return "rejected";
+        if (item.ApprovedRevision == item.ContentRevision)
+            return "approved";
+        if (item.AgentReviewedRevision == item.ContentRevision
+            && item.AgentReviewStatus is ContentItem.ReviewStatusPassed
+                or ContentItem.ReviewStatusRejected
+                or ContentItem.ReviewStatusNeedsHuman
+                or ContentItem.ReviewStatusFailed)
+        {
+            return "pending";
+        }
+
+        return "not_ready";
+    }
+
+    private static string ResolveWorkflowState(ContentItem item)
+    {
+        if (item.Status == "published")
+            return "published";
+        if (item.Status == "rejected")
+            return "rejected";
+        if (item.Status == "scheduled")
+            return "scheduled";
+        if (item.Status == "approved")
+            return "approved_awaiting_schedule";
+        if (item.AgentReviewStatus == ContentItem.ReviewStatusRunning)
+            return "agent_review_running";
+        if (item.AgentReviewedRevision != item.ContentRevision
+            || item.AgentReviewStatus is ContentItem.ReviewStatusPending)
+        {
+            return "awaiting_agent_review";
+        }
+
+        if (item.AgentReviewStatus == ContentItem.ReviewStatusFailed)
+            return "review_failed";
+        if (item.AgentReviewStatus is ContentItem.ReviewStatusRejected
+            or ContentItem.ReviewStatusNeedsHuman)
+        {
+            return "agent_review_non_pass";
+        }
+
+        return "awaiting_human_approval";
+    }
+
+    private static async Task CancelStaleScheduleIntentsAsync(
+        AppDbContext db,
+        Guid contentItemId,
+        int previousRevision,
+        DateTimeOffset at,
+        CancellationToken ct)
+    {
+        var stale = await db.ContentSchedules
+            .Where(s => s.ContentItemId == contentItemId
+                && s.ContentRevision == previousRevision
+                && (s.Status == ContentSchedule.StatusPending
+                    || s.Status == ContentSchedule.StatusHeld
+                    || s.Status == ContentSchedule.StatusFailed))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        foreach (var schedule in stale)
+            schedule.Cancel(at, "stale_content_revision");
+    }
 
     private static ContentScheduleDto ToDto(ContentSchedule schedule) =>
         new(
@@ -762,7 +1510,9 @@ public static class ContentEndpoints
             schedule.MetaAssetId,
             schedule.LikeCount,
             schedule.CommentCount,
-            schedule.EngagementSyncedAt);
+            schedule.EngagementSyncedAt,
+            schedule.RetryCount,
+            schedule.LastError);
 
     internal static IReadOnlyList<ContentCalendarItemDto> BuildCalendarRows(
         IReadOnlyList<ContentSchedule> schedules,
@@ -783,7 +1533,10 @@ public static class ContentEndpoints
                     s.PostUrl,
                     s.MetaAssetId,
                     s.LikeCount,
-                    s.CommentCount);
+                    s.CommentCount,
+                    s.RetryCount,
+                    s.LastError,
+                    s.RequiresInstagramTargetReselection());
             })
             .ToList();
 
@@ -946,6 +1699,13 @@ public static class ContentEndpoints
         Results.Json(
             new { code = errorCode, errorCode, message, requestId = http.TraceIdentifier },
             statusCode: statusCode);
+
+    private static IResult UnsupportedPlatform(HttpContext http) =>
+        Error(
+            http,
+            StatusCodes.Status400BadRequest,
+            "content.platform_unsupported",
+            "platform must be facebook, zalo, or instagram.");
 
     private sealed record GenerateInput(Guid? BriefId, string Platform, string Brief, IResult? Error);
 

@@ -1,6 +1,7 @@
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Skills.Content;
 using Clawbot.Api.Contracts.Content;
+using Clawbot.SharedKernel.Content;
 using Clawbot.SharedKernel.Multitenancy;
 
 namespace Clawbot.Api.Services;
@@ -11,15 +12,6 @@ public sealed class ContentImagePromptService(
     ITenantAccessor tenants)
 {
     private const string AgentCode = "content-agent";
-
-    private static readonly HashSet<string> SupportedPlatforms = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "facebook",
-        "instagram",
-        "tiktok",
-        "youtube",
-        "zalo",
-    };
 
     private readonly IImagePromptGenerator _generator = generator;
     private readonly ILlmCallScope _llmScope = llmScope;
@@ -44,8 +36,7 @@ public sealed class ContentImagePromptService(
         if (string.IsNullOrWhiteSpace(brief))
             throw new ArgumentException("brief required", nameof(request));
 
-        var platform = request.Platform?.Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(platform) || !SupportedPlatforms.Contains(platform))
+        if (!ContentPlatformCatalog.TryNormalizeWritable(request.Platform, out var platform))
             throw new ArgumentException("unsupported platform", nameof(request));
 
         var style = string.IsNullOrWhiteSpace(request.Style)
@@ -59,7 +50,7 @@ public sealed class ContentImagePromptService(
             .ToList() ?? [];
 
         var result = await _generator.GenerateAsync(
-            new ImagePromptRequest(brief, platform, style, brandTokens),
+            new ImagePromptRequest(brief, platform!, style, brandTokens),
             ct).ConfigureAwait(false);
 
         return new GenerateImagePromptResponse(

@@ -26,6 +26,7 @@ public sealed record LeadAutoScoreOutcome(Guid? LeadId, int Score, string Stage,
 //   2. add `fast_reply` when the reply gap is under the threshold
 //   3. weight every signal via the tenant's LeadScoringRules and apply ONE score adjustment
 // Best-effort: callers run this off the chat path and must not let its failures break replies.
+// Concurrency: inbound phải thắng auto-lost — retry 1 lần sau reload khi DbUpdateConcurrencyException.
 public sealed partial class LeadAutoScorer(
     AppDbContext db,
     ILeadSignalClassifier classifier,
@@ -33,10 +34,7 @@ public sealed partial class LeadAutoScorer(
     IClock clock,
     ILogger<LeadAutoScorer> logger)
 {
-    // A customer reply within this gap counts as "engaged / fast". Education sales context.
     private static readonly TimeSpan FastReplyWindow = TimeSpan.FromMinutes(5);
-
-    // Reuse the chat agent's bound LLM config for the Claude-backed signal classifier.
     private const string ScoringAgentCode = "chat-agent";
 
     private readonly AppDbContext _db = db;
@@ -49,8 +47,6 @@ public sealed partial class LeadAutoScorer(
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        // The chat agent disposed its own LLM scope before we run; open a fresh one so the
-        // Claude classifier can resolve this tenant's bound config (else it 'No scope set' → keyword).
         using var _llm = _llmScope.Begin(input.TenantId, ScoringAgentCode);
 
         var signal = await _classifier.ClassifyAsync(input.CustomerMessage, locale: null, ct).ConfigureAwait(false);
@@ -63,10 +59,45 @@ public sealed partial class LeadAutoScorer(
             eventCodes.Add("fast_reply");
         }
 
+        // Retry 1 lần khi race với auto-lost / concurrent scorer.
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                return await ApplyOnceAsync(input, eventCodes, ct).ConfigureAwait(false);
+            }
+            catch (DbUpdateConcurrencyException) when (attempt == 0)
+            {
+                // Clear tracking graph (Lead + activities Added) rồi reload.
+                foreach (var entry in _db.ChangeTracker.Entries().ToList())
+                    entry.State = EntityState.Detached;
+                LogConcurrencyRetry(_logger, input.ContactId);
+            }
+        }
+
+        return new LeadAutoScoreOutcome(null, 0, "cold", eventCodes);
+    }
+
+    private async Task<LeadAutoScoreOutcome> ApplyOnceAsync(
+        LeadAutoScoreInput input,
+        List<string> eventCodes,
+        CancellationToken ct)
+    {
         if (eventCodes.Count == 0)
-            return new LeadAutoScoreOutcome(null, 0, "cold", Array.Empty<string>());
+        {
+            var existing = await FindExistingLeadAsync(input.TenantId, input.ContactId, ct).ConfigureAwait(false);
+            if (existing is null || !existing.TouchInboundActivity(input.MessageAt))
+                return new LeadAutoScoreOutcome(existing?.Id, existing?.Score ?? 0, existing?.Stage ?? "cold", Array.Empty<string>());
+
+            await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return new LeadAutoScoreOutcome(existing.Id, existing.Score, existing.Stage, Array.Empty<string>());
+        }
 
         var lead = await ResolveLeadAsync(input.TenantId, input.ContactId, input.Platform, ct).ConfigureAwait(false);
+
+        // Message cũ / out-of-order: không rescore / không reactivated.
+        if (lead.LastActivityAt is { } la && la >= input.MessageAt)
+            return new LeadAutoScoreOutcome(lead.Id, lead.Score, lead.Stage, eventCodes);
 
         var rules = await _db.LeadScoringRules
             .IgnoreQueryFilters()
@@ -83,83 +114,52 @@ public sealed partial class LeadAutoScorer(
             matched.Add(code);
         }
 
+        var changed = false;
         if (totalDelta != 0)
         {
-            lead.AdjustScore(totalDelta, $"auto: {string.Join(",", matched)}", _clock.UtcNow);
-            await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+            // Dùng MessageAt (không phải clock) để LastActivityAt / reactivation đúng thời điểm tin.
+            lead.AdjustScore(totalDelta, $"auto: {string.Join(",", matched)}", input.MessageAt);
+            changed = true;
         }
+        else
+        {
+            changed = lead.TouchInboundActivity(input.MessageAt);
+        }
+
+        if (changed)
+            await _db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         LogScored(_logger, lead.Id, totalDelta, lead.Score, string.Join(",", eventCodes));
         return new LeadAutoScoreOutcome(lead.Id, lead.Score, lead.Stage, eventCodes);
     }
 
-    // A lead is per-contact; create one lazily the first time a contact shows a signal.
-    private async Task<Lead> ResolveLeadAsync(Guid tenantId, Guid contactId, string? platform, CancellationToken ct)
+    private async Task<Lead?> FindExistingLeadAsync(Guid tenantId, Guid contactId, CancellationToken ct)
     {
-        var lead = await _db.Leads
+        var leads = await _db.Leads
             .IgnoreQueryFilters()
             .Where(l => l.TenantId == tenantId && l.ContactId == contactId && l.DeletedAt == null)
-            .OrderByDescending(l => l.CreatedAt)
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        return leads.OrderByDescending(l => l.CreatedAt).FirstOrDefault();
+    }
+
+    private async Task<Lead> ResolveLeadAsync(Guid tenantId, Guid contactId, string? platform, CancellationToken ct)
+    {
+        var lead = await FindExistingLeadAsync(tenantId, contactId, ct).ConfigureAwait(false);
 
         if (lead is not null)
-        {
-            // Backfill: lead cu chua co owner thi tu gan theo kenh (khach cua kenh nao sale do phu trach)
-            if (lead.OwnerUserId is null)
-            {
-                var backfillOwner = await ResolveChannelSaleAsync(tenantId, contactId, ct).ConfigureAwait(false);
-                if (backfillOwner is { } bo)
-                {
-                    lead.Assign(bo);
-                    // Luu ngay: delta co the bang 0 va bo qua SaveChanges phia sau
-                    await _db.SaveChangesAsync(ct).ConfigureAwait(false);
-                }
-            }
             return lead;
-        }
 
         lead = Lead.Create(tenantId, contactId, platform ?? "unknown", _clock.UtcNow);
-        var owner = await ResolveChannelSaleAsync(tenantId, contactId, ct).ConfigureAwait(false);
-        if (owner is { } o) lead.Assign(o);
         _db.Leads.Add(lead);
-        try
-        {
-            await _db.SaveChangesAsync(ct).ConfigureAwait(false);
-            return lead;
-        }
-        catch (DbUpdateException)
-        {
-            // Concurrent message for the same contact created the lead first — drop ours, reload theirs.
-            _db.Entry(lead).State = EntityState.Detached;
-            return await _db.Leads
-                .IgnoreQueryFilters()
-                .Where(l => l.TenantId == tenantId && l.ContactId == contactId && l.DeletedAt == null)
-                .OrderByDescending(l => l.CreatedAt)
-                .FirstAsync(ct).ConfigureAwait(false);
-        }
+        return lead;
     }
 
-    // Khach thuoc kenh nao thi sale phu trach kenh do nhan lead: contact -> hoi thoai moi nhat co inbox
-    // -> thanh vien dau tien cua inbox. Null khi hoi thoai chua gan inbox hoac kenh chua co sale.
-    private async Task<Guid?> ResolveChannelSaleAsync(Guid tenantId, Guid contactId, CancellationToken ct)
-    {
-        var inboxId = await _db.Conversations
-            .IgnoreQueryFilters()
-            .Where(c => c.TenantId == tenantId && c.ContactId == contactId && c.InboxId != null && c.DeletedAt == null)
-            .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
-            .Select(c => c.InboxId)
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-        if (inboxId is null) return null;
+    [LoggerMessage(EventId = 5201, Level = LogLevel.Information,
+        Message = "Lead auto-scored lead={LeadId} delta={Delta} score={Score} codes={Codes}")]
+    private static partial void LogScored(ILogger logger, Guid leadId, int delta, int score, string codes);
 
-        return await _db.InboxMembers
-            .IgnoreQueryFilters()
-            .Where(m => m.InboxId == inboxId)
-            .OrderBy(m => m.AgentId)
-            .Select(m => (Guid?)m.AgentId)
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-    }
-
-    [LoggerMessage(EventId = 5101, Level = LogLevel.Information,
-        Message = "Lead {LeadId} auto-scored delta={Delta} total={Score} signals={Signals}")]
-    private static partial void LogScored(ILogger logger, Guid leadId, int delta, int score, string signals);
+    [LoggerMessage(EventId = 5202, Level = LogLevel.Warning,
+        Message = "Lead auto-score concurrency conflict contact={ContactId}; retrying once")]
+    private static partial void LogConcurrencyRetry(ILogger logger, Guid contactId);
 }

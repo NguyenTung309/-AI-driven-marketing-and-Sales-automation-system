@@ -34,6 +34,7 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" />
+    <PackageReference Include="Serilog" />
   </ItemGroup>
 
   <ItemGroup>

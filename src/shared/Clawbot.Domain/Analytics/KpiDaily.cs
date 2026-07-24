@@ -13,6 +13,7 @@ public sealed class KpiDaily : Entity<Guid>, ITenantOwned
     public int Conversions { get; private set; }
     public decimal? AvgResponseTimeSec { get; private set; }
     public decimal? AdSpend { get; private set; }
+    public decimal? Revenue { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     private KpiDaily() { }
@@ -31,7 +32,14 @@ public sealed class KpiDaily : Entity<Guid>, ITenantOwned
             CreatedAt = createdAt,
         };
 
-    public void Record(int leads, int dms, int replies, int conversions, decimal? avgRespSec, decimal? adSpend)
+    public void Record(
+        int leads,
+        int dms,
+        int replies,
+        int conversions,
+        decimal? avgRespSec,
+        decimal? adSpend,
+        decimal? revenue = null)
     {
         Leads = leads;
         Dms = dms;
@@ -39,5 +47,6 @@ public sealed class KpiDaily : Entity<Guid>, ITenantOwned
         Conversions = conversions;
         AvgResponseTimeSec = avgRespSec;
         AdSpend = adSpend;
+        Revenue = revenue;
     }
 }

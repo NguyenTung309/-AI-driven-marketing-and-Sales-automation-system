@@ -22,22 +22,12 @@ interface TrendSettingsDialogProps {
 type FormState = {
   geo: string;
   googleEnabled: boolean;
-  youTubeEnabled: boolean;
-  youTubeApiKey: string;
-  clearYouTubeKey: boolean;
-  tikTokEnabled: boolean;
-  tikTokUrl: string;
   cadence: string;
 };
 
 const DEFAULT_FORM: FormState = {
   geo: "VN",
   googleEnabled: true,
-  youTubeEnabled: true,
-  youTubeApiKey: "",
-  clearYouTubeKey: false,
-  tikTokEnabled: false,
-  tikTokUrl: "",
   cadence: "off",
 };
 
@@ -45,11 +35,6 @@ function formFromSettings(settings: TrendSettings): FormState {
   return {
     geo: settings.geo,
     googleEnabled: settings.google.enabled,
-    youTubeEnabled: settings.youTube.enabled,
-    youTubeApiKey: "",
-    clearYouTubeKey: false,
-    tikTokEnabled: settings.tikTok.enabled,
-    tikTokUrl: settings.tikTok.url ?? "",
     cadence: settings.schedule.cadence,
   };
 }
@@ -76,12 +61,6 @@ export function TrendSettingsDialog({ open, onClose }: TrendSettingsDialogProps)
       updateTrendSettings({
         geo: form.geo.trim() || null,
         google: { enabled: form.googleEnabled },
-        youTube: {
-          enabled: form.youTubeEnabled,
-          // null = giữ key đã lưu; "" = xoá; giá trị mới = thay
-          apiKey: form.clearYouTubeKey ? "" : form.youTubeApiKey.trim() || null,
-        },
-        tikTok: { enabled: form.tikTokEnabled, url: form.tikTokUrl.trim() },
         scheduleCadence: form.cadence,
       }),
     onSuccess: async () => {
@@ -141,69 +120,6 @@ export function TrendSettingsDialog({ open, onClose }: TrendSettingsDialogProps)
                 checked={form.googleEnabled}
                 onChange={(checked) => setForm((current) => ({ ...current, googleEnabled: checked }))}
               />
-            </div>
-
-            <div className="border-t border-outline pt-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-body-md font-bold text-secondary">YouTube</p>
-                  <p className="text-label-sm text-on-surface-variant">
-                    Cần API key (YouTube Data API v3, miễn phí 10.000 units/ngày).
-                  </p>
-                </div>
-                <ToggleSwitch
-                  checked={form.youTubeEnabled}
-                  onChange={(checked) => setForm((current) => ({ ...current, youTubeEnabled: checked }))}
-                />
-              </div>
-              <div className="mt-2 space-y-2">
-                <Input
-                  type="password"
-                  value={form.youTubeApiKey}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setForm((current) => ({
-                      ...current,
-                      youTubeApiKey: value,
-                      clearYouTubeKey: value ? false : current.clearYouTubeKey,
-                    }));
-                  }}
-                  placeholder={settings?.youTube.hasApiKey ? "•••••• (đã lưu — nhập để thay)" : "Dán API key"}
-                  autoComplete="off"
-                />
-                {settings?.youTube.hasApiKey ? (
-                  <label className="flex items-center gap-2 text-label-sm text-on-surface-variant">
-                    <input
-                      type="checkbox"
-                      checked={form.clearYouTubeKey}
-                      onChange={(event) => setForm((current) => ({ ...current, clearYouTubeKey: event.target.checked }))}
-                    />
-                    Xóa key đã lưu
-                  </label>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="border-t border-outline pt-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-body-md font-bold text-secondary">TikTok (thử nghiệm)</p>
-                  <p className="text-label-sm text-on-surface-variant">
-                    Quét HTML tĩnh từ URL công khai (https). Trang render bằng JS sẽ không đọc được.
-                  </p>
-                </div>
-                <ToggleSwitch
-                  checked={form.tikTokEnabled}
-                  onChange={(checked) => setForm((current) => ({ ...current, tikTokEnabled: checked }))}
-                />
-              </div>
-              <div className="mt-2">
-                <Input
-                  value={form.tikTokUrl}
-                  onChange={(event) => setForm((current) => ({ ...current, tikTokUrl: event.target.value }))}
-                  placeholder="https://..."
-                />
-              </div>
             </div>
           </div>
 

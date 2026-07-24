@@ -29,21 +29,20 @@ BEGIN TRANSACTION;
 
 DECLARE @expected_rows INT = 11;
 
--- allowed_tools_json mirrors DevDataSeeder.OrchestratorAgents: content-agent persists drafts, reviewer-agent
--- approves, publisher-agent schedules+publishes. The rest are text-only ([]). Kept in sync so a SQL-seeded
--- environment gets the same tool grants the app seeder applies — previously this wiped every grant to '[]'.
+-- allowed_tools_json mirrors DevDataSeeder.OrchestratorAgents (tool names = ToolRegistry).
+-- lead/sale/report/research/chat/docs/ads must NOT be [] — empty = text-only soft-fail ("thiếu list").
 MERGE agent_definitions AS target
 USING (VALUES
-    (N'chat-agent',        N'Chat Agent',        N'chat',        N'Handle customer conversation context and produce safe handoff summaries.',          N'[]'),
-    (N'sale-assist-agent', N'Sale Assist Agent', N'sale_assist', N'Help sales users draft replies, summarize conversations, and suggest next steps.', N'[]'),
-    (N'lead-agent',        N'Lead Agent',        N'lead',        N'Score, classify, and prioritize leads from customer signals.',                     N'[]'),
+    (N'chat-agent',        N'Chat Agent',        N'chat',        N'Handle customer conversation context and produce safe handoff summaries. Call chat-agent tool when a reply is needed.', N'["chat-agent"]'),
+    (N'sale-assist-agent', N'Sale Assist Agent', N'sale_assist', N'Draft/summarize/upsell for an EXISTING conversation. Call sale-assist with conversation_id + turns_json. Cannot blast cold leads without conversation context.', N'["sale-assist"]'),
+    (N'lead-agent',        N'Lead Agent',        N'lead',        N'ALWAYS call lead-agent tool. Use operation=list|find_cold (stage, topN) to query CRM — do not invent lists or ask for lead IDs. Also score/create/batch_score.', N'["lead-agent"]'),
     (N'content-agent',     N'Content Agent',     N'content',     N'Create campaign content briefs and channel-ready drafts.',                          N'["content-agent"]'),
-    (N'research-agent',    N'Research Agent',    N'research',    N'Research competitors, trends, and knowledge gaps for campaigns.',                   N'[]'),
-    (N'docs-agent',        N'Docs Agent',        N'docs',        N'Prepare quote, brochure, onboarding, and sales document artifacts.',                N'[]'),
-    (N'report-agent',      N'Report Agent',      N'report',      N'Aggregate KPI, cost, and orchestration run outcomes into reports.',                 N'[]'),
-    (N'ads-agent',         N'Ads Agent',         N'ads',         N'Plan ad tasks and review campaign signals without publishing automatically.',       N'[]'),
-    (N'reviewer-agent',    N'Reviewer Agent',    N'reviewer',    N'Review sub-agent outputs for quality, safety, and policy gates.',                   N'["content.approve"]'),
-    (N'publisher-agent',   N'Publisher Agent',   N'publisher',   N'Schedule and publish approved content to social channels via the graph publisher.', N'["content.schedule","content.publish"]'),
+    (N'research-agent',    N'Research Agent',    N'research',    N'Research competitors, trends, and knowledge gaps. Call research-agent or web.search with geo/keywords.', N'["research-agent","web.search"]'),
+    (N'docs-agent',        N'Docs Agent',        N'docs',        N'Prepare quote, brochure, onboarding documents via docs-agent tool.',                N'["docs-agent"]'),
+    (N'report-agent',      N'Report Agent',      N'report',      N'Aggregate KPI via report-agent tool (snapshot/anomaly/forecast). Pass date/platform/metric as needed.', N'["report-agent"]'),
+    (N'ads-agent',         N'Ads Agent',         N'ads',         N'Plan ad tasks via ads-agent tool. High-risk actions may require approval.',       N'["ads-agent"]'),
+    (N'reviewer-agent',    N'Reviewer Agent',    N'reviewer',    N'Review sub-agent outputs for quality, safety, and policy gates.',                   N'["content.review"]'),
+    (N'publisher-agent',   N'Publisher Agent',   N'publisher',   N'Publishing is handled by the durable worker; no autonomous publishing tools are granted by default.', N'[]'),
     (N'reporter-agent',    N'Reporter Agent',    N'reporter',    N'Summarize A2A run outputs, decisions, costs, and next actions.',                    N'[]')
 ) AS source (code, display_name, agent_type, persona_prompt, allowed_tools_json)
 ON target.tenant_id = @tenant_id AND target.code = source.code

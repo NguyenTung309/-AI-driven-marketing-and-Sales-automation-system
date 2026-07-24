@@ -28,7 +28,17 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Host.UseSerilog((ctx, lc) => lc.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console(formatProvider: CultureInfo.InvariantCulture));
+builder.Host.UseSerilog((ctx, lc) => lc
+    .ReadFrom.Configuration(ctx.Configuration)
+    .WriteTo.Console(formatProvider: CultureInfo.InvariantCulture)
+    .WriteTo.SystemLogs(ctx.Configuration.GetConnectionString("SqlServer"), "api"));
+
+builder.Services.Configure<Clawbot.Infrastructure.Observability.SystemLogsOptions>(
+    builder.Configuration.GetSection(Clawbot.Infrastructure.Observability.SystemLogsOptions.SectionName));
+builder.Services.Configure<Clawbot.Infrastructure.Observability.AuditRetentionOptions>(
+    builder.Configuration.GetSection(Clawbot.Infrastructure.Observability.AuditRetentionOptions.SectionName));
+builder.Services.AddExceptionHandler<Clawbot.Api.Middleware.GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
 
 builder.Services.AddApplication();
 builder.Services.AddClawbotChatSupport(builder.Configuration);
@@ -119,6 +129,7 @@ builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jo
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.SaleAssistUpsellJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.AgentSandboxJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.LeadCreateWithSkillsJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.LeadRevenueEstimateJobHandler>();
 // Relay notifications published on Redis by AgentService (run failed / pending approval) into NotificationHub.
 builder.Services.AddHostedService<Clawbot.Api.Hubs.RedisNotificationRelay>();
 // B5: cost summary cho điểm phê duyệt — cùng ledger với cost guard của orchestrator.
@@ -264,15 +275,58 @@ if (builder.Environment.IsDevelopment())
 
 var app = builder.Build();
 
+if (builder.Configuration.GetValue<bool>("Operations:MigrateMetaCredentialEnvelopes"))
+{
+    var migration = await Clawbot.Infrastructure.Integrations.Meta.MetaCredentialEnvelopeMigrator
+        .MigrateAsync(app.Services)
+        .ConfigureAwait(false);
+    Environment.ExitCode = migration.InvalidCount == 0 ? 0 : 1;
+    return;
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-app.UseSerilogRequestLogging();
+app.UseExceptionHandler();
+app.UseSerilogRequestLogging(options =>
+{
+    options.GetLevel = (httpContext, elapsed, ex) =>
+    {
+        if (ex is not null || httpContext.Response.StatusCode >= 500)
+            return Serilog.Events.LogEventLevel.Error;
+        if (httpContext.Response.StatusCode >= 400)
+            return Serilog.Events.LogEventLevel.Warning;
+
+        var captureAll = httpContext.RequestServices
+            .GetService<Microsoft.Extensions.Options.IOptions<Clawbot.Infrastructure.Observability.SystemLogsOptions>>()
+            ?.Value.CaptureAllRequests == true;
+        return captureAll
+            ? Serilog.Events.LogEventLevel.Warning
+            : Serilog.Events.LogEventLevel.Information;
+    };
+    options.EnrichDiagnosticContext = (diag, http) =>
+    {
+        diag.Set("TraceId", http.TraceIdentifier);
+        diag.Set("StatusCode", http.Response.StatusCode);
+        diag.Set("RequestMethod", http.Request.Method);
+        diag.Set("RequestPath", http.Request.Path.Value ?? string.Empty);
+        // Completion log runs outside LogEnrichmentMiddleware's LogContext scope —
+        // re-read claims here so system_logs.tenant_id/user_id are populated for HTTP rows.
+        var tenantId = http.User?.FindFirst("tenant_id")?.Value
+            ?? http.User?.FindFirst("tid")?.Value;
+        var userId = http.User?.FindFirst("sub")?.Value
+            ?? http.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!string.IsNullOrWhiteSpace(tenantId)) diag.Set("TenantId", tenantId);
+        if (!string.IsNullOrWhiteSpace(userId)) diag.Set("UserId", userId);
+    };
+});
 app.UseCors();
 app.UseAuthentication();
+app.UseMiddleware<Clawbot.Api.Middleware.LogEnrichmentMiddleware>();
+app.UseMiddleware<Clawbot.Infrastructure.Observability.RequestStatsMiddleware>();
 app.UseAuthorization();
 app.UseRateLimiter();
 
@@ -318,6 +372,7 @@ app.MapChannels();
 app.MapWebhooks();
 app.MapContacts();
 app.MapAdmin();
+app.MapAdminSystemLogs();
 app.MapAdminJobs();
 app.MapAdminSocialCredentials();
 app.MapAdminMetaIntegration();

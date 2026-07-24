@@ -17,6 +17,8 @@ public sealed class LlmConfig : AggregateRoot<Guid>, ITenantOwned
     public decimal? OutputUsdPer1M { get; private set; }
     public int? TimeoutSeconds { get; private set; }                 // request timeout; null → global Llm:HttpTimeoutSeconds
     public int? MaxOutputTokens { get; private set; }                // generation cap; null → provider default (3000)
+    // Phase 2.6: null = auto (registry/unknown); true/false = explicit operator override.
+    public bool? SupportsVision { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -33,7 +35,8 @@ public sealed class LlmConfig : AggregateRoot<Guid>, ITenantOwned
         decimal? inputUsdPer1M = null,
         decimal? outputUsdPer1M = null,
         int? timeoutSeconds = null,
-        int? maxOutputTokens = null) =>
+        int? maxOutputTokens = null,
+        bool? supportsVision = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -48,12 +51,21 @@ public sealed class LlmConfig : AggregateRoot<Guid>, ITenantOwned
             OutputUsdPer1M = outputUsdPer1M,
             TimeoutSeconds = timeoutSeconds,
             MaxOutputTokens = maxOutputTokens,
+            SupportsVision = supportsVision,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         };
 
     // Update connection identity (provider/model/baseUrl/label) without touching the key.
-    public void UpdateConnection(string provider, string modelId, string? baseUrl, string? displayName, DateTimeOffset updatedAt, int? timeoutSeconds = null, int? maxOutputTokens = null)
+    public void UpdateConnection(
+        string provider,
+        string modelId,
+        string? baseUrl,
+        string? displayName,
+        DateTimeOffset updatedAt,
+        int? timeoutSeconds = null,
+        int? maxOutputTokens = null,
+        bool? supportsVision = null)
     {
         Provider = provider;
         ModelId = modelId;
@@ -61,6 +73,7 @@ public sealed class LlmConfig : AggregateRoot<Guid>, ITenantOwned
         DisplayName = displayName;
         TimeoutSeconds = timeoutSeconds;
         MaxOutputTokens = maxOutputTokens;
+        SupportsVision = supportsVision;
         UpdatedAt = updatedAt;
     }
 

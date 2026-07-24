@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Playwright artifacts (regenerated on run — do not commit)
+/playwright-report/
+/test-results/
+/blob-report/
+/playwright/.cache/
+
 # Stitch design cache (re-fetchable via MCP)
 .stitch/
 

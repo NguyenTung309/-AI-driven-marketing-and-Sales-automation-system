@@ -42,7 +42,7 @@ public sealed class NotificationPreference : Entity<Guid>, ITenantOwned
 }
 
 /// <summary>Web Push endpoint của 1 trình duyệt. Push service trả 404/410 = hết hạn, xoá dòng.</summary>
-public sealed class PushSubscription : Entity<Guid>, ITenantOwned
+public sealed class PushSubscription : Entity<Guid>, ITenantOwned, IAuditExempt
 {
     public Guid TenantId { get; private set; }
     public Guid UserId { get; private set; }

@@ -11,10 +11,12 @@ using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.Domain.Contacts;
 using Clawbot.Domain.Leads;
+using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Jobs;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -33,6 +35,10 @@ public static class LeadsEndpoints
         grp.MapPost("/", CreateAsync).RequirePermission("leads:write");
         grp.MapPost("/create-with-skills", CreateWithSkillsAsync).RequirePermission("leads:write");
         grp.MapPost("/{id:guid}/activities", RecordActivityAsync).RequirePermission("leads:write");
+        grp.MapPut("/{id:guid}/stage", UpdateStageAsync).RequirePermission("leads:write");
+        grp.MapGet("/{id:guid}/revenues", ListRevenuesAsync).RequirePermission("leads:read");
+        grp.MapPost("/{id:guid}/revenues", CreateRevenueAsync).RequirePermission("leads:write");
+        grp.MapPut("/revenues/{revenueId:guid}", DecideRevenueAsync).RequirePermission("leads:write");
         grp.MapPost("/{id:guid}/assign", AssignAsync).RequirePermission("leads:write");
         grp.MapGet("/forecast", ForecastAsync).RequirePermission("leads:read");
         grp.MapGet("/{id:guid}/context", ContextPanelAsync).RequirePermission("leads:read");
@@ -232,17 +238,74 @@ public static class LeadsEndpoints
             ? id
             : null;
 
+    /// <summary>
+    /// Object-level: lead đã gán owner thì chỉ owner / Admin / SalesLead được ghi stage/revenue.
+    /// Lead chưa gán: bất kỳ ai có leads:write (đã gate ở route) đều được.
+    /// JWT chỉ mang role_id (SPEC-11) — không dùng IsInRole/role-name claim.
+    /// </summary>
+    private static bool CanManageLead(HttpContext http, Lead lead)
+    {
+        var userId = CurrentUserId(http);
+        if (userId is null)
+            return false;
+        if (lead.OwnerUserId is null || lead.OwnerUserId == userId)
+            return true;
+        return IsLeadManager(http);
+    }
+
+    private static bool IsLeadManager(HttpContext http)
+    {
+        var roleIdRaw = http.User.FindFirst("role_id")?.Value;
+        if (!Guid.TryParse(roleIdRaw, out var roleId) || roleId == Guid.Empty)
+            return false;
+        return roleId == RbacSeeder.RoleIds[RbacSeeder.Admin]
+            || roleId == RbacSeeder.RoleIds[RbacSeeder.SalesLead];
+    }
+
+    private static Guid? CurrentRoleId(HttpContext http)
+    {
+        var roleIdRaw = http.User.FindFirst("role_id")?.Value;
+        return Guid.TryParse(roleIdRaw, out var roleId) && roleId != Guid.Empty ? roleId : null;
+    }
+
     private static async Task<IResult> RecordActivityAsync(
         Guid id,
         LeadActivityRequest body,
+        HttpContext http,
         AppDbContext db,
         ITenantAccessor tenants,
         IClock clock,
+        IJobLauncher jobs,
         CancellationToken ct)
     {
         _ = tenants.Require();
         var lead = await db.Leads.FirstOrDefaultAsync(l => l.Id == id, ct).ConfigureAwait(false);
         if (lead is null) return Results.NotFound();
+
+        if (string.Equals(body.EventCode, "payment_confirmed", StringComparison.OrdinalIgnoreCase))
+        {
+            // payment_confirmed đổi lifecycle + có thể launch revenue job → object-level authz.
+            if (!CanManageLead(http, lead))
+                return Results.Json(new { error = "lead_not_owned" }, statusCode: StatusCodes.Status403Forbidden);
+
+            lead.MarkCustomer(
+                body.Notes ?? "payment_confirmed",
+                clock.UtcNow,
+                CurrentUserId(http),
+                trigger: "payment_event");
+            try
+            {
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { error = "lead_stage_changed" });
+            }
+
+            // payment_confirmed không mang số tiền — nếu chưa có revenue thì AI ước tính (idempotent).
+            await TryLaunchRevenueEstimateAsync(jobs, db, lead, CurrentUserId(http), ct).ConfigureAwait(false);
+            return Results.Ok(new LeadActivityResponse(lead.Score, lead.Stage, "payment_confirmed", []));
+        }
 
         var rules = await db.LeadScoringRules
             .Where(r => r.IsActive)
@@ -256,22 +319,349 @@ public static class LeadsEndpoints
         return Results.Ok(new LeadActivityResponse(lead.Score, lead.Stage, decision.Reason, decision.MatchedRules));
     }
 
+    private static async Task<IResult> UpdateStageAsync(
+        Guid id,
+        LeadStageRequest body,
+        HttpContext http,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        IJobLauncher jobs,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var lead = await db.Leads.FirstOrDefaultAsync(l => l.Id == id, ct).ConfigureAwait(false);
+        if (lead is null) return Results.NotFound();
+        if (!CanManageLead(http, lead))
+            return Results.Json(new { error = "lead_not_owned" }, statusCode: StatusCodes.Status403Forbidden);
+
+        var stage = body.Stage?.Trim().ToLowerInvariant();
+        var reason = string.IsNullOrWhiteSpace(body.Reason) ? stage : body.Reason.Trim();
+        if (body.Amount.HasValue && stage != "customer")
+            return Results.BadRequest(new { error = "revenue_only_for_customer" });
+
+        var userId = CurrentUserId(http);
+        var createdManualRevenue = false;
+        switch (stage)
+        {
+            case "customer":
+                lead.MarkCustomer(reason ?? "customer", clock.UtcNow, userId);
+                if (body.Amount.HasValue)
+                {
+                    if (userId is null)
+                        return Results.BadRequest(new { error = "user_required_for_manual_revenue" });
+                    var currency = NormalizeRevenueCurrency(body.Currency);
+                    if (currency is null)
+                        return Results.BadRequest(new { error = "unsupported_currency" });
+
+                    // Approved đã có → 409. Pending AI → reject rồi ghi manual. Rejected history OK.
+                    var active = await db.LeadRevenues
+                        .Where(r => r.LeadId == lead.Id
+                            && (r.Status == LeadRevenue.StatusPending || r.Status == LeadRevenue.StatusApproved))
+                        .ToListAsync(ct)
+                        .ConfigureAwait(false);
+                    if (active.Any(r => r.Status == LeadRevenue.StatusApproved))
+                        return Results.Conflict(new { error = "revenue_already_recorded" });
+
+                    foreach (var pending in active.Where(r => r.Status == LeadRevenue.StatusPending))
+                        pending.Reject(userId.Value, clock.UtcNow);
+
+                    try
+                    {
+                        db.LeadRevenues.Add(LeadRevenue.CreateManual(
+                            lead.TenantId, lead.Id, body.Amount.Value, currency, userId.Value, clock.UtcNow));
+                        createdManualRevenue = true;
+                    }
+                    catch (ArgumentOutOfRangeException)
+                    {
+                        return Results.BadRequest(new { error = "amount_must_be_positive" });
+                    }
+                    catch (ArgumentException)
+                    {
+                        return Results.BadRequest(new { error = "unsupported_currency" });
+                    }
+                }
+                break;
+            case "lost":
+                lead.MarkLost(reason ?? "lost", clock.UtcNow, CurrentUserId(http));
+                break;
+            case "reopen":
+                lead.ReopenStage(reason ?? "reopen", clock.UtcNow, CurrentUserId(http));
+                break;
+            default:
+                return Results.BadRequest(new { error = "invalid_stage_action" });
+        }
+
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Results.Conflict(new { error = "lead_stage_changed" });
+        }
+        catch (DbUpdateException)
+        {
+            // Unique active revenue / FK — treat as conflict, không 500.
+            return Results.Conflict(new { error = "revenue_already_recorded" });
+        }
+
+        // Không nhập số tiền → AI ước tính (chỉ khi chưa có active revenue).
+        if (stage == "customer" && !createdManualRevenue)
+            await TryLaunchRevenueEstimateAsync(jobs, db, lead, userId, ct).ConfigureAwait(false);
+
+        return Results.Ok(new LeadStageResponse(lead.Score, lead.Stage));
+    }
+
+    private static async Task TryLaunchRevenueEstimateAsync(
+        IJobLauncher jobs,
+        AppDbContext db,
+        Lead lead,
+        Guid? userId,
+        CancellationToken ct)
+    {
+        if (lead.Stage != "customer")
+            return;
+
+        var hasActive = await db.LeadRevenues
+            .AnyAsync(r => r.LeadId == lead.Id
+                && (r.Status == LeadRevenue.StatusPending || r.Status == LeadRevenue.StatusApproved), ct)
+            .ConfigureAwait(false);
+        if (hasActive)
+            return;
+
+        await jobs.LaunchAsync(
+            LeadRevenueEstimateJobHandler.JobType,
+            "Ước tính doanh thu lead",
+            new LeadRevenueEstimateJobPayload(lead.Id),
+            userId,
+            idempotencyKey: $"lead-revenue-estimate:{lead.Id:D}",
+            ct).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> ListRevenuesAsync(
+        Guid id,
+        HttpContext http,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var lead = await db.Leads.AsNoTracking().FirstOrDefaultAsync(l => l.Id == id, ct).ConfigureAwait(false);
+        if (lead is null) return Results.NotFound();
+        // Dữ liệu tài chính: cùng policy object-level với ghi.
+        if (!CanManageLead(http, lead))
+            return Results.Json(new { error = "lead_not_owned" }, statusCode: StatusCodes.Status403Forbidden);
+
+        var revenues = await db.LeadRevenues.AsNoTracking()
+            .Where(r => r.LeadId == id)
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        return Results.Ok(revenues.Select(ToRevenueResponse).ToList());
+    }
+
+    private static async Task<IResult> CreateRevenueAsync(
+        Guid id,
+        LeadRevenueCreateRequest body,
+        HttpContext http,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var lead = await db.Leads.FirstOrDefaultAsync(l => l.Id == id, ct).ConfigureAwait(false);
+        if (lead is null) return Results.NotFound();
+        if (!CanManageLead(http, lead))
+            return Results.Json(new { error = "lead_not_owned" }, statusCode: StatusCodes.Status403Forbidden);
+        // Manual revenue chỉ cho customer — hoặc atomic MarkCustomer nếu sale ghi doanh thu trực tiếp.
+        if (lead.Stage != "customer")
+            lead.MarkCustomer("manual_revenue", clock.UtcNow, CurrentUserId(http), trigger: "manual_revenue");
+
+        var userId = CurrentUserId(http);
+        if (userId is null)
+            return Results.BadRequest(new { error = "user_required_for_manual_revenue" });
+        var currency = NormalizeRevenueCurrency(body.Currency);
+        if (currency is null)
+            return Results.BadRequest(new { error = "unsupported_currency" });
+
+        var active = await db.LeadRevenues
+            .Where(r => r.LeadId == id
+                && (r.Status == LeadRevenue.StatusPending || r.Status == LeadRevenue.StatusApproved))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (active.Any(r => r.Status == LeadRevenue.StatusApproved))
+            return Results.Conflict(new { error = "revenue_already_recorded" });
+
+        LeadRevenue revenue;
+        try
+        {
+            revenue = LeadRevenue.CreateManual(
+                lead.TenantId, lead.Id, body.Amount, currency, userId.Value, clock.UtcNow);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return Results.BadRequest(new { error = "amount_must_be_positive" });
+        }
+        catch (ArgumentException)
+        {
+            return Results.BadRequest(new { error = "unsupported_currency" });
+        }
+
+        foreach (var proposal in active.Where(r => r.Status == LeadRevenue.StatusPending))
+            proposal.Reject(userId.Value, clock.UtcNow);
+
+        db.LeadRevenues.Add(revenue);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Results.Conflict(new { error = "revenue_already_decided" });
+        }
+        catch (DbUpdateException)
+        {
+            return Results.Conflict(new { error = "revenue_already_recorded" });
+        }
+
+        return Results.Ok(ToRevenueResponse(revenue));
+    }
+
+    private static async Task<IResult> DecideRevenueAsync(
+        Guid revenueId,
+        LeadRevenueDecisionRequest body,
+        HttpContext http,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IClock clock,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var revenue = await db.LeadRevenues.FirstOrDefaultAsync(r => r.Id == revenueId, ct).ConfigureAwait(false);
+        if (revenue is null) return Results.NotFound();
+        var lead = await db.Leads.FirstOrDefaultAsync(l => l.Id == revenue.LeadId, ct).ConfigureAwait(false);
+        if (lead is null) return Results.NotFound();
+        if (!CanManageLead(http, lead))
+            return Results.Json(new { error = "lead_not_owned" }, statusCode: StatusCodes.Status403Forbidden);
+        var userId = CurrentUserId(http);
+        if (userId is null)
+            return Results.BadRequest(new { error = "user_required_for_revenue_decision" });
+
+        try
+        {
+            switch (body.Action?.Trim().ToLowerInvariant())
+            {
+                case "approve":
+                    revenue.Approve(userId.Value, body.Amount, clock.UtcNow);
+                    break;
+                case "reject":
+                    revenue.Reject(userId.Value, clock.UtcNow);
+                    break;
+                default:
+                    return Results.BadRequest(new { error = "invalid_revenue_action" });
+            }
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return Results.BadRequest(new { error = "amount_must_be_positive" });
+        }
+
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Results.Conflict(new { error = "revenue_already_decided" });
+        }
+
+        return Results.Ok(ToRevenueResponse(revenue));
+    }
+
+    private static LeadRevenueResponse ToRevenueResponse(LeadRevenue revenue) => new(
+        revenue.Id,
+        revenue.LeadId,
+        revenue.Amount,
+        revenue.Currency,
+        revenue.Source,
+        revenue.Status,
+        revenue.Evidence,
+        revenue.ProposedBy,
+        revenue.DecidedBy,
+        revenue.CreatedAt,
+        revenue.DecidedAt);
+
+    private static string? NormalizeRevenueCurrency(string? currency)
+    {
+        var normalized = string.IsNullOrWhiteSpace(currency) ? "VND" : currency.Trim().ToUpperInvariant();
+        return normalized == "VND" ? normalized : null;
+    }
+
     private static async Task<IResult> AssignAsync(
         Guid id,
         LeadAssignRequest body,
+        HttpContext http,
         AppDbContext db,
         ITenantAccessor tenants,
         ILeadAssignmentService assignment,
+        UserManager<AppUser> users,
         CancellationToken ct)
     {
         var tenant = tenants.Require();
         var lead = await db.Leads.FirstOrDefaultAsync(l => l.Id == id, ct).ConfigureAwait(false);
         if (lead is null) return Results.NotFound();
 
-        var owner = body.UserId ?? await assignment.PickOwnerAsync(tenant.TenantId, ct).ConfigureAwait(false);
-        if (owner is null) return Results.BadRequest(new { error = "no eligible assignee" });
+        var actorId = CurrentUserId(http);
+        if (actorId is null)
+            return Results.Unauthorized();
 
-        lead.Assign(owner.Value);
+        // Đổi owner khi đã gán: chỉ Admin/SalesLead. Unowned: sale chỉ claim chính mình; manager gán bất kỳ.
+        var isManager = IsLeadManager(http);
+        if (lead.OwnerUserId is { } existingOwner && existingOwner != actorId && !isManager)
+            return Results.Json(new { error = "lead_not_owned" }, statusCode: StatusCodes.Status403Forbidden);
+
+        Guid owner;
+        if (body.UserId is { } requested && requested != Guid.Empty)
+        {
+            if (!isManager && requested != actorId)
+                return Results.Json(new { error = "can_only_claim_self" }, statusCode: StatusCodes.Status403Forbidden);
+
+            var assignee = await users.Users
+                .FirstOrDefaultAsync(u => u.Id == requested, ct)
+                .ConfigureAwait(false);
+            if (assignee is null || assignee.TenantId != tenant.TenantId || !assignee.IsActive)
+                return Results.BadRequest(new { error = "assignee_not_eligible" });
+
+            // Phải thuộc role được nhận lead (Sale / SalesLead / Admin).
+            var roles = await users.GetRolesAsync(assignee).ConfigureAwait(false);
+            var canOwn = roles.Any(r =>
+                string.Equals(r, RbacSeeder.Sale, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(r, RbacSeeder.SalesLead, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(r, RbacSeeder.Admin, StringComparison.OrdinalIgnoreCase));
+            if (!canOwn)
+                return Results.BadRequest(new { error = "assignee_role_not_allowed" });
+
+            owner = requested;
+        }
+        else
+        {
+            if (!isManager)
+            {
+                // Sale không truyền userId → tự claim.
+                owner = actorId.Value;
+            }
+            else
+            {
+                var picked = await assignment.PickOwnerAsync(tenant.TenantId, ct).ConfigureAwait(false);
+                if (picked is null)
+                    return Results.BadRequest(new { error = "no eligible assignee" });
+                owner = picked.Value;
+            }
+        }
+
+        lead.Assign(owner);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.NoContent();
     }

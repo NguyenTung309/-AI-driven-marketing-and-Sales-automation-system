@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Alert } from "@/shared/ui/Alert";
 import { Button } from "@/shared/ui/Button";
 import { Card } from "@/shared/ui/Card";
@@ -63,13 +63,16 @@ function errorMessage(error: unknown): string {
   return "Đã xảy ra lỗi không xác định.";
 }
 
-export function OrchestrationPanel({ live = false }: { readonly live?: boolean }) {
+interface OrchestrationPanelProps {
+  readonly live?: boolean;
+  readonly sessionId: string | null;
+  readonly onSessionIdChange: (sessionId: string | null) => void;
+}
+
+export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange }: OrchestrationPanelProps) {
   const permissions = useAuthStore((s) => s.permissions);
   const can = (code: string) => permissions.includes(code);
   const queryClient = useQueryClient();
-
-  const [searchParams, setSearchParams] = useSearchParams();
-  const sessionId = searchParams.get("sessionId");
 
   const [goal, setGoal] = useState("");
   // B9: dry-run — orchestrator vẫn lập kế hoạch + đi hết DAG nhưng tool chỉ trả preview "[dry-run] would ...".
@@ -84,16 +87,7 @@ export function OrchestrationPanel({ live = false }: { readonly live?: boolean }
   // Node the user clicked on the DAG; falls back to the running task so the detail pane follows execution.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
-  const setSessionId = (next: string | null): void => {
-    setSearchParams(
-      (params) => {
-        if (next) params.set("sessionId", next);
-        else params.delete("sessionId");
-        return params;
-      },
-      { replace: true },
-    );
-  };
+  const setSessionId = (next: string | null): void => onSessionIdChange(next);
 
   // Durable session state: read by sessionId from the URL so it survives route changes and F5.
   const sessionQuery = useQuery({

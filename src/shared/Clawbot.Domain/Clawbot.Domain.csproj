@@ -3,4 +3,8 @@
     <InternalsVisibleTo Include="Clawbot.Infrastructure" />
     <InternalsVisibleTo Include="Clawbot.Domain.Tests" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Clawbot.SharedKernel\Clawbot.SharedKernel.csproj" />
+  </ItemGroup>
 </Project>

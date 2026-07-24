@@ -8,19 +8,22 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
 
-// Review-gate P3: 2 flag mới nullable — client cũ không gửi thì giữ nguyên giá trị hiện tại.
+// PATCH-like: field null = client không gửi / không đổi. Tránh GET fail fallback ghi đè config.
 // RequireKbHumanReview (ai-self-learning-memory): bật = tri thức tự học luôn chờ người duyệt.
 // AiAutoReplyResumeMinutes: sale gửi tay -> AI nhường bao lâu (phút) rồi tự bật lại; null = giữ nguyên.
 // IdleAlertMinutes: hội thoại chờ quá bao lâu (phút) thì cảnh báo; escalate = 2x ngưỡng; null = giữ nguyên.
 public sealed record TenantOrchestrationSettingsRequest(
-    bool RequireApproval,
+    bool? RequireApproval = null,
     decimal? MonthlyCostCapUsd = null,
     bool? RequireContentReview = null,
     bool? RequireChatReplyApproval = null,
     bool? RequireKbHumanReview = null,
     int? AiAutoReplyResumeMinutes = null,
     bool? SkipChatReplyReview = null,
-    int? IdleAlertMinutes = null);
+    int? IdleAlertMinutes = null,
+    int? LeadLostAfterDays = null,
+    bool? AutoApproveLeadRevenue = null,
+    bool ClearMonthlyCostCapUsd = false);
 
 public static class AdminEndpoints
 {
@@ -28,7 +31,7 @@ public static class AdminEndpoints
     {
         var grp = app.MapGroup("/api/admin").RequireAuthorization().RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
-        grp.MapGet("/audit-logs", ListAuditLogsAsync);
+        grp.MapGet("/audit-logs", ListAuditLogsAsync).RequirePermission("system.logs");
         grp.MapGet("/tenant/orchestration", GetTenantOrchestrationAsync).RequirePermission("agent.read");
         grp.MapPut("/tenant/orchestration", UpdateTenantOrchestrationAsync).RequirePermission("system:config");
 
@@ -43,7 +46,7 @@ public static class AdminEndpoints
         var tenantId = tenants.Require().TenantId;
         var settings = await db.Tenants
             .Where(t => t.Id == tenantId)
-            .Select(t => new { t.RequireOrchestrationApproval, t.MonthlyCostCapUsd, t.RequireContentReview, t.RequireChatReplyApproval, t.RequireKbHumanReview, t.AiAutoReplyResumeMinutes, t.SkipChatReplyReview, t.IdleAlertMinutes })
+            .Select(t => new { t.RequireOrchestrationApproval, t.MonthlyCostCapUsd, t.RequireContentReview, t.RequireChatReplyApproval, t.RequireKbHumanReview, t.AiAutoReplyResumeMinutes, t.SkipChatReplyReview, t.IdleAlertMinutes, t.LeadLostAfterDays, t.AutoApproveLeadRevenue })
             .FirstOrDefaultAsync(ct);
         return Results.Ok(new
         {
@@ -55,6 +58,8 @@ public static class AdminEndpoints
             aiAutoReplyResumeMinutes = settings?.AiAutoReplyResumeMinutes ?? 5,
             skipChatReplyReview = settings?.SkipChatReplyReview ?? false,
             idleAlertMinutes = settings?.IdleAlertMinutes ?? 5,
+            leadLostAfterDays = settings?.LeadLostAfterDays ?? 60,
+            autoApproveLeadRevenue = settings?.AutoApproveLeadRevenue ?? false,
         });
     }
 
@@ -68,17 +73,34 @@ public static class AdminEndpoints
         var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, ct);
         if (tenant is null) return Results.NotFound(new { error = "tenant_not_found" });
 
-        tenant.SetRequireOrchestrationApproval(body.RequireApproval);
-        tenant.SetMonthlyCostCapUsd(body.MonthlyCostCapUsd);
-        // Review-gate P3: chỉ đổi khi client gửi tường minh (null = client cũ, giữ nguyên).
-        if (body.RequireContentReview is { } rcr) tenant.SetRequireContentReview(rcr);
+        // Chỉ update field thật sự được gửi — null không đụng.
+        // Phase 4.10: RequireContentReview is hard-deprecated — mutate nothing when present.
+        if (body.RequireContentReview is not null)
+        {
+            return Results.Json(
+                new
+                {
+                    code = "content.review_setting_deprecated",
+                    errorCode = "content.review_setting_deprecated",
+                    message = "RequireContentReview is deprecated. Use PUT /api/content/settings/publishing-policy.",
+                },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (body.RequireApproval is { } ra) tenant.SetRequireOrchestrationApproval(ra);
+        if (body.ClearMonthlyCostCapUsd)
+            tenant.SetMonthlyCostCapUsd(null);
+        else if (body.MonthlyCostCapUsd is { } cap)
+            tenant.SetMonthlyCostCapUsd(cap);
         if (body.RequireChatReplyApproval is { } rca) tenant.SetRequireChatReplyApproval(rca);
         if (body.RequireKbHumanReview is { } rkb) tenant.SetRequireKbHumanReview(rkb);
         if (body.AiAutoReplyResumeMinutes is { } arm) tenant.SetAiAutoReplyResumeMinutes(arm);
         if (body.SkipChatReplyReview is { } scr) tenant.SetSkipChatReplyReview(scr);
         if (body.IdleAlertMinutes is { } iam) tenant.SetIdleAlertMinutes(iam);
+        if (body.LeadLostAfterDays is { } llad) tenant.SetLeadLostAfterDays(llad);
+        if (body.AutoApproveLeadRevenue is { } aalr) tenant.SetAutoApproveLeadRevenue(aalr);
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new { tenant.RequireOrchestrationApproval, tenant.MonthlyCostCapUsd, tenant.RequireContentReview, tenant.RequireChatReplyApproval, tenant.RequireKbHumanReview, tenant.AiAutoReplyResumeMinutes, tenant.SkipChatReplyReview, tenant.IdleAlertMinutes });
+        return Results.Ok(new { tenant.RequireOrchestrationApproval, tenant.MonthlyCostCapUsd, tenant.RequireContentReview, tenant.RequireChatReplyApproval, tenant.RequireKbHumanReview, tenant.AiAutoReplyResumeMinutes, tenant.SkipChatReplyReview, tenant.IdleAlertMinutes, tenant.LeadLostAfterDays, tenant.AutoApproveLeadRevenue });
     }
 
     private static async Task<IResult> ListAuditLogsAsync(
@@ -107,13 +129,14 @@ public static class AdminEndpoints
             query = query.Where(a => a.ResourceId == resourceId.Value);
 
         var total = await query.CountAsync(ct);
-        var items = await query
+        var rows = await query
             .OrderByDescending(a => a.OccurredAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(a => new
             {
                 a.Id,
+                a.UserId,
                 a.Action,
                 a.ResourceType,
                 a.ResourceId,
@@ -123,6 +146,28 @@ public static class AdminEndpoints
                 a.OccurredAt,
             })
             .ToListAsync(ct);
+
+        var userIds = rows.Where(r => r.UserId.HasValue).Select(r => r.UserId!.Value).Distinct().ToArray();
+        var emails = userIds.Length == 0
+            ? new Dictionary<Guid, string>()
+            : await db.Users.AsNoTracking()
+                .Where(u => userIds.Contains(u.Id))
+                .Select(u => new { u.Id, u.Email })
+                .ToDictionaryAsync(u => u.Id, u => u.Email ?? string.Empty, ct);
+
+        var items = rows.Select(a => new
+        {
+            a.Id,
+            a.UserId,
+            UserEmail = a.UserId.HasValue && emails.TryGetValue(a.UserId.Value, out var email) ? email : null,
+            a.Action,
+            a.ResourceType,
+            a.ResourceId,
+            a.DiffJson,
+            a.IpAddress,
+            a.UserAgent,
+            a.OccurredAt,
+        }).ToList();
 
         return Results.Ok(new { total, page, pageSize, items });
     }

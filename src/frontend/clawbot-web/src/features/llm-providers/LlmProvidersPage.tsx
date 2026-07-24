@@ -48,6 +48,8 @@ interface LlmFormState {
   readonly outputUsdPer1M: string;
   readonly timeoutSeconds: string;
   readonly maxOutputTokens: string;
+  /** "" = auto, "true"/"false" = explicit override */
+  readonly supportsVision: "" | "true" | "false";
 }
 
 interface EmbeddingFormState {
@@ -69,6 +71,7 @@ const EMPTY_LLM_FORM: LlmFormState = {
   outputUsdPer1M: "",
   timeoutSeconds: "",
   maxOutputTokens: "",
+  supportsVision: "",
 };
 
 const EMPTY_EMBEDDING_FORM: EmbeddingFormState = {
@@ -97,6 +100,12 @@ function readError(err: unknown): string {
   return apiError ?? "Đã xảy ra lỗi, vui lòng thử lại.";
 }
 
+function toNullableBooleanTriState(value: "" | "true" | "false"): boolean | null {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return null;
+}
+
 function toLlmUpdatePayload(form: LlmFormState): UpdateLlmConfigPayload {
   return {
     provider: form.provider,
@@ -107,6 +116,7 @@ function toLlmUpdatePayload(form: LlmFormState): UpdateLlmConfigPayload {
     outputUsdPer1M: toNullableNumber(form.outputUsdPer1M),
     timeoutSeconds: toNullableNumber(form.timeoutSeconds),
     maxOutputTokens: toNullableNumber(form.maxOutputTokens),
+    supportsVision: toNullableBooleanTriState(form.supportsVision),
   };
 }
 
@@ -125,6 +135,8 @@ function fromLlmConfig(config: LlmConfig): LlmFormState {
     outputUsdPer1M: config.outputUsdPer1M?.toString() ?? "",
     timeoutSeconds: config.timeoutSeconds?.toString() ?? "",
     maxOutputTokens: config.maxOutputTokens?.toString() ?? "",
+    supportsVision:
+      config.supportsVision === true ? "true" : config.supportsVision === false ? "false" : "",
   };
 }
 
@@ -492,6 +504,7 @@ export default function LlmProvidersPage() {
           <label className="block space-y-1"><span className={LABEL_CLASS}>Base URL (tùy chọn, https)</span><input className={`${FIELD_CLASS} font-mono`} value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://api.openai.com" /></label>
           <label className="block space-y-1"><span className={LABEL_CLASS}>Timeout (giây, tùy chọn)</span><input className={FIELD_CLASS} type="number" min={1} max={600} step={1} value={form.timeoutSeconds} onChange={(e) => setForm({ ...form, timeoutSeconds: e.target.value })} placeholder="mặc định 120" /></label>
           <label className="block space-y-1"><span className={LABEL_CLASS}>Max output tokens (tùy chọn)</span><input className={FIELD_CLASS} type="number" min={1} max={200000} step={1} value={form.maxOutputTokens} onChange={(e) => setForm({ ...form, maxOutputTokens: e.target.value })} placeholder="mặc định 3000" /></label>
+          <label className="block space-y-1"><span className={LABEL_CLASS}>Hỗ trợ vision (review ảnh)</span><select className={FIELD_CLASS} value={form.supportsVision} onChange={(e) => setForm({ ...form, supportsVision: e.target.value as LlmFormState["supportsVision"] })}><option value="">Tự động (registry / unknown)</option><option value="true">Bật (override)</option><option value="false">Tắt (override)</option></select></label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block space-y-1"><span className={LABEL_CLASS}>USD / 1M input</span><input className={FIELD_CLASS} type="number" min={0} step={0.01} value={form.inputUsdPer1M} onChange={(e) => setForm({ ...form, inputUsdPer1M: e.target.value })} /></label>
             <label className="block space-y-1"><span className={LABEL_CLASS}>USD / 1M output</span><input className={FIELD_CLASS} type="number" min={0} step={0.01} value={form.outputUsdPer1M} onChange={(e) => setForm({ ...form, outputUsdPer1M: e.target.value })} /></label>

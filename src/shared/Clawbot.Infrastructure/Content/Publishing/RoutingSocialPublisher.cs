@@ -7,7 +7,7 @@ public sealed class RoutingSocialPublisher(
     public async Task<PublishResult> PublishAsync(PublishRequest request, CancellationToken ct = default)
     {
         var platform = (request.Platform ?? string.Empty).Trim().ToLowerInvariant();
-        if (platform is not ("facebook" or "zalo"))
+        if (platform is not ("facebook" or "instagram" or "zalo"))
             return await fallbackPublisher.PublishAsync(request, ct).ConfigureAwait(false);
 
         var result = await nativePublisher.PublishAsync(request, ct).ConfigureAwait(false);

@@ -27,4 +27,23 @@ public static class KeysetQuery
 
         return (rowsIncludingOverflow as List<T> ?? rowsIncludingOverflow.ToList(), null);
     }
+
+    /// <summary>Decode long-id cursor once; invalid/missing → null (first page).</summary>
+    public static LongCursorKey? DecodeLong(string? cursor) => LongCursorCodec.TryDecode(cursor);
+
+    public static (List<T> Items, string? NextCursor) SliceWithLongCursor<T>(
+        IReadOnlyList<T> rowsIncludingOverflow,
+        int pageSize,
+        Func<T, DateTimeOffset> ts,
+        Func<T, long> id)
+    {
+        if (rowsIncludingOverflow.Count > pageSize)
+        {
+            var last = rowsIncludingOverflow[pageSize - 1];
+            var page = rowsIncludingOverflow.Take(pageSize).ToList();
+            return (page, LongCursorCodec.Encode(ts(last), id(last)));
+        }
+
+        return (rowsIncludingOverflow as List<T> ?? rowsIncludingOverflow.ToList(), null);
+    }
 }

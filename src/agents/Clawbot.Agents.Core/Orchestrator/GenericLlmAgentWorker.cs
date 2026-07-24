@@ -43,8 +43,8 @@ internal sealed class GenericLlmAgentWorker(
             : await ragRetriever.RetrieveAsync(new RagRequest(TenantId(task), definition.KbModuleCode, task.Description, RagTopK), ct).ConfigureAwait(false);
 
         var allowedTools = ResolveAllowedTools();
-        // EARS[WHEN a data-defined agent declares no allowed tools THE SYSTEM SHALL complete the task with a
-        // single text completion, preserving the original behavior]
+        // Text-only only when neither explicit grants nor orchestrator defaults resolve any registry tool
+        // (e.g. reporter-agent). Empty DB grants no longer force text-only for lead/sale/content/…
         if (allowedTools.Count == 0)
             return await RunTextOnlyAsync(task, chunks, ct).ConfigureAwait(false);
 
@@ -55,14 +55,21 @@ internal sealed class GenericLlmAgentWorker(
     {
         if (toolRegistry is null)
             return [];
-        var names = ParseAllowedToolNames(definition.AllowedToolsJson);
-        return names.Length == 0 ? [] : toolRegistry.AllowedFor(names);
+        // Explicit AllowedToolsJson wins; empty → AgentToolDefaults by code/shortName/type.
+        var names = AgentToolDefaults.ResolveToolNames(definition);
+        if (names.Length == 0)
+            return [];
+        return toolRegistry.AllowedFor(names);
     }
 
     private async Task<AgentResult> RunTextOnlyAsync(AgentTask task, IReadOnlyList<RagChunk> chunks, CancellationToken ct)
     {
         var reply = await CallLlmWithHeartbeatAsync(BuildSystemPrompt(chunks, task.RoleInstruction), Array.Empty<ChatTurn>(), BuildUserMessage(task), task, ct).ConfigureAwait(false);
         await RecordCostAsync(reply).ConfigureAwait(false);
+        // Text-only agent that admits "thiếu list/input" must not mark the orchestration task completed —
+        // that cascade made 3/3 "xong" with 0 lead touched.
+        if (LooksLikeBlockedMissingData(reply.Text))
+            return new AgentResult(task.Id, false, reply.Text, "blocked_missing_input");
         return new AgentResult(task.Id, true, reply.Text, null);
     }
 
@@ -87,7 +94,12 @@ internal sealed class GenericLlmAgentWorker(
             await RecordCostAsync(reply).ConfigureAwait(false);
 
             if (!ReActAction.TryParse(reply.Text, out var action))
+            {
+                // Có tool nhưng không gọi + text nhận thiếu data / blocked → fail để orchestrator replan.
+                if (toolOutputs.Count == 0 && (LooksLikeBlockedMissingData(reply.Text) || LooksLikeShouldHaveUsedTools(task.Description)))
+                    return new AgentResult(task.Id, false, reply.Text, "blocked_missing_tool_use");
                 return new AgentResult(task.Id, true, ComposeOutput(reply.Text, toolOutputs), null);
+            }
 
             var tool = allowedTools.FirstOrDefault(t => string.Equals(t.Name, action.Tool, StringComparison.OrdinalIgnoreCase));
             string observation;
@@ -235,6 +247,71 @@ internal sealed class GenericLlmAgentWorker(
         }
     }
 
+    /// <summary>
+    /// LLM admits it cannot proceed without data the system could have fetched/tools could supply.
+    /// Treating this as Success=true caused orchestration "3/3 xong" with zero side effects.
+    /// </summary>
+    internal static bool LooksLikeBlockedMissingData(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        var t = text.ToLowerInvariant();
+        return t.Contains("thiếu danh sách", StringComparison.Ordinal)
+            || t.Contains("thieu danh sach", StringComparison.Ordinal)
+            || t.Contains("thiếu lead", StringComparison.Ordinal)
+            || t.Contains("thieu lead", StringComparison.Ordinal)
+            || t.Contains("cần cung cấp", StringComparison.Ordinal)
+            || t.Contains("can cung cap", StringComparison.Ordinal)
+            || t.Contains("yêu cầu cung cấp", StringComparison.Ordinal)
+            || t.Contains("yeu cau cung cap", StringComparison.Ordinal)
+            || t.Contains("missing list", StringComparison.Ordinal)
+            || t.Contains("missing lead", StringComparison.Ordinal)
+            || t.Contains("provide the list", StringComparison.Ordinal)
+            || t.Contains("provide lead", StringComparison.Ordinal)
+            || t.Contains("need the list", StringComparison.Ordinal)
+            || t.Contains("blocked", StringComparison.Ordinal)
+            || t.Contains("input chỉ có tenant_id", StringComparison.Ordinal)
+            || t.Contains("input chi co tenant_id", StringComparison.Ordinal)
+            || t.Contains("only has tenant_id", StringComparison.Ordinal)
+            || t.Contains("chỉ có tenant_id", StringComparison.Ordinal)
+            || t.Contains("chi co tenant_id", StringComparison.Ordinal)
+            || t.Contains("0/11", StringComparison.Ordinal)
+            || t.Contains("chưa soạn tin", StringComparison.Ordinal)
+            || t.Contains("chua soan tin", StringComparison.Ordinal)
+            || t.Contains("no leads", StringComparison.Ordinal)
+            || t.Contains("không có lead", StringComparison.Ordinal)
+            || t.Contains("khong co lead", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Task wording implies a CRM/list/action tool should run — finishing with prose alone is a soft-fail.
+    /// </summary>
+    internal static bool LooksLikeShouldHaveUsedTools(string? description)
+    {
+        if (string.IsNullOrWhiteSpace(description))
+            return false;
+        var d = description.ToLowerInvariant();
+        return d.Contains("list", StringComparison.Ordinal)
+            || d.Contains("find", StringComparison.Ordinal)
+            || d.Contains("xác định", StringComparison.Ordinal)
+            || d.Contains("xac dinh", StringComparison.Ordinal)
+            || d.Contains("cold", StringComparison.Ordinal)
+            || d.Contains("lạnh", StringComparison.Ordinal)
+            || d.Contains("lanh", StringComparison.Ordinal)
+            || d.Contains("tương tác", StringComparison.Ordinal)
+            || d.Contains("tuong tac", StringComparison.Ordinal)
+            || d.Contains("gửi tin", StringComparison.Ordinal)
+            || d.Contains("gui tin", StringComparison.Ordinal)
+            || d.Contains("score", StringComparison.Ordinal)
+            || d.Contains("chấm điểm", StringComparison.Ordinal)
+            || d.Contains("publish", StringComparison.Ordinal)
+            || d.Contains("schedule", StringComparison.Ordinal)
+            || d.Contains("approve", StringComparison.Ordinal)
+            || d.Contains("generate", StringComparison.Ordinal)
+            || d.Contains("tạo", StringComparison.Ordinal)
+            || d.Contains("tao ", StringComparison.Ordinal);
+    }
+
     private string BuildSystemPrompt(IReadOnlyList<RagChunk> chunks, string? roleInstruction = null)
     {
         var sb = new StringBuilder(definition.Description.Length + 512);
@@ -265,9 +342,10 @@ internal sealed class GenericLlmAgentWorker(
         // (content_id, schedule_id, post_url) are what downstream agents (reviewer→publisher→report) consume.
         // A prose-only answer leaves no id and breaks the chain — so require a tool call before finishing.
         sb.AppendLine("IMPORTANT — act, do not just describe:");
-        sb.AppendLine("- When the task creates, approves, schedules, or publishes something and a matching tool exists, you MUST call that tool. Producing only a plan/calendar/description as text is a failure: the next agent needs the id the tool returns (e.g. content_id).");
+        sb.AppendLine("- When the task creates, approves, schedules, publishes, lists/queries CRM data, or scores leads and a matching tool exists, you MUST call that tool. Producing only a plan/description as text is a failure: the next agent needs the ids the tool returns (content_id, lead_ids, …).");
         sb.AppendLine("- Prefer one concrete tool call over a long text plan. If the task is bulk (e.g. a content calendar), still persist at least one concrete item via the tool so a real id exists, then summarise the rest as text.");
-        sb.AppendLine("- If an upstream Observation or the Input JSON contains an id you need (e.g. content_id under upstream_results), reuse it in your tool args instead of inventing one.");
+        sb.AppendLine("- If an upstream Observation or the Input JSON contains an id you need (e.g. content_id / lead_ids under upstream_results), reuse it in your tool args instead of inventing one.");
+        sb.AppendLine("- NEVER invent lead lists or claim you need the user to paste IDs when lead-agent list/find_cold can query the tenant CRM with only tenant_id.");
         sb.AppendLine("- Only give a plain-text final answer after the needed tool(s) have run, or when no available tool fits the task.");
         sb.AppendLine();
         sb.AppendLine("## Available tools");

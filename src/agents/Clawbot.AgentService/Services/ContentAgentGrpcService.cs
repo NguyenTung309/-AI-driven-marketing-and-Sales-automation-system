@@ -1,6 +1,7 @@
 using Clawbot.Agents.Contracts.Content;
 using Clawbot.Domain.Content;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Content;
 using Clawbot.SharedKernel.Time;
 using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
@@ -34,14 +35,19 @@ public sealed partial class ContentAgentGrpcService(
             throw new RpcException(new Status(StatusCode.InvalidArgument, "brief required"));
         if (string.IsNullOrWhiteSpace(request.Channel))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "channel required"));
+        if (!ContentPlatformCatalog.TryNormalizeWritable(request.Channel, out var platform))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "content.platform_unsupported"));
         var briefId = ParseOptionalGuid(request.BriefId, "brief_id");
+        var generatorAgentId = await ResolveContentGeneratorAgentIdAsync(
+            tenantId,
+            context.CancellationToken).ConfigureAwait(false);
 
         CoreContent.ContentDraftResult draft;
         try
         {
             draft = await _agent.GenerateAsync(
                 new CoreContent.ContentGenerateRequest(
-                    tenantId, briefId, request.Channel, request.Brief, KbModuleCode: null),
+                    tenantId, briefId, platform!, request.Brief, KbModuleCode: null),
                 context.CancellationToken).ConfigureAwait(false);
         }
         catch (CoreContent.ContentPromptTemplateException ex)
@@ -50,9 +56,22 @@ public sealed partial class ContentAgentGrpcService(
             throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
         }
 
+        var now = _clock.UtcNow;
         var item = ContentItem.Create(
-            tenantId, draft.Platform, draft.Body, createdBy: null, _clock.UtcNow, briefId: draft.BriefId);
+            tenantId,
+            draft.Platform,
+            draft.Body,
+            createdBy: null,
+            now,
+            briefId: draft.BriefId,
+            createdByAgentId: generatorAgentId);
         _db.ContentItems.Add(item);
+        _db.ContentReviewTasks.Add(
+            ContentGenerationPersistence.CreateImmediateReviewTask(
+                tenantId,
+                item.Id,
+                item.ContentRevision,
+                now));
         await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
         LogDraftGenerated(
             _logger,
@@ -79,15 +98,22 @@ public sealed partial class ContentAgentGrpcService(
         var tenantId = ParseTenantId(request.TenantId);
         if (!Guid.TryParse(request.ContentId, out var contentId) || contentId == Guid.Empty)
             throw new RpcException(new Status(StatusCode.InvalidArgument, "content_id required"));
+        if (request.TargetChannels.Count == 0)
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "content.repurpose_invalid"));
+
         IReadOnlyList<string> targets;
         try
         {
-            targets = CoreContent.ContentRepurposeMapper.NormalizeTargets(request.TargetChannels);
+            targets = ContentPlatformCatalog.NormalizeWritable(request.TargetChannels);
         }
-        catch (ArgumentException ex)
+        catch (ArgumentException)
         {
-            throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "content.platform_unsupported"));
         }
+
+        var generatorAgentId = await ResolveContentGeneratorAgentIdAsync(
+            tenantId,
+            context.CancellationToken).ConfigureAwait(false);
 
         var source = await _db.ContentItems
             .IgnoreQueryFilters()
@@ -98,6 +124,7 @@ public sealed partial class ContentAgentGrpcService(
 
         var sourceBody = string.IsNullOrWhiteSpace(request.SourceBody) ? source.Body : request.SourceBody;
         var created = new List<(ContentItem Item, CoreContent.ContentDraftResult Draft)>(targets.Count);
+        var now = _clock.UtcNow;
         foreach (var target in targets)
         {
             var draft = await _agent.GenerateAsync(
@@ -106,11 +133,23 @@ public sealed partial class ContentAgentGrpcService(
                 context.CancellationToken).ConfigureAwait(false);
 
             var item = ContentItem.Create(
-                tenantId, draft.Platform, draft.Body, createdBy: null, _clock.UtcNow, briefId: draft.BriefId);
+                tenantId,
+                draft.Platform,
+                draft.Body,
+                createdBy: null,
+                now,
+                briefId: draft.BriefId,
+                createdByAgentId: generatorAgentId);
             created.Add((item, draft));
         }
 
         _db.ContentItems.AddRange(created.Select(c => c.Item));
+        _db.ContentReviewTasks.AddRange(
+            created.Select(c => ContentGenerationPersistence.CreateImmediateReviewTask(
+                tenantId,
+                c.Item.Id,
+                c.Item.ContentRevision,
+                now)));
         await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
         foreach (var (item, draft) in created)
         {
@@ -197,6 +236,31 @@ public sealed partial class ContentAgentGrpcService(
             Reason = result.Reason,
             ReviewedByAgentDefinitionId = result.Verdict == CoreContent.ContentReviewResult.Approve ? reviewerDefId.Value.ToString() : string.Empty,
         };
+    }
+
+    private async Task<Guid> ResolveContentGeneratorAgentIdAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var generatorId = await _db.AgentDefinitions
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(definition =>
+                definition.TenantId == tenantId
+                && definition.Code == ContentGenerationPersistence.GeneratorAgentCode
+                && definition.DeletedAt == null)
+            .Select(definition => (Guid?)definition.Id)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (generatorId is null)
+        {
+            throw new RpcException(new Status(
+                StatusCode.FailedPrecondition,
+                ContentGenerationPersistence.GeneratorAgentNotConfigured));
+        }
+
+        return generatorId.Value;
     }
 
     private static Guid ParseTenantId(string tenantId)

@@ -8,7 +8,12 @@ public sealed class LlmBaseUrlOptions
 {
     public const string SectionName = "LlmBaseUrl";
 
+    // Operator-only. Never bound from tenant config. Dev/local gateways only when true.
     public bool AllowPrivate { get; init; }
+
+    // Exact origins (scheme://host[:port]) for private LLM gateways. CIDR checks are
+    // enforced at DNS/connect time via LlmBaseUrlGuard private-address rejection unless listed.
+    public string[] AllowedPrivateOrigins { get; init; } = [];
 }
 
 public sealed class LlmHttpOptions
@@ -38,6 +43,12 @@ public static class ChatModule
         services.AddSingleton<ILlmCallScope, LlmCallScope>();
         services.AddSingleton<ILlmChatClientFactory>(sp => new LlmChatClientFactory(sp.GetRequiredService<IHttpClientFactory>(), allowPrivateBaseUrls, httpOptions.HttpTimeoutSeconds));
         services.AddSingleton<IClaudeChatClient, ScopedLlmChatClient>();
+
+        // Phase 2.12: review-specific completion path (parallel to chat; never reuses ClaudeReply).
+        services.AddSingleton<Clawbot.Agents.Core.Content.ILlmVisionCapabilityResolver,
+            Clawbot.Agents.Core.Content.LlmVisionCapabilityResolver>();
+        services.AddSingleton<Clawbot.Agents.Core.Content.IContentReviewCompletionClientFactory>(
+            _ => new Clawbot.Agents.Core.Content.ContentReviewCompletionClientFactory(allowPrivateBaseUrls));
 
         services.AddScoped<ChatAgent>();
         return services;
