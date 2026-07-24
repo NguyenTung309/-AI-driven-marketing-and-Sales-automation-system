@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Clawbot.Agents.Tests" />
+    <InternalsVisibleTo Include="Clawbot.Infrastructure.Tests" />
   </ItemGroup>
 
   <PropertyGroup>

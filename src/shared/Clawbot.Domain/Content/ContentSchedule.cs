@@ -113,6 +113,11 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
     {
         if (Status is not (StatusPending or StatusHeld))
             throw new InvalidOperationException("content_schedule_not_reschedulable");
+        if (RequiresInstagramTargetReselection()
+            && string.IsNullOrWhiteSpace(providerTargetId))
+        {
+            throw new InvalidOperationException("content_schedule_instagram_target_reselection_required");
+        }
 
         MetaAssetId = publishTargetId;
         PublishTargetId = publishTargetId;
@@ -225,6 +230,8 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
     // Manual "Đăng ngay / Thử lại": failed or stuck pending → clean pending for another attempt.
     public bool TryResetForRetry(DateTimeOffset at)
     {
+        if (RequiresInstagramTargetReselection())
+            return false;
         if (!string.Equals(Status, StatusFailed, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(Status, StatusHeld, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(Status, StatusPending, StringComparison.OrdinalIgnoreCase))
@@ -241,6 +248,14 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
         UpdatedAt = at;
         return true;
     }
+
+    public bool RequiresInstagramTargetReselection() =>
+        string.Equals(Platform, "instagram", StringComparison.OrdinalIgnoreCase)
+        && string.IsNullOrWhiteSpace(ProviderTargetId)
+        && string.Equals(
+            LastErrorCode,
+            ErrorInstagramTargetReselectionRequired,
+            StringComparison.Ordinal);
 
     // Phase 4.6: privileged reconcile after operator verification — never calls provider.
     public void MarkReconciledPosted(string postUrl, DateTimeOffset at)

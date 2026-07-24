@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Content;
@@ -8,7 +7,6 @@ using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Security;
 using Clawbot.SharedKernel.Time;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 
 namespace Clawbot.Api.Endpoints;
 
@@ -38,7 +36,6 @@ public static class AdminSocialCredentialsEndpoints
     private static readonly string[] Providers = ["zalo", "instagram"];
     private const int MaxFieldChars = 512;
     private const int MaxEndpointChars = 2048;
-    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
     public static IEndpointRouteBuilder MapAdminSocialCredentials(this IEndpointRouteBuilder app)
     {
@@ -54,7 +51,6 @@ public static class AdminSocialCredentialsEndpoints
     private static async Task<IResult> ListAsync(
         AppDbContext db,
         IEncryptor encryptor,
-        IOptions<GraphPublisherOptions> options,
         ITenantAccessor tenants,
         CancellationToken ct)
     {
@@ -74,7 +70,7 @@ public static class AdminSocialCredentialsEndpoints
             {
                 if (row is null)
                 {
-                    items.Add(ToDto(provider, "absent", Defaults(options.Value, provider), updatedAt: null));
+                    items.Add(ToDto(provider, "absent", new GraphChannelOptions(), updatedAt: null));
                     continue;
                 }
 
@@ -84,13 +80,13 @@ public static class AdminSocialCredentialsEndpoints
                     continue;
                 }
 
-                var decoded = InstagramCredentialEnvelopeCodec.Decode(
+                var decoded = SocialCredentialEnvelopeCodec.Decode(
                     encryptor,
                     tenant.TenantId,
                     provider,
                     row.PageId,
                     row.CredentialsEncrypted);
-                if (decoded.Status == InstagramCredentialEnvelopeStatus.Invalid || decoded.Options is null)
+                if (decoded.Status == SocialCredentialEnvelopeStatus.Invalid || decoded.Options is null)
                 {
                     items.Add(ToDto(provider, "invalid", new GraphChannelOptions(), row.UpdatedAt));
                     continue;
@@ -106,10 +102,12 @@ public static class AdminSocialCredentialsEndpoints
                 continue;
             }
 
-            var stored = row is null ? null : Decrypt(encryptor, row.CredentialsEncrypted);
-            var effective = stored ?? Defaults(options.Value, provider);
+            // Zalo: global OA configuration is never reported as tenant state, so an absent row stays empty.
+            var stored = row is null || !row.IsActive
+                ? null
+                : DecodeStored(encryptor, tenant.TenantId, provider, row);
             var resolutionState = row is null ? "absent" : stored is null ? "invalid" : "resolved";
-            items.Add(ToDto(provider, resolutionState, effective, row?.UpdatedAt));
+            items.Add(ToDto(provider, resolutionState, stored ?? new GraphChannelOptions(), row?.UpdatedAt));
         }
 
         return Results.Ok(new { items });
@@ -120,7 +118,6 @@ public static class AdminSocialCredentialsEndpoints
         UpdateSocialCredentialRequest body,
         AppDbContext db,
         IEncryptor encryptor,
-        IOptions<GraphPublisherOptions> options,
         ITenantAccessor tenants,
         IClock clock,
         HttpContext http,
@@ -153,7 +150,7 @@ public static class AdminSocialCredentialsEndpoints
             return Error(http, StatusCodes.Status400BadRequest, "admin.social_endpoint_invalid", "endpoint must be an absolute https URL.");
         }
 
-        var row = await db.SocialCredentials
+        var row = await db.SocialCredentials.AsNoTracking()
             .FirstOrDefaultAsync(
                 c => c.TenantId == tenant.TenantId
                     && c.Provider == normalized
@@ -162,28 +159,17 @@ public static class AdminSocialCredentialsEndpoints
                 ct)
             .ConfigureAwait(false);
         GraphChannelOptions? stored;
-        if (normalized == "instagram" && row is not null)
+        if (row is null || !row.IsActive)
         {
-            if (!row.IsActive)
-            {
-                stored = null;
-            }
-            else
-            {
-                var decoded = InstagramCredentialEnvelopeCodec.Decode(
-                    encryptor,
-                    tenant.TenantId,
-                    normalized,
-                    row.PageId,
-                    row.CredentialsEncrypted);
-                stored = decoded.Status == InstagramCredentialEnvelopeStatus.Resolved
-                    ? decoded.Options
-                    : null;
-            }
+            stored = null;
+        }
+        else if (normalized == "zalo" && CanReplaceZaloWithoutDecrypting(body))
+        {
+            stored = null;
         }
         else
         {
-            stored = row is null ? null : Decrypt(encryptor, row.CredentialsEncrypted);
+            stored = DecodeStored(encryptor, tenant.TenantId, normalized, row);
         }
 
         if (normalized == "instagram"
@@ -193,47 +179,102 @@ public static class AdminSocialCredentialsEndpoints
         {
             return Error(http, StatusCodes.Status400BadRequest, "admin.instagram_credentials_invalid", "Disable the standalone override or replace all Instagram credential fields.");
         }
+        if (normalized == "zalo"
+            && row is not null
+            && stored is null
+            && !CanRepairInvalidZalo(body))
+        {
+            return Error(http, StatusCodes.Status400BadRequest, "admin.zalo_credentials_invalid", "Disable and clear the Zalo override or replace all Zalo credential fields.");
+        }
 
-        var current = stored ?? Defaults(options.Value, normalized);
+        // Merge only over the tenant's own stored credentials. Global publisher configuration must never
+        // become a tenant credential, otherwise any admin could adopt the shared OA token by omitting fields.
+        var current = stored ?? new GraphChannelOptions();
         var merged = normalized == "instagram"
             ? MergeInstagram(current, body)
             : MergeZalo(current, body);
         if (normalized == "instagram" && !IsValidInstagram(merged))
             return Error(http, StatusCodes.Status400BadRequest, "admin.instagram_credentials_invalid", "Enabled Instagram credentials require a numeric user ID and access token.");
+        if (normalized == "zalo" && !IsValidZalo(merged))
+            return Error(http, StatusCodes.Status400BadRequest, "admin.zalo_credentials_invalid", "Enabled Zalo credentials require an HTTPS endpoint, OA ID, and access token.");
 
-        var encrypted = normalized == "instagram"
-            ? InstagramCredentialEnvelopeCodec.Encode(
-                encryptor,
-                tenant.TenantId,
-                normalized,
-                row?.PageId,
-                merged)
-            : encryptor.Encrypt(JsonSerializer.Serialize(merged, JsonOpts));
+        var encrypted = SocialCredentialEnvelopeCodec.Encode(
+            encryptor,
+            tenant.TenantId,
+            normalized,
+            row?.PageId,
+            merged);
         var now = clock.UtcNow;
         if (row is null)
         {
             db.SocialCredentials.Add(SocialCredential.Create(tenant.TenantId, normalized, encrypted, now));
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
         else
         {
-            row.UpdateCredentials(encrypted, now);
-            row.Activate(now);
+            var updatedRows = await CompareAndSwapExistingAsync(
+                db,
+                tenant.TenantId,
+                normalized,
+                row,
+                encrypted,
+                now,
+                ct).ConfigureAwait(false);
+            if (updatedRows != 1)
+            {
+                return Error(
+                    http,
+                    StatusCodes.Status409Conflict,
+                    "admin.social_credential_conflict",
+                    "Social credentials changed concurrently. Reload and try again.");
+            }
         }
 
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
         var resolutionState = normalized == "instagram"
             ? InstagramResolutionState(merged)
             : "resolved";
         return Results.Ok(ToDto(normalized, resolutionState, merged, now));
     }
 
-    private static GraphChannelOptions Defaults(GraphPublisherOptions options, string provider) =>
-        provider switch
-        {
-            "zalo" => options.Zalo,
-            "instagram" => new GraphChannelOptions(),
-            _ => new GraphChannelOptions(),
-        };
+    private static Task<int> CompareAndSwapExistingAsync(
+        AppDbContext db,
+        Guid tenantId,
+        string provider,
+        SocialCredential observed,
+        string encrypted,
+        DateTimeOffset updatedAt,
+        CancellationToken ct) =>
+        db.SocialCredentials.IgnoreQueryFilters()
+            .Where(row => row.TenantId == tenantId
+                && row.Id == observed.Id
+                && row.Provider == provider
+                && row.PageId == observed.PageId
+                && row.IsActive == observed.IsActive
+                && row.DeletedAt == observed.DeletedAt
+                && row.UpdatedAt == observed.UpdatedAt
+                && row.CredentialsEncrypted == observed.CredentialsEncrypted)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(row => row.CredentialsEncrypted, encrypted)
+                    .SetProperty(row => row.IsActive, true)
+                    .SetProperty(row => row.UpdatedAt, updatedAt),
+                ct);
+
+    // Stored credentials are only usable when the envelope is bound to this tenant, provider, and row target.
+    private static GraphChannelOptions? DecodeStored(
+        IEncryptor encryptor,
+        Guid tenantId,
+        string provider,
+        SocialCredential row)
+    {
+        var decoded = SocialCredentialEnvelopeCodec.Decode(
+            encryptor,
+            tenantId,
+            provider,
+            row.PageId,
+            row.CredentialsEncrypted);
+        return decoded.Status == SocialCredentialEnvelopeStatus.Resolved ? decoded.Options : null;
+    }
 
     private static GraphChannelOptions MergeInstagram(
         GraphChannelOptions current,
@@ -271,35 +312,39 @@ public static class AdminSocialCredentialsEndpoints
         && update.PageId is not null
         && update.PageAccessToken is not null;
 
+    private static bool CanRepairInvalidZalo(UpdateSocialCredentialRequest update) =>
+        update.Enabled == false || IsFullZaloReplacement(update);
+
+    private static bool CanReplaceZaloWithoutDecrypting(UpdateSocialCredentialRequest update) =>
+        IsFullZaloReplacement(update) || IsExplicitZaloClearAndDisable(update);
+
+    private static bool IsFullZaloReplacement(UpdateSocialCredentialRequest update) =>
+        update.Enabled.HasValue
+        && update.Endpoint is not null
+        && update.OaId is not null
+        && update.OaAccessToken is not null;
+
+    private static bool IsExplicitZaloClearAndDisable(UpdateSocialCredentialRequest update) =>
+        update.Enabled == false
+        && IsExplicitClear(update.Endpoint)
+        && IsExplicitClear(update.OaId)
+        && IsExplicitClear(update.OaAccessToken);
+
+    private static bool IsExplicitClear(string? value) =>
+        value is not null && string.IsNullOrWhiteSpace(value);
+
     private static bool IsValidInstagram(GraphChannelOptions value) =>
         !value.Enabled
         || (!string.IsNullOrWhiteSpace(value.PageId)
             && value.PageId.All(char.IsAsciiDigit)
             && !string.IsNullOrWhiteSpace(value.PageAccessToken));
 
-    private static GraphChannelOptions? Decrypt(IEncryptor encryptor, string encrypted)
-    {
-        if (string.IsNullOrEmpty(encrypted))
-            return null;
-
-        try
-        {
-            var options = JsonSerializer.Deserialize<GraphChannelOptions>(encryptor.Decrypt(encrypted), JsonOpts);
-            return options is null ? null : InstagramCredentialEnvelopeCodec.Normalize(options);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-        catch (FormatException)
-        {
-            return null;
-        }
-        catch (System.Security.Cryptography.CryptographicException)
-        {
-            return null;
-        }
-    }
+    private static bool IsValidZalo(GraphChannelOptions value) =>
+        !value.Enabled
+        || (!string.IsNullOrWhiteSpace(value.Endpoint)
+            && IsValidHttpsUrl(value.Endpoint)
+            && !string.IsNullOrWhiteSpace(value.OaId)
+            && !string.IsNullOrWhiteSpace(value.OaAccessToken));
 
     private static string InstagramResolutionState(GraphChannelOptions value) =>
         !value.Enabled ? "disabled" : IsValidInstagram(value) ? "resolved" : "invalid";

@@ -57,34 +57,72 @@ public sealed partial class ContentPublishJob(
 
         foreach (var schedule in dueSchedules)
         {
-            if (!itemsById.TryGetValue(schedule.ContentItemId, out var item) || item.TenantId != schedule.TenantId)
+            // Cách ly từng schedule: 1 row lỗi bất ngờ không được giết cả batch (và gây bão retry Hangfire).
+            try
             {
-                // Item missing / hard-deleted — free the unique pending index so user can re-schedule.
-                schedule.Cancel(now, "item_missing");
-                await _db.SaveChangesAsync(ct).ConfigureAwait(false);
-                continue;
+                await ProcessDueScheduleAsync(schedule, itemsById, now, ct).ConfigureAwait(false);
             }
-
-            // Stale schedule: item was reverted/rejected after scheduling — cancel so it no longer blocks
-            // the unique pending index and calendar shows a terminal state with reason.
-            if (!string.Equals(item.Status, "scheduled", StringComparison.OrdinalIgnoreCase))
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                var staleReason = ContentSchedule.ErrorStaleItemPrefix + item.Status;
-                schedule.Cancel(now, staleReason);
-                LogStaleScheduleSkipped(_logger, schedule.TenantId, item.Id, schedule.Id, item.Status);
-                await _db.SaveChangesAsync(ct).ConfigureAwait(false);
-                continue;
+                DiscardPendingChanges();
+                LogScheduleProcessingFailed(_logger, schedule.TenantId, schedule.ContentItemId, schedule.Id, exception);
             }
+        }
+    }
 
-            if (schedule.ContentRevision != item.ContentRevision)
-            {
-                schedule.Cancel(now, "stale_content_revision");
-                await _db.SaveChangesAsync(ct).ConfigureAwait(false);
-                continue;
-            }
-
-            await AttemptPublishAsync(schedule, item, now, ct).ConfigureAwait(false);
+    private async Task ProcessDueScheduleAsync(
+        ContentSchedule schedule,
+        Dictionary<Guid, ContentItem> itemsById,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        if (!itemsById.TryGetValue(schedule.ContentItemId, out var item) || item.TenantId != schedule.TenantId)
+        {
+            // Item missing / hard-deleted — free the unique pending index so user can re-schedule.
+            schedule.Cancel(now, "item_missing");
             await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        // Stale schedule: item was reverted/rejected after scheduling — cancel so it no longer blocks
+        // the unique pending index and calendar shows a terminal state with reason.
+        if (!string.Equals(item.Status, "scheduled", StringComparison.OrdinalIgnoreCase))
+        {
+            var staleReason = ContentSchedule.ErrorStaleItemPrefix + item.Status;
+            schedule.Cancel(now, staleReason);
+            LogStaleScheduleSkipped(_logger, schedule.TenantId, item.Id, schedule.Id, item.Status);
+            await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (schedule.ContentRevision != item.ContentRevision)
+        {
+            schedule.Cancel(now, "stale_content_revision");
+            await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        await AttemptPublishAsync(schedule, item, now, ct).ConfigureAwait(false);
+        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    // Hoàn tác các thay đổi đang chờ của schedule vừa lỗi để vòng lặp chạy tiếp an toàn,
+    // giữ nguyên các entity đã lưu thành công (Unchanged) ở các lượt trước.
+    private void DiscardPendingChanges()
+    {
+        foreach (var entry in _db.ChangeTracker.Entries().ToList())
+        {
+            switch (entry.State)
+            {
+                case EntityState.Added:
+                    entry.State = EntityState.Detached;
+                    break;
+                case EntityState.Modified:
+                case EntityState.Deleted:
+                    entry.CurrentValues.SetValues(entry.OriginalValues);
+                    entry.State = EntityState.Unchanged;
+                    break;
+            }
         }
     }
 
@@ -103,6 +141,9 @@ public sealed partial class ContentPublishJob(
         {
             return (false, "schedule_not_retryable");
         }
+
+        if (schedule.RequiresInstagramTargetReselection())
+            return (false, ContentSchedule.ErrorInstagramTargetReselectionRequired);
 
         var item = await _db.ContentItems
             .FirstOrDefaultAsync(i => i.Id == schedule.ContentItemId && i.DeletedAt == null, ct)
@@ -151,26 +192,75 @@ public sealed partial class ContentPublishJob(
         var publishTargetId = schedule.PublishTargetId
             ?? schedule.MetaAssetId
             ?? schedule.Id;
-        var assetSnapshots = await LoadReadyAssetSnapshotsAsync(
-            schedule.TenantId,
-            item.Id,
-            ct).ConfigureAwait(false);
         var leaseExpiresAt = now.AddMinutes(10);
-        var attempt = ContentPublishAttempt.Claim(
-            schedule.TenantId,
-            schedule.Id,
-            item.Id,
-            item.ContentRevision,
-            schedule.Platform,
-            publishTargetId,
-            item.Body,
-            assetSnapshots,
-            leaseExpiresAt,
-            now,
-            attemptSequence: schedule.RetryCount + 1);
+
+        // UX_content_publish_attempts_operation cho đúng 1 row cho mỗi
+        // (tenant, schedule, item, revision, target). Lần thử lại phải TÁI DÙNG row đó — claim
+        // row mới sẽ đụng unique index (Msg 2601) và giết cả batch. Lần đầu mới insert.
+        // IgnoreQueryFilters BẮT BUỘC: job scope Hangfire không có tenant context nên query
+        // filter theo tenant sẽ cắt kết quả về rỗng, khiến lookup luôn tưởng chưa có attempt.
+        var existingAttempt = await _db.ContentPublishAttempts.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                candidate => candidate.TenantId == schedule.TenantId
+                    && candidate.ScheduleId == schedule.Id
+                    && candidate.ContentItemId == item.Id
+                    && candidate.ContentRevision == item.ContentRevision
+                    && candidate.PublishTargetId == publishTargetId,
+                ct)
+            .ConfigureAwait(false);
+
+        if (existingAttempt is not null)
+        {
+            // Bài đã thực sự lên provider ở lần trước — tuyệt đối không gọi lại (chống đăng trùng).
+            if (existingAttempt.HasConfirmedPublication())
+            {
+                ReconcileConfirmedPublication(schedule, item, existingAttempt, now);
+                LogPublished(_logger, schedule.TenantId, item.Id, schedule.Id);
+                return;
+            }
+
+            // Một tiến trình khác đang giữ lease còn hạn — nhường nó, thử lại lượt sau.
+            if (existingAttempt.HasActiveLease(now))
+                return;
+
+            // transmitted hết lease / outcome_unknown: có thể đã đăng, thuộc về reconciliation job.
+            if (!existingAttempt.CanReopenForRetry())
+            {
+                schedule.MarkHeld("publish_attempt_awaiting_reconciliation", now);
+                return;
+            }
+        }
+
+        ContentPublishAttempt attempt;
+        if (existingAttempt is null)
+        {
+            // Snapshot bất biến chỉ chốt một lần khi claim; reopen tái dùng nên không cần load lại.
+            var assetSnapshots = await LoadReadyAssetSnapshotsAsync(
+                schedule.TenantId,
+                item.Id,
+                ct).ConfigureAwait(false);
+            attempt = ContentPublishAttempt.Claim(
+                schedule.TenantId,
+                schedule.Id,
+                item.Id,
+                item.ContentRevision,
+                schedule.Platform,
+                publishTargetId,
+                item.Body,
+                assetSnapshots,
+                leaseExpiresAt,
+                now,
+                attemptSequence: 1);
+            _db.ContentPublishAttempts.Add(attempt);
+        }
+        else
+        {
+            attempt = existingAttempt;
+            attempt.ReopenForRetry(Guid.NewGuid(), leaseExpiresAt, now);
+        }
+
         item.ClaimPublishAttempt(item.ContentRevision, attempt.Id, now);
         schedule.MarkPublishing(now);
-        _db.ContentPublishAttempts.Add(attempt);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         // Mark transmitted before provider call so timeout/process-loss becomes outcome_unknown, not blind retry.
@@ -224,8 +314,9 @@ public sealed partial class ContentPublishJob(
         var reason = string.IsNullOrWhiteSpace(result.Error) ? "publisher_failed" : result.Error;
         if (IsAmbiguousPublishOutcome(reason))
         {
-            attempt.MarkOutcomeUnknown(attempt.LeaseToken!.Value, "publish_outcome_unknown", now);
-            schedule.MarkOutcomeUnknown(now, "publish_outcome_unknown");
+            var outcomeError = NormalizeAttemptError(reason);
+            attempt.MarkOutcomeUnknown(attempt.LeaseToken!.Value, outcomeError, now);
+            schedule.MarkOutcomeUnknown(now, outcomeError);
             await PersistAmbiguousOutcomeAsync().ConfigureAwait(false);
             return;
         }
@@ -262,6 +353,28 @@ public sealed partial class ContentPublishJob(
         {
             using var saveCts = new CancellationTokenSource(AmbiguousOutcomeSaveTimeout);
             await _db.SaveChangesAsync(saveCts.Token).ConfigureAwait(false);
+        }
+    }
+
+    // Attempt trước đã xác nhận lên provider nhưng schedule bị đưa lại 'pending' (vd. thao tác thử lại
+    // tay). Đồng bộ trạng thái cuối mà KHÔNG gọi provider lần nữa, tránh đăng trùng.
+    private static void ReconcileConfirmedPublication(
+        ContentSchedule schedule,
+        ContentItem item,
+        ContentPublishAttempt attempt,
+        DateTimeOffset now)
+    {
+        if (!string.Equals(schedule.Status, ContentSchedule.StatusPosted, StringComparison.Ordinal))
+        {
+            schedule.MarkPublishing(now);
+            schedule.MarkPosted(attempt.ExternalPostId ?? string.Empty, now);
+        }
+
+        // Chỉ chạm item khi nó vẫn ở 'scheduled' và hợp lệ; các trạng thái khác đã terminal.
+        if (item.CanPublishCurrentRevision())
+        {
+            item.ClaimPublishAttempt(item.ContentRevision, attempt.Id, now);
+            item.MarkPublished(attempt.Id, now);
         }
     }
 
@@ -317,7 +430,7 @@ public sealed partial class ContentPublishJob(
     }
 
     private static bool IsAmbiguousPublishOutcome(string reason) =>
-        reason is "publisher_timeout"
+        reason is "publish_outcome_unknown"
             or "facebook_timeout"
             or "facebook_unavailable"
             or "facebook_response_invalid"
@@ -325,7 +438,24 @@ public sealed partial class ContentPublishJob(
             or "instagram_timeout"
             or "instagram_unavailable"
             or "instagram_error"
-            or "zalo_timeout";
+        || reason.StartsWith("facebook_outcome_unknown:", StringComparison.Ordinal)
+        || reason.StartsWith("instagram_outcome_unknown:", StringComparison.Ordinal)
+        || reason.StartsWith("zalo_outcome_unknown:", StringComparison.Ordinal)
+        || reason.StartsWith("facebook_graph_", StringComparison.Ordinal)
+        || reason.StartsWith("instagram_graph_", StringComparison.Ordinal)
+        || IsLegacyAmbiguousFacebookHttpError(reason);
+
+    private static bool IsLegacyAmbiguousFacebookHttpError(string reason)
+    {
+        const string prefix = "facebook_http_";
+        return reason.StartsWith(prefix, StringComparison.Ordinal)
+            && int.TryParse(
+                reason.AsSpan(prefix.Length),
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var statusCode)
+            && (statusCode is 408 or 429 || statusCode >= 500);
+    }
 
     private static string? ResolvePublishHoldReason(ContentSchedule schedule, ContentItem item)
     {
@@ -340,6 +470,8 @@ public sealed partial class ContentPublishJob(
         {
             return "approval_context_mismatch";
         }
+        if (schedule.RequiresInstagramTargetReselection())
+            return ContentSchedule.ErrorInstagramTargetReselectionRequired;
         if (InstagramPublishingGate.IsBlocked(schedule.Platform)
             || InstagramPublishingGate.IsBlocked(item.Platform))
         {
@@ -395,4 +527,15 @@ public sealed partial class ContentPublishJob(
         Level = LogLevel.Information,
         Message = "Content publication paused by content_workflow_runtime_gate; skipping due publish batch")]
     private static partial void LogPublicationPaused(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 5109,
+        Level = LogLevel.Error,
+        Message = "Failed processing due schedule {ScheduleId} for content item {ContentItemId} tenant {TenantId}; skipping to keep batch alive")]
+    private static partial void LogScheduleProcessingFailed(
+        ILogger logger,
+        Guid tenantId,
+        Guid contentItemId,
+        Guid scheduleId,
+        Exception exception);
 }

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/shared/layout/AppShell";
@@ -46,6 +47,7 @@ import {
   type ContentPublishTarget,
   type ContentPublishTargetMode,
   type ContentQueueResponse,
+  type ScheduleContentItemPayload,
   type Trend,
 } from "@/shared/api/content";
 
@@ -63,6 +65,15 @@ interface ScheduleTargetState {
   readonly isExistingSchedule: boolean;
   readonly originalMetaAssetId: string | null;
   readonly explicitMetaAssetId: string | null;
+  readonly requiresInstagramAccountConfirmation: boolean;
+  readonly confirmInstagramAccount: boolean;
+}
+
+interface ScheduleMutationVariables {
+  readonly item: ContentItem;
+  readonly session: number;
+  readonly mode: ScheduleMode;
+  readonly payload: ScheduleContentItemPayload;
 }
 
 interface ContentAsset {
@@ -114,6 +125,8 @@ const EMPTY_SCHEDULE_TARGET: ScheduleTargetState = {
   isExistingSchedule: false,
   originalMetaAssetId: null,
   explicitMetaAssetId: null,
+  requiresInstagramAccountConfirmation: false,
+  confirmInstagramAccount: false,
 };
 
 function normalize(value: string | null | undefined): string {
@@ -312,7 +325,18 @@ function scheduledAtIso(mode: ScheduleMode, date: string, time: string): string 
   return local.toISOString();
 }
 
+const INSTAGRAM_TARGET_RESELECTION_ERROR_CODE = "content.instagram_target_reselection_required";
+const INSTAGRAM_TARGET_RESELECTION_GUIDANCE = "Lịch Instagram này cần chọn lại đích đăng. Hãy xác nhận tài khoản Instagram độc lập hiện đang cấu hình hoặc chọn Meta Page liên kết rồi thử lại.";
+
+function isInstagramTargetReselectionError(error: unknown): boolean {
+  if (!isAxiosError(error) || error.response?.status !== 409) return false;
+  const data: unknown = error.response.data;
+  if (!data || typeof data !== "object") return false;
+  return (data as { readonly errorCode?: unknown }).errorCode === INSTAGRAM_TARGET_RESELECTION_ERROR_CODE;
+}
+
 function errorMessage(error: unknown): string {
+  if (isInstagramTargetReselectionError(error)) return INSTAGRAM_TARGET_RESELECTION_GUIDANCE;
   return toUserFriendlyError(error, "Không xử lý được thao tác nội dung. Vui lòng thử lại.");
 }
 
@@ -1127,10 +1151,13 @@ function ScheduleDialog({
   selectedTargetId,
   preserveExistingTarget,
   originalTargetUnavailable,
+  requiresStandaloneConfirmation,
+  standaloneAccountConfirmed,
   onMode,
   onDate,
   onTime,
   onTarget,
+  onStandaloneAccountConfirmation,
   onClose,
   onSubmit,
 }: {
@@ -1146,10 +1173,13 @@ function ScheduleDialog({
   readonly selectedTargetId: string | null;
   readonly preserveExistingTarget: boolean;
   readonly originalTargetUnavailable: boolean;
+  readonly requiresStandaloneConfirmation: boolean;
+  readonly standaloneAccountConfirmed: boolean;
   readonly onMode: (value: ScheduleMode) => void;
   readonly onDate: (value: string) => void;
   readonly onTime: (value: string) => void;
   readonly onTarget: (value: string) => void;
+  readonly onStandaloneAccountConfirmation: (value: boolean) => void;
   readonly onClose: () => void;
   readonly onSubmit: () => void;
 }) {
@@ -1162,12 +1192,17 @@ function ScheduleDialog({
     && (targetsLoading || !targetMode);
   const showsTargetSelector = requiresMetaTarget(item.platform, targetMode) || isTargetResolutionPending;
   const needsSelectedTarget = requiresMetaTarget(item.platform, targetMode) && !preserveExistingTarget;
+  const showsStandaloneConfirmation = normalizedPlatform === "instagram"
+    && targetMode === "standalone"
+    && requiresStandaloneConfirmation;
+  const isStandaloneConfirmationMissing = showsStandaloneConfirmation && !standaloneAccountConfirmed;
 
   return (
     <Modal
       open
       title="Lên lịch xuất bản nội dung"
       onClose={onClose}
+      dismissible={!saving}
       footer={
         <>
           <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
@@ -1176,7 +1211,11 @@ function ScheduleDialog({
           <Button
             type="button"
             onClick={onSubmit}
-            disabled={saving || isTargetModeInvalid || isTargetResolutionPending || (needsSelectedTarget && !selectedTargetId)}
+            disabled={saving
+              || isTargetModeInvalid
+              || isTargetResolutionPending
+              || isStandaloneConfirmationMissing
+              || (needsSelectedTarget && !selectedTargetId)}
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">event_available</span>
             {saving ? "Đang lên lịch..." : "Xác nhận lên lịch"}
@@ -1191,7 +1230,28 @@ function ScheduleDialog({
           <PlatformBadge platform={item.platform} />
         </div>
         {normalizedPlatform === "instagram" && targetMode === "standalone" ? (
-          <Alert tone="info">Bài sẽ dùng tài khoản Instagram độc lập đang bật trong Quản trị hệ thống.</Alert>
+          showsStandaloneConfirmation ? (
+            <div className="space-y-3">
+              <Alert tone="warning">
+                Lịch Instagram cũ cần xác nhận lại tài khoản Instagram độc lập đang cấu hình trước khi đổi lịch.
+              </Alert>
+              <label className="flex cursor-pointer items-start gap-3 rounded border border-outline bg-surface px-3 py-3 text-body-md text-on-surface-variant">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                  checked={standaloneAccountConfirmed}
+                  onChange={(event) => onStandaloneAccountConfirmation(event.target.checked)}
+                />
+                <span>Tôi xác nhận dùng tài khoản Instagram độc lập hiện đang cấu hình</span>
+              </label>
+            </div>
+          ) : (
+            <Alert tone="info">
+              {preserveExistingTarget
+                ? "Lịch hiện tại sẽ giữ nguyên đích Instagram đã khóa; tài khoản độc lập chỉ áp dụng khi chọn lại đích hoặc tạo lịch mới."
+                : "Bài sẽ dùng tài khoản Instagram độc lập đang bật trong Quản trị hệ thống."}
+            </Alert>
+          )
         ) : null}
         {isTargetModeInvalid ? (
           <Alert tone="error">Thông tin Instagram độc lập đang lỗi. Hãy sửa hoặc tắt ghi đè trước khi lên lịch.</Alert>
@@ -1224,7 +1284,11 @@ function ScheduleDialog({
                 ) : null}
               </div>
             ) : (
-              <Alert tone="warning">Chưa có Meta Page khả dụng. Hãy kết nối Meta trong phần Quản trị hệ thống.</Alert>
+              <Alert tone={preserveExistingTarget ? "info" : "warning"}>
+                {preserveExistingTarget
+                  ? "Không tải được Page đã gắn với lịch hiện tại. Nếu chỉ đổi thời gian, hệ thống sẽ giữ nguyên đích đăng đã khóa."
+                  : "Chưa có Meta Page khả dụng. Hãy kết nối Meta trong phần Quản trị hệ thống."}
+              </Alert>
             )}
           </label>
         ) : null}
@@ -1305,6 +1369,8 @@ export default function ContentWorkspacePage() {
   const [scheduleDate, setScheduleDate] = useState(defaultScheduleDate);
   const [scheduleTime, setScheduleTime] = useState("09:00");
   const [scheduleTarget, setScheduleTarget] = useState<ScheduleTargetState>(EMPTY_SCHEDULE_TARGET);
+  const scheduleDialogSessionCounterRef = useRef(0);
+  const activeScheduleDialogSessionRef = useRef<number | null>(null);
   const [overrideItem, setOverrideItem] = useState<ContentItem | null>(null);
   const [overrideReason, setOverrideReason] = useState("");
   const [rejectItem, setRejectItem] = useState<ContentItem | null>(null);
@@ -1352,6 +1418,9 @@ export default function ContentWorkspacePage() {
         && (normalize(schedule.status) === "pending" || normalize(schedule.status) === "held"),
       )
     : null;
+  const isExistingDialogSchedule = scheduleTarget.isExistingSchedule || Boolean(activeDialogSchedule);
+  const requiresInstagramAccountConfirmation = activeDialogSchedule?.requiresInstagramAccountConfirmation === true
+    || scheduleTarget.requiresInstagramAccountConfirmation;
   const originalScheduleTargetId = scheduleTarget.originalMetaAssetId
     ?? activeDialogSchedule?.metaAssetId
     ?? null;
@@ -1360,17 +1429,21 @@ export default function ContentWorkspacePage() {
     originalScheduleTargetId
     && scheduleTargets.some((target) => target.id === originalScheduleTargetId),
   );
-  const isPreservingScheduleTarget = scheduleTarget.isExistingSchedule
+  const isPreservingScheduleTarget = isExistingDialogSchedule
     && scheduleTarget.explicitMetaAssetId === null;
   const selectedScheduleTargetId = isScheduleTargetRequired
     ? scheduleTarget.explicitMetaAssetId
-      ?? (scheduleTarget.isExistingSchedule
-        ? isOriginalScheduleTargetAvailable ? scheduleTarget.originalMetaAssetId : null
+      ?? (isExistingDialogSchedule
+        ? isOriginalScheduleTargetAvailable ? originalScheduleTargetId : null
         : defaultScheduleTarget?.id ?? null)
     : null;
   const submittedScheduleTargetId = isScheduleTargetRequired
-    ? scheduleTarget.isExistingSchedule ? scheduleTarget.explicitMetaAssetId : selectedScheduleTargetId
+    ? isExistingDialogSchedule ? scheduleTarget.explicitMetaAssetId : selectedScheduleTargetId
     : null;
+  const submittedInstagramAccountConfirmation = normalize(scheduleItem?.platform) === "instagram"
+    && publishTargetsQuery.data?.mode === "standalone"
+    && requiresInstagramAccountConfirmation
+    && scheduleTarget.confirmInstagramAccount;
   const isOriginalScheduleTargetUnavailable = isScheduleTargetRequired
     && isPreservingScheduleTarget
     && !isOriginalScheduleTargetAvailable;
@@ -1615,27 +1688,36 @@ export default function ContentWorkspacePage() {
   });
 
   const scheduleMutation = useMutation({
-    mutationFn: (item: ContentItem) => scheduleContentItem(
-      item.id,
-      scheduledAtIso(scheduleMode, scheduleDate, scheduleTime),
-      submittedScheduleTargetId,
-    ),
-    onSuccess: async () => {
-      setScheduleItem(null);
-      setScheduleTarget(EMPTY_SCHEDULE_TARGET);
-      setNotice({
-        tone: "success",
-        message: scheduleMode === "golden"
-          ? "Đã tạo/cập nhật lịch giờ vàng cho bài viết."
-          : "Đã đổi lịch xuất bản theo thời điểm bạn chọn.",
-      });
+    mutationFn: ({ item, payload }: ScheduleMutationVariables) => scheduleContentItem(item.id, payload),
+    onSuccess: async (_schedule, variables) => {
+      if (activeScheduleDialogSessionRef.current === variables.session) {
+        closeScheduleDialog(variables.session);
+        setNotice({
+          tone: "success",
+          message: variables.mode === "golden"
+            ? "Đã tạo/cập nhật lịch giờ vàng cho bài viết."
+            : "Đã đổi lịch xuất bản theo thời điểm bạn chọn.",
+        });
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["content", "queue"] }),
         queryClient.invalidateQueries({ queryKey: ["content", "calendar"] }),
         invalidateLinkedItem(),
       ]);
     },
+    onError: (error, variables) => {
+      if (activeScheduleDialogSessionRef.current !== variables.session
+        || !isInstagramTargetReselectionError(error)) return;
+      setScheduleTarget((current) => ({
+        ...current,
+        requiresInstagramAccountConfirmation: true,
+        confirmInstagramAccount: false,
+      }));
+    },
   });
+  const isActiveScheduleMutation = scheduleMutation.variables?.session === activeScheduleDialogSessionRef.current;
+  const isActiveScheduleSaving = isActiveScheduleMutation && scheduleMutation.isPending;
+  const activeScheduleError = isActiveScheduleMutation ? scheduleMutation.error : null;
 
   const cancelScheduleMutation = useMutation({
     mutationFn: (id: string) => deleteContentSchedule(id),
@@ -1722,6 +1804,21 @@ export default function ContentWorkspacePage() {
     setEditorDraft({ itemId: selectedItem.id, body: value, assetsJson: editorAssets });
   }
 
+  function resetScheduleDialogInputs() {
+    setScheduleMode("golden");
+    setScheduleDate(defaultScheduleDate());
+    setScheduleTime("09:00");
+  }
+
+  function closeScheduleDialog(expectedSession = activeScheduleDialogSessionRef.current) {
+    if (expectedSession === null || activeScheduleDialogSessionRef.current !== expectedSession) return;
+    activeScheduleDialogSessionRef.current = null;
+    scheduleMutation.reset();
+    setScheduleItem(null);
+    resetScheduleDialogInputs();
+    setScheduleTarget(EMPTY_SCHEDULE_TARGET);
+  }
+
   function openScheduleDialog(item: ContentItem) {
     const activeSchedule = calendarItems.find((schedule) =>
       schedule.contentItemId === item.id
@@ -1730,12 +1827,38 @@ export default function ContentWorkspacePage() {
     const isExistingSchedule = Boolean(activeSchedule)
       || normalize(item.status) === "scheduled"
       || normalize(item.workflowState) === "scheduled";
+    const session = scheduleDialogSessionCounterRef.current + 1;
+    scheduleDialogSessionCounterRef.current = session;
+    activeScheduleDialogSessionRef.current = session;
+    scheduleMutation.reset();
+    resetScheduleDialogInputs();
     setScheduleTarget({
       isExistingSchedule,
       originalMetaAssetId: activeSchedule?.metaAssetId ?? null,
       explicitMetaAssetId: null,
+      // Seed from the persisted schedule's typed flag so a reopened hold keeps requiring account
+      // confirmation, instead of matching the fragile lastError string or silently resetting to false.
+      requiresInstagramAccountConfirmation: activeSchedule?.requiresInstagramAccountConfirmation === true,
+      confirmInstagramAccount: false,
     });
     setScheduleItem(item);
+  }
+
+  function submitScheduleDialog() {
+    const session = activeScheduleDialogSessionRef.current;
+    if (!scheduleItem || session === null) return;
+    const payload: ScheduleContentItemPayload = Object.freeze({
+      scheduledAt: scheduledAtIso(scheduleMode, scheduleDate, scheduleTime),
+      metaAssetId: submittedScheduleTargetId,
+      confirmInstagramAccount: submittedInstagramAccountConfirmation,
+    });
+    const variables: ScheduleMutationVariables = Object.freeze({
+      item: scheduleItem,
+      session,
+      mode: scheduleMode,
+      payload,
+    });
+    scheduleMutation.mutate(variables);
   }
 
   function newBrief() {
@@ -2167,23 +2290,30 @@ export default function ContentWorkspacePage() {
           mode={scheduleMode}
           date={scheduleDate}
           time={scheduleTime}
-          saving={scheduleMutation.isPending}
-          error={scheduleMutation.error ?? (requiresMetaTarget(scheduleItem.platform) ? publishTargetsQuery.error : null)}
+          saving={isActiveScheduleSaving}
+          error={activeScheduleError ?? (requiresMetaTarget(scheduleItem.platform) ? publishTargetsQuery.error : null)}
           targets={publishTargetsQuery.data?.items ?? []}
           targetsLoading={publishTargetsQuery.isLoading}
           targetMode={publishTargetsQuery.data?.mode}
           selectedTargetId={selectedScheduleTargetId}
           preserveExistingTarget={isPreservingScheduleTarget}
           originalTargetUnavailable={isOriginalScheduleTargetUnavailable}
+          requiresStandaloneConfirmation={requiresInstagramAccountConfirmation}
+          standaloneAccountConfirmed={scheduleTarget.confirmInstagramAccount}
           onMode={setScheduleMode}
           onDate={setScheduleDate}
           onTime={setScheduleTime}
           onTarget={(metaAssetId) => setScheduleTarget((current) => ({
             ...current,
             explicitMetaAssetId: metaAssetId,
+            confirmInstagramAccount: false,
           }))}
-          onClose={() => setScheduleItem(null)}
-          onSubmit={() => scheduleMutation.mutate(scheduleItem)}
+          onStandaloneAccountConfirmation={(confirmInstagramAccount) => setScheduleTarget((current) => ({
+            ...current,
+            confirmInstagramAccount,
+          }))}
+          onClose={closeScheduleDialog}
+          onSubmit={submitScheduleDialog}
         />
       ) : null}
     </AppShell>

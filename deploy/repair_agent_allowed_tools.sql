@@ -8,12 +8,12 @@ SET ARITHABORT ON;
 IF OBJECT_ID(N'dbo.data_patches', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.data_patches (
-        name NVARCHAR(128) NOT NULL CONSTRAINT PK_data_patches PRIMARY KEY,
-        applied_at DATETIMEOFFSET NOT NULL
+        patch_id NVARCHAR(64) NOT NULL CONSTRAINT PK_data_patches PRIMARY KEY,
+        applied_at DATETIMEOFFSET NOT NULL CONSTRAINT DF_data_patches_applied_at DEFAULT SYSUTCDATETIME()
     );
 END
 
-IF EXISTS (SELECT 1 FROM dbo.data_patches WHERE name = N'2026-07-20-agent-allowed-tools-grant')
+IF EXISTS (SELECT 1 FROM dbo.data_patches WHERE patch_id = N'2026-07-20-agent-allowed-tools-grant')
     RETURN;
 
 IF OBJECT_ID(N'dbo.agent_definitions', N'U') IS NOT NULL
@@ -46,5 +46,5 @@ BEGIN
     WHERE code = N'lead-agent';
 END
 
-INSERT INTO dbo.data_patches (name, applied_at)
+INSERT INTO dbo.data_patches (patch_id, applied_at)
 VALUES (N'2026-07-20-agent-allowed-tools-grant', SYSDATETIMEOFFSET());

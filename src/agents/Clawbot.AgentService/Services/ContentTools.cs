@@ -155,6 +155,8 @@ public sealed class ContentPublishTool(
         var schedule = schedules.OrderByDescending(s => s.CreatedAt).FirstOrDefault();
         if (schedule is null)
             return ToolResult.Fail("content_schedule_required");
+        if (schedule.RequiresInstagramTargetReselection())
+            return ToolResult.Fail(ContentSchedule.ErrorInstagramTargetReselectionRequired);
 
         if (schedule.Status != ContentSchedule.StatusPending
             && !schedule.TryResetForRetry(clock.UtcNow))

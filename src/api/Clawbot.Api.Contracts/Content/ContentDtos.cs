@@ -114,7 +114,10 @@ public sealed record ContentQueueResponse(
     int Page,
     int PageSize);
 
-public sealed record ScheduleContentItemRequest(DateTimeOffset? ScheduledAt, Guid? MetaAssetId = null);
+public sealed record ScheduleContentItemRequest(
+    DateTimeOffset? ScheduledAt,
+    Guid? MetaAssetId = null,
+    bool ConfirmInstagramAccount = false);
 
 public sealed record ContentPublishTargetDto(
     Guid Id,
@@ -153,7 +156,8 @@ public sealed record ContentCalendarItemDto(
     int? LikeCount = null,
     int? CommentCount = null,
     int RetryCount = 0,
-    string? LastError = null);
+    string? LastError = null,
+    bool RequiresInstagramAccountConfirmation = false);
 
 public sealed record ContentCalendarResponse(IReadOnlyList<ContentCalendarItemDto> Items);
 

@@ -1,8 +1,11 @@
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Clawbot.Infrastructure.Integrations.Meta;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 
 namespace Clawbot.Infrastructure.Content.Publishing;
 
@@ -35,16 +38,23 @@ public sealed partial class GraphSocialPublisher(
     ILogger<GraphSocialPublisher>? logger = null,
     IMetaIntegrationService? metaIntegration = null,
     IMetaGraphClient? metaGraph = null,
-    IInstagramCredentialResolver? instagramCredentialResolver = null) : ISocialPublisher
+    IInstagramCredentialResolver? instagramCredentialResolver = null,
+    IHttpClientFactory? httpClientFactory = null,
+    IPublicUrlSafetyValidator? publicUrlSafetyValidator = null) : ISocialPublisher
 {
     private const string FacebookEndpoint = "https://graph.facebook.com/v25.0";
     private const string ZaloApiHost = "openapi.zalo.me";
     private const string ZaloApiBasePath = "/v2.0";
+    internal const string ZaloHttpClientName = "clawbot-zalo-publisher";
+    internal const long ZaloMaxResponseContentBufferSize = 64 * 1024;
+    private const int ZaloMaxBodyUtf8Bytes = 256 * 1024;
+    private const int ZaloMaxAssetsJsonUtf8Bytes = 32 * 1024;
+    private const int ZaloMaxCoverUrlLength = 2048;
     private const string ZaloDefaultAuthor = "Clawbot";
     private const int ZaloTitleMaxLength = 150;
     private const int ZaloDescriptionMaxLength = 300;
     private const int ZaloProcessTokenMaxLength = 4096;
-    private const int ZaloArticleIdMaxLength = 512;
+    private const int ZaloArticleIdMaxLength = 256;
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _http = http;
     private readonly GraphPublisherOptions _options = options.Value;
@@ -53,6 +63,9 @@ public sealed partial class GraphSocialPublisher(
     private readonly IMetaIntegrationService? _metaIntegration = metaIntegration;
     private readonly IMetaGraphClient? _metaGraph = metaGraph;
     private readonly IInstagramCredentialResolver? _instagramCredentialResolver = instagramCredentialResolver;
+    private readonly IHttpClientFactory? _httpClientFactory = httpClientFactory;
+    private readonly IPublicUrlSafetyValidator _publicUrlSafetyValidator = publicUrlSafetyValidator
+        ?? new DnsPublicUrlSafetyValidator(new SystemHostAddressResolver());
 
     public async Task<PublishResult> PublishAsync(PublishRequest request, CancellationToken ct = default)
     {
@@ -122,23 +135,50 @@ public sealed partial class GraphSocialPublisher(
             using var resp = await _http.PostAsync(url, form, ct).ConfigureAwait(false);
             var body = resp.Content is null ? string.Empty : await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
-                return new PublishResult(false, null, $"facebook_http_{(int)resp.StatusCode}");
+            {
+                var error = $"facebook_http_{(int)resp.StatusCode}";
+                return IsAmbiguousHttpStatus(resp.StatusCode)
+                    ? ProviderOutcomeUnknown("facebook", "publish", error)
+                    : new PublishResult(false, null, error);
+            }
 
             using var doc = JsonDocument.Parse(body);
             var idEl = doc.RootElement.TryGetProperty("post_id", out var postIdEl)
                 ? postIdEl
                 : (doc.RootElement.TryGetProperty("id", out var fallbackId) ? fallbackId : default);
-            if (idEl.ValueKind != JsonValueKind.String)
-                return new PublishResult(false, null, "facebook_response_missing_id");
-            var postId = idEl.GetString()!;
+            var postId = idEl.ValueKind == JsonValueKind.String ? idEl.GetString() : null;
+            if (string.IsNullOrWhiteSpace(postId))
+            {
+                return ProviderOutcomeUnknown(
+                    "facebook",
+                    "publish",
+                    "facebook_response_missing_id");
+            }
             var postUrl = $"https://www.facebook.com/{postId}";
             LogPublished(_logger, "facebook", request.TenantId, request.ContentItemId, postUrl);
             return new PublishResult(true, postUrl, null, postId);
         }
-        catch (HttpRequestException) { return new PublishResult(false, null, "facebook_unavailable"); }
+        catch (BrokenCircuitException)
+        {
+            return new PublishResult(false, null, "facebook_circuit_open");
+        }
+        catch (TimeoutRejectedException)
+        {
+            return ProviderOutcomeUnknown("facebook", "publish", "facebook_timeout");
+        }
+        catch (HttpRequestException)
+        {
+            return ProviderOutcomeUnknown("facebook", "publish", "facebook_unavailable");
+        }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (OperationCanceledException) { return new PublishResult(false, null, "facebook_timeout"); }
-        catch (JsonException) { return new PublishResult(false, null, "facebook_response_invalid"); }
+        catch (OperationCanceledException)
+        {
+            return ProviderOutcomeUnknown("facebook", "publish", "facebook_timeout");
+        }
+        catch (JsonException)
+        {
+            return ProviderOutcomeUnknown("facebook", "publish", "facebook_response_invalid");
+        }
     }
 
     private async Task<PublishResult> PublishFacebookWithMetaAsync(
@@ -161,6 +201,7 @@ public sealed partial class GraphSocialPublisher(
         }
         catch (MetaGraphException ex) when (ex.IsTokenError)
         {
+            var refreshedPublishAttempted = false;
             try
             {
                 var refresh = await _metaIntegration!.RefreshPageAsync(request.TenantId, request.MetaAssetId, ct).ConfigureAwait(false);
@@ -174,6 +215,7 @@ public sealed partial class GraphSocialPublisher(
                     return new PublishResult(false, null, "facebook_target_unavailable");
                 }
 
+                refreshedPublishAttempted = true;
                 var published = await _metaGraph!.PublishPageAsync(
                     request.TenantId,
                     refresh.Credential.PageId,
@@ -194,32 +236,36 @@ public sealed partial class GraphSocialPublisher(
             }
             catch (MetaGraphException refreshException)
             {
-                var code = refreshException.Code ?? refreshException.HttpStatus ?? 0;
-                var error = string.Equals(refreshException.Message, "meta_response_missing_id", StringComparison.Ordinal)
-                    ? "facebook_response_missing_id"
-                    : $"facebook_graph_{code}";
-                LogMetaPublishFailed(_logger, request.TenantId, request.ContentItemId, error);
-                return new PublishResult(false, null, error);
+                return refreshedPublishAttempted
+                    ? FacebookMetaFailure(request, refreshException)
+                    : FacebookGraphFailure(request, refreshException);
             }
             catch (HttpRequestException)
             {
                 LogMetaPublishFailed(_logger, request.TenantId, request.ContentItemId, "unavailable");
-                return new PublishResult(false, null, "facebook_unavailable");
+                return refreshedPublishAttempted
+                    ? ProviderOutcomeUnknown("facebook", "publish", "facebook_unavailable")
+                    : new PublishResult(false, null, "facebook_unavailable");
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                return refreshedPublishAttempted
+                    ? ProviderOutcomeUnknown("facebook", "publish", "facebook_timeout")
+                    : new PublishResult(false, null, "facebook_timeout");
             }
         }
         catch (MetaGraphException ex)
         {
-            var code = ex.Code ?? ex.HttpStatus ?? 0;
-            var error = string.Equals(ex.Message, "meta_response_missing_id", StringComparison.Ordinal)
-                ? "facebook_response_missing_id"
-                : $"facebook_graph_{code}";
-            LogMetaPublishFailed(_logger, request.TenantId, request.ContentItemId, error);
-            return new PublishResult(false, null, error);
+            return FacebookMetaFailure(request, ex);
         }
         catch (HttpRequestException)
         {
             LogMetaPublishFailed(_logger, request.TenantId, request.ContentItemId, "unavailable");
-            return new PublishResult(false, null, "facebook_unavailable");
+            return ProviderOutcomeUnknown("facebook", "publish", "facebook_unavailable");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -227,7 +273,7 @@ public sealed partial class GraphSocialPublisher(
         }
         catch (OperationCanceledException)
         {
-            return new PublishResult(false, null, "facebook_timeout");
+            return ProviderOutcomeUnknown("facebook", "publish", "facebook_timeout");
         }
     }
 
@@ -283,6 +329,7 @@ public sealed partial class GraphSocialPublisher(
             return new PublishResult(false, null, "instagram_target_required");
 
         var refreshAssetId = request.MetaAssetId;
+        var publishAttempted = false;
         try
         {
             var resolution = await _metaIntegration.ResolveInstagramAsync(
@@ -306,6 +353,7 @@ public sealed partial class GraphSocialPublisher(
                 return new PublishResult(false, null, "instagram_target_unavailable");
             }
 
+            publishAttempted = true;
             var published = await _metaGraph.PublishInstagramAsync(
                 request.TenantId,
                 credential.InstagramUserId,
@@ -322,7 +370,9 @@ public sealed partial class GraphSocialPublisher(
         }
         catch (OperationCanceledException)
         {
-            return InstagramFailure(request, "instagram_timeout", "timeout");
+            return publishAttempted
+                ? InstagramOutcomeUnknown(request, "instagram_timeout", "timeout")
+                : InstagramFailure(request, "instagram_timeout", "timeout");
         }
         catch (MetaGraphException ex) when (ex.IsTokenError)
         {
@@ -334,15 +384,21 @@ public sealed partial class GraphSocialPublisher(
         }
         catch (MetaGraphException ex)
         {
-            return InstagramGraphFailure(request, ex);
+            return publishAttempted
+                ? InstagramMetaFailure(request, ex)
+                : InstagramGraphFailure(request, ex);
         }
         catch (HttpRequestException)
         {
-            return InstagramFailure(request, "instagram_unavailable", "unavailable");
+            return publishAttempted
+                ? InstagramOutcomeUnknown(request, "instagram_unavailable", "unavailable")
+                : InstagramFailure(request, "instagram_unavailable", "unavailable");
         }
         catch (Exception)
         {
-            return InstagramFailure(request, "instagram_error", "unexpected");
+            return publishAttempted
+                ? InstagramOutcomeUnknown(request, "instagram_error", "unexpected")
+                : InstagramFailure(request, "instagram_error", "unexpected");
         }
     }
 
@@ -378,7 +434,7 @@ public sealed partial class GraphSocialPublisher(
         }
         catch (OperationCanceledException)
         {
-            return InstagramFailure(request, "instagram_timeout", "standalone_timeout");
+            return InstagramOutcomeUnknown(request, "instagram_timeout", "standalone_timeout");
         }
         catch (MetaGraphException ex) when (ex.IsTokenError)
         {
@@ -386,15 +442,15 @@ public sealed partial class GraphSocialPublisher(
         }
         catch (MetaGraphException ex)
         {
-            return InstagramGraphFailure(request, ex);
+            return InstagramMetaFailure(request, ex);
         }
         catch (HttpRequestException)
         {
-            return InstagramFailure(request, "instagram_unavailable", "standalone_unavailable");
+            return InstagramOutcomeUnknown(request, "instagram_unavailable", "standalone_unavailable");
         }
         catch (Exception)
         {
-            return InstagramFailure(request, "instagram_error", "standalone_unexpected");
+            return InstagramOutcomeUnknown(request, "instagram_error", "standalone_unexpected");
         }
     }
 
@@ -404,6 +460,7 @@ public sealed partial class GraphSocialPublisher(
         string imageUrl,
         CancellationToken ct)
     {
+        var publishAttempted = false;
         try
         {
             var refresh = await _metaIntegration!.RefreshPageAsync(
@@ -430,6 +487,7 @@ public sealed partial class GraphSocialPublisher(
             if (!string.Equals(instagramUserId, request.ProviderTargetId, StringComparison.Ordinal))
                 return new PublishResult(false, null, "instagram_target_unavailable");
 
+            publishAttempted = true;
             var published = await _metaGraph.PublishInstagramAsync(
                 request.TenantId,
                 instagramUserId,
@@ -446,7 +504,9 @@ public sealed partial class GraphSocialPublisher(
         }
         catch (OperationCanceledException)
         {
-            return InstagramFailure(request, "instagram_timeout", "retry_timeout");
+            return publishAttempted
+                ? InstagramOutcomeUnknown(request, "instagram_timeout", "retry_timeout")
+                : InstagramFailure(request, "instagram_timeout", "retry_timeout");
         }
         catch (MetaGraphException ex) when (ex.IsTokenError)
         {
@@ -458,15 +518,21 @@ public sealed partial class GraphSocialPublisher(
         }
         catch (MetaGraphException ex)
         {
-            return InstagramGraphFailure(request, ex);
+            return publishAttempted
+                ? InstagramMetaFailure(request, ex)
+                : InstagramGraphFailure(request, ex);
         }
         catch (HttpRequestException)
         {
-            return InstagramFailure(request, "instagram_unavailable", "retry_unavailable");
+            return publishAttempted
+                ? InstagramOutcomeUnknown(request, "instagram_unavailable", "retry_unavailable")
+                : InstagramFailure(request, "instagram_unavailable", "retry_unavailable");
         }
         catch (Exception)
         {
-            return InstagramFailure(request, "instagram_error", "retry_unexpected");
+            return publishAttempted
+                ? InstagramOutcomeUnknown(request, "instagram_error", "retry_unexpected")
+                : InstagramFailure(request, "instagram_error", "retry_unexpected");
         }
     }
 
@@ -481,13 +547,49 @@ public sealed partial class GraphSocialPublisher(
             _ => new PublishResult(false, null, "instagram_meta_unavailable"),
         };
 
+    private PublishResult FacebookMetaFailure(
+        PublishRequest request,
+        MetaGraphException exception)
+    {
+        var error = MapMetaPublishError("facebook", exception);
+        LogMetaPublishFailed(_logger, request.TenantId, request.ContentItemId, error);
+        return IsAmbiguousMetaFailure(exception)
+            ? ProviderOutcomeUnknown("facebook", "publish", error)
+            : new PublishResult(false, null, error);
+    }
+
+    private PublishResult FacebookGraphFailure(
+        PublishRequest request,
+        MetaGraphException exception)
+    {
+        var error = MapMetaPublishError("facebook", exception);
+        LogMetaPublishFailed(_logger, request.TenantId, request.ContentItemId, error);
+        return new PublishResult(false, null, error);
+    }
+
+    private PublishResult InstagramMetaFailure(
+        PublishRequest request,
+        MetaGraphException exception)
+    {
+        var error = MapMetaPublishError("instagram", exception);
+        return IsAmbiguousMetaFailure(exception)
+            ? InstagramOutcomeUnknown(request, error, $"graph_{exception.Code ?? exception.HttpStatus ?? 0}")
+            : InstagramFailure(request, error, $"graph_{exception.Code ?? exception.HttpStatus ?? 0}");
+    }
+
     private PublishResult InstagramGraphFailure(PublishRequest request, MetaGraphException exception)
     {
         var code = exception.Code ?? exception.HttpStatus ?? 0;
-        var publicError = string.Equals(exception.Message, "meta_response_missing_id", StringComparison.Ordinal)
-            ? "instagram_error"
-            : $"instagram_graph_{code}";
-        return InstagramFailure(request, publicError, $"graph_{code}");
+        return InstagramFailure(request, MapMetaPublishError("instagram", exception), $"graph_{code}");
+    }
+
+    private PublishResult InstagramOutcomeUnknown(
+        PublishRequest request,
+        string error,
+        string reason)
+    {
+        LogInstagramPublishFailed(_logger, request.TenantId, request.ContentItemId, reason);
+        return ProviderOutcomeUnknown("instagram", "publish", error);
     }
 
     private PublishResult InstagramFailure(PublishRequest request, string error, string reason)
@@ -495,6 +597,33 @@ public sealed partial class GraphSocialPublisher(
         LogInstagramPublishFailed(_logger, request.TenantId, request.ContentItemId, reason);
         return new PublishResult(false, null, error);
     }
+
+    private static string MapMetaPublishError(string platform, MetaGraphException exception)
+    {
+        if (string.Equals(exception.Message, "meta_response_invalid_json", StringComparison.Ordinal))
+            return $"{platform}_response_invalid";
+        if (exception.Message.StartsWith("meta_response_missing_", StringComparison.Ordinal))
+            return $"{platform}_response_missing_id";
+        return $"{platform}_graph_{exception.Code ?? exception.HttpStatus ?? 0}";
+    }
+
+    private static bool IsAmbiguousMetaFailure(MetaGraphException exception) =>
+        exception.IsTransient
+        || string.Equals(exception.Message, "meta_response_invalid_json", StringComparison.Ordinal)
+        || exception.Message.StartsWith("meta_response_missing_", StringComparison.Ordinal)
+        || exception.HttpStatus is { } status && IsAmbiguousHttpStatusCode(status);
+
+    private static bool IsAmbiguousHttpStatus(System.Net.HttpStatusCode status) =>
+        IsAmbiguousHttpStatusCode((int)status);
+
+    private static bool IsAmbiguousHttpStatusCode(int statusCode) =>
+        statusCode is 408 or 429 || statusCode >= 500;
+
+    private static PublishResult ProviderOutcomeUnknown(
+        string platform,
+        string stage,
+        string error) =>
+        new(false, null, $"{platform}_outcome_unknown:{stage}:{error}");
 
     private static (string? ImageUrl, string? Error) ResolveInstagramImage(string assetsJson)
     {
@@ -594,30 +723,50 @@ public sealed partial class GraphSocialPublisher(
                && !(bytes[0] == 198 && bytes[1] is 18 or 19);
     }
 
-    // EARS[WHEN publishing to Zalo THE SYSTEM SHALL resolve credentials from the encrypted DB store first, falling
-    // back to options when none exists]
+    // EARS[WHEN a tenant credential resolver is configured THE SYSTEM SHALL use only that tenant's Zalo credentials;
+    // options fallback is limited to callers constructed without a resolver]
     private async Task<PublishResult> PublishZaloAsync(PublishRequest request, CancellationToken ct)
     {
-        var z = await ResolveZaloChannelAsync(request.TenantId, ct).ConfigureAwait(false);
-        if (z is null || !z.Enabled || string.IsNullOrWhiteSpace(z.Endpoint) || string.IsNullOrWhiteSpace(z.OaAccessToken) || string.IsNullOrWhiteSpace(z.OaId))
-            return new PublishResult(false, null, "zalo_not_configured");
-        if (ContainsControlCharacters(z.OaAccessToken))
-            return new PublishResult(false, null, "zalo_credentials_invalid");
-        if (!TryBuildZaloArticleEndpoint(z.Endpoint, "create", out var createEndpoint)
-            || !TryBuildZaloArticleEndpoint(z.Endpoint, "verify", out var verifyEndpoint))
-        {
-            return new PublishResult(false, null, "zalo_endpoint_invalid");
-        }
+        if (ExceedsUtf8Limit(request.Body, ZaloMaxBodyUtf8Bytes))
+            return new PublishResult(false, null, "zalo_body_too_large");
+        if (ExceedsUtf8Limit(request.AssetsJson, ZaloMaxAssetsJsonUtf8Bytes))
+            return new PublishResult(false, null, "zalo_assets_too_large");
 
-        var coverUrl = FirstImageUrl(request.AssetsJson);
-        if (string.IsNullOrWhiteSpace(coverUrl))
-            return new PublishResult(false, null, "zalo_media_required");
-
+        var stage = "create";
+        var transmissionMayHaveOccurred = false;
         try
         {
+            var z = await ResolveZaloChannelAsync(request.TenantId, ct).ConfigureAwait(false);
+            if (z is null || !z.Enabled || string.IsNullOrWhiteSpace(z.Endpoint) || string.IsNullOrWhiteSpace(z.OaAccessToken) || string.IsNullOrWhiteSpace(z.OaId))
+                return new PublishResult(false, null, "zalo_not_configured");
+            if (ContainsControlCharacters(z.OaAccessToken))
+                return new PublishResult(false, null, "zalo_credentials_invalid");
+            if (!TryBuildZaloArticleEndpoint(z.Endpoint, "create", out var createEndpoint)
+                || !TryBuildZaloArticleEndpoint(z.Endpoint, "verify", out var verifyEndpoint))
+            {
+                return new PublishResult(false, null, "zalo_endpoint_invalid");
+            }
+
+            var httpClientFactory = _httpClientFactory;
+            if (httpClientFactory is null)
+                return new PublishResult(false, null, "zalo_http_client_not_configured");
+
+            var coverUrl = FirstImageUrl(request.AssetsJson);
+            if (string.IsNullOrWhiteSpace(coverUrl))
+                return new PublishResult(false, null, "zalo_media_required");
+            if (!TryNormalizeZaloCoverUrl(coverUrl, out var normalizedCoverUri)
+                || !await _publicUrlSafetyValidator
+                    .IsSafeAsync(normalizedCoverUri, ct)
+                    .ConfigureAwait(false))
+            {
+                return new PublishResult(false, null, "zalo_media_invalid");
+            }
+
+            var normalizedCoverUrl = normalizedCoverUri.AbsoluteUri;
+            var zaloHttp = httpClientFactory.CreateClient(ZaloHttpClientName);
             var normalizedBody = request.Body.Trim();
             using var createRequest = CreateZaloRequest(
-                BuildZaloArticleEndpoint(z.Endpoint, "create"),
+                createEndpoint,
                 z.OaAccessToken,
                 new
                 {
@@ -627,7 +776,7 @@ public sealed partial class GraphSocialPublisher(
                     cover = new
                     {
                         cover_type = "photo",
-                        photo_url = coverUrl,
+                        photo_url = normalizedCoverUrl,
                         status = "show",
                     },
                     description = Truncate(normalizedBody, ZaloDescriptionMaxLength),
@@ -635,53 +784,114 @@ public sealed partial class GraphSocialPublisher(
                     status = "show",
                     comment = "show",
                 });
-            using var createResponse = await _http.SendAsync(createRequest, ct).ConfigureAwait(false);
+            transmissionMayHaveOccurred = true;
+            using var createResponse = await zaloHttp.SendAsync(createRequest, ct).ConfigureAwait(false);
             using var createDocument = await ReadZaloResponseAsync(createResponse, ct).ConfigureAwait(false);
             var createError = ResolveZaloError(createResponse, createDocument.RootElement);
             if (createError is not null)
+            {
+                if (IsAmbiguousHttpStatus(createResponse.StatusCode)
+                    || (createResponse.IsSuccessStatusCode
+                        && !createError.StartsWith("zalo_error_", StringComparison.Ordinal)))
+                {
+                    return ZaloOutcomeUnknown(stage, createError);
+                }
+
                 return new PublishResult(false, null, createError);
+            }
+
             var processToken = ReadZaloDataString(createDocument.RootElement, "token");
             if (string.IsNullOrWhiteSpace(processToken))
-                return new PublishResult(false, null, "zalo_response_missing_token");
+                return ZaloOutcomeUnknown(stage, "zalo_response_missing_token");
+            if (processToken.Length > ZaloProcessTokenMaxLength || ContainsControlCharacters(processToken))
+                return ZaloOutcomeUnknown(stage, "zalo_response_invalid_token");
 
+            stage = "verify";
             using var verifyRequest = CreateZaloRequest(
-                BuildZaloArticleEndpoint(z.Endpoint, "verify"),
+                verifyEndpoint,
                 z.OaAccessToken,
                 new { token = processToken });
-            using var verifyResponse = await _http.SendAsync(verifyRequest, ct).ConfigureAwait(false);
+            using var verifyResponse = await zaloHttp.SendAsync(verifyRequest, ct).ConfigureAwait(false);
             using var verifyDocument = await ReadZaloResponseAsync(verifyResponse, ct).ConfigureAwait(false);
             var verifyError = ResolveZaloError(verifyResponse, verifyDocument.RootElement);
             if (verifyError is not null)
-                return new PublishResult(false, null, verifyError);
+                return ZaloOutcomeUnknown(stage, verifyError);
             var articleId = ReadZaloDataString(verifyDocument.RootElement, "id");
             if (string.IsNullOrWhiteSpace(articleId))
-                return new PublishResult(false, null, "zalo_response_missing_id");
+                return ZaloOutcomeUnknown(stage, "zalo_response_missing_id");
+            if (articleId.Length > ZaloArticleIdMaxLength
+                || ContainsControlCharacters(articleId)
+                || ContainsSecret(articleId, processToken)
+                || ContainsSecret(articleId, z.OaAccessToken))
+            {
+                return ZaloOutcomeUnknown(stage, "zalo_response_invalid_id");
+            }
 
             LogPublished(_logger, "zalo", request.TenantId, request.ContentItemId, articleId);
             return new PublishResult(true, null, null, articleId);
         }
-        catch (HttpRequestException) { return new PublishResult(false, null, "zalo_http_request_failed"); }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (OperationCanceledException) { return new PublishResult(false, null, "zalo_timeout"); }
-        catch (JsonException) { return new PublishResult(false, null, "zalo_response_invalid_json"); }
+        catch (TimeoutRejectedException)
+        {
+            return MapZaloOperationalFailure(stage, transmissionMayHaveOccurred, "zalo_timeout");
+        }
+        catch (BrokenCircuitException)
+        {
+            var earlierTransmissionOccurred = string.Equals(stage, "verify", StringComparison.Ordinal);
+            return MapZaloOperationalFailure(stage, earlierTransmissionOccurred, "zalo_circuit_open");
+        }
+        catch (OperationCanceledException)
+        {
+            return MapZaloOperationalFailure(stage, transmissionMayHaveOccurred, "zalo_timeout");
+        }
+        catch (ZaloResponseSizeLimitExceededException)
+        {
+            return MapZaloOperationalFailure(stage, transmissionMayHaveOccurred, "zalo_response_too_large");
+        }
+        catch (HttpRequestException)
+        {
+            return MapZaloOperationalFailure(stage, transmissionMayHaveOccurred, "zalo_http_request_failed");
+        }
+        catch (JsonException)
+        {
+            return MapZaloOperationalFailure(stage, transmissionMayHaveOccurred, "zalo_response_invalid_json");
+        }
     }
 
-    // EARS[WHEN a tenant stores the legacy Zalo /oa API base THE SYSTEM SHALL normalize it to the documented article API root]
-    private static string BuildZaloArticleEndpoint(string endpoint, string operation)
+    // EARS[WHEN a tenant stores a Zalo article API base THE SYSTEM SHALL accept only the documented HTTPS origin and paths]
+    private static bool TryBuildZaloArticleEndpoint(string endpoint, string operation, out Uri articleEndpoint)
     {
-        var apiRoot = endpoint.Trim().TrimEnd('/');
-        if (apiRoot.EndsWith("/oa", StringComparison.OrdinalIgnoreCase))
-            apiRoot = apiRoot[..^3];
-        return $"{apiRoot}/article/{operation}";
+        articleEndpoint = null!;
+        if (!Uri.TryCreate(endpoint.Trim(), UriKind.Absolute, out var configured)
+            || configured.Scheme != Uri.UriSchemeHttps
+            || !configured.IsDefaultPort
+            || !string.Equals(configured.IdnHost, ZaloApiHost, StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrEmpty(configured.UserInfo)
+            || !string.IsNullOrEmpty(configured.Query)
+            || !string.IsNullOrEmpty(configured.Fragment))
+        {
+            return false;
+        }
+
+        var configuredPath = configured.AbsolutePath.TrimEnd('/');
+        if (configuredPath.EndsWith("/oa", StringComparison.OrdinalIgnoreCase))
+            configuredPath = configuredPath[..^3];
+        if (!string.Equals(configuredPath, ZaloApiBasePath, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        articleEndpoint = new Uri(
+            $"https://{ZaloApiHost}{ZaloApiBasePath}/article/{operation}",
+            UriKind.Absolute);
+        return true;
     }
 
-    private static HttpRequestMessage CreateZaloRequest(string url, string accessToken, object payload)
+    private static HttpRequestMessage CreateZaloRequest(Uri url, string accessToken, object payload)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = JsonContent.Create(payload, options: JsonOpts),
         };
-        request.Headers.TryAddWithoutValidation("access_token", accessToken);
+        request.Headers.Add("access_token", accessToken);
         return request;
     }
 
@@ -702,23 +912,85 @@ public sealed partial class GraphSocialPublisher(
     {
         if (!response.IsSuccessStatusCode)
             return $"zalo_http_{(int)response.StatusCode}";
-        if (!root.TryGetProperty("error", out var error)
-            || error.ValueKind != JsonValueKind.Number
-            || error.GetInt32() == 0)
+        if (root.ValueKind != JsonValueKind.Object)
+            return "zalo_response_invalid_shape";
+
+        var hasError = false;
+        var error = default(JsonElement);
+        foreach (var property in root.EnumerateObject())
         {
-            return null;
+            if (!string.Equals(property.Name, "error", StringComparison.Ordinal))
+                continue;
+            if (hasError)
+                return "zalo_response_invalid_error";
+
+            hasError = true;
+            error = property.Value;
         }
 
-        return $"zalo_error_{error.GetInt32()}";
+        if (!hasError
+            || error.ValueKind != JsonValueKind.Number
+            || !error.TryGetInt32(out var errorCode))
+        {
+            return "zalo_response_invalid_error";
+        }
+
+        return errorCode == 0 ? null : $"zalo_error_{errorCode}";
     }
 
     private static string? ReadZaloDataString(JsonElement root, string property) =>
-        root.TryGetProperty("data", out var data)
+        root.ValueKind == JsonValueKind.Object
+        && root.TryGetProperty("data", out var data)
         && data.ValueKind == JsonValueKind.Object
         && data.TryGetProperty(property, out var value)
         && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
+
+    private static bool ExceedsUtf8Limit(string? value, int maximumBytes) =>
+        value is not null && Encoding.UTF8.GetByteCount(value) > maximumBytes;
+
+    private static bool TryNormalizeZaloCoverUrl(string value, out Uri normalizedUri)
+    {
+        normalizedUri = null!;
+        if (value.Length == 0
+            || value.Length > ZaloMaxCoverUrlLength
+            || !string.Equals(value, value.Trim(), StringComparison.Ordinal)
+            || ContainsControlCharacters(value)
+            || !Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(uri.Host)
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || uri.AbsoluteUri.Length > ZaloMaxCoverUrlLength)
+        {
+            return false;
+        }
+
+        normalizedUri = uri;
+        return true;
+    }
+
+    private static bool ContainsControlCharacters(string value) => value.Any(char.IsControl);
+
+    private static bool ContainsSecret(string value, string secret) =>
+        !string.IsNullOrEmpty(secret) && value.Contains(secret, StringComparison.Ordinal);
+
+    private static PublishResult MapZaloOperationalFailure(
+        string stage,
+        bool transmissionMayHaveOccurred,
+        string reason) =>
+        transmissionMayHaveOccurred
+            ? ZaloOutcomeUnknown(stage, reason)
+            : new PublishResult(false, null, reason);
+
+    private static PublishResult ZaloOutcomeUnknown(string stage, string reason) =>
+        new(false, null, $"zalo_outcome_unknown:{stage}:{reason}");
+
+    // EARS[WHEN a tenant credential resolver is configured THE SYSTEM SHALL NOT fall back to another OA's global credentials]
+    private Task<GraphChannelOptions?> ResolveZaloChannelAsync(Guid tenantId, CancellationToken ct) =>
+        _credentialResolver is null
+            ? Task.FromResult<GraphChannelOptions?>(_options.Zalo)
+            : _credentialResolver.ResolveAsync(tenantId, "zalo", ct);
 
     // SPEC-16 Module M-1: DB credential store first (encrypted); options fallback for dev/single-tenant.
     private async Task<GraphChannelOptions?> ResolveChannelAsync(Guid tenantId, string provider, CancellationToken ct)
@@ -741,7 +1013,13 @@ public sealed partial class GraphSocialPublisher(
             if (doc.RootElement.ValueKind != JsonValueKind.Array) return null;
             foreach (var asset in doc.RootElement.EnumerateArray())
             {
-                var type = asset.TryGetProperty("type", out var typeEl) ? typeEl.GetString() : "image";
+                if (asset.ValueKind != JsonValueKind.Object) continue;
+                var type = "image";
+                if (asset.TryGetProperty("type", out var typeEl))
+                {
+                    if (typeEl.ValueKind != JsonValueKind.String) continue;
+                    type = typeEl.GetString();
+                }
                 if (!string.Equals(type, "image", StringComparison.OrdinalIgnoreCase)) continue;
                 if (asset.TryGetProperty("url", out var urlEl) && urlEl.ValueKind == JsonValueKind.String)
                 {

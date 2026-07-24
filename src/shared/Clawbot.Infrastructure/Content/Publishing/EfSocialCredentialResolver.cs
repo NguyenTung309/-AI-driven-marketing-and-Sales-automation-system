@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Clawbot.Domain.Content;
 using Clawbot.Infrastructure.Content.Publishing;
 using Clawbot.Infrastructure.Persistence;
@@ -18,7 +17,6 @@ public sealed partial class EfSocialCredentialResolver(
     ITenantAccessor tenants,
     ILogger<EfSocialCredentialResolver> logger) : ISocialCredentialResolver, IInstagramCredentialResolver
 {
-    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private readonly AppDbContext _db = db;
     private readonly IEncryptor _encryptor = encryptor;
     private readonly ITenantAccessor _tenants = tenants;
@@ -60,19 +58,22 @@ public sealed partial class EfSocialCredentialResolver(
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
         if (row is null) return null;
-        var json = SafeDecrypt(row.CredentialsEncrypted);
-        if (string.IsNullOrEmpty(json)) return null;
 
-        try
+        // Only envelopes bound to this tenant, provider, and row target are usable. Ciphertext lifted from
+        // another tenant, or written before context binding, resolves to null so publishing fails closed.
+        var decoded = SocialCredentialEnvelopeCodec.Decode(
+            _encryptor,
+            tenantId,
+            normalized,
+            row.PageId,
+            row.CredentialsEncrypted);
+        if (decoded.Status != SocialCredentialEnvelopeStatus.Resolved || decoded.Options is null)
         {
-            var options = JsonSerializer.Deserialize<GraphChannelOptions>(json, JsonOpts);
-            return options is null ? null : InstagramCredentialEnvelopeCodec.Normalize(options);
-        }
-        catch (JsonException ex)
-        {
-            LogParseFailed(_logger, ex, tenantId, normalized);
+            LogEnvelopeRejected(_logger, tenantId, normalized);
             return null;
         }
+
+        return decoded.Options;
     }
 
     public async Task<InstagramCredentialResolution> ResolveAsync(
@@ -102,13 +103,13 @@ public sealed partial class EfSocialCredentialResolver(
         if (!row.IsActive)
             return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
 
-        var decoded = InstagramCredentialEnvelopeCodec.Decode(
+        var decoded = SocialCredentialEnvelopeCodec.Decode(
             _encryptor,
             tenantId,
             "instagram",
             row.PageId,
             row.CredentialsEncrypted);
-        if (decoded.Status == InstagramCredentialEnvelopeStatus.Invalid || decoded.Options is null)
+        if (decoded.Status == SocialCredentialEnvelopeStatus.Invalid || decoded.Options is null)
             return new InstagramCredentialResolution(InstagramCredentialResolutionStatus.Invalid);
 
         var options = decoded.Options;
@@ -128,19 +129,11 @@ public sealed partial class EfSocialCredentialResolver(
     private static bool IsNumericInstagramUserId(string value) =>
         !string.IsNullOrWhiteSpace(value) && value.All(char.IsAsciiDigit);
 
-    private string SafeDecrypt(string cipher)
-    {
-        if (string.IsNullOrEmpty(cipher)) return string.Empty;
-        try { return _encryptor.Decrypt(cipher); }
-        catch (FormatException) { return string.Empty; }
-        catch (System.Security.Cryptography.CryptographicException) { return string.Empty; }
-    }
-
     [LoggerMessage(EventId = 5210, Level = LogLevel.Warning, Message = "SocialCredentialResolver: requested tenant {requested} does not match ambient {ambient}")]
     private static partial void LogTenantMismatch(ILogger logger, Guid requested, Guid ambient);
 
-    [LoggerMessage(EventId = 5211, Level = LogLevel.Error, Message = "SocialCredentialResolver: failed to parse decrypted credentials for tenant {tenantId} provider {provider}")]
-    private static partial void LogParseFailed(ILogger logger, Exception ex, Guid tenantId, string provider);
+    [LoggerMessage(EventId = 5213, Level = LogLevel.Warning, Message = "SocialCredentialResolver: stored credential envelope for tenant {tenantId} provider {provider} is not bound to this context and was rejected")]
+    private static partial void LogEnvelopeRejected(ILogger logger, Guid tenantId, string provider);
 
     [LoggerMessage(EventId = 5212, Level = LogLevel.Error, Message = "SocialCredentialResolver: failed to decrypt credentials for tenant {tenantId} provider {provider}")]
     private static partial void LogDecryptFailed(ILogger logger, Exception ex, Guid tenantId, string provider);

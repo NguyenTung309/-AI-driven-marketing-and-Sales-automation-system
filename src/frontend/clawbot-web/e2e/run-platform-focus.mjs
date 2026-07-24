@@ -37,10 +37,11 @@ function emptyList() {
   return { items: [], total: 0, page: 1, pageSize: 50 };
 }
 
-async function json(route, status, body) {
+async function json(route, status, body, headers = {}) {
   await route.fulfill({
     status,
     contentType: "application/json",
+    headers,
     body: body == null ? "" : JSON.stringify(body),
   });
 }
@@ -48,6 +49,15 @@ async function json(route, status, body) {
 async function installMockApi(page, options = {}) {
   let sessionActive = false;
   let lastScheduleRequest = null;
+  const scheduleRequests = [];
+  const scheduleRequiresReselection = options.scheduleRequiresReselection ?? false;
+  const scheduleConflictOnce = options.scheduleConflictOnce ?? false;
+  let releaseCalendarResponse = () => {};
+  const calendarResponseGate = options.delayCalendarResponse
+    ? new Promise((resolve) => {
+        releaseCalendarResponse = resolve;
+      })
+    : Promise.resolve();
   let legacyBrief = {
     id: legacyBriefId,
     platform: "tiktok",
@@ -79,13 +89,17 @@ async function installMockApi(page, options = {}) {
     canSchedule: false,
     canPublish: false,
   };
+  const scheduledPlatform = options.scheduledPlatform ?? "facebook";
+  const publishTargetMode = options.publishTargetMode ?? "linked_meta";
   const scheduledItem = {
     ...legacyItem,
     id: scheduledItemId,
     briefId: null,
-    platform: "facebook",
+    platform: scheduledPlatform,
     status: "scheduled",
-    body: "Facebook schedule with frozen non-default target",
+    body: scheduledPlatform === "instagram"
+      ? "Instagram schedule with frozen linked target"
+      : "Facebook schedule with frozen non-default target",
     workflowState: "scheduled",
     canSchedule: true,
   };
@@ -163,21 +177,25 @@ async function installMockApi(page, options = {}) {
         return json(route, 200, scheduledItem);
       }
       if (method === "GET" && path === "/api/content/calendar") {
+        await calendarResponseGate;
         return json(route, 200, {
           items: [{
             scheduleId: scheduledId,
             contentItemId: scheduledItemId,
-            platform: "facebook",
-            status: "pending",
+            platform: scheduledPlatform,
+            status: scheduleRequiresReselection ? "held" : "pending",
             body: scheduledItem.body,
             scheduledAt: "2026-07-25T02:00:00.000Z",
             postedAt: null,
             postUrl: null,
-            metaAssetId: originalMetaAssetId,
+            metaAssetId: scheduleRequiresReselection ? null : originalMetaAssetId,
             likeCount: null,
             commentCount: null,
             retryCount: 0,
-            lastError: null,
+            lastError: scheduleRequiresReselection
+              ? "Instagram target must be reselected after the provider target snapshot repair."
+              : null,
+            requiresInstagramAccountConfirmation: scheduleRequiresReselection,
           }],
         });
       }
@@ -194,40 +212,56 @@ async function installMockApi(page, options = {}) {
         });
       }
       if (method === "GET" && path === "/api/content/publish-targets") {
+        const requestedPlatform = new URL(request.url()).searchParams.get("platform");
+        if (requestedPlatform !== scheduledPlatform) {
+          return json(route, 400, { code: "unexpected_publish_target_platform" });
+        }
         const originalTarget = {
           id: originalMetaAssetId,
-          platform: "facebook",
+          platform: scheduledPlatform,
           externalId: "page-original",
           name: "Page gốc đã khóa",
           isDefault: false,
         };
-        return json(route, 200, {
-          mode: "linked_meta",
-          items: [
-            {
-              id: currentDefaultMetaAssetId,
-              platform: "facebook",
-              externalId: "page-current-default",
-              name: "Page mặc định mới",
-              isDefault: true,
-            },
-            ...(options.includeOriginalTarget === false ? [] : [originalTarget]),
-          ],
+        const targets = publishTargetMode === "standalone"
+          ? []
+          : [
+              {
+                id: currentDefaultMetaAssetId,
+                platform: scheduledPlatform,
+                externalId: "page-current-default",
+                name: "Page mặc định mới",
+                isDefault: true,
+              },
+              ...(options.includeOriginalTarget === false ? [] : [originalTarget]),
+            ];
+        return json(route, 200, targets, {
+          "X-Clawbot-Publish-Target-Mode": publishTargetMode,
         });
       }
       if (method === "POST" && path === `/api/content/items/${scheduledItemId}/schedule`) {
         lastScheduleRequest = request.postDataJSON();
+        scheduleRequests.push(lastScheduleRequest);
+        if ((scheduleConflictOnce && scheduleRequests.length === 1)
+          || (scheduleRequiresReselection
+            && lastScheduleRequest.metaAssetId == null
+            && lastScheduleRequest.confirmInstagramAccount !== true)) {
+          return json(route, 409, {
+            errorCode: "content.instagram_target_reselection_required",
+            message: "Instagram target must be explicitly reselected before this schedule can be changed.",
+          });
+        }
         return json(route, 201, {
           id: scheduledId,
           contentItemId: scheduledItemId,
-          platform: "facebook",
+          platform: scheduledPlatform,
           scheduledAt: lastScheduleRequest.scheduledAt,
           postedAt: null,
           status: "pending",
           postUrl: null,
           createdAt: timestamp,
           updatedAt: timestamp,
-          metaAssetId: originalMetaAssetId,
+          metaAssetId: lastScheduleRequest.metaAssetId ?? null,
           likeCount: null,
           commentCount: null,
           engagementSyncedAt: null,
@@ -282,6 +316,8 @@ async function installMockApi(page, options = {}) {
   return {
     getLastBriefUpdate: () => lastBriefUpdate,
     getLastScheduleRequest: () => lastScheduleRequest,
+    getScheduleRequests: () => [...scheduleRequests],
+    releaseCalendarResponse,
   };
 }
 
@@ -359,13 +395,21 @@ async function testAnalyticsThreeChannelFocus() {
   });
 }
 
-async function openExistingFacebookSchedule(page) {
+async function openExistingSchedule(page, accessibleName) {
   await page.goto(`${baseURL}/content`);
-  const scheduledItem = page.getByRole("button", { name: /Facebook.*Facebook schedule with frozen non-default target/ });
+  const scheduledItem = page.getByRole("button", { name: accessibleName });
   await expect(scheduledItem).toBeVisible();
   await scheduledItem.click();
   await page.getByRole("button", { name: "Đổi lịch (tuỳ chọn)", exact: true }).click();
   return page.getByRole("dialog", { name: "Lên lịch xuất bản nội dung" });
+}
+
+async function openExistingFacebookSchedule(page) {
+  return openExistingSchedule(page, /Facebook.*Facebook schedule with frozen non-default target/);
+}
+
+async function openExistingInstagramSchedule(page) {
+  return openExistingSchedule(page, /Instagram.*Instagram schedule with frozen linked target/);
 }
 
 async function testExistingScheduleKeepsFrozenTarget() {
@@ -383,6 +427,24 @@ async function testExistingScheduleKeepsFrozenTarget() {
   });
 }
 
+async function testExplicitTargetChangeUsesSelectedPage() {
+  await withPage(async (page, mocks) => {
+    const dialog = await openExistingFacebookSchedule(page);
+    const targetSelect = dialog.getByLabel("Facebook Page");
+    await expect(targetSelect).toHaveValue(originalMetaAssetId);
+
+    await targetSelect.selectOption(currentDefaultMetaAssetId);
+    await expect(targetSelect).toHaveValue(currentDefaultMetaAssetId);
+    await dialog.getByRole("button", { name: /Chọn thời điểm riêng/i }).click();
+    await dialog.getByLabel("Giờ").fill("10:45");
+    await dialog.getByRole("button", { name: "Xác nhận lên lịch", exact: true }).click();
+
+    await expect.poll(() => mocks.getLastScheduleRequest()).toMatchObject({
+      metaAssetId: currentDefaultMetaAssetId,
+    });
+  });
+}
+
 async function testMissingFrozenTargetDoesNotUseCurrentDefault() {
   await withPage(async (page, mocks) => {
     const dialog = await openExistingFacebookSchedule(page);
@@ -397,6 +459,160 @@ async function testMissingFrozenTargetDoesNotUseCurrentDefault() {
 
     await expect.poll(() => mocks.getLastScheduleRequest()).toMatchObject({ metaAssetId: null });
   }, { includeOriginalTarget: false });
+}
+
+async function testExistingLinkedInstagramScheduleSurvivesStandaloneMode() {
+  await withPage(async (page, mocks) => {
+    const dialog = await openExistingInstagramSchedule(page);
+    await expect(dialog.getByText(
+      "Lịch hiện tại sẽ giữ nguyên đích Instagram đã khóa; tài khoản độc lập chỉ áp dụng khi chọn lại đích hoặc tạo lịch mới.",
+      { exact: true },
+    )).toBeVisible();
+    await expect(dialog.getByLabel("Meta Page liên kết Instagram")).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "Xác nhận lên lịch", exact: true })).toBeEnabled();
+
+    await dialog.getByRole("button", { name: /Chọn thời điểm riêng/i }).click();
+    await dialog.getByLabel("Giờ").fill("11:45");
+    await dialog.getByRole("button", { name: "Xác nhận lên lịch", exact: true }).click();
+
+    await expect.poll(() => mocks.getLastScheduleRequest()).toMatchObject({ metaAssetId: null });
+  }, {
+    scheduledPlatform: "instagram",
+    publishTargetMode: "standalone",
+  });
+}
+
+async function testStandaloneInstagramReselectionRequiresExplicitConfirmation() {
+  await withPage(async (page, mocks) => {
+    const dialog = await openExistingInstagramSchedule(page);
+    expect(mocks.getScheduleRequests()).toHaveLength(0);
+    await expect(dialog.getByText(/cần xác nhận lại tài khoản instagram độc lập/i)).toBeVisible();
+    const confirmation = dialog.getByRole("checkbox", {
+      name: "Tôi xác nhận dùng tài khoản Instagram độc lập hiện đang cấu hình",
+      exact: true,
+    });
+    await expect(confirmation).not.toBeChecked();
+
+    await dialog.getByRole("button", { name: /Chọn thời điểm riêng/i }).click();
+    await dialog.getByLabel("Giờ").fill("12:15");
+    const submit = dialog.getByRole("button", { name: "Xác nhận lên lịch", exact: true });
+    await expect(submit).toBeDisabled();
+    expect(mocks.getScheduleRequests()).toHaveLength(0);
+
+    await confirmation.check();
+    await expect(submit).toBeEnabled();
+    await submit.click();
+
+    await expect.poll(() => mocks.getScheduleRequests()).toHaveLength(1);
+    expect(mocks.getScheduleRequests()[0]).toMatchObject({
+      metaAssetId: null,
+      confirmInstagramAccount: true,
+    });
+    await expect(page.getByText("Đã đổi lịch xuất bản theo thời điểm bạn chọn.", { exact: true })).toBeVisible();
+  }, {
+    scheduledPlatform: "instagram",
+    publishTargetMode: "standalone",
+    scheduleRequiresReselection: true,
+  });
+}
+
+async function testDelayedStandaloneInstagramReselectionRequiresExplicitConfirmation() {
+  await withPage(async (page, mocks) => {
+    const dialog = await openExistingInstagramSchedule(page);
+    await expect(dialog.getByText(/giữ nguyên đích instagram đã khóa/i)).toBeVisible();
+    await dialog.getByRole("button", { name: /Chọn thời điểm riêng/i }).click();
+    await dialog.getByLabel("Giờ").fill("12:45");
+
+    mocks.releaseCalendarResponse();
+
+    await expect(dialog.getByText(/cần xác nhận lại tài khoản instagram độc lập/i)).toBeVisible();
+    const confirmation = dialog.getByRole("checkbox", {
+      name: "Tôi xác nhận dùng tài khoản Instagram độc lập hiện đang cấu hình",
+      exact: true,
+    });
+    const submit = dialog.getByRole("button", { name: "Xác nhận lên lịch", exact: true });
+    await expect(confirmation).not.toBeChecked();
+    await expect(submit).toBeDisabled();
+    expect(mocks.getScheduleRequests()).toHaveLength(0);
+
+    await confirmation.check();
+    await expect(submit).toBeEnabled();
+    await submit.click();
+
+    await expect.poll(() => mocks.getScheduleRequests()).toHaveLength(1);
+    expect(mocks.getScheduleRequests()[0]).toMatchObject({
+      metaAssetId: null,
+      confirmInstagramAccount: true,
+    });
+  }, {
+    scheduledPlatform: "instagram",
+    publishTargetMode: "standalone",
+    scheduleRequiresReselection: true,
+    delayCalendarResponse: true,
+  });
+}
+
+async function testScheduleConflictStateClearsAcrossDialogSessions() {
+  await withPage(async (page) => {
+    const dialog = await openExistingInstagramSchedule(page);
+    await expect(dialog.getByText(/giữ nguyên đích instagram đã khóa/i)).toBeVisible();
+    await dialog.getByRole("button", { name: /Chọn thời điểm riêng/i }).click();
+    await dialog.getByLabel("Giờ").fill("13:15");
+    await dialog.getByRole("button", { name: "Xác nhận lên lịch", exact: true }).click();
+
+    const confirmation = dialog.getByRole("checkbox", {
+      name: "Tôi xác nhận dùng tài khoản Instagram độc lập hiện đang cấu hình",
+      exact: true,
+    });
+    await expect(dialog.getByText(/lịch instagram này cần chọn lại đích đăng/i)).toBeVisible();
+    await expect(confirmation).toBeVisible();
+    await confirmation.check();
+
+    await dialog.getByRole("button", { name: "Hủy bỏ", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await page.getByRole("button", { name: "Đổi lịch (tuỳ chọn)", exact: true }).click();
+
+    const reopenedDialog = page.getByRole("dialog", { name: "Lên lịch xuất bản nội dung" });
+    await expect(reopenedDialog.getByText(/lịch instagram này cần chọn lại đích đăng/i)).toHaveCount(0);
+    await expect(reopenedDialog.getByRole("checkbox", {
+      name: "Tôi xác nhận dùng tài khoản Instagram độc lập hiện đang cấu hình",
+      exact: true,
+    })).toHaveCount(0);
+    await expect(reopenedDialog.getByText(/giữ nguyên đích instagram đã khóa/i)).toBeVisible();
+    await expect(reopenedDialog.getByLabel("Ngày")).toBeDisabled();
+    await expect(reopenedDialog.getByLabel("Giờ")).toBeDisabled();
+    await expect(reopenedDialog.getByLabel("Giờ")).toHaveValue("09:00");
+  }, {
+    scheduledPlatform: "instagram",
+    publishTargetMode: "standalone",
+    scheduleConflictOnce: true,
+  });
+}
+
+async function testLinkedInstagramReselectionUsesSelectedMetaTarget() {
+  await withPage(async (page, mocks) => {
+    const dialog = await openExistingInstagramSchedule(page);
+    const targetSelect = dialog.getByLabel("Meta Page liên kết Instagram");
+    await expect(targetSelect).toHaveValue("");
+    await expect(targetSelect.locator(`option[value="${currentDefaultMetaAssetId}"]`)).toHaveText("Page mặc định mới (mặc định)");
+    expect(mocks.getScheduleRequests()).toHaveLength(0);
+
+    await targetSelect.selectOption(currentDefaultMetaAssetId);
+    await dialog.getByRole("button", { name: /Chọn thời điểm riêng/i }).click();
+    await dialog.getByLabel("Giờ").fill("12:30");
+    await dialog.getByRole("button", { name: "Xác nhận lên lịch", exact: true }).click();
+
+    await expect.poll(() => mocks.getScheduleRequests()).toHaveLength(1);
+    expect(mocks.getScheduleRequests()[0]).toMatchObject({
+      metaAssetId: currentDefaultMetaAssetId,
+      confirmInstagramAccount: false,
+    });
+  }, {
+    scheduledPlatform: "instagram",
+    publishTargetMode: "linked_meta",
+    scheduleRequiresReselection: true,
+    includeOriginalTarget: false,
+  });
 }
 
 async function testLegacyReadOnlyContract() {
@@ -454,7 +670,13 @@ async function main() {
     ["trend settings keep Google and omit legacy content targets", testTrendSettingsRemainAvailable],
     ["analytics charts render and scale only the three primary channels", testAnalyticsThreeChannelFocus],
     ["time-only reschedule keeps the frozen non-default Meta target", testExistingScheduleKeepsFrozenTarget],
+    ["explicit target change submits the selected Meta Page", testExplicitTargetChangeUsesSelectedPage],
     ["missing frozen target never falls back to the current default", testMissingFrozenTargetDoesNotUseCurrentDefault],
+    ["linked Instagram schedule stays frozen after standalone mode is enabled", testExistingLinkedInstagramScheduleSurvivesStandaloneMode],
+    ["standalone Instagram reselection requires explicit account confirmation", testStandaloneInstagramReselectionRequiresExplicitConfirmation],
+    ["delayed calendar reselection requires explicit standalone confirmation", testDelayedStandaloneInstagramReselectionRequiresExplicitConfirmation],
+    ["schedule conflict state clears across dialog sessions", testScheduleConflictStateClearsAcrossDialogSessions],
+    ["linked Instagram reselection sends only the selected Meta target", testLinkedInstagramReselectionUsesSelectedMetaTarget],
     ["legacy TikTok content remains readable and text-editable", testLegacyReadOnlyContract],
   ];
 

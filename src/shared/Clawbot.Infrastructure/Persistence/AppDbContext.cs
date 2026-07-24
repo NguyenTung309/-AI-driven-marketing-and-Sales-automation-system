@@ -108,6 +108,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<ContentItem> ContentItems => Set<ContentItem>();
     public DbSet<ContentSchedule> ContentSchedules => Set<ContentSchedule>();
     public DbSet<ContentReviewTask> ContentReviewTasks => Set<ContentReviewTask>();
+    public DbSet<ContentRenderTask> ContentRenderTasks => Set<ContentRenderTask>();
     public DbSet<ContentAsset> ContentAssets => Set<ContentAsset>();
     public DbSet<ContentPublishAttempt> ContentPublishAttempts => Set<ContentPublishAttempt>();
     public DbSet<ContentWorkflowMetricsHourly> ContentWorkflowMetricsHourly => Set<ContentWorkflowMetricsHourly>();
@@ -150,6 +151,39 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
     Task<int> IAppDbContext.SaveChangesAsync(CancellationToken ct) => base.SaveChangesAsync(ct);
 
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        RefreshSqliteContentRenderTaskConcurrencyTokens();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        RefreshSqliteContentRenderTaskConcurrencyTokens();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void RefreshSqliteContentRenderTaskConcurrencyTokens()
+    {
+        if (!string.Equals(
+                Database.ProviderName,
+                "Microsoft.EntityFrameworkCore.Sqlite",
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        foreach (var entry in ChangeTracker.Entries<ContentRenderTask>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Property(x => x.RowVersion).CurrentValue = Guid.NewGuid().ToByteArray();
+            }
+        }
+    }
+
     private sealed class EfConversationSet(DbSet<Conversation> set) : IConversationSet
     {
         public void Add(Conversation conversation) => set.Add(conversation);
@@ -174,10 +208,16 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
             builder.Entity<ContentReviewTask>().Property(x => x.RowVersion)
                 .IsConcurrencyToken()
                 .ValueGeneratedNever();
+            builder.Entity<ContentRenderTask>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
             builder.Entity<ContentAsset>().Property(x => x.RowVersion)
                 .IsConcurrencyToken()
                 .ValueGeneratedNever();
             builder.Entity<ContentPublishAttempt>().Property(x => x.RowVersion)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            builder.Entity<AgentSession>().Property(x => x.RowVersion)
                 .IsConcurrencyToken()
                 .ValueGeneratedNever();
         }
@@ -186,8 +226,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
             builder.Entity<ContentItem>().Property(x => x.RowVersion).IsRowVersion();
             builder.Entity<ContentSchedule>().Property(x => x.RowVersion).IsRowVersion();
             builder.Entity<ContentReviewTask>().Property(x => x.RowVersion).IsRowVersion();
+            builder.Entity<ContentRenderTask>().Property(x => x.RowVersion).IsRowVersion();
             builder.Entity<ContentAsset>().Property(x => x.RowVersion).IsRowVersion();
             builder.Entity<ContentPublishAttempt>().Property(x => x.RowVersion).IsRowVersion();
+            builder.Entity<AgentSession>().Property(x => x.RowVersion).IsRowVersion();
         }
 
         builder.AddInboxStateEntity();

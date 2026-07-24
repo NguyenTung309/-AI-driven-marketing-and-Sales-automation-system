@@ -698,6 +698,62 @@ public sealed class ContentReviewTaskConfiguration : IEntityTypeConfiguration<Co
     }
 }
 
+public sealed class ContentRenderTaskConfiguration : IEntityTypeConfiguration<ContentRenderTask>
+{
+    public void Configure(EntityTypeBuilder<ContentRenderTask> builder)
+    {
+        builder.ToTable("content_render_tasks", table =>
+        {
+            table.HasCheckConstraint(
+                "CK_content_render_tasks_revision",
+                "source_revision > 0 AND source_revision < 2147483647 AND template_version > 0 AND attempt_count >= 0");
+            table.HasCheckConstraint(
+                "CK_content_render_tasks_status",
+                "status IN ('pending', 'leased', 'completed', 'failed', 'canceled_stale')");
+            table.HasCheckConstraint(
+                "CK_content_render_tasks_preset",
+                "preset IN ('1200x630', '1080x1080')");
+            table.HasCheckConstraint(
+                "CK_content_render_tasks_state",
+                "(status = 'pending' AND lease_token IS NULL AND claimed_lease_token IS NULL AND lease_expires_at IS NULL AND completed_at IS NULL AND output_asset_id IS NULL AND completed_revision IS NULL) OR "
+                + "(status = 'leased' AND lease_token IS NOT NULL AND (claimed_lease_token IS NULL OR claimed_lease_token = lease_token) AND lease_expires_at IS NOT NULL AND completed_at IS NULL AND output_asset_id IS NULL AND completed_revision IS NULL) OR "
+                + "(status = 'completed' AND lease_token IS NULL AND claimed_lease_token IS NULL AND lease_expires_at IS NULL AND completed_at IS NOT NULL AND output_asset_id IS NOT NULL AND completed_revision = source_revision + 1) OR "
+                + "(status IN ('failed', 'canceled_stale') AND lease_token IS NULL AND claimed_lease_token IS NULL AND lease_expires_at IS NULL AND completed_at IS NOT NULL AND output_asset_id IS NULL AND completed_revision IS NULL)");
+        });
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.TemplateId)
+            .HasMaxLength(ContentRenderTask.MaxTemplateIdLength)
+            .IsRequired();
+        builder.Property(x => x.TemplateHash).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.Preset)
+            .HasMaxLength(ContentRenderTask.MaxPresetLength)
+            .IsRequired();
+        builder.Property(x => x.CanonicalSlotsJson)
+            .HasMaxLength(ContentRenderTask.MaxCanonicalSlotsUtf8Bytes)
+            .IsRequired();
+        builder.Property(x => x.SlotsHash).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.Status)
+            .HasMaxLength(24)
+            .HasDefaultValue(ContentRenderTask.StatusPending)
+            .IsRequired();
+        builder.Property(x => x.AttemptCount).HasDefaultValue(0);
+        builder.Property(x => x.LastErrorCode)
+            .HasMaxLength(ContentRenderTask.MaxErrorCodeLength);
+        builder.HasOne<ContentItem>()
+            .WithMany()
+            .HasForeignKey(x => new { x.TenantId, x.ContentItemId })
+            .HasPrincipalKey(x => new { x.TenantId, x.Id })
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasIndex(x => new { x.TenantId, x.ContentItemId, x.SourceRevision })
+            .IsUnique()
+            .HasDatabaseName("UX_content_render_tasks_item_revision");
+        builder.HasIndex(x => new { x.TenantId, x.Status, x.NextAttemptAt, x.CreatedAt })
+            .HasDatabaseName("IX_content_render_tasks_due");
+        builder.HasIndex(x => new { x.TenantId, x.Status, x.LeaseExpiresAt })
+            .HasDatabaseName("IX_content_render_tasks_expired_lease");
+    }
+}
+
 public sealed class ContentAssetConfiguration : IEntityTypeConfiguration<ContentAsset>
 {
     public void Configure(EntityTypeBuilder<ContentAsset> builder)

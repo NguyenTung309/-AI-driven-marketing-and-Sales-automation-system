@@ -58,12 +58,12 @@ public sealed class ContentAutoScheduler(
             if (desiredPublishAt is { } existingExplicitAt && existingExplicitAt <= at)
                 throw new InvalidOperationException("content_schedule_in_past");
 
-            var preserveInstagramReselectionHold = !hasTargetUpdate
-                && string.Equals(item.Platform, "instagram", StringComparison.OrdinalIgnoreCase)
-                && string.Equals(
-                    active.LastErrorCode,
-                    ContentSchedule.ErrorInstagramTargetReselectionRequired,
-                    StringComparison.Ordinal);
+            if (!hasTargetUpdate && active.RequiresInstagramTargetReselection())
+            {
+                throw new InvalidOperationException(
+                    "content_schedule_instagram_target_reselection_required");
+            }
+
             var rescheduledAt = desiredPublishAt ?? _goldenHour.ResolveNext(item.Platform, at);
             var rescheduledPublishTargetId = hasTargetUpdate ? publishTargetId : active.MetaAssetId;
             var rescheduledProviderTargetId = hasTargetUpdate ? providerTargetId : active.ProviderTargetId;
@@ -77,7 +77,6 @@ public sealed class ContentAutoScheduler(
                 item.Platform,
                 rescheduledPublishTargetId,
                 rescheduledProviderTargetId,
-                preserveInstagramReselectionHold,
                 at);
             item.SetDesiredPublishAt(rescheduledAt, at);
             return active;
@@ -131,8 +130,7 @@ public sealed class ContentAutoScheduler(
             item.Platform,
             publishTargetId,
             providerTargetId,
-            preserveInstagramReselectionHold: false,
-            at: at);
+            at);
 
         item.SetDesiredPublishAt(scheduledAt, at);
         item.MarkScheduled(at);
@@ -161,15 +159,11 @@ public sealed class ContentAutoScheduler(
         string platform,
         Guid? publishTargetId,
         string? providerTargetId,
-        bool preserveInstagramReselectionHold,
         DateTimeOffset at)
     {
         if (!HasRequiredPublishTarget(platform, publishTargetId, providerTargetId))
         {
-            var errorCode = preserveInstagramReselectionHold
-                ? ContentSchedule.ErrorInstagramTargetReselectionRequired
-                : ErrorAutoScheduleTargetMissing;
-            schedule.MarkHeld(errorCode, at);
+            schedule.MarkHeld(ErrorAutoScheduleTargetMissing, at);
             return;
         }
 

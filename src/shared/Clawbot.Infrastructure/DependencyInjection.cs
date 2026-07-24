@@ -1,4 +1,4 @@
-﻿using Clawbot.Agents.Core.Ads;
+using Clawbot.Agents.Core.Ads;
 using Clawbot.Agents.Core.Lead;
 using Clawbot.Agents.Core.Rag;
 using Clawbot.Agents.Core.Skills;
@@ -70,7 +70,7 @@ public static class DependencyInjection
         });
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
-         // Identity and Auth    
+        // Identity and Auth
         services.AddIdentityCore<AppUser>(opt =>
             {
                 opt.User.RequireUniqueEmail = true;
@@ -204,6 +204,28 @@ public static class DependencyInjection
         services.AddScoped<EfSocialCredentialResolver>();
         services.AddScoped<ISocialCredentialResolver>(sp => sp.GetRequiredService<EfSocialCredentialResolver>());
         services.AddScoped<IInstagramCredentialResolver>(sp => sp.GetRequiredService<EfSocialCredentialResolver>());
+        services.AddSingleton<IHostAddressResolver, SystemHostAddressResolver>();
+        services.AddSingleton<IPublicUrlSafetyValidator, DnsPublicUrlSafetyValidator>();
+        services.AddTransient<ZaloResponseBufferingHandler>();
+        services.AddHttpClient(
+                GraphSocialPublisher.ZaloHttpClientName,
+                static client =>
+                {
+                    client.Timeout = Timeout.InfiniteTimeSpan;
+                    client.MaxResponseContentBufferSize = GraphSocialPublisher.ZaloMaxResponseContentBufferSize;
+                })
+            .RedactLoggedHeaders(static headerName =>
+                string.Equals(headerName, "access_token", StringComparison.OrdinalIgnoreCase))
+            .ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler
+            {
+                AllowAutoRedirect = false,
+                MaxResponseHeadersLength = checked(
+                    (int)(GraphSocialPublisher.ZaloMaxResponseContentBufferSize / 1024)),
+                UseCookies = false,
+            })
+            .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
+            .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(15)))
+            .AddHttpMessageHandler<ZaloResponseBufferingHandler>();
         services.AddHttpClient<GraphSocialPublisher>()
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(15)));

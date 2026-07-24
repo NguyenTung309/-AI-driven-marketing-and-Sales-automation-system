@@ -141,6 +141,44 @@ public sealed class ContentPublishAttempt : Entity<Guid>, ITenantOwned, IAuditEx
         LastErrorCode = "lease_expired";
     }
 
+    // UX_content_publish_attempts_operation chỉ cho đúng 1 row cho mỗi
+    // (tenant, schedule, item, revision, target), nên lần thử lại phải mở lại chính row này
+    // thay vì claim row mới. Chỉ hợp lệ khi chắc chắn KHÔNG có bài nào đã lên provider.
+    public void ReopenForRetry(
+        Guid replacementLeaseToken,
+        DateTimeOffset leaseExpiresAt,
+        DateTimeOffset at)
+    {
+        ValidateIdentity(replacementLeaseToken, nameof(replacementLeaseToken));
+        if (!CanReopenForRetry())
+            throw new InvalidOperationException("content_publish_attempt_not_reopenable");
+        if (leaseExpiresAt <= at)
+            throw new ArgumentOutOfRangeException(nameof(leaseExpiresAt), "content_publish_attempt_lease_expiry_invalid");
+
+        Status = StatusClaimed;
+        LeaseToken = replacementLeaseToken;
+        LeaseExpiresAt = leaseExpiresAt;
+        ProviderRequestId = null;
+        TransmittedAt = null;
+        CompletedAt = null;
+        ClaimedAt = at;
+        // Giữ LastErrorCode làm dấu vết lần hỏng trước cho tới khi có kết quả mới.
+    }
+
+    // Lần thử đã kết thúc và chắc chắn không có bài nào lên provider:
+    // failed (provider từ chối) hoặc reconciled mà không có external id.
+    public bool CanReopenForRetry() =>
+        Status == StatusFailed
+        || (Status == StatusReconciled && ExternalPostId is null);
+
+    // Bài đã lên thật — không được gọi provider lần nữa với cùng snapshot.
+    public bool HasConfirmedPublication() =>
+        Status == StatusSucceeded
+        || (Status == StatusReconciled && ExternalPostId is not null);
+
+    public bool HasActiveLease(DateTimeOffset at) =>
+        LeaseToken is not null && LeaseExpiresAt is not null && LeaseExpiresAt > at;
+
     public void MarkTransmitted(
         Guid leaseToken,
         string? providerRequestId,

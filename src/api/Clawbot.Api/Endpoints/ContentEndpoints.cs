@@ -770,8 +770,11 @@ public static class ContentEndpoints
         HttpContext http,
         CancellationToken ct)
     {
-        _ = tenants.Require();
-        var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
+        var tenant = tenants.Require();
+        var item = await db.ContentItems
+            .FirstOrDefaultAsync(
+                i => i.TenantId == tenant.TenantId && i.Id == id && i.DeletedAt == null,
+                ct)
             .ConfigureAwait(false);
         if (item is null)
             return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
@@ -797,6 +800,16 @@ public static class ContentEndpoints
                         && schedule.ActiveRevisionSlot == item.ContentRevision,
                     ct)
                 .ConfigureAwait(false);
+        }
+
+        if (activeSchedule?.RequiresInstagramTargetReselection() == true
+            && !body.ConfirmInstagramAccount)
+        {
+            return Error(
+                http,
+                StatusCodes.Status409Conflict,
+                "content.instagram_target_reselection_required",
+                "Instagram target must be explicitly reselected before this schedule can be changed.");
         }
 
         var preserveExistingTarget = activeSchedule is not null
@@ -901,6 +914,15 @@ public static class ContentEndpoints
                 StatusCodes.Status409Conflict,
                 "content.schedule_canceled_by_user",
                 "User-canceled schedule for this revision cannot be recreated automatically. Create a new revision or explicit reschedule flow.");
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message == "content_schedule_instagram_target_reselection_required")
+        {
+            return Error(
+                http,
+                StatusCodes.Status409Conflict,
+                "content.instagram_target_reselection_required",
+                "Instagram target must be explicitly reselected before this schedule can be changed.");
         }
         catch (InvalidOperationException exception) when (exception.Message == "content_schedule_in_past")
         {
@@ -1103,11 +1125,20 @@ public static class ContentEndpoints
         HttpContext http,
         CancellationToken ct)
     {
-        _ = tenants.Require();
-        var schedule = await db.ContentSchedules.FirstOrDefaultAsync(s => s.Id == id, ct)
+        var tenant = tenants.Require();
+        var schedule = await db.ContentSchedules
+            .FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId && s.Id == id, ct)
             .ConfigureAwait(false);
         if (schedule is null)
             return Error(http, StatusCodes.Status404NotFound, "content.schedule_not_found", "Content schedule not found.");
+        if (schedule.RequiresInstagramTargetReselection())
+        {
+            return Error(
+                http,
+                StatusCodes.Status422UnprocessableEntity,
+                "content.instagram_target_reselection_required",
+                "Instagram target must be reselected before publishing can be retried.");
+        }
 
         if (!schedule.TryResetForRetry(clock.UtcNow))
         {
@@ -1504,7 +1535,8 @@ public static class ContentEndpoints
                     s.LikeCount,
                     s.CommentCount,
                     s.RetryCount,
-                    s.LastError);
+                    s.LastError,
+                    s.RequiresInstagramTargetReselection());
             })
             .ToList();
 

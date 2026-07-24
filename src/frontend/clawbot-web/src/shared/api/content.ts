@@ -132,6 +132,7 @@ export interface ContentCalendarItem {
   readonly commentCount: number | null;
   readonly retryCount: number;
   readonly lastError: string | null;
+  readonly requiresInstagramAccountConfirmation: boolean;
 }
 
 export interface ContentPublishTarget {
@@ -147,6 +148,12 @@ export type ContentPublishTargetMode = "linked_meta" | "standalone" | "invalid" 
 export interface ContentPublishTargetsResponse {
   readonly mode: ContentPublishTargetMode;
   readonly items: readonly ContentPublishTarget[];
+}
+
+export interface ScheduleContentItemPayload {
+  readonly scheduledAt: string | null;
+  readonly metaAssetId?: string | null;
+  readonly confirmInstagramAccount?: boolean;
 }
 
 export interface ContentCalendarResponse {
@@ -385,8 +392,15 @@ export async function retryAgentReview(id: string, payload: RetryAgentReviewPayl
   return res.data;
 }
 
-export async function scheduleContentItem(id: string, scheduledAt: string | null, metaAssetId?: string | null): Promise<ContentSchedule> {
-  const res = await apiClient.post<ContentSchedule>(`/api/content/items/${id}/schedule`, { scheduledAt, metaAssetId: metaAssetId ?? null });
+export async function scheduleContentItem(
+  id: string,
+  payload: ScheduleContentItemPayload,
+): Promise<ContentSchedule> {
+  const res = await apiClient.post<ContentSchedule>(`/api/content/items/${id}/schedule`, {
+    scheduledAt: payload.scheduledAt,
+    metaAssetId: payload.metaAssetId ?? null,
+    confirmInstagramAccount: payload.confirmInstagramAccount ?? false,
+  });
   return res.data;
 }
 

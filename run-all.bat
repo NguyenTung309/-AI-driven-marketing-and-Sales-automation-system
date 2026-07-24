@@ -437,6 +437,11 @@ if errorlevel 1 (
     echo [ERROR] Content schedule provider target repair failed.
     exit /b 1
 )
+type "%ROOT%deploy\migrations\0082_content_render_tasks.sql" | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
+if errorlevel 1 (
+    echo [ERROR] Content render task persistence repair failed.
+    exit /b 1
+)
 exit /b 0
 
 :verify_tenant_runtime_columns
@@ -479,6 +484,33 @@ if /i not "%LEAD_REV_FLAGS%"=="111" (
     echo [ERROR] lead_revenues schema incomplete after repair.
     echo Expected table lead_revenues + UX_lead_revenues_one_active + kpi_daily.revenue when kpi_daily exists.
     echo Verify flags were "%LEAD_REV_FLAGS%" - want 111.
+    exit /b 1
+)
+rem Content render task gate (0082): exact rowversion, ordered FK/index columns, trusted CHECK definitions, and payload defaults.
+rem verify_content_render_tasks.sql checks sys.index_columns/key_ordinal, sys.foreign_key_columns/constraint_column_id/referenced_object_id,
+rem delete_referential_action_desc, is_not_trusted, is_disabled, system_type_id, and normalized constraint definition values.
+rem Payload checks cover canonical_slots_json, slots_hash, and sys.default_constraints for every immutable payload column.
+echo [INFO] Verifying content_render_tasks schema...
+if not exist "%ROOT%deploy\verify_content_render_tasks.sql" (
+    echo [ERROR] Missing deploy\verify_content_render_tasks.sql
+    exit /b 1
+)
+set "CONTENT_RENDER_TASK_CHECK=%TEMP%\clawbot_content_render_tasks_%RANDOM%.txt"
+type "%ROOT%deploy\verify_content_render_tasks.sql" | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -h -1 -W -b > "%CONTENT_RENDER_TASK_CHECK%" 2>nul
+if errorlevel 1 (
+    del "%CONTENT_RENDER_TASK_CHECK%" >nul 2>nul
+    echo [ERROR] Could not verify content_render_tasks schema.
+    exit /b 1
+)
+set "CONTENT_RENDER_TASK_FLAGS="
+for /f "usebackq delims= " %%A in ("%CONTENT_RENDER_TASK_CHECK%") do (
+    if not defined CONTENT_RENDER_TASK_FLAGS set "CONTENT_RENDER_TASK_FLAGS=%%A"
+)
+del "%CONTENT_RENDER_TASK_CHECK%" >nul 2>nul
+if /i not "%CONTENT_RENDER_TASK_FLAGS%"=="1111111111111" (
+    echo [ERROR] content_render_tasks schema definitions are incomplete or malformed after repair.
+    echo Expected exact rowversion, tenant-safe FK, ordered worker indexes, trusted CHECK definitions, canonical payload columns, full column contract, non-null required values, and clustered primary key.
+    echo Verify flags were "%CONTENT_RENDER_TASK_FLAGS%" - want 1111111111111.
     exit /b 1
 )
 exit /b 0

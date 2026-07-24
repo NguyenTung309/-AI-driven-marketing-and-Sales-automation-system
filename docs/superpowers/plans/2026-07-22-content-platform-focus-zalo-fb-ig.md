@@ -65,6 +65,10 @@ Thu gọn phần Content về đúng 3 platform có thể ghi/chọn mới: **`f
 
 ### F. Analytics (thứ yếu)
 - FE `src/frontend/clawbot-web/src/features/analytics/AnalyticsReportsPage.tsx:49` — `CHANNELS`: bỏ `tiktok`, `youtube`; thêm `instagram` (+ label/icon dòng 68-95). Backend `KpiAggregator.cs:13` **đã có `instagram`** — không đụng; giữ `tiktok`/`youtube` (dữ liệu lịch sử vô hại).
+- **Posture deprecation metric Graph (đã tra v25.0, xác minh 2026-07-22): ClawBot zero exposure.** Hai đợt gỡ Page Insights — page `impressions`/`page_fans` từ 15/11/2025; `post_impressions*` + `page_impressions_unique` sau v25, hiệu lực mọi API version từ 15/06/2026 — không chạm điểm nào của ClawBot:
+  - Engagement sync `src/shared/Clawbot.Infrastructure/Jobs/MetaEngagementSyncJob.cs:55` dùng **edge** `likes.summary(true),comments.summary(true)` (object connection trên post node), KHÔNG phải `/insights?metric=` → nằm ngoài diện gỡ.
+  - Ads metrics `src/shared/Clawbot.Infrastructure/Ads/MetaAdsConnector.cs:39` dùng **Ads Insights API** (`{campaign}/insights` với `cpc,impressions,clicks,spend,actions`) — track quản trị riêng, không thuộc Page Insights deprecation.
+  - Ràng buộc nếu về sau mở rộng analytics FB: chỉ lấy reach/media-view qua edge hoặc `*_media_view`, **tuyệt đối không** dùng `post_impressions`; tách từng metric thành call riêng vì `/insights` gộp mà dính 1 metric hỏng sẽ `(#100)` fail cả request, và cutover sang `post_media_view` **không backfill** (chuỗi lịch sử sẽ đứt gãy).
 
 ## 5. Chia phase thực thi
 
@@ -170,6 +174,7 @@ Render/storage/handoff lỗi giữ item ngoài publish path; riêng IG tiếp t�
 ### Done
 - [x] Khảo sát repository và research các điểm chạm Content/Meta/asset/testing.
 - [x] Architecture review và các quyết định scope: đúng 3 platform writable; legacy read-only; renderer trước review; JPEG; capability IG tách FB.
+- [x] Tra & xác minh posture deprecation metric Graph API v25.0 (đợt 15/11/2025 + 15/06/2026): ClawBot zero exposure — engagement sync dùng edge `summary(true)`, ads dùng Ads Insights riêng (chi tiết §4.F).
 
 ### In Progress
 - [ ] P1 guard/bề mặt chỉ cho `facebook|zalo|instagram`, gồm semantics text-only edit cho brief legacy.
