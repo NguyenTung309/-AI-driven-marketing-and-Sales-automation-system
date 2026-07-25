@@ -20,6 +20,10 @@ public sealed class ContentReviewTask : Entity<Guid>, ITenantOwned, IAuditExempt
     public Guid? ClaimedLeaseToken { get; private set; }
     public DateTimeOffset? LeaseExpiresAt { get; private set; }
     public int AttemptCount { get; private set; }
+    // Refine (P6, §4.7): số vòng sửa tự động đã chạy cho revision này. Đúng 1 vòng/revision — reviewer reject lần
+    // đầu (RefineAttemptCount==0) mới kích refine; vòng 2 vẫn reject => needs_human, dừng hẳn. Đếm trên task (bền),
+    // KHÔNG trong bộ nhớ tiến trình, để restart/đa host không chạy lại vòng đã dùng.
+    public int RefineAttemptCount { get; private set; }
     public DateTimeOffset NextAttemptAt { get; private set; }
     public string? LastErrorCode { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -103,6 +107,16 @@ public sealed class ContentReviewTask : Entity<Guid>, ITenantOwned, IAuditExempt
 
         ClaimedLeaseToken = leaseToken;
         return true;
+    }
+
+    // Refine (P6, §4.7): đánh dấu đã chạy 1 vòng sửa cho lần review này. Đếm trên task (bền qua tiến trình) —
+    // chỉ RefineAttemptCount==0 mới được kích refine; gọi lần 2 ném lỗi (vòng 2 reject => needs_human, không refine tiếp).
+    public void RecordRefineAttempt(Guid leaseToken, DateTimeOffset at)
+    {
+        EnsureActiveLease(leaseToken, at);
+        if (RefineAttemptCount > 0)
+            throw new InvalidOperationException("content_review_task_refine_exhausted");
+        RefineAttemptCount = checked(RefineAttemptCount + 1);
     }
 
     public void ReleaseForRetry(

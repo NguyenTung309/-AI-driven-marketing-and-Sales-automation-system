@@ -442,6 +442,21 @@ if errorlevel 1 (
     echo [ERROR] Content render task persistence repair failed.
     exit /b 1
 )
+type "%ROOT%deploy\migrations\0083_content_generation_traces.sql" | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
+if errorlevel 1 (
+    echo [ERROR] Content generation traces repair failed.
+    exit /b 1
+)
+type "%ROOT%deploy\migrations\0084_content_items_chain_snapshot.sql" | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
+if errorlevel 1 (
+    echo [ERROR] Content items chain snapshot repair failed.
+    exit /b 1
+)
+type "%ROOT%deploy\migrations\0085_content_review_tasks_refine_attempt.sql" | docker exec -i clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b
+if errorlevel 1 (
+    echo [ERROR] Content review tasks refine attempt repair failed.
+    exit /b 1
+)
 exit /b 0
 
 :verify_tenant_runtime_columns

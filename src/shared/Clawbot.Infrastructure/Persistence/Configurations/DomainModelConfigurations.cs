@@ -631,6 +631,9 @@ public sealed class ContentItemConfiguration : IEntityTypeConfiguration<ContentI
         builder.Property(x => x.HumanApprovalRequirementReason).HasMaxLength(32);
         builder.Property(x => x.ApprovalMode).HasMaxLength(16);
         builder.Property(x => x.ApprovalReason).HasMaxLength(ContentItem.MaxApprovalReasonLength);
+        // Prompt chaining P4: ảnh chụp L1/L2 để repurpose tái dùng (§4.5). NVARCHAR(MAX) — plan+outline có thể dài.
+        builder.Property(x => x.ChainPlanJson).HasColumnName("chain_plan_json");
+        builder.Property(x => x.ChainOutlineJson).HasColumnName("chain_outline_json");
         builder.HasIndex(x => new { x.TenantId, x.Status, x.CreatedAt });
     }
 }
@@ -687,6 +690,8 @@ public sealed class ContentReviewTaskConfiguration : IEntityTypeConfiguration<Co
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Status).HasMaxLength(24).IsRequired();
         builder.Property(x => x.LastErrorCode).HasMaxLength(128);
+        // Refine P6 (§4.7): số vòng sửa-tự-động đã dùng cho revision này; đúng 1 vòng nên chỉ 0→1.
+        builder.Property(x => x.RefineAttemptCount).HasDefaultValue(0);
         builder.HasOne<ContentItem>()
             .WithMany()
             .HasForeignKey(x => new { x.TenantId, x.ContentItemId })
@@ -857,6 +862,29 @@ public sealed class ContentWorkflowMetricsHourlyConfiguration
         builder.Property(x => x.LlmCostUsd).HasPrecision(18, 6).HasDefaultValue(0m);
         builder.HasIndex(x => new { x.TenantId, x.HourUtc }).IsUnique();
         builder.HasIndex(x => x.HourUtc);
+    }
+}
+
+public sealed class ContentGenerationTraceConfiguration
+    : IEntityTypeConfiguration<ContentGenerationTrace>
+{
+    public void Configure(EntityTypeBuilder<ContentGenerationTrace> builder)
+    {
+        builder.ToTable("content_generation_traces");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).ValueGeneratedOnAdd();
+        builder.Property(x => x.StepId).HasMaxLength(ContentGenerationTrace.StepIdMaxLength).IsRequired();
+        builder.Property(x => x.PromptVersion).HasMaxLength(ContentGenerationTrace.PromptVersionMaxLength).IsRequired();
+        builder.Property(x => x.Model).HasMaxLength(ContentGenerationTrace.ModelMaxLength);
+        builder.Property(x => x.GateResult).HasMaxLength(ContentGenerationTrace.GateResultMaxLength).IsRequired();
+        builder.Property(x => x.PayloadJson).HasMaxLength(ContentGenerationTrace.PayloadJsonMaxLength);
+        builder.Property(x => x.InputTokens).HasDefaultValue(0);
+        builder.Property(x => x.OutputTokens).HasDefaultValue(0);
+        builder.Property(x => x.UsdCost).HasPrecision(18, 6).HasDefaultValue(0m);
+        builder.Property(x => x.LatencyMs).HasDefaultValue(0L);
+        // Truy vấn theo tenant + thời gian (retention 30 ngày, xem trace gần nhất); nhóm theo lượt chạy chuỗi.
+        builder.HasIndex(x => new { x.TenantId, x.CreatedAt });
+        builder.HasIndex(x => x.ChainRunId);
     }
 }
 
