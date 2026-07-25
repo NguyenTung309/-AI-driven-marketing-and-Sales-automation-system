@@ -142,7 +142,7 @@ public sealed class ContentAgent(
         var outcome = await _chain.ResumeFromWriteAsync(context, ct).ConfigureAwait(false);
 
         await RecordCostAsync(request.TenantId, outcome.Model, outcome.InputTokens, outcome.OutputTokens,
-            outcome.UsdCost, ct).ConfigureAwait(false);
+            outcome.UsdCost, outcome.IsEstimated, ct).ConfigureAwait(false);
         await WriteTracesAsync(
             new ContentGenerateRequest(request.TenantId, request.BriefId, request.Platform, string.Empty, null),
             outcome, ct).ConfigureAwait(false);
@@ -205,7 +205,7 @@ public sealed class ContentAgent(
         var outcome = await _chain.ResumeFromWriteAsync(context, ct).ConfigureAwait(false);
 
         await RecordCostAsync(request.TenantId, outcome.Model, outcome.InputTokens, outcome.OutputTokens,
-            outcome.UsdCost, ct).ConfigureAwait(false);
+            outcome.UsdCost, outcome.IsEstimated, ct).ConfigureAwait(false);
         await WriteTracesAsync(
             new ContentGenerateRequest(request.TenantId, request.BriefId, request.Platform, string.Empty, null),
             outcome, ct).ConfigureAwait(false);
@@ -268,7 +268,7 @@ public sealed class ContentAgent(
         var outcome = await _chain.ResumeFromWriteAsync(context, ct).ConfigureAwait(false);
 
         await RecordCostAsync(request.TenantId, outcome.Model, outcome.InputTokens, outcome.OutputTokens,
-            outcome.UsdCost, ct).ConfigureAwait(false);
+            outcome.UsdCost, outcome.IsEstimated, ct).ConfigureAwait(false);
         await WriteTracesAsync(
             new ContentGenerateRequest(request.TenantId, request.BriefId, request.Platform, string.Empty, null),
             outcome, ct).ConfigureAwait(false);
@@ -339,7 +339,7 @@ public sealed class ContentAgent(
 
         // Chi phí thực chuỗi đã tiêu (đầy đủ khi thành công, một phần khi fallback) — ghi ledger như content-agent.
         await RecordCostAsync(request.TenantId, outcome.Model, outcome.InputTokens, outcome.OutputTokens,
-            outcome.UsdCost, ct).ConfigureAwait(false);
+            outcome.UsdCost, outcome.IsEstimated, ct).ConfigureAwait(false);
         await WriteTracesAsync(request, outcome, ct).ConfigureAwait(false);
 
         if (!outcome.Succeeded)
@@ -374,12 +374,19 @@ public sealed class ContentAgent(
     }
 
     private Task RecordCostAsync(Guid tenantId, ClaudeReply reply, CancellationToken ct) =>
-        RecordCostAsync(tenantId, reply.Model, reply.InputTokens, reply.OutputTokens, reply.UsdCost, ct);
+        RecordCostAsync(
+            tenantId, reply.Model, reply.InputTokens, reply.OutputTokens, reply.UsdCost, reply.IsEstimated, ct);
 
     private async Task RecordCostAsync(
-        Guid tenantId, string model, int inputTokens, int outputTokens, decimal usdCost, CancellationToken ct)
+        Guid tenantId,
+        string model,
+        int inputTokens,
+        int outputTokens,
+        decimal usdCost,
+        bool isEstimated,
+        CancellationToken ct)
     {
-        if (_costTracker is null || usdCost <= 0m)
+        if (_costTracker is null || (usdCost <= 0m && inputTokens <= 0 && outputTokens <= 0))
             return;
 
         await _costTracker.RecordAsync(new CostEntry(
@@ -390,7 +397,9 @@ public sealed class ContentAgent(
             outputTokens,
             usdCost,
             _llmScope.Current?.CostAt ?? DateTimeOffset.UtcNow,
-            _llmScope.Current?.ReservationId), ct).ConfigureAwait(false);
+            _llmScope.Current?.ReservationId,
+            SessionId: null,
+            IsEstimated: isEstimated), ct).ConfigureAwait(false);
     }
 
     private static string RenderTemplate(string template, string brief, string knowledge) =>

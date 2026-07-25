@@ -104,7 +104,9 @@ public sealed record ContentChainOutcome(
     decimal UsdCost,
     string Model,
     ContentPlan? Plan = null,
-    ContentOutline? Outline = null);
+    ContentOutline? Outline = null,
+    // IsEstimated: có ít nhất một bước trong chuỗi phải ước lượng token (provider không trả usage).
+    bool IsEstimated = false);
 
 // Mã lỗi cổng — ghi thẳng vào cột gate_result. Giữ trong tập ASCII an toàn (letter/digit + _-.:).
 public static class ContentChainErrorCodes
