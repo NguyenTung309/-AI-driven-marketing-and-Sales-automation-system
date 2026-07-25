@@ -98,12 +98,22 @@ public sealed class QuestPdfDocumentRenderer : IDocumentRenderer
         {
             col.Spacing(8);
             var normalized = resolvedBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+            var titleRendered = false;
             foreach (var paragraph in normalized.Split('\n'))
             {
                 var text = paragraph.TrimEnd();
                 if (text.Length == 0)
                 {
                     col.Item().Height(4);
+                    continue;
+                }
+
+                if (!titleRendered)
+                {
+                    // Dòng nội dung đầu tiên đóng vai tiêu đề tài liệu — in to & đậm để giống văn bản thật.
+                    // Bản xem trước ở frontend dựng đúng quy ước này nên preview khớp PDF.
+                    col.Item().Text(text).FontSize(16).Bold().FontColor(Colors.Blue.Darken2);
+                    titleRendered = true;
                     continue;
                 }
 

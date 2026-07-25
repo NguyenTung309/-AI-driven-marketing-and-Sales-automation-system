@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Clawbot.Agents.Contracts.Docs;
+using Grpc.Core;
 using Clawbot.Api.Endpoints;
 using Clawbot.Api.Services;
 using Clawbot.SharedKernel.Jobs;
@@ -56,6 +57,8 @@ public sealed class DocsKitJobHandler(
 
         var total = payload.TemplateCodes.Count;
         long totalBytes = 0;
+        var made = 0;
+        var skipped = new List<string>();
 
         for (var i = 0; i < total; i++)
         {
@@ -63,12 +66,29 @@ public sealed class DocsKitJobHandler(
             await ctx.Progress.ReportAsync(i * 100 / total, $"Đang sinh {code} ({i + 1}/{total})", ct)
                 .ConfigureAwait(false);
 
-            var doc = await DocumentsEndpoints.GenerateOneAsync(
-                ctx.TenantId, code, payload.ContactId, payload.Vars, payload.SentVia,
-                grpc, delivery, ct).ConfigureAwait(false);
-            totalBytes += doc.SizeBytes;
+            try
+            {
+                var doc = await DocumentsEndpoints.GenerateOneAsync(
+                    ctx.TenantId, code, payload.ContactId, payload.Vars, payload.SentVia,
+                    grpc, delivery, ct).ConfigureAwait(false);
+                totalBytes += doc.SizeBytes;
+                made++;
+            }
+            catch (RpcException ex) when (ex.StatusCode is StatusCode.InvalidArgument or StatusCode.NotFound)
+            {
+                // Mỗi mẫu có bộ trường bắt buộc riêng, một lần điền form không thể phủ hết cả bộ.
+                // Mẫu nào thiếu thông tin thì bỏ qua chứ không đánh sập cả việc, tránh mất các mẫu đã sinh được.
+                skipped.Add(code);
+            }
         }
 
-        return new JobResult("/documents", $"Đã sinh {total} tài liệu ({totalBytes} bytes).");
+        if (made == 0)
+            throw new InvalidOperationException(
+                $"Không sinh được tài liệu nào. Các mẫu còn thiếu thông tin bắt buộc: {string.Join(", ", skipped)}.");
+
+        var summary = skipped.Count == 0
+            ? $"Đã sinh {made} tài liệu ({totalBytes} bytes)."
+            : $"Đã sinh {made}/{total} tài liệu ({totalBytes} bytes). Bỏ qua vì thiếu thông tin bắt buộc: {string.Join(", ", skipped)}.";
+        return new JobResult("/documents", summary);
     }
 }
