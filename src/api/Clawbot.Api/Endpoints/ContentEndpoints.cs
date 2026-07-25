@@ -72,6 +72,11 @@ public static class ContentEndpoints
         grp.MapPost("/items/{id:guid}/agent-review/retry", RetryAgentReviewAsync).RequirePermission("content:write");
         grp.MapPost("/items/{id:guid}/schedule", ScheduleItemAsync).RequirePermission("content:write");
         grp.MapPost("/items/{id:guid}/repurpose", RepurposeItemAsync).RequirePermission("content:write");
+        // P5 §4.5: đọc danh sách hook L2 đã lưu + đổi hook (chạy lại L3+L4 với hook marketer chọn).
+        grp.MapGet("/items/{id:guid}/hooks", GetItemHooksAsync).RequirePermission("content:read");
+        grp.MapPost("/items/{id:guid}/regenerate-hook", RegenerateHookAsync).RequirePermission("content:write");
+        // P5 §6: dashboard vận hành chuỗi sinh nội dung (fallback rate, gate fail/step, token/độ trễ, review approve).
+        grp.MapGet("/chain-metrics", ChainMetricsAsync).RequirePermission("content:read");
         grp.MapGet("/calendar", CalendarAsync).RequirePermission("content:read");
         grp.MapGet("/publish-targets", PublishTargetsAsync).RequirePermission("content:read");
         grp.MapDelete("/schedule/{id:guid}", DeleteScheduleAsync).RequirePermission("content:write");
@@ -755,6 +760,138 @@ public static class ContentEndpoints
             ct: ct).ConfigureAwait(false);
 
         return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
+    }
+
+    // P5 §4.5: trả danh sách hook L2 đã lưu (từ ChainOutlineJson) + hook đang được chọn, để marketer đổi tay.
+    // Bài single-shot cũ / chain tắt không có ChainOutlineJson => trả canRegenerate=false, hooks rỗng.
+    private static async Task<IResult> GetItemHooksAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var row = await db.ContentItems.AsNoTracking()
+            .Where(i => i.Id == id && i.DeletedAt == null)
+            .Select(i => new { i.ChainOutlineJson })
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        if (row is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+
+        var (hooks, selectedIndex) = ContentHookReader.Read(row.ChainOutlineJson);
+        var options = hooks
+            .Select((text, index) => new ContentHookOptionDto(index, text, index == selectedIndex))
+            .ToList();
+        return Results.Ok(new ContentItemHooksResponse(options.Count > 0, options));
+    }
+
+    // P5 §4.5: đổi hook chạy ngầm — chạy lại L3+L4 với hook đã chọn, sửa bài tại chỗ (revision mới + chờ review lại).
+    private static async Task<IResult> RegenerateHookAsync(
+        Guid id,
+        RegenerateHookApiRequest? body,
+        AppDbContext db,
+        IJobLauncher jobs,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        if (body is null || body.HookIndex < 0)
+            return Error(http, StatusCodes.Status400BadRequest, "content.hook_index_invalid", "hookIndex required.");
+
+        var exists = await db.ContentItems.AsNoTracking()
+            .AnyAsync(i => i.Id == id && i.DeletedAt == null, ct).ConfigureAwait(false);
+        if (!exists)
+            return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+
+        var jobId = await jobs.LaunchAsync(
+            ContentRegenerateHookJobHandler.JobType,
+            "Đổi hook mở bài",
+            new ContentRegenerateHookJobPayload(id, body.HookIndex),
+            CurrentUserId(http),
+            ct: ct).ConfigureAwait(false);
+
+        return Results.Accepted($"/api/jobs/{jobId}", new { jobId, statusUrl = $"/agents?job={jobId}" });
+    }
+
+    // P5 §6: dashboard chỉ số chuỗi — đọc tổng hợp từ content_generation_traces (telemetry PII-free) trong cửa sổ
+    // N ngày. Fallback rate, tỉ lệ fail từng cổng, token/chi phí trung bình mỗi lượt, độ trễ p95; approve rate lấy từ
+    // content_items. Tính p95 in-memory (cần phân phối); trace chỉ giữ 30 ngày (retention) nên khối lượng có hạn.
+    private static readonly string[] ChainStepOrder = ["plan", "outline", "write", "package"];
+    private const string ChainFallbackStepId = "fallback";
+    private const string ChainGatePassed = "passed";
+
+    private static async Task<IResult> ChainMetricsAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        [FromQuery] int days,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var windowDays = days is < 1 or > 90 ? 7 : days;
+        var since = clock.UtcNow.AddDays(-windowDays);
+
+        var rows = await db.ContentGenerationTraces.AsNoTracking()
+            .Where(t => t.CreatedAt >= since)
+            .Select(t => new { t.ChainRunId, t.StepId, t.GateResult, t.InputTokens, t.OutputTokens, t.UsdCost, t.LatencyMs })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var runIds = rows.Select(r => r.ChainRunId).Distinct().ToList();
+        var totalRuns = runIds.Count;
+        var fallbackRuns = rows
+            .Where(r => r.StepId == ChainFallbackStepId)
+            .Select(r => r.ChainRunId)
+            .Distinct()
+            .Count();
+
+        var totalTokens = rows.Sum(r => (long)r.InputTokens + r.OutputTokens);
+        var totalCost = rows.Sum(r => r.UsdCost);
+
+        var steps = ChainStepOrder.Select(stepId =>
+        {
+            var stepRows = rows.Where(r => r.StepId == stepId).ToList();
+            var attempts = stepRows.Count;
+            var gateFailures = stepRows.Count(r => r.GateResult != ChainGatePassed);
+            var p95 = Percentile95(stepRows.Select(r => r.LatencyMs).ToList());
+            return new ContentChainStepMetricDto(
+                stepId,
+                attempts,
+                gateFailures,
+                attempts > 0 ? Math.Round((double)gateFailures / attempts, 4) : 0,
+                p95);
+        }).ToList();
+
+        var reviewTotal = await db.ContentItems.AsNoTracking()
+            .Where(i => i.DeletedAt == null && i.AgentReviewedAt >= since)
+            .CountAsync(ct).ConfigureAwait(false);
+        var reviewApproved = await db.ContentItems.AsNoTracking()
+            .Where(i => i.DeletedAt == null
+                && i.AgentReviewedAt >= since
+                && i.AgentReviewStatus == ContentItem.ReviewStatusPassed)
+            .CountAsync(ct).ConfigureAwait(false);
+
+        return Results.Ok(new ContentChainMetricsResponse(
+            windowDays,
+            totalRuns,
+            fallbackRuns,
+            totalRuns > 0 ? Math.Round((double)fallbackRuns / totalRuns, 4) : 0,
+            totalRuns > 0 ? Math.Round((double)totalTokens / totalRuns, 1) : 0,
+            totalRuns > 0 ? Math.Round((double)totalCost / totalRuns, 6) : 0,
+            steps,
+            reviewApproved,
+            reviewTotal,
+            reviewTotal > 0 ? Math.Round((double)reviewApproved / reviewTotal, 4) : 0));
+    }
+
+    // p95 tất định trên mẫu nhỏ: sắp xếp, lấy phần tử ở vị trí ceil(0.95*n)-1. Rỗng => 0.
+    private static long Percentile95(List<long> values)
+    {
+        if (values.Count == 0)
+            return 0;
+        values.Sort();
+        var rank = (int)Math.Ceiling(0.95 * values.Count) - 1;
+        return values[Math.Clamp(rank, 0, values.Count - 1)];
     }
 
     private static async Task<IResult> ScheduleItemAsync(

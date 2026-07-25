@@ -1,0 +1,15 @@
+<Project>
+  <!-- Inherit root settings (net8.0, Nullable, TreatWarningsAsErrors, analyzers). -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!-- Relax analyzer rules that are noise in test code:
+         CA1707 underscores in test names, CA2007 ConfigureAwait in tests,
+         CA1062 arg null-checks on test methods, CA1515 public test types. -->
+    <NoWarn>$(NoWarn);CA1707;CA2007;CA1062;CA1515;CA1861</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

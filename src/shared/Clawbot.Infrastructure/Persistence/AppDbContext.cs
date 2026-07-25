@@ -112,6 +112,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<ContentAsset> ContentAssets => Set<ContentAsset>();
     public DbSet<ContentPublishAttempt> ContentPublishAttempts => Set<ContentPublishAttempt>();
     public DbSet<ContentWorkflowMetricsHourly> ContentWorkflowMetricsHourly => Set<ContentWorkflowMetricsHourly>();
+    public DbSet<ContentGenerationTrace> ContentGenerationTraces => Set<ContentGenerationTrace>();
     public DbSet<SocialCredential> SocialCredentials => Set<SocialCredential>();
 
     // Meta business integrations

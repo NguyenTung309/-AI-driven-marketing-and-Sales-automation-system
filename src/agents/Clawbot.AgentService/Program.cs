@@ -103,6 +103,9 @@ builder.Services.AddScoped<Clawbot.AgentService.Services.IContentReviewExecutor,
     Clawbot.AgentService.Services.ContentReviewExecutor>();
 builder.Services.AddScoped<Clawbot.AgentService.Services.IContentReviewCoordinator,
     Clawbot.AgentService.Services.ContentReviewCoordinator>();
+// Refine (P6, §4.7): reviewer reject => chạy lại L3+L4 kèm lý do, sửa bài tại chỗ, chấm lại đúng 1 vòng.
+builder.Services.AddScoped<Clawbot.AgentService.Services.IContentRefiner,
+    Clawbot.AgentService.Services.ContentRefiner>();
 builder.Services.Configure<Clawbot.Agents.Core.Content.ContentAssetReaderOptions>(
     builder.Configuration.GetSection(Clawbot.Agents.Core.Content.ContentAssetReaderOptions.SectionName));
 builder.Services.AddScoped<Clawbot.Agents.Core.Content.IContentAssetRepository,
@@ -138,6 +141,9 @@ builder.Services.AddScoped<IAgent, ReportOrchestrationAdapter>();
 // M25: persist Claude cost to claude_cost_ledger (overrides in-memory tracker from the skills module).
 builder.Services.RemoveAll<Clawbot.Agents.Core.Skills.Ops.ILlmCostTracker>();
 builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Ops.ILlmCostTracker, Clawbot.Infrastructure.Agents.DbLlmCostTracker>();
+// Prompt chaining (P1): ghi telemetry chuỗi vào content_generation_traces (scope riêng như cost tracker).
+// Core chỉ đăng ký chuỗi + mắt xích; sink là EF nên phải vá ở host có AppDbContext.
+builder.Services.AddSingleton<Clawbot.Agents.Core.Content.Chain.IContentChainTraceSink, Clawbot.Infrastructure.Content.EfContentChainTraceSink>();
 // M25: chat agent honors per-tenant enable/disable (AgentConfig.Status).
 builder.Services.RemoveAll<Clawbot.Agents.Core.Chat.IAgentToggleGate>();
 builder.Services.AddSingleton<Clawbot.Agents.Core.Chat.IAgentToggleGate, Clawbot.Infrastructure.Agents.DbAgentToggleGate>();

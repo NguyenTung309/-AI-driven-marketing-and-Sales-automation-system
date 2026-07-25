@@ -137,6 +137,11 @@ public sealed class ContentReviewer(
         if (LooksLikeInstructionInjection(body))
             return new ContentReviewResult(ContentReviewResult.NeedsHuman, "suspicious_embedded_instructions");
 
+        // Lint tất định (§4.7): cam kết tuyệt đối / link lạ / ký tự rác => đẩy người duyệt TRƯỚC khi gọi LLM.
+        var lint = ContentLint.Check(body);
+        if (!lint.Succeeded)
+            return new ContentReviewResult(ContentReviewResult.NeedsHuman, lint.ErrorCode);
+
         var evidence = await RetrieveEvidenceAsync(tenantId, body, ct).ConfigureAwait(false);
         var memory = await LoadUntrustedMemoryAsync(tenantId, ct).ConfigureAwait(false);
 
@@ -206,6 +211,18 @@ public sealed class ContentReviewer(
                 ReviewedImageCount: 0,
                 ReasonCode: "agent_non_pass",
                 Reason: "suspicious_embedded_instructions");
+        }
+
+        // Lint tất định (§4.7): cùng luật với ReviewAsync — cam kết tuyệt đối / link lạ / ký tự rác => người duyệt.
+        var lint = ContentLint.Check(body);
+        if (!lint.Succeeded)
+        {
+            return new ContentItemReviewOutcome(
+                ContentItem.ReviewStatusNeedsHuman,
+                ContentItem.ImageReviewStatusNotApplicable,
+                ReviewedImageCount: 0,
+                ReasonCode: "agent_non_pass",
+                Reason: lint.ErrorCode);
         }
 
         if (_reviewClientFactory is null || _llmConfigResolver is null)

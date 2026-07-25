@@ -1,3 +1,4 @@
+using Clawbot.Agents.Core.Content.Chain;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -62,7 +63,58 @@ public static class ContentModule
         services.AddScoped<ContentAgent>();
         // Review-gate P1: LLM reviewer (reviewer-agent binding) cho content output.
         services.AddScoped<ContentReviewer>();
+
+        // Prompt chaining (P1): options nạp phẳng từ Content:Chain (mặc định TẮT), chuỗi + 2 mắt xích.
+        // Chuỗi luôn đăng ký nhưng chỉ chạy khi IsEnabledFor(tenant) => an toàn bật dần theo allow-list.
+        // Trace sink (EF) do Infrastructure đăng ký; thiếu (host chỉ-Core) thì ContentAgent bỏ qua trace.
+        services.AddSingleton<IOptions<ContentChainOptions>>(
+            _ => Options.Create(LoadChainOptions(configuration)));
+        services.AddScoped<IContentChain, ContentChain>();
+        services.AddScoped<IContentChainStep, PlanStep>();
+        services.AddScoped<IContentChainStep, OutlineStep>();
+        services.AddScoped<IContentChainStep, WriteStep>();
+        services.AddScoped<IContentChainStep, PackageStep>();
         return services;
+    }
+
+    private static ContentChainOptions LoadChainOptions(IConfiguration configuration)
+    {
+        var section = configuration.GetSection(ContentChainOptions.SectionName);
+        var options = new ContentChainOptions();
+
+        var enabled = section.GetValue<bool?>("Enabled");
+        if (enabled.HasValue)
+            options.Enabled = enabled.Value;
+
+        var version = section["Version"];
+        if (!string.IsNullOrWhiteSpace(version))
+            options.Version = version.Trim();
+
+        var stepTimeout = section.GetValue<int?>("StepTimeoutSeconds");
+        if (stepTimeout is > 0)
+            options.StepTimeoutSeconds = stepTimeout.Value;
+
+        var chainTimeout = section.GetValue<int?>("ChainTimeoutSeconds");
+        if (chainTimeout is > 0)
+            options.ChainTimeoutSeconds = chainTimeout.Value;
+
+        var allowList = ParseTenantAllowList(section.GetSection("TenantAllowList"));
+        if (allowList.Count > 0)
+            options.TenantAllowList = allowList;
+
+        return options;
+    }
+
+    private static List<Guid> ParseTenantAllowList(IConfigurationSection section)
+    {
+        var result = new List<Guid>();
+        foreach (var child in section.GetChildren())
+        {
+            if (Guid.TryParse(child.Value, out var tenantId))
+                result.Add(tenantId);
+        }
+
+        return result;
     }
 
     private static ContentPromptTemplateOptions LoadPromptTemplateOptions(IConfiguration configuration)

@@ -27,11 +27,14 @@ import {
   deleteContentSchedule,
   generateContentItems,
   getContentCalendar,
+  getContentChainMetrics,
   getContentItem,
+  getContentItemHooks,
   getContentPublishTargets,
   getContentQueue,
   getContentTrends,
   listContentBriefs,
+  regenerateContentHook,
   rejectContentItem,
   repurposeContentItem,
   retryAgentReview,
@@ -43,6 +46,7 @@ import {
   uploadContentAsset,
   type ContentBrief,
   type ContentCalendarItem,
+  type ContentHookOption,
   type ContentItem,
   type ContentPublishTarget,
   type ContentPublishTargetMode,
@@ -52,7 +56,7 @@ import {
 } from "@/shared/api/content";
 
 type QueueStatusFilter = "all" | "draft" | "approved" | "scheduled" | "published" | "rejected";
-type ContentWorkspaceTab = "queue" | "calendar";
+type ContentWorkspaceTab = "queue" | "calendar" | "metrics";
 type ScheduleMode = "golden" | "specific";
 type NoticeTone = "info" | "success" | "warning" | "error";
 
@@ -121,6 +125,13 @@ const EMPTY_BRIEFS: readonly ContentBrief[] = [];
 const EMPTY_ITEMS: readonly ContentItem[] = [];
 const EMPTY_CALENDAR: readonly ContentCalendarItem[] = [];
 const EMPTY_TRENDS: readonly Trend[] = [];
+const EMPTY_HOOKS: readonly ContentHookOption[] = [];
+const CHAIN_STEP_LABELS: Readonly<Record<string, string>> = {
+  plan: "Lập kế hoạch (L1)",
+  outline: "Dàn ý + bằng chứng (L2)",
+  write: "Viết nội dung (L3)",
+  package: "Đóng gói + hashtag (L4)",
+};
 const EMPTY_SCHEDULE_TARGET: ScheduleTargetState = {
   isExistingSchedule: false,
   originalMetaAssetId: null,
@@ -808,6 +819,67 @@ function SocialPreview({ item, body, assetsJson }: { readonly item: ContentItem;
   );
 }
 
+// P5 §4.5: đổi hook mở bài. Tự chứa (query hooks + mutation + job watcher) để không phình props QueueEditor.
+// Chỉ hiện khi bài có L1/L2 đã lưu (available=true); bài single-shot cũ / chain tắt thì ẩn hẳn.
+function HookSwitcher({ item, disabled }: { readonly item: ContentItem; readonly disabled: boolean }) {
+  const queryClient = useQueryClient();
+  const [jobId, setJobId] = useState<string | null>(null);
+  const hooksQuery = useQuery({
+    queryKey: ["content", "hooks", item.id],
+    queryFn: () => getContentItemHooks(item.id),
+  });
+  const regenMutation = useMutation({
+    mutationFn: (hookIndex: number) => regenerateContentHook(item.id, hookIndex),
+    onSuccess: (job) => setJobId(job.jobId),
+  });
+  useJobWatcher(jobId, () => {
+    setJobId(null);
+    void queryClient.invalidateQueries({ queryKey: ["content", "queue"] });
+    void queryClient.invalidateQueries({ queryKey: ["content", "hooks", item.id] });
+  });
+
+  const hooks = hooksQuery.data?.hooks ?? EMPTY_HOOKS;
+  if (!hooksQuery.data?.available || hooks.length === 0) return null;
+
+  const busy = disabled || regenMutation.isPending || jobId !== null;
+  return (
+    <div className="rounded-lg border border-outline bg-surface p-3">
+      <p className="mb-1 text-label-caps uppercase text-secondary">Đổi hook mở bài</p>
+      <p className="mb-3 text-label-sm text-on-surface-variant">
+        Chạy lại phần viết + đóng gói với câu mở bài bạn chọn. Bài sẽ lên revision mới và chờ duyệt lại.
+      </p>
+      <div className="space-y-2">
+        {hooks.map((hook) => (
+          <div
+            key={hook.index}
+            className={`flex items-start justify-between gap-3 rounded border px-3 py-2 ${
+              hook.selected ? "border-primary bg-primary/5" : "border-outline bg-white"
+            }`}
+          >
+            <span className="text-body-sm text-on-surface">
+              {hook.selected ? <span className="mr-1 font-semibold text-primary">Đang dùng:</span> : null}
+              {hook.text}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => regenMutation.mutate(hook.index)}
+              disabled={busy || hook.selected}
+            >
+              {hook.selected ? "Hiện tại" : "Dùng hook này"}
+            </Button>
+          </div>
+        ))}
+      </div>
+      {regenMutation.error ? (
+        <div className="mt-2"><Alert tone="error">{errorMessage(regenMutation.error)}</Alert></div>
+      ) : null}
+      {jobId ? <p className="mt-2 text-label-sm text-on-surface-variant">Đang đổi hook...</p> : null}
+    </div>
+  );
+}
+
 function QueueEditor({
   item,
   body,
@@ -1018,9 +1090,89 @@ function QueueEditor({
             Tạo biến thể
           </Button>
         </div>
+
+        <HookSwitcher item={item} disabled={acting || publishedLocked} />
       </div>
       <SocialPreview item={item} body={body} assetsJson={assetsJson} />
     </div>
+  );
+}
+
+// P5 §6: chỉ số vận hành chuỗi sinh nội dung (fallback, gate fail mỗi mắt xích, token/độ trễ, reviewer approve).
+// Tự chứa query theo cửa sổ ngày. Chuỗi tắt / chưa có trace => totalRuns=0, hiện trạng thái rỗng.
+function ChainMetricsPanel() {
+  const [windowDays, setWindowDays] = useState(7);
+  const metricsQuery = useQuery({
+    queryKey: ["content", "chain-metrics", windowDays],
+    queryFn: () => getContentChainMetrics(windowDays),
+  });
+  const metrics = metricsQuery.data;
+  const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
+
+  return (
+    <Card>
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h2 className="text-headline-sm text-secondary">Chỉ số chuỗi sinh nội dung AI</h2>
+          <p className="mt-1 text-body-md text-on-surface-variant">
+            Theo dõi tỉ lệ fallback, lỗi cổng từng mắt xích, token và độ trễ. Dữ liệu giữ 30 ngày.
+          </p>
+        </div>
+        <select
+          className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
+          value={windowDays}
+          onChange={(event) => setWindowDays(Number(event.target.value))}
+        >
+          <option value={7}>7 ngày</option>
+          <option value={14}>14 ngày</option>
+          <option value={30}>30 ngày</option>
+        </select>
+      </div>
+
+      {metricsQuery.isError ? (
+        <Alert tone="error">{errorMessage(metricsQuery.error)}</Alert>
+      ) : metricsQuery.isLoading ? (
+        <p className="text-body-md text-on-surface-variant">Đang tải chỉ số...</p>
+      ) : !metrics || metrics.totalRuns === 0 ? (
+        <div className="rounded-lg border border-dashed border-outline bg-surface p-6 text-center text-body-md text-on-surface-variant">
+          Chưa có lượt chạy chuỗi nào trong {windowDays} ngày qua. Chuỗi prompt chaining có thể đang tắt cho tenant này.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <MetricTile icon="dataset" label="Lượt chạy" value={metrics.totalRuns} meta={`${windowDays} ngày`} />
+            <MetricTile icon="undo" label="Fallback single-shot" value={pct(metrics.fallbackRate)} meta={`${metrics.fallbackRuns} lượt`} />
+            <MetricTile icon="token" label="Token TB/lượt" value={Math.round(metrics.avgTokensPerRun)} meta={`~$${metrics.avgUsdCostPerRun.toFixed(4)}/lượt`} />
+            <MetricTile icon="verified" label="Reviewer duyệt" value={pct(metrics.reviewApproveRate)} meta={`${metrics.reviewApproved}/${metrics.reviewTotal}`} />
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-outline">
+            <table className="w-full text-body-sm">
+              <thead className="bg-surface text-label-caps uppercase text-secondary">
+                <tr>
+                  <th className="px-3 py-2 text-left">Mắt xích</th>
+                  <th className="px-3 py-2 text-right">Lượt gọi</th>
+                  <th className="px-3 py-2 text-right">Lỗi cổng</th>
+                  <th className="px-3 py-2 text-right">Tỉ lệ lỗi</th>
+                  <th className="px-3 py-2 text-right">p95 độ trễ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metrics.steps.map((step) => (
+                  <tr key={step.stepId} className="border-t border-outline">
+                    <td className="px-3 py-2 text-on-surface">{CHAIN_STEP_LABELS[step.stepId] ?? step.stepId}</td>
+                    <td className="px-3 py-2 text-right font-mono">{step.attempts}</td>
+                    <td className="px-3 py-2 text-right font-mono">{step.gateFailures}</td>
+                    <td className="px-3 py-2 text-right font-mono">{pct(step.gateFailRate)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{step.p95LatencyMs} ms</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -1356,7 +1508,12 @@ export default function ContentWorkspacePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const calendarRange = useMemo(() => buildCalendarRange(), []);
   const requestedItemId = searchParams.get("itemId");
-  const activeTab: ContentWorkspaceTab = requestedItemId || searchParams.get("tab") !== "calendar" ? "queue" : "calendar";
+  const tabParam = searchParams.get("tab");
+  const activeTab: ContentWorkspaceTab = requestedItemId
+    ? "queue"
+    : tabParam === "calendar" || tabParam === "metrics"
+      ? tabParam
+      : "queue";
   const [selectedBriefId, setSelectedBriefId] = useState<string | null>(null);
   const [briefPlatform, setBriefPlatform] = useState(PLATFORMS[0].value);
   const [briefText, setBriefText] = useState("");
@@ -1795,7 +1952,7 @@ export default function ContentWorkspacePage() {
   function selectCalendarTab(tab: ContentWorkspaceTab) {
     const next = new URLSearchParams(searchParams);
     next.set("tab", tab);
-    if (tab === "calendar") next.delete("itemId");
+    if (tab !== "queue") next.delete("itemId");
     setSearchParams(next, { replace: true });
   }
 
@@ -1987,6 +2144,17 @@ export default function ContentWorkspacePage() {
             >
               Lịch xuất bản
             </button>
+            <button
+              id="content-metrics-tab"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "metrics"}
+              aria-controls="content-metrics-panel"
+              onClick={() => selectCalendarTab("metrics")}
+              className={`border-b-2 px-4 py-3 text-body-md font-semibold ${activeTab === "metrics" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"}`}
+            >
+              Chỉ số chuỗi AI
+            </button>
           </nav>
 
           {activeTab === "queue" ? (
@@ -2070,6 +2238,10 @@ export default function ContentWorkspacePage() {
                 )}
               </div>
             </Card>
+            </div>
+          ) : activeTab === "metrics" ? (
+            <div id="content-metrics-panel" role="tabpanel" aria-labelledby="content-metrics-tab">
+              <ChainMetricsPanel />
             </div>
           ) : (
             <div id="content-calendar-panel" role="tabpanel" aria-labelledby="content-calendar-tab">

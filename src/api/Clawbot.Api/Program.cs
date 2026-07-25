@@ -120,6 +120,7 @@ builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jo
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentRepurposeJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentTrendScanJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentImagePromptJobHandler>();
+builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentRegenerateHookJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.AdsEvaluateJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.AdsLookalikeJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.KbClassifyUploadJobHandler>();
