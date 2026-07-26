@@ -15,6 +15,7 @@ public sealed class Message : Entity<Guid>, ITenantOwned
     // links a comment to its post so the comment auto-reply + DM-invite flow can act on it.
     public string MessageType { get; private set; } = "text";
     public string? ParentPostId { get; private set; }
+    public string? ParentCommentId { get; private set; }
     public string? ExternalMessageId { get; private set; }
     public string? OriginalContent { get; private set; }
     public string? RedactedContent { get; private set; }
@@ -40,6 +41,9 @@ public sealed class Message : Entity<Guid>, ITenantOwned
 
     // Outbound delivery thất bại: giữ row để retry/audit nhưng không được hiển thị như đã gửi.
     public void MarkSendFailed() => Status = "send_failed";
+
+    // Provider đã nhận nhưng response/save không xác nhận được; không tự retry POST non-idempotent.
+    public void MarkOutcomeUnknown() => Status = "outcome_unknown";
 
     // Review-gate P3: nguoi tu choi draft pending_approval -> blocked (giu audit, khong bao gio gui).
     public void MarkBlocked() => Status = "blocked";
@@ -69,7 +73,8 @@ public sealed class Message : Entity<Guid>, ITenantOwned
         string? senderDisplayName = null,
         string? senderAvatarUrl = null,
         string? attachmentUrl = null,
-        string status = "sent") =>
+        string status = "sent",
+        string? parentCommentId = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -85,6 +90,7 @@ public sealed class Message : Entity<Guid>, ITenantOwned
             RedactedContent = redactedContent,
             MessageType = messageType,
             ParentPostId = parentPostId,
+            ParentCommentId = parentCommentId,
             SenderDisplayName = senderDisplayName,
             SenderAvatarUrl = senderAvatarUrl,
             AttachmentUrl = attachmentUrl,

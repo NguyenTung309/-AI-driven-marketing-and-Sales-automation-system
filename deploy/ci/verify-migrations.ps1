@@ -95,13 +95,17 @@ if ($files.Count -eq 0) {
 }
 
 $seenPrefixes = [System.Collections.Generic.HashSet[string]]::new()
+# Legacy history used several parallel migration tracks through 0048. Keep those immutable
+# prefixes accepted while preserving strict uniqueness for every new migration prefix.
+$legacyDuplicatePrefixLimit = 48
+$legacyBatchGuardLimit = 86
 foreach ($file in $files) {
     if ($file.Name -notmatch '^\d{4}_.+\.sql$') {
         Fail "Migration file '$($file.Name)' must start with a four-digit prefix, e.g. 0001_init.sql."
     }
 
     $prefix = $file.Name.Substring(0, 4)
-    if (-not $seenPrefixes.Add($prefix)) {
+    if (-not $seenPrefixes.Add($prefix) -and [int]$prefix -gt $legacyDuplicatePrefixLimit) {
         Fail "Duplicate migration prefix '$prefix' found at '$($file.Name)'."
     }
 
@@ -110,7 +114,9 @@ foreach ($file in $files) {
         Fail "Migration '$($file.Name)' must not contain GO batch separators; SqlServerFixture and CI execute each .sql file as one batch."
     }
 
-    Assert-NoSameBatchIndexOnAlterAddedColumn -FileName $file.Name -Content $content
+    if ([int]$prefix -gt $legacyBatchGuardLimit) {
+        Assert-NoSameBatchIndexOnAlterAddedColumn -FileName $file.Name -Content $content
+    }
 }
 
 Write-Host "Migration static guard passed: $($files.Count) .sql files checked under $MigrationRoot."

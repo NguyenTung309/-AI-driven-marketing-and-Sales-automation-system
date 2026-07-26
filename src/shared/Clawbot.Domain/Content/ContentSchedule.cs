@@ -23,6 +23,7 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
 
     private const int MaxErrorCodeLength = 128;
     public const int MaxProviderTargetIdLength = 128;
+    public const int MaxExternalPostIdLength = 256;
 
     public Guid TenantId { get; private set; }
     public Guid ContentItemId { get; private set; }
@@ -38,6 +39,7 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
     public DateTimeOffset? PostedAt { get; private set; }
     public string Status { get; private set; } = StatusPending;
     public string? PostUrl { get; private set; }
+    public string? ExternalPostId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public int RetryCount { get; private set; }
@@ -45,10 +47,11 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
     public string? LastErrorCode { get; private set; }
     // Last publisher/job reason (retry, fail, hold, stale). Null when healthy pending or successfully posted.
     public string? LastError { get; private set; }
-    // Engagement counts fetched back from the platform (FB Graph) after publishing. Null = not synced yet.
+    // Engagement counts fetched back from the platform after publishing. Timestamp is the last Graph attempt.
     public int? LikeCount { get; private set; }
     public int? CommentCount { get; private set; }
     public DateTimeOffset? EngagementSyncedAt { get; private set; }
+    public DateTimeOffset? MetaCommentsSyncedAt { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
 
     private ContentSchedule() { }
@@ -144,7 +147,7 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
         UpdatedAt = at;
     }
 
-    public void MarkPosted(string postUrl, DateTimeOffset at)
+    public void MarkPosted(string postUrl, string? externalPostId, DateTimeOffset at)
     {
         if (Status != StatusPublishing)
             throw new InvalidOperationException("content_schedule_not_publishing");
@@ -152,6 +155,7 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
         ActiveRevisionSlot = null;
         PostedAt = at;
         PostUrl = postUrl;
+        ExternalPostId = NormalizeExternalPostId(externalPostId);
         NextAttemptAt = null;
         LastError = null;
         LastErrorCode = null;
@@ -258,7 +262,7 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
             StringComparison.Ordinal);
 
     // Phase 4.6: privileged reconcile after operator verification — never calls provider.
-    public void MarkReconciledPosted(string postUrl, DateTimeOffset at)
+    public void MarkReconciledPosted(string postUrl, string? externalPostId, DateTimeOffset at)
     {
         if (Status != StatusOutcomeUnknown)
             throw new InvalidOperationException("content_schedule_not_outcome_unknown");
@@ -266,6 +270,7 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
         ActiveRevisionSlot = null;
         PostedAt = at;
         PostUrl = postUrl;
+        ExternalPostId = NormalizeExternalPostId(externalPostId);
         NextAttemptAt = null;
         LastError = null;
         LastErrorCode = null;
@@ -284,6 +289,18 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
         UpdatedAt = at;
     }
 
+    public void MarkEngagementAttempt(DateTimeOffset at)
+    {
+        EngagementSyncedAt = at;
+        UpdatedAt = at;
+    }
+
+    public void MarkMetaCommentsAttempt(DateTimeOffset at)
+    {
+        MetaCommentsSyncedAt = at;
+        UpdatedAt = at;
+    }
+
     public void SetEngagement(int? likeCount, int? commentCount, DateTimeOffset at)
     {
         LikeCount = likeCount;
@@ -299,6 +316,25 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
             : providerTargetId.Trim();
         if (normalized?.Length > MaxProviderTargetIdLength)
             throw new ArgumentOutOfRangeException(nameof(providerTargetId));
+        return normalized;
+    }
+
+    public static bool IsValidExternalPostId(string? externalPostId)
+    {
+        if (string.IsNullOrWhiteSpace(externalPostId))
+            return false;
+        var normalized = externalPostId.Trim();
+        return normalized.Length <= MaxExternalPostIdLength
+            && normalized.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
+    }
+
+    private static string? NormalizeExternalPostId(string? externalPostId)
+    {
+        if (string.IsNullOrWhiteSpace(externalPostId))
+            return null;
+        var normalized = externalPostId.Trim();
+        if (!IsValidExternalPostId(normalized))
+            throw new ArgumentOutOfRangeException(nameof(externalPostId));
         return normalized;
     }
 

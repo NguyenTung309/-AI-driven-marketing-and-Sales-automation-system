@@ -547,6 +547,27 @@ if errorlevel 1 exit /b 1
 rem Engagement counts (0059_content_schedule_engagement) — lenh rieng, giu duoi tran 8191 ky tu cua cmd.exe
 docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF COL_LENGTH(N'dbo.content_schedule', N'like_count') IS NULL ALTER TABLE dbo.content_schedule ADD like_count INT NULL; IF COL_LENGTH(N'dbo.content_schedule', N'comment_count') IS NULL ALTER TABLE dbo.content_schedule ADD comment_count INT NULL; IF COL_LENGTH(N'dbo.content_schedule', N'engagement_synced_at') IS NULL ALTER TABLE dbo.content_schedule ADD engagement_synced_at DATETIMEOFFSET NULL;"
 if errorlevel 1 exit /b 1
+rem Provider object id (0087_content_schedule_external_post_id) — lenh rieng
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF COL_LENGTH(N'dbo.content_schedule', N'external_post_id') IS NULL ALTER TABLE dbo.content_schedule ADD external_post_id NVARCHAR(256) NULL;"
+if errorlevel 1 exit /b 1
+rem Meta inbox identity (0088_meta_inbox_unique_identity) — lenh rieng
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF EXISTS (SELECT 1 FROM dbo.inboxes WHERE is_active = 1 AND deleted_at IS NULL GROUP BY tenant_id, platform, external_page_id HAVING COUNT(*) > 1) THROW 51088, 'meta_inbox_duplicate_identity', 1; IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_inboxes_tenant_platform_external_active' AND object_id = OBJECT_ID(N'dbo.inboxes')) CREATE UNIQUE INDEX UX_inboxes_tenant_platform_external_active ON dbo.inboxes (tenant_id, platform, external_page_id) WHERE is_active = 1 AND deleted_at IS NULL;"
+if errorlevel 1 exit /b 1
+rem Meta comment reconciliation watermark (0089_content_schedule_meta_comments_synced_at) — lenh rieng
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF COL_LENGTH(N'dbo.content_schedule', N'meta_comments_synced_at') IS NULL ALTER TABLE dbo.content_schedule ADD meta_comments_synced_at DATETIMEOFFSET NULL;"
+if errorlevel 1 exit /b 1
+rem Parent comment id (0090_messages_parent_comment_id) — lenh rieng
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF COL_LENGTH(N'dbo.messages', N'parent_comment_id') IS NULL ALTER TABLE dbo.messages ADD parent_comment_id NVARCHAR(256) NULL;"
+if errorlevel 1 exit /b 1
+rem Parent comment id index (0091_messages_parent_comment_id_index) — lenh rieng
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_messages_tenant_parent_comment_id' AND object_id = OBJECT_ID(N'dbo.messages')) CREATE INDEX IX_messages_tenant_parent_comment_id ON dbo.messages (tenant_id, parent_comment_id) WHERE parent_comment_id IS NOT NULL;"
+if errorlevel 1 exit /b 1
+rem Bot comment claim uniqueness (0092_messages_parent_comment_unique_claim) — lenh rieng
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_messages_bot_parent_comment_type' AND object_id = OBJECT_ID(N'dbo.messages') AND (filter_definition IS NULL OR CHARINDEX(N'send_failed', filter_definition) = 0)) DROP INDEX UX_messages_bot_parent_comment_type ON dbo.messages; IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_messages_bot_parent_comment_type' AND object_id = OBJECT_ID(N'dbo.messages')) CREATE UNIQUE INDEX UX_messages_bot_parent_comment_type ON dbo.messages (tenant_id, parent_comment_id, message_type) WHERE parent_comment_id IS NOT NULL AND direction = N'out' AND sender_type = N'bot' AND status != N'send_failed';"
+if errorlevel 1 exit /b 1
+rem Page feed webhook subscription marker (0093_meta_assets_feed_subscribed_at) — lenh rieng
+docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF COL_LENGTH(N'dbo.meta_assets', N'feed_subscribed_at') IS NULL ALTER TABLE dbo.meta_assets ADD feed_subscribed_at DATETIMEOFFSET NULL;"
+if errorlevel 1 exit /b 1
 rem Last publish error on schedule (0069_content_schedule_last_error) — lenh rieng
 docker exec clawbot-sqlserver %SQLCMD% -S localhost -U sa -P "%MSSQL_SA_PASSWORD%" -C -d clawbot -b -Q "SET QUOTED_IDENTIFIER ON; SET ARITHABORT ON; IF COL_LENGTH(N'dbo.content_schedule', N'last_error') IS NULL ALTER TABLE dbo.content_schedule ADD last_error NVARCHAR(1024) NULL;"
 if errorlevel 1 exit /b 1

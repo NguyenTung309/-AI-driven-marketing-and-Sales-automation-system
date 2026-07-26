@@ -152,6 +152,7 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(Math.Clamp(options.TimeoutSeconds, 5, 120));
         }).RemoveAllLoggers();
         services.AddScoped<IMetaIntegrationService, MetaIntegrationService>();
+        services.AddScoped<Channels.Meta.IMetaInboxProvisioner, Channels.Meta.MetaInboxProvisioner>();
         services.Configure<EncryptionOptions>(cfg.GetSection("Encryption"));
         services.AddSingleton<IEncryptor, AesEncryptor>();
         // Per-(tenant, agent) LLM provider resolution (decrypts the bound LlmConfig at call time).
@@ -199,6 +200,8 @@ public static class DependencyInjection
         services.AddScoped<ICommentChannelAdapter>(sp =>
             sp.GetRequiredService<IChannelAdapter>() as ICommentChannelAdapter
             ?? throw new InvalidOperationException("ICommentChannelAdapter not available"));
+        services.AddScoped<Channels.Meta.MetaCommentChannelAdapter>();
+        services.AddScoped<Channels.Meta.ICommentChannelAdapterResolver, Channels.Meta.TenantCommentChannelAdapterResolver>();
         // Native Facebook/Zalo publishing is always available so DB-backed connections take effect without a restart.
         services.Configure<GraphPublisherOptions>(cfg.GetSection(GraphPublisherOptions.SectionName));
         services.AddScoped<EfSocialCredentialResolver>();

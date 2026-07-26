@@ -1350,11 +1350,30 @@ public static class ContentEndpoints
         {
             if (outcome == "succeeded")
             {
+                if (!string.IsNullOrWhiteSpace(body.ExternalPostId)
+                    && !ContentSchedule.IsValidExternalPostId(body.ExternalPostId))
+                {
+                    return Error(
+                        http,
+                        StatusCodes.Status400BadRequest,
+                        "content.external_post_id_invalid",
+                        "External post ID contains invalid path characters.");
+                }
+
                 var externalId = string.IsNullOrWhiteSpace(body.ExternalPostId)
-                    ? schedule.PostUrl ?? attempt?.IdempotencyKey ?? schedule.Id.ToString("N")
+                    ? schedule.ExternalPostId
                     : body.ExternalPostId.Trim();
-                attempt?.ReconcileSucceeded(externalId, now);
-                schedule.MarkReconciledPosted(externalId, now);
+                if (!ContentSchedule.IsValidExternalPostId(externalId))
+                {
+                    return Error(
+                        http,
+                        StatusCodes.Status400BadRequest,
+                        "content.external_post_id_required",
+                        "A valid provider post ID is required to reconcile a successful publication.");
+                }
+
+                attempt?.ReconcileSucceeded(externalId!, now);
+                schedule.MarkReconciledPosted(schedule.PostUrl ?? string.Empty, externalId!, now);
                 if (item.ActivePublishAttemptId is not null)
                     item.MarkPublished(item.ActivePublishAttemptId.Value, now);
                 else if (item.Status != "published")
