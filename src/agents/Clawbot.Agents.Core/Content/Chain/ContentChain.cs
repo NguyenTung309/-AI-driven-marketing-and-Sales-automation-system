@@ -135,7 +135,8 @@ public sealed class ContentChain(
             UsdCost: totals.UsdCost,
             Model: totals.Model,
             Plan: current.Plan,       // L1 để lưu lại phục vụ repurpose/đổi hook (P4/P5)
-            Outline: current.Outline); // L2 (đã kèm SelectedHookIndex)
+            Outline: current.Outline, // L2 (đã kèm SelectedHookIndex)
+            IsEstimated: totals.IsEstimated);
     }
 
     private async Task<ClaudeReply> CompleteStepAsync(ChainStepPrompt prompt, CancellationToken chainToken)
@@ -159,7 +160,8 @@ public sealed class ContentChain(
             InputTokens: totals.InputTokens,
             OutputTokens: totals.OutputTokens,
             UsdCost: totals.UsdCost,
-            Model: totals.Model);
+            Model: totals.Model,
+            IsEstimated: totals.IsEstimated);
 
     private sealed class RunningTotals
     {
@@ -168,11 +170,16 @@ public sealed class ContentChain(
         public decimal UsdCost { get; private set; }
         public string Model { get; private set; } = string.Empty;
 
+        // Cả chuỗi coi là ước lượng nếu bất kỳ bước nào phải ước lượng — cộng dồn số ước lượng
+        // với số thật cho ra tổng không còn chính xác, phải gắn nhãn.
+        public bool IsEstimated { get; private set; }
+
         public void Add(ClaudeReply reply)
         {
             InputTokens += reply.InputTokens;
             OutputTokens += reply.OutputTokens;
             UsdCost += reply.UsdCost;
+            IsEstimated |= reply.IsEstimated;
             if (!string.IsNullOrEmpty(reply.Model))
                 Model = reply.Model;
         }

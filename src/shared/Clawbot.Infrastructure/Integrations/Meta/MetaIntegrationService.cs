@@ -1,9 +1,11 @@
 using System.Text.Json;
 using Clawbot.Domain.Integrations;
+using Clawbot.Infrastructure.Channels.Meta;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Security;
 using Clawbot.SharedKernel.Time;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Infrastructure.Integrations.Meta;
 
@@ -15,7 +17,20 @@ public sealed record MetaAssetSnapshot(
     IReadOnlyList<string> Tasks,
     bool IsDefault,
     bool IsActive,
-    DateTimeOffset LastSyncedAt);
+    DateTimeOffset LastSyncedAt,
+    bool CanModerateComments = false,
+    bool CanSendPrivateReplies = false,
+    DateTimeOffset? FeedSubscribedAt = null);
+
+// Trạng thái năng lực engagement ở mức kết nối: task nằm trên từng Page, còn scope nằm
+// trên token nên phải soi cả hai mới biết vì sao comment không rep được.
+public sealed record MetaEngagementCapabilitySnapshot(
+    IReadOnlyList<string> MissingCommentScopes,
+    IReadOnlyList<string> MissingPrivateReplyScopes,
+    int ActivePageCount,
+    int CommentCapablePageCount,
+    int PrivateReplyCapablePageCount,
+    int FeedSubscribedPageCount);
 
 public sealed record MetaIntegrationSnapshot(
     bool Connected,
@@ -28,7 +43,8 @@ public sealed record MetaIntegrationSnapshot(
     DateTimeOffset? DataAccessExpiresAt,
     DateTimeOffset? LastValidatedAt,
     string? LastError,
-    IReadOnlyList<MetaAssetSnapshot> Assets);
+    IReadOnlyList<MetaAssetSnapshot> Assets,
+    MetaEngagementCapabilitySnapshot? Engagement = null);
 
 public sealed record MetaPageCredential(
     Guid AssetId,
@@ -78,26 +94,42 @@ public interface IMetaIntegrationService
     Task DisconnectAsync(Guid tenantId, CancellationToken ct = default);
     Task<string?> ResolveRootTokenAsync(Guid tenantId, CancellationToken ct = default);
     Task<MetaPageCredential?> ResolvePageAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default);
+    Task<MetaPageCredential?> ResolvePageForEngagementAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default);
+    Task<MetaPageCredential?> ResolvePageForEngagementByExternalIdAsync(Guid tenantId, string pageExternalId, CancellationToken ct = default);
+    Task<MetaPageCredential?> ResolvePageForCommentsByExternalIdAsync(Guid tenantId, string pageExternalId, CancellationToken ct = default);
+    Task<MetaPageCredential?> ResolvePageForPrivateRepliesByExternalIdAsync(Guid tenantId, string pageExternalId, CancellationToken ct = default);
     Task<MetaInstagramResolution> ResolveInstagramAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default);
+    Task<MetaInstagramResolution> ResolveInstagramForEngagementAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default);
+    Task<MetaInstagramResolution> ResolveInstagramForCommentsAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default);
+    Task<MetaInstagramResolution> ResolveInstagramForPrivateRepliesAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default);
     Task<MetaPageRefreshResult> RefreshPageAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default);
     Task MarkReconnectRequiredAsync(Guid tenantId, string reason, CancellationToken ct = default);
 }
 
-public sealed class MetaIntegrationService(
+public sealed partial class MetaIntegrationService(
     AppDbContext db,
     IEncryptor encryptor,
     IMetaGraphClient graph,
     IMetaGraphConfigurationResolver configurations,
-    IClock clock) : IMetaIntegrationService
+    IClock clock,
+    IMetaInboxProvisioner inboxes,
+    ILogger<MetaIntegrationService> logger) : IMetaIntegrationService
 {
     private static readonly string[] RequiredPageScopes = ["pages_manage_posts", "pages_read_engagement", "pages_show_list"];
     private static readonly string[] RequiredInstagramScopes = ["instagram_basic", "instagram_content_publish"];
+    private static readonly string[] EngagementInstagramScopes = ["instagram_basic"];
+    private static readonly string[] CommentPageScopes = ["pages_manage_engagement"];
+    private static readonly string[] PrivateReplyPageScopes = ["pages_manage_engagement", "pages_messaging"];
+    private static readonly string[] CommentInstagramScopes = ["instagram_basic", "instagram_manage_comments"];
+    private static readonly string[] PrivateReplyInstagramScopes = ["instagram_basic", "instagram_manage_comments", "instagram_manage_messages"];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly AppDbContext _db = db;
     private readonly IEncryptor _encryptor = encryptor;
     private readonly IMetaGraphClient _graph = graph;
     private readonly IMetaGraphConfigurationResolver _configurations = configurations;
     private readonly IClock _clock = clock;
+    private readonly IMetaInboxProvisioner _inboxes = inboxes;
+    private readonly ILogger<MetaIntegrationService> _logger = logger;
 
     public async Task CompleteAuthorizationAsync(Guid tenantId, string code, CancellationToken ct = default)
     {
@@ -184,18 +216,31 @@ public sealed class MetaIntegrationService(
         var configuration = await _configurations.ResolveAsync(tenantId, ct).ConfigureAwait(false);
         var connected = IsConnectionUsable(connection, configuration);
         var status = connection.Status == "active" && !connected ? "reconnect_required" : connection.Status;
+        var grantedScopes = DeserializeStrings(connection.GrantedScopesJson);
+        var assetSnapshots = assets.Select(ToSnapshot).ToList();
+        var activePages = assetSnapshots
+            .Where(asset => asset.IsActive && string.Equals(asset.AssetType, "page", StringComparison.Ordinal))
+            .ToList();
+        var engagement = new MetaEngagementCapabilitySnapshot(
+            MissingCommentPageScopes(grantedScopes),
+            MissingPrivateReplyPageScopes(grantedScopes),
+            activePages.Count,
+            activePages.Count(asset => asset.CanModerateComments),
+            activePages.Count(asset => asset.CanSendPrivateReplies),
+            activePages.Count(asset => asset.FeedSubscribedAt is not null));
         return new MetaIntegrationSnapshot(
             connected,
             status,
             connection.ClientBusinessId,
             connection.SystemUserId,
             connection.TokenType,
-            DeserializeStrings(connection.GrantedScopesJson),
+            grantedScopes,
             connection.ExpiresAt,
             connection.DataAccessExpiresAt,
             connection.LastValidatedAt,
             connection.LastError,
-            assets.Select(ToSnapshot).ToList());
+            assetSnapshots,
+            engagement);
     }
 
     public async Task<IReadOnlyList<MetaAssetSnapshot>> GetPublishablePagesAsync(Guid tenantId, CancellationToken ct = default)
@@ -400,7 +445,35 @@ public sealed class MetaIntegrationService(
         return TryUnprotectConnectionToken(connection);
     }
 
-    public async Task<MetaPageCredential?> ResolvePageAsync(Guid tenantId, Guid? assetId, CancellationToken ct = default)
+    public Task<MetaPageCredential?> ResolvePageAsync(
+        Guid tenantId,
+        Guid? assetId,
+        CancellationToken ct = default) =>
+        ResolvePageWithCapabilityAsync(tenantId, assetId, externalId: null, capability: CanPublish, ct: ct);
+
+    public Task<MetaPageCredential?> ResolvePageForEngagementAsync(
+        Guid tenantId,
+        Guid? assetId,
+        CancellationToken ct = default) =>
+        ResolvePageWithCapabilityAsync(tenantId, assetId, externalId: null, capability: CanModerate, ct: ct);
+
+    public Task<MetaPageCredential?> ResolvePageForEngagementByExternalIdAsync(
+        Guid tenantId,
+        string pageExternalId,
+        CancellationToken ct = default) =>
+        ResolvePageWithCapabilityAsync(
+            tenantId,
+            assetId: null,
+            externalId: pageExternalId,
+            capability: CanModerate,
+            ct: ct);
+
+    private async Task<MetaPageCredential?> ResolvePageWithCapabilityAsync(
+        Guid tenantId,
+        Guid? assetId,
+        string? externalId,
+        Func<MetaAssetSnapshot, bool> capability,
+        CancellationToken ct)
     {
         var connection = await GetUsableConnectionAsync(tenantId, ct).ConfigureAwait(false);
         if (connection is null)
@@ -414,6 +487,12 @@ public sealed class MetaIntegrationService(
         {
             asset = await query.FirstOrDefaultAsync(x => x.Id == assetId.Value, ct).ConfigureAwait(false);
         }
+        else if (!string.IsNullOrWhiteSpace(externalId))
+        {
+            asset = await query
+                .FirstOrDefaultAsync(x => x.ExternalId == externalId.Trim(), ct)
+                .ConfigureAwait(false);
+        }
         else
         {
             var candidates = await query
@@ -421,15 +500,58 @@ public sealed class MetaIntegrationService(
                 .ThenBy(x => x.Name)
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
-            asset = candidates.FirstOrDefault(x => CanPublish(ToSnapshot(x)));
+            asset = candidates.FirstOrDefault(x => capability(ToSnapshot(x)));
         }
-        if (asset is null || !CanPublish(ToSnapshot(asset)))
+        if (asset is null || !capability(ToSnapshot(asset)))
             return null;
 
         var token = TryUnprotectAssetToken(asset);
         return string.IsNullOrWhiteSpace(token)
             ? null
             : new MetaPageCredential(asset.Id, asset.ExternalId, asset.Name, token);
+    }
+
+    public async Task<MetaPageCredential?> ResolvePageForCommentsByExternalIdAsync(
+        Guid tenantId,
+        string pageExternalId,
+        CancellationToken ct = default)
+    {
+        var credential = await ResolvePageForEngagementByExternalIdAsync(tenantId, pageExternalId, ct)
+            .ConfigureAwait(false);
+        if (credential is null)
+            return null;
+
+        var connection = await ConnectionQuery(tenantId)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        return connection is not null
+            && MissingCommentPageScopes(DeserializeStrings(connection.GrantedScopesJson)).Length == 0
+            ? credential
+            : null;
+    }
+
+    public async Task<MetaPageCredential?> ResolvePageForPrivateRepliesByExternalIdAsync(
+        Guid tenantId,
+        string pageExternalId,
+        CancellationToken ct = default)
+    {
+        var credential = await ResolvePageForEngagementByExternalIdAsync(tenantId, pageExternalId, ct)
+            .ConfigureAwait(false);
+        if (credential is null)
+            return null;
+
+        var connection = await ConnectionQuery(tenantId).AsNoTracking().FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        var asset = await AssetQuery(tenantId)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(value => value.Id == credential.AssetId && value.IsActive, ct)
+            .ConfigureAwait(false);
+        return connection is not null
+            && asset is not null
+            && CanMessage(ToSnapshot(asset))
+            && MissingPrivateReplyPageScopes(DeserializeStrings(connection.GrantedScopesJson)).Length == 0
+            ? credential
+            : null;
     }
 
     public async Task<MetaInstagramResolution> ResolveInstagramAsync(
@@ -455,6 +577,125 @@ public sealed class MetaIntegrationService(
             return new MetaInstagramResolution(MetaInstagramResolutionStatus.PageUnavailable, null);
 
         if (MissingInstagramScopes(DeserializeStrings(connection.GrantedScopesJson)).Length > 0)
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.MissingScopes, null);
+
+        var instagramUserId = await _graph.ResolveInstagramAccountAsync(
+            tenantId,
+            page.PageId,
+            page.PageAccessToken,
+            ct).ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(instagramUserId)
+            ? new MetaInstagramResolution(MetaInstagramResolutionStatus.NotLinked, null)
+            : new MetaInstagramResolution(
+                MetaInstagramResolutionStatus.Resolved,
+                new MetaInstagramCredential(page.AssetId, instagramUserId, page.PageAccessToken));
+    }
+
+    public async Task<MetaInstagramResolution> ResolveInstagramForEngagementAsync(
+        Guid tenantId,
+        Guid? assetId,
+        CancellationToken ct = default)
+    {
+        var configuration = await _configurations.ResolveAsync(tenantId, ct).ConfigureAwait(false);
+        if (!configuration.IsConfigured)
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.Disconnected, null);
+
+        var connection = await ConnectionQuery(tenantId)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (connection is null || string.Equals(connection.Status, "disconnected", StringComparison.Ordinal))
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.Disconnected, null);
+        if (!IsConnectionUsable(connection, configuration))
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.ReconnectRequired, null);
+
+        // Instagram engagement reads use the linked publishing target and do not require the
+        // Page moderation task; comment moderation is a separate capability from metric reads.
+        var page = await ResolvePageAsync(tenantId, assetId, ct).ConfigureAwait(false);
+        if (page is null)
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.PageUnavailable, null);
+
+        if (MissingInstagramEngagementScopes(DeserializeStrings(connection.GrantedScopesJson)).Length > 0)
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.MissingScopes, null);
+
+        var instagramUserId = await _graph.ResolveInstagramAccountAsync(
+            tenantId,
+            page.PageId,
+            page.PageAccessToken,
+            ct).ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(instagramUserId)
+            ? new MetaInstagramResolution(MetaInstagramResolutionStatus.NotLinked, null)
+            : new MetaInstagramResolution(
+                MetaInstagramResolutionStatus.Resolved,
+                new MetaInstagramCredential(page.AssetId, instagramUserId, page.PageAccessToken));
+    }
+
+    public async Task<MetaInstagramResolution> ResolveInstagramForCommentsAsync(
+        Guid tenantId,
+        Guid? assetId,
+        CancellationToken ct = default)
+    {
+        var configuration = await _configurations.ResolveAsync(tenantId, ct).ConfigureAwait(false);
+        if (!configuration.IsConfigured)
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.Disconnected, null);
+
+        var connection = await ConnectionQuery(tenantId)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (connection is null || string.Equals(connection.Status, "disconnected", StringComparison.Ordinal))
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.Disconnected, null);
+        if (!IsConnectionUsable(connection, configuration))
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.ReconnectRequired, null);
+
+        var page = await ResolvePageForEngagementAsync(tenantId, assetId, ct).ConfigureAwait(false);
+        if (page is null)
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.PageUnavailable, null);
+
+        if (MissingInstagramCommentScopes(DeserializeStrings(connection.GrantedScopesJson)).Length > 0)
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.MissingScopes, null);
+
+        var instagramUserId = await _graph.ResolveInstagramAccountAsync(
+            tenantId,
+            page.PageId,
+            page.PageAccessToken,
+            ct).ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(instagramUserId)
+            ? new MetaInstagramResolution(MetaInstagramResolutionStatus.NotLinked, null)
+            : new MetaInstagramResolution(
+                MetaInstagramResolutionStatus.Resolved,
+                new MetaInstagramCredential(page.AssetId, instagramUserId, page.PageAccessToken));
+    }
+
+    public async Task<MetaInstagramResolution> ResolveInstagramForPrivateRepliesAsync(
+        Guid tenantId,
+        Guid? assetId,
+        CancellationToken ct = default)
+    {
+        var configuration = await _configurations.ResolveAsync(tenantId, ct).ConfigureAwait(false);
+        if (!configuration.IsConfigured)
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.Disconnected, null);
+
+        var connection = await ConnectionQuery(tenantId)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (connection is null || string.Equals(connection.Status, "disconnected", StringComparison.Ordinal))
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.Disconnected, null);
+        if (!IsConnectionUsable(connection, configuration))
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.ReconnectRequired, null);
+
+        var page = await ResolvePageForEngagementAsync(tenantId, assetId, ct).ConfigureAwait(false);
+        if (page is null)
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.PageUnavailable, null);
+        var pageAsset = await AssetQuery(tenantId)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(value => value.Id == page.AssetId && value.IsActive, ct)
+            .ConfigureAwait(false);
+        if (pageAsset is null || !CanMessage(ToSnapshot(pageAsset)))
+            return new MetaInstagramResolution(MetaInstagramResolutionStatus.PageUnavailable, null);
+        if (MissingInstagramPrivateReplyScopes(DeserializeStrings(connection.GrantedScopesJson)).Length > 0
+            || MissingPrivateReplyPageScopes(DeserializeStrings(connection.GrantedScopesJson)).Length > 0)
             return new MetaInstagramResolution(MetaInstagramResolutionStatus.MissingScopes, null);
 
         var instagramUserId = await _graph.ResolveInstagramAccountAsync(
@@ -572,6 +813,33 @@ public sealed class MetaIntegrationService(
                 _db.MetaAssets.Add(asset);
             }
             syncedAssets.Add(asset);
+            await _inboxes.EnsureAsync(
+                connection.TenantId,
+                "facebook",
+                page.Id,
+                page.Name,
+                ct).ConfigureAwait(false);
+            try
+            {
+                await _graph.SubscribePageFeedAsync(
+                    connection.TenantId,
+                    page.Id,
+                    page.AccessToken,
+                    ct).ConfigureAwait(false);
+                asset.MarkFeedSubscribed(now);
+            }
+            catch (MetaGraphException exception)
+            {
+                LogPageFeedSubscriptionFailed(_logger, connection.TenantId, page.Id, GetGraphFailureReason(exception));
+            }
+            catch (HttpRequestException)
+            {
+                LogPageFeedSubscriptionFailed(_logger, connection.TenantId, page.Id, "transport_error");
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                LogPageFeedSubscriptionFailed(_logger, connection.TenantId, page.Id, "timeout");
+            }
         }
 
         foreach (var asset in existing.Where(x => !seen.Contains(x.ExternalId)))
@@ -586,7 +854,7 @@ public sealed class MetaIntegrationService(
             asset.SetDefault(defaultAsset is not null && asset.Id == defaultAsset.Id, now);
 
         connection.MarkHealthy(now);
-        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+        await _inboxes.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     private IQueryable<MetaConnection> ConnectionQuery(Guid tenantId) =>
@@ -636,16 +904,59 @@ public sealed class MetaIntegrationService(
     private static bool CanPublish(MetaAssetSnapshot asset) =>
         asset.Tasks.Any(task => string.Equals(task, "CREATE_CONTENT", StringComparison.OrdinalIgnoreCase));
 
+    private static bool CanModerate(MetaAssetSnapshot asset) =>
+        asset.Tasks.Any(task => string.Equals(task, "MODERATE", StringComparison.OrdinalIgnoreCase));
+
+    private static bool CanMessage(MetaAssetSnapshot asset) =>
+        asset.Tasks.Any(task => string.Equals(task, "MESSAGING", StringComparison.OrdinalIgnoreCase));
+
+    private static string GetGraphFailureReason(MetaGraphException exception) =>
+        exception.Code is { } code
+            ? $"graph_code:{code}"
+            : exception.HttpStatus is { } status
+                ? $"http_status:{status}"
+                : "graph_error";
+
     private static string[] MissingPageScopes(IReadOnlyList<string> scopes)
     {
         var grantedScopes = scopes.ToHashSet(StringComparer.OrdinalIgnoreCase);
         return RequiredPageScopes.Where(scope => !grantedScopes.Contains(scope)).ToArray();
     }
 
+    private static string[] MissingCommentPageScopes(IReadOnlyList<string> scopes)
+    {
+        var grantedScopes = scopes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return CommentPageScopes.Where(scope => !grantedScopes.Contains(scope)).ToArray();
+    }
+
+    private static string[] MissingPrivateReplyPageScopes(IReadOnlyList<string> scopes)
+    {
+        var grantedScopes = scopes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return PrivateReplyPageScopes.Where(scope => !grantedScopes.Contains(scope)).ToArray();
+    }
+
     private static string[] MissingInstagramScopes(IReadOnlyList<string> scopes)
     {
         var grantedScopes = scopes.ToHashSet(StringComparer.OrdinalIgnoreCase);
         return RequiredInstagramScopes.Where(scope => !grantedScopes.Contains(scope)).ToArray();
+    }
+
+    private static string[] MissingInstagramEngagementScopes(IReadOnlyList<string> scopes)
+    {
+        var grantedScopes = scopes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return EngagementInstagramScopes.Where(scope => !grantedScopes.Contains(scope)).ToArray();
+    }
+
+    private static string[] MissingInstagramCommentScopes(IReadOnlyList<string> scopes)
+    {
+        var grantedScopes = scopes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return CommentInstagramScopes.Where(scope => !grantedScopes.Contains(scope)).ToArray();
+    }
+
+    private static string[] MissingInstagramPrivateReplyScopes(IReadOnlyList<string> scopes)
+    {
+        var grantedScopes = scopes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return PrivateReplyInstagramScopes.Where(scope => !grantedScopes.Contains(scope)).ToArray();
     }
 
     private string ProtectConnectionToken(Guid tenantId, Guid connectionId, string token) =>
@@ -699,16 +1010,25 @@ public sealed class MetaIntegrationService(
             ? token
             : null;
 
-    private static MetaAssetSnapshot ToSnapshot(MetaAsset asset) =>
-        new(
+    private static MetaAssetSnapshot ToSnapshot(MetaAsset asset)
+    {
+        var tasks = DeserializeStrings(asset.TasksJson);
+        var snapshot = new MetaAssetSnapshot(
             asset.Id,
             asset.AssetType,
             asset.ExternalId,
             asset.Name,
-            DeserializeStrings(asset.TasksJson),
+            tasks,
             asset.IsDefault,
             asset.IsActive,
-            asset.LastSyncedAt);
+            asset.LastSyncedAt,
+            FeedSubscribedAt: asset.FeedSubscribedAt);
+        return snapshot with
+        {
+            CanModerateComments = CanModerate(snapshot),
+            CanSendPrivateReplies = CanMessage(snapshot),
+        };
+    }
 
     private static string[] DeserializeStrings(string json)
     {
@@ -717,4 +1037,12 @@ public sealed class MetaIntegrationService(
         try { return JsonSerializer.Deserialize<string[]>(json, JsonOptions) ?? []; }
         catch (JsonException) { return []; }
     }
+
+    [LoggerMessage(EventId = 5290, Level = LogLevel.Warning,
+        Message = "Meta Page webhook subscription failed for tenant {TenantId}, page {PageId}: {Reason}")]
+    private static partial void LogPageFeedSubscriptionFailed(
+        ILogger logger,
+        Guid tenantId,
+        string pageId,
+        string reason);
 }

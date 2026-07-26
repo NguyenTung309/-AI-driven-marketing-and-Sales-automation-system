@@ -297,16 +297,27 @@ public sealed partial class ContentPublishJob(
             return;
         }
 
+        if (result.Success
+            && string.IsNullOrWhiteSpace(result.ExternalId)
+            && string.IsNullOrWhiteSpace(result.PostUrl))
+        {
+            attempt.MarkOutcomeUnknown(attempt.LeaseToken!.Value, "publish_provider_id_missing", now);
+            schedule.MarkOutcomeUnknown(now, "publish_provider_id_missing");
+            await PersistAmbiguousOutcomeAsync().ConfigureAwait(false);
+            return;
+        }
+
         if (result.Success)
         {
             var externalId = !string.IsNullOrWhiteSpace(result.ExternalId)
                 ? result.ExternalId!
-                : !string.IsNullOrWhiteSpace(result.PostUrl)
-                    ? result.PostUrl!
-                    : attempt.IdempotencyKey;
+                : result.PostUrl!;
             attempt.MarkSucceeded(attempt.LeaseToken!.Value, externalId, now);
             item.MarkPublished(attempt.Id, now);
-            schedule.MarkPosted(result.PostUrl ?? string.Empty, now);
+            var externalPostId = ContentSchedule.IsValidExternalPostId(result.ExternalId)
+                ? result.ExternalId
+                : null;
+            schedule.MarkPosted(result.PostUrl ?? string.Empty, externalPostId, now);
             LogPublished(_logger, schedule.TenantId, item.Id, schedule.Id);
             return;
         }
@@ -367,7 +378,10 @@ public sealed partial class ContentPublishJob(
         if (!string.Equals(schedule.Status, ContentSchedule.StatusPosted, StringComparison.Ordinal))
         {
             schedule.MarkPublishing(now);
-            schedule.MarkPosted(attempt.ExternalPostId ?? string.Empty, now);
+            var externalPostId = ContentSchedule.IsValidExternalPostId(attempt.ExternalPostId)
+                ? attempt.ExternalPostId
+                : null;
+            schedule.MarkPosted(schedule.PostUrl ?? string.Empty, externalPostId, now);
         }
 
         // Chỉ chạm item khi nó vẫn ở 'scheduled' và hợp lệ; các trạng thái khác đã terminal.

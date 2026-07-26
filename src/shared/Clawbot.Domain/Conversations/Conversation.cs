@@ -90,13 +90,17 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
 
     public void MarkMemoryExtracted(DateTimeOffset at) => MemoryExtractedAt = at;
 
-    public Message AppendMessage(string direction, string senderType, string content, string contentType, DateTimeOffset sentAt, Guid? senderUserId = null, string? externalMessageId = null, string? originalContent = null, string? redactedContent = null, string messageType = "text", string? parentPostId = null, string? senderDisplayName = null, string? senderAvatarUrl = null, string? attachmentUrl = null, string status = "sent")
+    public Message AppendMessage(string direction, string senderType, string content, string contentType, DateTimeOffset sentAt, Guid? senderUserId = null, string? externalMessageId = null, string? originalContent = null, string? redactedContent = null, string messageType = "text", string? parentPostId = null, string? senderDisplayName = null, string? senderAvatarUrl = null, string? attachmentUrl = null, string status = "sent", string? parentCommentId = null)
     {
-        var msg = Message.Create(Id, TenantId, direction, senderType, content, contentType, sentAt, senderUserId, externalMessageId, originalContent, redactedContent, messageType, parentPostId, senderDisplayName, senderAvatarUrl, attachmentUrl, status);
+        var msg = Message.Create(Id, TenantId, direction, senderType, content, contentType, sentAt, senderUserId, externalMessageId, originalContent, redactedContent, messageType, parentPostId, senderDisplayName, senderAvatarUrl, attachmentUrl, status, parentCommentId);
         _messages.Add(msg);
         LastMessageAt = sentAt;
         return msg;
     }
+
+    // Claim ghi hụt (đụng unique index) phải rời khỏi navigation, nếu không lần
+    // SaveChanges sau EF sẽ tự phát hiện lại và insert lần nữa.
+    public void DiscardMessage(Message message) => _messages.Remove(message);
 
     public void Unassign() => AssignedTo = null;
 

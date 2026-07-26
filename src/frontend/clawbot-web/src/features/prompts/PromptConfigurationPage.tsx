@@ -40,8 +40,9 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat("vi-VN").format(Math.round(value));
 }
 
+// 4 chữ số thập phân: chi phí 7 ngày của 1 prompt thường dưới $0.005, làm tròn 2 số sẽ hiện $0.00.
 function formatUsd(value: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(value);
 }
 
 function formatDateTime(value: string | null | undefined): string {

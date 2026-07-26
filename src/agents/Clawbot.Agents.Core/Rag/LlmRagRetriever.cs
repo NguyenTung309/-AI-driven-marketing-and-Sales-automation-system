@@ -128,7 +128,7 @@ public sealed partial class LlmRagRetriever(
             request.TenantId, scope?.AgentCode ?? FallbackAgentCode, reply.Model,
             reply.InputTokens, reply.OutputTokens, reply.UsdCost,
             scope?.CostAt ?? DateTimeOffset.UtcNow,
-            scope?.ReservationId, scope?.SessionId), ct).ConfigureAwait(false);
+            scope?.ReservationId, scope?.SessionId, reply.IsEstimated), ct).ConfigureAwait(false);
 
         var indexes = ParseIndexes(reply.Text);
         var results = new List<RagChunk>(Math.Min(indexes.Count, request.TopK));

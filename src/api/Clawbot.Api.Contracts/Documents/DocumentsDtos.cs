@@ -24,17 +24,34 @@ public sealed record GenerateDocumentKitResponse(
     int TotalSizeBytes,
     long TotalLatencyMs);
 
+// Mô tả một trường điền của mẫu — frontend dựng form nhập liệu từ danh sách này.
+public sealed record TemplateFieldDto(
+    string Key,
+    string Label,
+    string Type,
+    bool Required,
+    string? Placeholder,
+    string? Sample);
+
 public sealed record DocumentTemplateDto(
     Guid Id,
     string Code,
     string DocType,
     string TemplateHtml,
+    IReadOnlyList<TemplateFieldDto> Fields,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
-public sealed record CreateDocumentTemplateRequest(string Code, string DocType, string TemplateHtml);
+public sealed record CreateDocumentTemplateRequest(
+    string Code,
+    string DocType,
+    string TemplateHtml,
+    IReadOnlyList<TemplateFieldDto>? Fields = null);
 
-public sealed record UpdateDocumentTemplateRequest(string DocType, string TemplateHtml);
+public sealed record UpdateDocumentTemplateRequest(
+    string DocType,
+    string TemplateHtml,
+    IReadOnlyList<TemplateFieldDto>? Fields = null);
 
 public sealed record GeneratedDocumentDto(
     Guid Id,

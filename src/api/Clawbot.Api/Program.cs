@@ -378,6 +378,7 @@ app.MapAdminJobs();
 app.MapAdminSocialCredentials();
 app.MapAdminMetaIntegration();
 app.MapMetaBusinessIntegrationWebhooks();
+app.MapMetaPageWebhooks();
 app.MapAdminInboxEndpoints();
 app.MapAdminChannelsEndpoints();
 app.MapTenantBranding();

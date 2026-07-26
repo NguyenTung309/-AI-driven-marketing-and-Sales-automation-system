@@ -71,7 +71,7 @@ public sealed partial class ChannelMessageIngestor(
         // Dedup phai so text da StripHtml: Pancake echo boc HTML/entity, row outbound local luu plain text
         var cleanText = StripHtml(message.Text);
 
-        if (await IsDuplicateAsync(conversation.Id, message, cleanText, isOwner, ct).ConfigureAwait(false))
+        if (await IsDuplicateAsync(tenantId, conversation.Id, message, cleanText, isOwner, ct).ConfigureAwait(false))
         {
             LogDuplicate(_logger, conversation.Id, message.ExternalThreadId);
             return new IngestResult(conversation.Id, null, true);
@@ -110,6 +110,7 @@ public sealed partial class ChannelMessageIngestor(
             redactedContent: redacted.RedactedText,
             messageType: message.MessageType,
             parentPostId: message.ParentPostId,
+            parentCommentId: message.ParentCommentId,
             senderDisplayName: senderDisplayName ?? senderContact?.DisplayName,
             senderAvatarUrl: finalAvatarUrl,
             attachmentUrl: attachmentUrl);
@@ -209,7 +210,10 @@ public sealed partial class ChannelMessageIngestor(
         // 1. Query all inboxes for this platform
         var inboxes = await _db.Inboxes
             .IgnoreQueryFilters()
-            .Where(i => i.TenantId == tenantId && i.Platform == message.Channel)
+            .Where(i => i.TenantId == tenantId
+                && i.Platform == message.Channel
+                && i.IsActive
+                && i.DeletedAt == null)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -233,11 +237,10 @@ public sealed partial class ChannelMessageIngestor(
             }
         }
 
-        // Fallback 2: check platform fallback if there's only one inbox
-        if (matchedInboxes.Count == 0)
-        {
-            matchedInboxes.AddRange(inboxes);
-        }
+        // Fallback 2 is safe only when the tenant has exactly one active inbox for this platform.
+        // Picking the first inbox from a multi-page tenant can route a customer to the wrong sale team.
+        if (matchedInboxes.Count == 0 && inboxes.Count == 1)
+            matchedInboxes.Add(inboxes[0]);
 
         if (matchedInboxes.Count == 0) return null;
 
@@ -313,14 +316,15 @@ public sealed partial class ChannelMessageIngestor(
         return contact;
     }
 
-    private async Task<bool> IsDuplicateAsync(Guid conversationId, ChannelMessage message, string cleanText, bool isOwner, CancellationToken ct)
+    private async Task<bool> IsDuplicateAsync(Guid tenantId, Guid conversationId, ChannelMessage message, string cleanText, bool isOwner, CancellationToken ct)
     {
         // Strict dedup: use external_message_id if available
         if (message.Metadata.TryGetValue("external_message_id", out var externalId) && !string.IsNullOrEmpty(externalId))
         {
             var exists = await _db.Messages
                 .IgnoreQueryFilters()
-                .AnyAsync(m => m.ExternalMessageId == externalId, ct).ConfigureAwait(false);
+                .AnyAsync(m => m.TenantId == tenantId
+                    && m.ExternalMessageId == externalId, ct).ConfigureAwait(false);
             if (exists) return true;
             if (!isOwner) return false;
             // Owner message with a fresh external id can still be the channel echo of a reply we

@@ -45,6 +45,45 @@ internal static class ReviewCompletionCost
     }
 }
 
+// Fallback khi provider (vd. aigatewayport) không trả usage: đếm token cục bộ để chi phí không về 0.
+// Con số này THẤP HƠN hóa đơn thật (không thấy reasoning token, không tính token ảnh của lượt vision)
+// nên envelope phải mang cờ IsEstimated để UI gắn nhãn.
+internal static class ReviewCompletionUsage
+{
+    public static (int Input, int Output, decimal Cost, bool IsEstimated) Resolve(
+        ResolvedLlmConfig config,
+        int inputTokens,
+        int outputTokens,
+        string promptText,
+        string completionText)
+    {
+        if (inputTokens != 0 || outputTokens != 0)
+            return (inputTokens, outputTokens, ReviewCompletionCost.Compute(config, inputTokens, outputTokens), false);
+
+        var estimatedIn = LlmTokenEstimator.CountText(config.Model, promptText);
+        var estimatedOut = LlmTokenEstimator.CountText(config.Model, completionText);
+        return (
+            estimatedIn,
+            estimatedOut,
+            ReviewCompletionCost.Compute(config, estimatedIn, estimatedOut),
+            true);
+    }
+
+    /// <summary>Gộp text của prompt (system + phần untrusted) để đếm token; bỏ qua ảnh.</summary>
+    public static string PromptText(string system, IReadOnlyList<ReviewPromptPart> parts)
+    {
+        var sb = new StringBuilder(system);
+        foreach (var part in parts)
+        {
+            if (part.Kind != ReviewPromptPartKind.Text || string.IsNullOrEmpty(part.Text))
+                continue;
+            sb.Append('\n').Append(part.Text);
+        }
+
+        return sb.ToString();
+    }
+}
+
 internal static class ReviewPartIdCanonicalizer
 {
     public static IReadOnlyList<string> CanonicalImageIds(IReadOnlyList<ReviewPromptPart> parts)
@@ -118,6 +157,7 @@ public sealed class OpenAiChatContentReviewClient : IContentReviewCompletionClie
             BuildTextMessages(trustedInstructions.Text!, userText),
             requestedPartIds: [],
             sentPartIds: [],
+            promptText: trustedInstructions.Text + "\n" + userText,
             cancellationToken);
     }
 
@@ -137,13 +177,19 @@ public sealed class OpenAiChatContentReviewClient : IContentReviewCompletionClie
             throw new ArgumentException("vision_image_parts_required", nameof(untrustedContentParts));
 
         var (messages, sent) = BuildVisionMessages(trustedInstructions.Text!, untrustedContentParts, requested);
-        return CompleteAsync(messages, requested, sent, cancellationToken);
+        return CompleteAsync(
+            messages,
+            requested,
+            sent,
+            ReviewCompletionUsage.PromptText(trustedInstructions.Text!, untrustedContentParts),
+            cancellationToken);
     }
 
     private async Task<ReviewCompletionEnvelope> CompleteAsync(
         object[] messages,
         IReadOnlyList<string> requestedPartIds,
         IReadOnlyList<string> sentPartIds,
+        string promptText,
         CancellationToken cancellationToken)
     {
         var payload = new Dictionary<string, object?>
@@ -175,7 +221,7 @@ public sealed class OpenAiChatContentReviewClient : IContentReviewCompletionClie
                 sentPartIds);
         }
 
-        return ParseChatCompletion(body, requestedPartIds, sentPartIds);
+        return ParseChatCompletion(body, requestedPartIds, sentPartIds, promptText);
     }
 
     private static object[] BuildTextMessages(string system, string user) =>
@@ -234,7 +280,8 @@ public sealed class OpenAiChatContentReviewClient : IContentReviewCompletionClie
     private ReviewCompletionEnvelope ParseChatCompletion(
         string body,
         IReadOnlyList<string> requestedPartIds,
-        IReadOnlyList<string> sentPartIds)
+        IReadOnlyList<string> sentPartIds,
+        string promptText = "")
     {
         try
         {
@@ -253,8 +300,9 @@ public sealed class OpenAiChatContentReviewClient : IContentReviewCompletionClie
             var model = root.TryGetProperty("model", out var modelEl) && modelEl.ValueKind == JsonValueKind.String
                 ? modelEl.GetString() ?? _config.Model
                 : _config.Model;
-            var (inTok, outTok) = ReadOpenAiUsage(root);
-            var cost = ReviewCompletionCost.Compute(_config, inTok, outTok);
+            var (reportedIn, reportedOut) = ReadOpenAiUsage(root);
+            var (inTok, outTok, cost, estimated) = ReviewCompletionUsage.Resolve(
+                _config, reportedIn, reportedOut, promptText, rawText);
 
             var refused = string.Equals(finishReason, "refusal", StringComparison.OrdinalIgnoreCase)
                 || HasRefusalPayload(choice);
@@ -278,7 +326,8 @@ public sealed class OpenAiChatContentReviewClient : IContentReviewCompletionClie
                 InputTokens: inTok,
                 OutputTokens: outTok,
                 UsdCost: cost,
-                Model: model);
+                Model: model,
+                IsEstimated: estimated);
         }
         catch (JsonException)
         {
@@ -409,7 +458,13 @@ public sealed class AnthropicContentReviewClient : IContentReviewCompletionClien
         {
             new { role = "user", content = userText },
         };
-        return CompleteAsync(trustedInstructions.Text!, messages, [], [], cancellationToken);
+        return CompleteAsync(
+            trustedInstructions.Text!,
+            messages,
+            [],
+            [],
+            trustedInstructions.Text + "\n" + userText,
+            cancellationToken);
     }
 
     public Task<ReviewCompletionEnvelope> CompleteVisionAsync(
@@ -460,7 +515,13 @@ public sealed class AnthropicContentReviewClient : IContentReviewCompletionClien
         {
             new { role = "user", content },
         };
-        return CompleteAsync(trustedInstructions.Text!, messages, requested, sent, cancellationToken);
+        return CompleteAsync(
+            trustedInstructions.Text!,
+            messages,
+            requested,
+            sent,
+            ReviewCompletionUsage.PromptText(trustedInstructions.Text!, untrustedContentParts),
+            cancellationToken);
     }
 
     private async Task<ReviewCompletionEnvelope> CompleteAsync(
@@ -468,6 +529,7 @@ public sealed class AnthropicContentReviewClient : IContentReviewCompletionClien
         object[] messages,
         IReadOnlyList<string> requestedPartIds,
         IReadOnlyList<string> sentPartIds,
+        string promptText,
         CancellationToken cancellationToken)
     {
         var payload = new Dictionary<string, object?>
@@ -495,13 +557,14 @@ public sealed class AnthropicContentReviewClient : IContentReviewCompletionClien
             return Incomplete(string.Empty, string.Empty, requestedPartIds, sentPartIds);
         }
 
-        return Parse(body, requestedPartIds, sentPartIds);
+        return Parse(body, requestedPartIds, sentPartIds, promptText);
     }
 
     private ReviewCompletionEnvelope Parse(
         string body,
         IReadOnlyList<string> requestedPartIds,
-        IReadOnlyList<string> sentPartIds)
+        IReadOnlyList<string> sentPartIds,
+        string promptText = "")
     {
         try
         {
@@ -524,6 +587,9 @@ public sealed class AnthropicContentReviewClient : IContentReviewCompletionClien
                     outTok = oo;
             }
 
+            var (resolvedIn, resolvedOut, cost, estimated) = ReviewCompletionUsage.Resolve(
+                _config, inTok, outTok, promptText, rawText);
+
             var refused = string.Equals(stopReason, "refusal", StringComparison.OrdinalIgnoreCase);
             var truncated = string.Equals(stopReason, "max_tokens", StringComparison.OrdinalIgnoreCase);
             var terminal = string.Equals(stopReason, "end_turn", StringComparison.OrdinalIgnoreCase)
@@ -540,10 +606,11 @@ public sealed class AnthropicContentReviewClient : IContentReviewCompletionClien
                 IsTruncated: truncated,
                 RequestedPartIds: requestedPartIds,
                 SentPartIds: sentPartIds,
-                InputTokens: inTok,
-                OutputTokens: outTok,
-                UsdCost: ReviewCompletionCost.Compute(_config, inTok, outTok),
-                Model: model);
+                InputTokens: resolvedIn,
+                OutputTokens: resolvedOut,
+                UsdCost: cost,
+                Model: model,
+                IsEstimated: estimated);
         }
         catch (JsonException)
         {
@@ -659,7 +726,13 @@ public sealed class OpenAiResponsesContentReviewClient : IContentReviewCompletio
                 content = new object[] { new { type = "input_text", text = userText } },
             },
         };
-        return CompleteAsync(trustedInstructions.Text!, input, [], [], cancellationToken);
+        return CompleteAsync(
+            trustedInstructions.Text!,
+            input,
+            [],
+            [],
+            trustedInstructions.Text + "\n" + userText,
+            cancellationToken);
     }
 
     public Task<ReviewCompletionEnvelope> CompleteVisionAsync(
@@ -702,7 +775,13 @@ public sealed class OpenAiResponsesContentReviewClient : IContentReviewCompletio
         {
             new { role = "user", content },
         };
-        return CompleteAsync(trustedInstructions.Text!, input, requested, sent, cancellationToken);
+        return CompleteAsync(
+            trustedInstructions.Text!,
+            input,
+            requested,
+            sent,
+            ReviewCompletionUsage.PromptText(trustedInstructions.Text!, untrustedContentParts),
+            cancellationToken);
     }
 
     private async Task<ReviewCompletionEnvelope> CompleteAsync(
@@ -710,6 +789,7 @@ public sealed class OpenAiResponsesContentReviewClient : IContentReviewCompletio
         object[] input,
         IReadOnlyList<string> requestedPartIds,
         IReadOnlyList<string> sentPartIds,
+        string promptText,
         CancellationToken cancellationToken)
     {
         var payload = new Dictionary<string, object?>
@@ -748,19 +828,23 @@ public sealed class OpenAiResponsesContentReviewClient : IContentReviewCompletio
             || body.Contains("event:", StringComparison.Ordinal)
             || body.Contains("data:", StringComparison.Ordinal))
         {
-            return ParseSse(body, requestedPartIds, sentPartIds);
+            return ParseSse(body, requestedPartIds, sentPartIds, promptText);
         }
 
         // Non-stream JSON is accepted only when status is completed.
-        return ParseCompletedJson(body, requestedPartIds, sentPartIds);
+        return ParseCompletedJson(body, requestedPartIds, sentPartIds, promptText);
     }
 
     private ReviewCompletionEnvelope ParseSse(
         string body,
         IReadOnlyList<string> requestedPartIds,
-        IReadOnlyList<string> sentPartIds)
+        IReadOnlyList<string> sentPartIds,
+        string promptText = "")
     {
         var text = new StringBuilder();
+        // Reasoning summary chỉ dùng để ước lượng output token khi provider không trả usage;
+        // không đưa vào RawText vì parser review chỉ nhận JSON verdict.
+        var reasoning = new StringBuilder();
         var observedCompleted = false;
         var status = string.Empty;
         var finishReason = string.Empty;
@@ -813,6 +897,13 @@ public sealed class OpenAiResponsesContentReviewClient : IContentReviewCompletio
                     continue;
                 }
 
+                if (type is "response.reasoning_summary_text.delta")
+                {
+                    if (root.TryGetProperty("delta", out var reasoningDelta) && reasoningDelta.ValueKind == JsonValueKind.String)
+                        reasoning.Append(reasoningDelta.GetString());
+                    continue;
+                }
+
                 if (type is "response.completed" or "response.incomplete" or "response.failed")
                 {
                     if (!root.TryGetProperty("response", out var responseEl) || responseEl.ValueKind != JsonValueKind.Object)
@@ -856,6 +947,9 @@ public sealed class OpenAiResponsesContentReviewClient : IContentReviewCompletio
             && !truncated
             && rawText.Length > 0;
 
+        var (resolvedIn, resolvedOut, cost, estimated) = ReviewCompletionUsage.Resolve(
+            _config, inTok, outTok, promptText, rawText + reasoning.ToString());
+
         return new ReviewCompletionEnvelope(
             RawText: rawText,
             ObservedTerminalSuccess: terminal,
@@ -865,16 +959,18 @@ public sealed class OpenAiResponsesContentReviewClient : IContentReviewCompletio
             IsTruncated: truncated,
             RequestedPartIds: requestedPartIds,
             SentPartIds: sentPartIds,
-            InputTokens: inTok,
-            OutputTokens: outTok,
-            UsdCost: ReviewCompletionCost.Compute(_config, inTok, outTok),
-            Model: model);
+            InputTokens: resolvedIn,
+            OutputTokens: resolvedOut,
+            UsdCost: cost,
+            Model: model,
+            IsEstimated: estimated);
     }
 
     private ReviewCompletionEnvelope ParseCompletedJson(
         string body,
         IReadOnlyList<string> requestedPartIds,
-        IReadOnlyList<string> sentPartIds)
+        IReadOnlyList<string> sentPartIds,
+        string promptText = "")
     {
         try
         {
@@ -902,6 +998,9 @@ public sealed class OpenAiResponsesContentReviewClient : IContentReviewCompletio
                     outTok = oo;
             }
 
+            var (resolvedIn, resolvedOut, cost, estimated) = ReviewCompletionUsage.Resolve(
+                _config, inTok, outTok, promptText, rawText);
+
             return new ReviewCompletionEnvelope(
                 RawText: rawText,
                 ObservedTerminalSuccess: rawText.Length > 0,
@@ -911,10 +1010,11 @@ public sealed class OpenAiResponsesContentReviewClient : IContentReviewCompletio
                 IsTruncated: false,
                 RequestedPartIds: requestedPartIds,
                 SentPartIds: sentPartIds,
-                InputTokens: inTok,
-                OutputTokens: outTok,
-                UsdCost: ReviewCompletionCost.Compute(_config, inTok, outTok),
-                Model: model);
+                InputTokens: resolvedIn,
+                OutputTokens: resolvedOut,
+                UsdCost: cost,
+                Model: model,
+                IsEstimated: estimated);
         }
         catch (JsonException)
         {

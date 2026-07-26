@@ -54,9 +54,11 @@ public sealed class OrchestratorCostGuard(ILlmCostTracker tracker)
         Guid? reservationId,
         Guid? sessionId = null,
         CancellationToken ct = default) =>
-        reply.UsdCost <= 0m
+        // Bỏ qua chỉ khi không có gì để ghi; lượt có token nhưng cost 0 (provider không trả usage,
+        // rate chưa cấu hình) vẫn phải vào ledger, nếu không cap tháng mất luôn dữ liệu.
+        reply.UsdCost <= 0m && reply.InputTokens <= 0 && reply.OutputTokens <= 0
             ? Task.CompletedTask
-            : _tracker.RecordAsync(new CostEntry(tenantId, agentCode, reply.Model, reply.InputTokens, reply.OutputTokens, reply.UsdCost, at, reservationId, sessionId), ct);
+            : _tracker.RecordAsync(new CostEntry(tenantId, agentCode, reply.Model, reply.InputTokens, reply.OutputTokens, reply.UsdCost, at, reservationId, sessionId, reply.IsEstimated), ct);
 
     public Task AdjustReservationAsync(
         Guid tenantId,

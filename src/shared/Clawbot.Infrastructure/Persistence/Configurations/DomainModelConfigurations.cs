@@ -170,9 +170,11 @@ public sealed class MessageConfiguration : IEntityTypeConfiguration<Message>
         builder.Property(x => x.SenderType).HasMaxLength(16).IsRequired();
         builder.Property(x => x.ContentType).HasMaxLength(32);
         builder.Property(x => x.AttachmentUrl).HasMaxLength(2048);
+        builder.Property(x => x.ParentCommentId).HasColumnName("parent_comment_id").HasMaxLength(256);
         builder.Property(x => x.Status).HasMaxLength(32).IsRequired().HasDefaultValue("sent");
         builder.HasIndex(x => new { x.ConversationId, x.SentAt });
         builder.HasIndex(x => new { x.TenantId, x.SentAt });
+        builder.HasIndex(x => new { x.TenantId, x.ParentCommentId });
     }
 }
 
@@ -656,7 +658,11 @@ public sealed class ContentScheduleConfiguration : IEntityTypeConfiguration<Cont
             .HasDefaultValue(ContentSchedule.StatusPending)
             .IsRequired();
         builder.Property(x => x.PostUrl).HasMaxLength(512);
+        builder.Property(x => x.ExternalPostId)
+            .HasColumnName("external_post_id")
+            .HasMaxLength(ContentSchedule.MaxExternalPostIdLength);
         builder.Property(x => x.ProviderTargetId).HasColumnName("provider_target_id").HasMaxLength(128);
+        builder.Property(x => x.MetaCommentsSyncedAt).HasColumnName("meta_comments_synced_at");
         builder.Property(x => x.LastError).HasColumnName("last_error").HasMaxLength(ContentSchedule.MaxLastErrorLength);
         builder.Property(x => x.LastErrorCode).HasMaxLength(128);
         builder.Property(x => x.RetryCount).HasColumnName("retry_count");
@@ -935,6 +941,7 @@ public sealed class MetaAssetConfiguration : IEntityTypeConfiguration<MetaAsset>
         builder.Property(x => x.Name).HasMaxLength(256).IsRequired();
         builder.Property(x => x.TasksJson).HasColumnName("tasks_json").IsRequired();
         builder.Property(x => x.AccessTokenEncrypted).HasColumnName("access_token_encrypted").IsRequired();
+        builder.Property(x => x.FeedSubscribedAt).HasColumnName("feed_subscribed_at");
         builder.HasOne<Tenant>()
             .WithMany()
             .HasForeignKey(x => x.TenantId)
@@ -1162,7 +1169,9 @@ public sealed class InboxConfiguration : IEntityTypeConfiguration<Inbox>
         builder.Property(x => x.ExternalPageId).HasMaxLength(128).IsRequired();
         builder.Property(x => x.AvatarUrl).HasMaxLength(512);
         builder.Property(x => x.EncryptedAccessToken).HasColumnName("encrypted_access_token").HasMaxLength(1024);
-        builder.HasIndex(x => new { x.TenantId, x.Platform, x.ExternalPageId }).HasFilter("is_active = 1");
+        builder.HasIndex(x => new { x.TenantId, x.Platform, x.ExternalPageId })
+            .IsUnique()
+            .HasFilter("[is_active] = 1 AND [deleted_at] IS NULL");
     }
 }
 

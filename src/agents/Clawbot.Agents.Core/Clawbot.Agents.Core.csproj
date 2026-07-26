@@ -12,6 +12,11 @@
     <PackageReference Include="MathNet.Numerics" />
     <PackageReference Include="Microsoft.ML" />
     <PackageReference Include="Microsoft.ML.TimeSeries" />
+    <!-- Đếm token cục bộ khi provider không trả usage. Package .Data.* nhúng vocab vào assembly
+         nên không tải file .tiktoken qua mạng lúc chạy (môi trường khách có thể chặn outbound). -->
+    <PackageReference Include="Microsoft.ML.Tokenizers" />
+    <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" />
+    <PackageReference Include="Microsoft.ML.Tokenizers.Data.Cl100kBase" />
     <PackageReference Include="Microsoft.SemanticKernel" />
     <PackageReference Include="QuestPDF" />
     <PackageReference Include="QRCoder" />
