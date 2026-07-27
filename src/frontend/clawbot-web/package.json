@@ -7,7 +7,18 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "node e2e/run-mock.mjs",
+    "test:e2e:publish": "node e2e/run-publish-mock.mjs",
+    "test:e2e:platform": "node e2e/run-platform-focus.mjs",
+    "test:e2e:platform:spec": "playwright test e2e/content-platform-focus.spec.ts --config=playwright.config.mjs",
+    "test:e2e:instagram": "node e2e/run-instagram-credentials-mock.mjs",
+    "test:e2e:modal": "node e2e/run-modal-focus-mock.mjs",
+    "test:e2e:all": "node e2e/run-mock.mjs && node e2e/run-publish-mock.mjs && npm run test:e2e:instagram && npm run test:e2e:modal && npm run test:e2e:platform",
+    "test:e2e:pw": "playwright test --config=playwright.config.mjs",
+    "test:e2e:ui": "playwright test --config=playwright.config.mjs --ui",
+    "test:e2e:live": "node e2e/run-live.mjs",
+    "test:e2e:publish:live": "node e2e/run-publish-live.mjs"
   },
   "dependencies": {
     "@microsoft/signalr": "^10.0.0",
@@ -20,6 +31,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.52.0",
     "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^24.12.4",
     "@types/react": "^19.2.14",

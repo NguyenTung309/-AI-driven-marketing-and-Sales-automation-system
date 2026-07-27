@@ -193,7 +193,7 @@ public sealed class SaleAssistAgent(
 
     private async Task RecordCostAsync(Guid tenantId, ClaudeReply reply, CancellationToken ct)
     {
-        if (_costTracker is null || reply.UsdCost <= 0m)
+        if (_costTracker is null || (reply.UsdCost <= 0m && reply.InputTokens <= 0 && reply.OutputTokens <= 0))
             return;
 
         await _costTracker.RecordAsync(new CostEntry(
@@ -204,7 +204,9 @@ public sealed class SaleAssistAgent(
             reply.OutputTokens,
             reply.UsdCost,
             _llmScope.Current?.CostAt ?? DateTimeOffset.UtcNow,
-            _llmScope.Current?.ReservationId), ct).ConfigureAwait(false);
+            _llmScope.Current?.ReservationId,
+            SessionId: null,
+            IsEstimated: reply.IsEstimated), ct).ConfigureAwait(false);
     }
 
     private static string AppendKb(string baseSystem, IReadOnlyList<RagChunk> chunks)

@@ -87,6 +87,7 @@ internal sealed class ResearchAgent(
     ITrendRelevanceScorer scorer) : IResearchAgent
 {
     private const int MaxResults = 25;
+    private static readonly TrendSourceOverride HiddenSourceDisabled = new(Enabled: false);
     private readonly IReadOnlyList<ITrendSource> _sources = sources.ToList();
     private readonly ITrendRelevanceScorer _scorer = scorer;
 
@@ -114,13 +115,13 @@ internal sealed class ResearchAgent(
             .ToList();
     }
 
-    private static TrendSourceOverride? OverrideFor(string source, TrendOverrides? overrides) => source switch
-    {
-        "google_trends" => overrides?.GoogleTrends,
-        "youtube" => overrides?.YouTube,
-        "tiktok" => overrides?.TikTok,
-        _ => null,
-    };
+    private static TrendSourceOverride? OverrideFor(string source, TrendOverrides? overrides) =>
+        source.Trim().ToLowerInvariant() switch
+        {
+            "google_trends" => overrides?.GoogleTrends,
+            "youtube" or "tiktok" => HiddenSourceDisabled,
+            _ => null,
+        };
 
     private static async Task<IReadOnlyList<RawTrend>> FetchSourceAsync(
         ITrendSource source,

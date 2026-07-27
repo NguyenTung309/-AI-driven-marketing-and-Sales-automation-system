@@ -82,13 +82,11 @@ public sealed class TrendScanService(
         }
     }
 
-    private static CoreResearch.TrendOverrides? ToOverrides(ContentTrendSettings? settings) =>
-        settings is null
-            ? null
-            : new CoreResearch.TrendOverrides(
-                ToOverride(settings.Google),
-                ToOverride(settings.YouTube),
-                ToOverride(settings.TikTok));
+    private static CoreResearch.TrendOverrides ToOverrides(ContentTrendSettings? settings) =>
+        new(
+            ToOverride(settings?.Google),
+            new CoreResearch.TrendSourceOverride(Enabled: false),
+            new CoreResearch.TrendSourceOverride(Enabled: false));
 
     private static CoreResearch.TrendSourceOverride? ToOverride(ContentTrendSourceSetting? setting) =>
         setting is null ? null : new CoreResearch.TrendSourceOverride(setting.Enabled, setting.ApiKey, setting.Url);

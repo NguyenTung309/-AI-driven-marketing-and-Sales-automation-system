@@ -43,9 +43,14 @@ internal sealed class AdapterTool(IAgent agent, string description, string permi
 {
     public string Name => agent.Name;
     public string Description { get; } = description;
-    public string InputSchemaJson { get; } = "{}";
+    public string InputSchemaJson { get; } = InputSchemaFor(agent.Name);
     public string RequiredPermission { get; } = permission;
     public ToolRiskLevel RiskLevel { get; } = riskLevel;
+
+    private static string InputSchemaFor(string name) =>
+        string.Equals(name, "research-agent", StringComparison.OrdinalIgnoreCase)
+            ? """{"type":"object","properties":{"geo":{"type":"string","description":"Mã khu vực, mặc định VN"},"keywords":{"type":"array","items":{"type":"string"},"description":"Từ khóa trend, có thể bỏ trống để dùng mặc định"}},"additionalProperties":false}"""
+            : "{}";
 
     public async Task<ToolResult> InvokeAsync(IReadOnlyDictionary<string, string> args, ToolContext ctx, CancellationToken ct)
     {
@@ -80,20 +85,24 @@ public static class ToolRegistryFactory
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["content-agent"] = ("Generate content (posts/captions/copy) for a platform from a brief.", "content:write", ToolRiskLevel.Low),
-            ["ads-agent"] = ("Apply ad campaign actions (budget/pause/resume) or build lookalike/remarketing audiences.", "ads:write", ToolRiskLevel.High),
-            ["lead-agent"] = ("Score an existing lead or create a new lead from a contact.", "leads:write", ToolRiskLevel.Low),
-            ["report-agent"] = ("Pull a daily KPI snapshot, detect anomalies, or forecast a metric series.", "analytics:read", ToolRiskLevel.Low),
-            ["docs-agent"] = ("Render a document (pdf/docx) from a template and variables.", "docs:write", ToolRiskLevel.Low),
-            ["sale-assist"] = ("Summarize a conversation, draft a reply, or suggest an upsell for a sales rep.", "sale-assist:use", ToolRiskLevel.Low),
-            ["chat-agent"] = ("Reply to a customer chat message using RAG + conversation memory.", "conversations:write", ToolRiskLevel.High),
-            ["research-agent"] = ("Scan market research by geo and keywords.", "", ToolRiskLevel.Low),
+            ["ads-agent"] = ("Apply ad campaign actions (budget/pause/resume) or build lookalike/remarketing audiences. Args: operation, platform, campaign_id/…", "ads:write", ToolRiskLevel.High),
+            // list/find_cold reads CRM; score/create/batch_score write. Use operation=list when goal needs lead IDs.
+            ["lead-agent"] = ("List/query leads (operation=list|find_cold, stage, topN), score one lead (lead_id), create from contact, or batch_score. Returns lead_ids + items.", "leads:write", ToolRiskLevel.Low),
+            ["report-agent"] = ("Pull a daily KPI snapshot (date), detect anomalies, or forecast a metric series. Args: operation, platform, metric, date.", "analytics:read", ToolRiskLevel.Low),
+            ["docs-agent"] = ("Render a document (pdf/docx) from a template and variables. Args: template_code, template_body, vars_json.", "docs:write", ToolRiskLevel.Low),
+            ["sale-assist"] = ("Summarize a conversation, draft a reply, or suggest an upsell. REQUIRES conversation_id + turns_json. Args: operation=summarize|draft|upsell.", "sale-assist:use", ToolRiskLevel.Low),
+            ["chat-agent"] = ("Reply to a customer chat message using RAG + conversation memory. Args: user_text, conversation_id?, history.", "conversations:write", ToolRiskLevel.High),
+            ["research-agent"] = ("Quét trend thị trường theo geo + keywords (nguồn trend công khai). Không lọc theo ngày và không lấy tin mới nhất. Args: geo (mặc định VN), keywords (có thể bỏ trống).", "", ToolRiskLevel.Low),
             // SPEC-16 P4-3: explicit AgentService-layer tools (ContentTools.cs) declared here so the admin upsert
             // can validate their names + permissions. Build() skips them (no adapter with these names is registered).
-            ["content.approve"] = ("Approve/reject a draft content item (reviewer action).", "content:write", ToolRiskLevel.Low),
-            ["content.schedule"] = ("Schedule an approved content item for publishing.", "content:write", ToolRiskLevel.Low),
-            ["content.publish"] = ("Publish an approved content item via the social publisher.", "content:write", ToolRiskLevel.High),
+            // Phase 4.9: content.review is canonical (queues durable agent review only — never publishes).
+            // content.approve remains a non-publishing legacy alias during migration.
+            ["content.review"] = ("Request or retry durable Agent review for a content revision (never grants publishing approval).", "content:write", ToolRiskLevel.Low),
+            ["content.approve"] = ("Legacy alias for content.review — reviewer action only; never publishes.", "content:write", ToolRiskLevel.Low),
+            ["content.schedule"] = ("Queue an approved content revision for publishing.", "content:publish", ToolRiskLevel.High),
+            ["content.publish"] = ("Queue an existing approved schedule for the durable publisher.", "content:publish", ToolRiskLevel.High),
             // Read-only external search (SearXNG self-host), no tenant-data write -> no permission gate.
-            ["web.search"] = ("Search the public web (prices, competitors, news) via self-hosted SearXNG.", "", ToolRiskLevel.Low),
+            ["web.search"] = ("Tìm web công khai qua SearXNG: tin mới, bài đăng, giá và đối thủ. Dùng tool này khi cần nội dung mới theo ngày. Args: query, max_results.", "", ToolRiskLevel.Low),
         };
 
     // Builds the registry from adapter-wrapped tools PLUS any explicit IAgentTool registrations (AgentService-layer
@@ -114,6 +123,14 @@ public static class ToolRegistryFactory
             foreach (var tool in explicitTools)
                 byName[tool.Name] = tool; // explicit overrides adapter-wrapped on name collision
         }
+
+        // Phase 4.9: content.approve is a non-publishing legacy alias for content.review.
+        if (byName.TryGetValue("content.review", out var reviewTool)
+            && !byName.ContainsKey("content.approve"))
+        {
+            byName["content.approve"] = reviewTool;
+        }
+
         return new ToolRegistry(byName.Values);
     }
 }

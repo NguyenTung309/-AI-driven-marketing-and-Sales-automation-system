@@ -11,12 +11,14 @@ export function toneClasses(tone: SemanticTone): string {
   return TONE_CLASSES[tone];
 }
 
-export type PlatformKey = "facebook" | "zalo" | "tiktok" | "website" | "other";
+export type PlatformKey = "facebook" | "zalo" | "instagram" | "tiktok" | "youtube" | "website" | "other";
 
 const PLATFORM_CLASSES: Record<PlatformKey, string> = {
   facebook: "bg-blue-100 text-blue-700 border-blue-200",
   zalo: "bg-indigo-100 text-indigo-700 border-indigo-200",
+  instagram: "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200",
   tiktok: "bg-slate-100 text-slate-800 border-slate-200",
+  youtube: "bg-red-100 text-red-700 border-red-200",
   website: "bg-emerald-100 text-emerald-700 border-emerald-200",
   other: "bg-surface-container text-secondary border-outline",
 };
@@ -25,7 +27,9 @@ export function platformKey(platform: string): PlatformKey {
   const value = platform.toLowerCase();
   if (value.includes("facebook") || value === "fb") return "facebook";
   if (value.includes("zalo") || value === "zl") return "zalo";
+  if (value.includes("instagram") || value === "ig") return "instagram";
   if (value.includes("tiktok")) return "tiktok";
+  if (value.includes("youtube")) return "youtube";
   if (value.includes("web")) return "website";
   return "other";
 }

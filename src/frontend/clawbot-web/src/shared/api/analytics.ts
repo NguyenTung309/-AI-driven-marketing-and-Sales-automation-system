@@ -9,6 +9,7 @@ export interface OmniChannelRow {
   readonly avgResponseTimeSec: number | null;
   readonly adSpend: number | null;
   readonly cpl: number | null;
+  readonly revenue?: number | null;
 }
 
 export interface OmniChannelResponse {

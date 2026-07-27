@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
+import { useAuthStore } from "@/shared/auth/authStore";
 import { Card } from "@/shared/ui/Card";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import { InfiniteScrollSentinel, useDebounce, useInfiniteList } from "@/shared/ui";
@@ -208,6 +209,7 @@ export default function TaskLogsPage() {
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const canViewAudit = useAuthStore((s) => s.permissions.includes("system.logs"));
 
   const debouncedQuery = useDebounce(query, 300);
   const runsList = useInfiniteList<TaskRunListItem, TaskRunListResponse>({
@@ -231,6 +233,7 @@ export default function TaskLogsPage() {
     enabled: Boolean(activeRunId),
   });
 
+  // Global audit feed requires system.logs (same as /api/admin/audit-logs).
   const auditList = useInfiniteList<TaskRunAudit, AuditLogListResponse>({
     queryKey: ["logs", "audit"],
     queryFn: (pageParam) =>
@@ -238,6 +241,7 @@ export default function TaskLogsPage() {
         cursor: typeof pageParam === "string" ? pageParam : null,
         pageSize: 12,
       }),
+    enabled: canViewAudit,
   });
   const auditQuery = auditList.query;
 
@@ -250,7 +254,7 @@ export default function TaskLogsPage() {
   }, [runsQuery.data]);
   const traces = detailQuery.data?.traces ?? EMPTY_TRACES;
   const runAudit = detailQuery.data?.auditEvents ?? EMPTY_AUDIT;
-  const recentAudit = auditList.items.length ? auditList.items : EMPTY_AUDIT;
+  const recentAudit = canViewAudit && auditList.items.length ? auditList.items : EMPTY_AUDIT;
 
   const detailEvents = useMemo(() => {
     if (runAudit.length) return runAudit;
@@ -347,17 +351,21 @@ export default function TaskLogsPage() {
             )}
           </Card>
 
-          <Card>
-            <div className="mb-4">
-              <p className="text-label-caps uppercase text-on-surface-variant">Sự kiện quản trị</p>
-              <h2 className="mt-1 text-headline-sm font-bold text-secondary">{runAudit.length ? "Theo lượt chạy đang chọn" : "Gần đây"}</h2>
-            </div>
-            {auditQuery.isLoading && !runAudit.length ? (
-              <p className="text-body-md text-on-surface-variant">Đang tải nhật ký quản trị...</p>
-            ) : (
-              <AuditList events={detailEvents} />
-            )}
-          </Card>
+          {canViewAudit || runAudit.length ? (
+            <Card>
+              <div className="mb-4">
+                <p className="text-label-caps uppercase text-on-surface-variant">Sự kiện quản trị</p>
+                <h2 className="mt-1 text-headline-sm font-bold text-secondary">
+                  {runAudit.length ? "Theo lượt chạy đang chọn" : "Gần đây"}
+                </h2>
+              </div>
+              {canViewAudit && auditQuery.isLoading && !runAudit.length ? (
+                <p className="text-body-md text-on-surface-variant">Đang tải nhật ký quản trị...</p>
+              ) : (
+                <AuditList events={detailEvents} />
+              )}
+            </Card>
+          ) : null}
         </aside>
       </section>
     </AppShell>

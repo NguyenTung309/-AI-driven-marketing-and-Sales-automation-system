@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Domain.Common;
+using Clawbot.Domain.Content;
 using Clawbot.Domain.Security;
 using Clawbot.SharedKernel.Audit;
 using Clawbot.SharedKernel.Multitenancy;
@@ -21,6 +22,22 @@ public sealed class AuditSaveChangesInterceptor(
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private static readonly string[] SensitiveProps =
         { "PasswordHash", "SecurityStamp", "AccessToken", "RefreshToken", "ApiKey", "Secret", "Token" };
+
+    // Phase 2.13: never put content payloads / provider prompts into generic EF audit diffs.
+    private static readonly HashSet<string> ContentPayloadProps = new(StringComparer.Ordinal)
+    {
+        nameof(ContentItem.Body),
+        nameof(ContentItem.AssetsJson),
+        "Prompt",
+        "SystemPrompt",
+        "ProviderPayload",
+        "ProviderResponse",
+        "RawPrompt",
+        "RawResponse",
+        "LlmPrompt",
+        "LlmResponse",
+        "CompletionPayload",
+    };
 
     private readonly IAuditContext _audit = audit;
     private readonly ITenantAccessor _tenants = tenants;
@@ -44,6 +61,7 @@ public sealed class AuditSaveChangesInterceptor(
 
         var entries = ctx.ChangeTracker.Entries()
             .Where(e => e.Entity is not AuditLog
+                && e.Entity is not IAuditExempt
                 && (e.State == EntityState.Added || e.State == EntityState.Modified || e.State == EntityState.Deleted))
             .ToList();
 
@@ -97,7 +115,7 @@ public sealed class AuditSaveChangesInterceptor(
         foreach (var prop in entry.Properties)
         {
             var name = prop.Metadata.Name;
-            if (IsSensitive(name)) continue;
+            if (IsSensitive(entry.Entity, name)) continue;
 
             var current = prop.CurrentValue;
             var original = prop.OriginalValue;
@@ -138,11 +156,40 @@ public sealed class AuditSaveChangesInterceptor(
         return value.ToString();
     }
 
-    private static bool IsSensitive(string name)
+    private static bool IsSensitive(object entity, string name)
     {
-        foreach (var s in SensitiveProps)
+        // Content body/assets and any provider/prompt payload fields stay out of generic audit.
+        if (entity is ContentItem && ContentPayloadProps.Contains(name))
+            return true;
+        if (ContentPayloadProps.Contains(name))
+            return true;
+
+        if (entity is SocialCredential
+            && name == nameof(SocialCredential.CredentialsEncrypted))
         {
-            if (name.Contains(s, StringComparison.OrdinalIgnoreCase)) return true;
+            return true;
+        }
+
+        if (entity is ContentSchedule
+            && name is nameof(ContentSchedule.PostUrl)
+                or nameof(ContentSchedule.LastError)
+                or nameof(ContentSchedule.LastErrorCode))
+        {
+            return true;
+        }
+
+        // ContentAsset storage keys/hashes are operational; exclude large binary-adjacent fields.
+        if (entity is ContentAsset
+            && name is nameof(ContentAsset.StorageKey)
+                or nameof(ContentAsset.Sha256)
+                or nameof(ContentAsset.ContentType))
+        {
+            return true;
+        }
+
+        foreach (var sensitiveName in SensitiveProps)
+        {
+            if (name.Contains(sensitiveName, StringComparison.OrdinalIgnoreCase)) return true;
         }
         return false;
     }

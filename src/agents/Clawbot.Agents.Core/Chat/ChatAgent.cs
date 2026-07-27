@@ -170,7 +170,9 @@ public sealed class ChatAgent(
             request.TenantId, AgentCode, reply.Model,
             reply.InputTokens, reply.OutputTokens, reply.UsdCost,
             _llmScope.Current?.CostAt ?? DateTimeOffset.UtcNow,
-            _llmScope.Current?.ReservationId), ct).ConfigureAwait(false);
+            _llmScope.Current?.ReservationId,
+            SessionId: null,
+            IsEstimated: reply.IsEstimated), ct).ConfigureAwait(false);
 
         var escalate = string.Equals(intentResult.Label, "escalation", StringComparison.OrdinalIgnoreCase)
             || chunks.Count == 0
@@ -252,6 +254,7 @@ public sealed class ChatAgent(
         var outputTokens = 0;
         var usdCost = 0m;
         var model = string.Empty;
+        var isEstimated = false;
 
         await foreach (var chunk in _claude.StreamAsync(system, redactedHistory, redacted.RedactedText, ct).ConfigureAwait(false))
         {
@@ -261,6 +264,7 @@ public sealed class ChatAgent(
                 outputTokens = chunk.OutputTokens;
                 usdCost = chunk.UsdCost;
                 model = chunk.Model;
+                isEstimated = chunk.IsEstimated;
                 continue;
             }
 
@@ -286,7 +290,9 @@ public sealed class ChatAgent(
             request.TenantId, AgentCode, model,
             inputTokens, outputTokens, usdCost,
             _llmScope.Current?.CostAt ?? DateTimeOffset.UtcNow,
-            _llmScope.Current?.ReservationId), ct).ConfigureAwait(false);
+            _llmScope.Current?.ReservationId,
+            SessionId: null,
+            IsEstimated: isEstimated), ct).ConfigureAwait(false);
 
         var escalate = string.Equals(intentResult.Label, "escalation", StringComparison.OrdinalIgnoreCase)
             || chunks.Count == 0

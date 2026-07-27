@@ -1,7 +1,7 @@
-﻿using Clawbot.Domain.Common;
+using Clawbot.Domain.Common;
 using MassTransit;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Infrastructure.Messaging;
@@ -9,10 +9,11 @@ namespace Clawbot.Infrastructure.Messaging;
 // Publishes aggregate domain events through the MassTransit transactional outbox (WS1).
 // Publishing happens in SavingChangesAsync (BEFORE the write completes) so that, with
 // UseBusOutbox() configured, each event is buffered and persisted to OutboxMessage in the
-// SAME SaveChanges transaction as the aggregate change â€” exactly-once, durable across a
+// SAME SaveChanges transaction as the aggregate change — exactly-once, durable across a
 // broker outage. MassTransit's delivery service relays to RabbitMQ after commit.
-// NOTE: the outbox tables (migration 0019) + end-to-end relay require a real SQL Server +
-// RabbitMQ to verify (Docker / M21); compilation + SQLite model are covered by unit tests.
+//
+// Phase 2.13: enlistment failure MUST propagate and domain events MUST be retained.
+// Swallow-and-clear would drop business notifications after a successful state transition.
 public sealed partial class DomainEventDispatchInterceptor(
     IServiceScopeFactory scopeFactory,
     ILogger<DomainEventDispatchInterceptor> logger) : SaveChangesInterceptor
@@ -20,7 +21,9 @@ public sealed partial class DomainEventDispatchInterceptor(
     private readonly ILogger<DomainEventDispatchInterceptor> _logger = logger;
 
     public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
-        DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        DbContextEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
     {
         if (eventData.Context is not null)
         {
@@ -32,20 +35,28 @@ public sealed partial class DomainEventDispatchInterceptor(
 
             foreach (var aggregate in aggregates)
             {
-                foreach (var domainEvent in aggregate.DomainEvents.ToList())
+                // Snapshot — clear only after ALL events for this aggregate enlist successfully.
+                var pending = aggregate.DomainEvents.ToList();
+                foreach (var domainEvent in pending)
                 {
                     try
                     {
                         // With UseBusOutbox() this enlists into the outbox (no direct broker call).
-                    using var eventScope = scopeFactory.CreateScope();
-                    var publishEndpoint = eventScope.ServiceProvider.GetRequiredService<IPublishEndpoint>();
-                    await publishEndpoint.Publish(domainEvent, domainEvent.GetType(), cancellationToken).ConfigureAwait(false);
+                        using var eventScope = scopeFactory.CreateScope();
+                        var publishEndpoint = eventScope.ServiceProvider
+                            .GetRequiredService<IPublishEndpoint>();
+                        await publishEndpoint
+                            .Publish(domainEvent, domainEvent.GetType(), cancellationToken)
+                            .ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
                         LogPublishFailed(_logger, ex, domainEvent.GetType().Name);
+                        // Do NOT clear events — caller can retry SaveChanges with the same aggregates.
+                        throw;
                     }
                 }
+
                 aggregate.ClearDomainEvents();
             }
         }

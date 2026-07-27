@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
@@ -15,6 +15,7 @@ import { OrchestrationPanel } from "./OrchestrationPanel";
 import { SchedulesCard } from "./SchedulesCard";
 import { useOrchestrationRealtime } from "./useOrchestrationRealtime";
 import { CreateSubAgentDialog } from "./CreateSubAgentDialog";
+import { ContentPublishingPolicyControl } from "@/features/content/ContentPublishingPolicyControl";
 import { useAuthStore } from "@/shared/auth/authStore";
 import {
   createOrchestrationV2Schedule,
@@ -57,6 +58,18 @@ const EMPTY_TRACES: readonly AgentTraceItem[] = [];
 
 type AgentConfigTab = "prompt" | "model" | "tools";
 type TerminalTab = "events" | "queue" | "errors";
+type AgentDashboardTab = "dieu-phoi" | "doi-ngu" | "nhat-ky";
+type SearchParamUpdates = Readonly<Record<string, string | null>>;
+
+const AGENT_DASHBOARD_TABS: readonly {
+  readonly key: AgentDashboardTab;
+  readonly icon: string;
+  readonly label: string;
+}[] = [
+  { key: "dieu-phoi", icon: "account_tree", label: "Điều phối" },
+  { key: "doi-ngu", icon: "smart_toy", label: "Đội ngũ agent" },
+  { key: "nhat-ky", icon: "receipt_long", label: "Nhật ký & chi phí" },
+];
 
 interface AgentSettingsForm {
   readonly displayName: string;
@@ -96,6 +109,10 @@ function normalize(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function parseAgentDashboardTab(value: string | null): AgentDashboardTab {
+  return AGENT_DASHBOARD_TABS.some((item) => item.key === value) ? value as AgentDashboardTab : "dieu-phoi";
+}
+
 function statusTone(status: AgentStatus): StatusTone {
   const value = normalize(status);
   if (value === "running") return "success";
@@ -132,8 +149,10 @@ function formatDateTime(value: string | null): string {
   }).format(date);
 }
 
+// 4 chữ số thập phân: chi phí một agent/lượt gọi thường dưới $0.005, làm tròn 2 số sẽ hiện $0.00
+// và người dùng tưởng hệ thống không ghi nhận chi phí.
 function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(value);
 }
 
 function firstNonBlank(...values: readonly (string | null | undefined)[]): string {
@@ -300,16 +319,22 @@ function AgentNode({
 }
 
 function TerminalLog({
+  agents,
   selectedAgent,
   traces,
   loading,
+  agentsLoading,
+  onAgentSelect,
   onExport,
   onLoadMore,
   canLoadMore,
 }: {
+  readonly agents: readonly AgentListItem[];
   readonly selectedAgent: AgentListItem | null;
   readonly traces: readonly AgentTraceItem[];
   readonly loading: boolean;
+  readonly agentsLoading: boolean;
+  readonly onAgentSelect: (code: string) => void;
   readonly onExport: () => void;
   readonly onLoadMore: () => void;
   readonly canLoadMore: boolean;
@@ -332,7 +357,7 @@ function TerminalLog({
 
   return (
     <section className="flex h-[70vh] min-h-[520px] flex-col overflow-hidden rounded-xl border border-slate-700 bg-[#0f172a] shadow-lg">
-      <div className="flex flex-col gap-3 border-b border-slate-700 bg-[#1e293b] px-4 pt-4 lg:flex-row lg:items-end lg:justify-between">
+      <div className="flex flex-col gap-3 border-b border-slate-700 bg-[#1e293b] px-4 pt-4 2xl:flex-row 2xl:items-end 2xl:justify-between">
         <div className="flex flex-wrap gap-1">
           {tabs.map((item) => (
             <button
@@ -349,13 +374,30 @@ function TerminalLog({
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-3 pb-3">
-          <div className="hidden items-center gap-2 rounded border border-slate-600 bg-[#0f172a] px-3 py-1.5 font-mono text-mono-status text-slate-300 sm:flex">
-            <span aria-hidden="true" className="material-symbols-outlined text-[16px] text-slate-400">tag</span>
-            {selectedAgent?.code ?? "Chưa chọn agent"}
+        <div className="flex w-full flex-col gap-3 pb-3 sm:flex-row sm:items-end 2xl:w-auto">
+          <div className="min-w-0 flex-1 sm:min-w-[280px]">
+            <label className="mb-1 block text-label-sm font-semibold text-slate-400" htmlFor="agent-log-select">
+              Agent đang xem
+            </label>
+            <select
+              className="w-full rounded border border-slate-600 bg-[#0f172a] px-3 py-2 font-mono text-mono-status text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={agentsLoading || agents.length === 0}
+              id="agent-log-select"
+              onChange={(event) => onAgentSelect(event.target.value)}
+              value={selectedAgent?.code ?? ""}
+            >
+              {agents.length === 0 ? (
+                <option value="">{agentsLoading ? "Đang tải agent..." : "Chưa có agent"}</option>
+              ) : null}
+              {agents.map((agent) => (
+                <option key={agent.code} value={agent.code}>
+                  {agent.displayName || agent.code} — {agent.code}
+                </option>
+              ))}
+            </select>
           </div>
           <button
-            className="flex items-center gap-2 rounded border border-error px-3 py-1.5 text-label-caps uppercase text-white transition-colors hover:bg-error disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 whitespace-nowrap rounded border border-error px-3 py-2 text-label-caps uppercase text-white transition-colors hover:bg-error disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             disabled={!traces.length}
             onClick={onExport}
             type="button"
@@ -419,11 +461,12 @@ export default function AgentDashboardPage() {
   const agents = agentsQuery.data?.items ?? EMPTY_AGENTS;
   const costs = costQuery.data?.items ?? EMPTY_COSTS;
   const approvalQuery = useQuery({ queryKey: ["tenant", "orchestration"], queryFn: getTenantOrchestration, staleTime: 60_000 });
+  // Chỉ dùng fallback để render; mutation chỉ bật khi GET thành công (tránh ghi đè config).
+  const settingsReady = approvalQuery.isSuccess;
   const requireApproval = approvalQuery.data?.requireApproval ?? false;
   const monthlyCostCapUsd = approvalQuery.data?.monthlyCostCapUsd ?? null;
-  // PUT ghi cả requireApproval lẫn cap, nên mỗi lần đổi 1 field phải gửi kèm field kia (tránh xoá nhầm).
   const approvalMutation = useMutation({
-    mutationFn: (next: boolean) => setTenantOrchestration(next, monthlyCostCapUsd),
+    mutationFn: (next: boolean) => setTenantOrchestration({ requireApproval: next }),
     onSuccess: async (res) => {
       setNotice({
         tone: "success",
@@ -436,18 +479,17 @@ export default function AgentDashboardPage() {
     onError: (error) =>
       setNotice({ tone: "error", message: `Đổi chế độ duyệt thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
   });
-  // Review-gate P3: 2 flag tenant — agent review bài đăng + duyệt tay AI reply.
+  // Review-gate P3: chat/KB flags only. Content publishing policy lives on canonical content endpoint.
   // ai-self-learning-memory: requireKbHumanReview (bật = tắt AI tự duyệt tri thức).
-  const requireContentReview = approvalQuery.data?.requireContentReview ?? false;
   const requireChatReplyApproval = approvalQuery.data?.requireChatReplyApproval ?? false;
   const requireKbHumanReview = approvalQuery.data?.requireKbHumanReview ?? false;
   const reviewFlagMutation = useMutation({
-    mutationFn: (flags: { requireContentReview?: boolean; requireChatReplyApproval?: boolean; requireKbHumanReview?: boolean }) =>
-      setTenantOrchestration(requireApproval, monthlyCostCapUsd, flags),
+    mutationFn: (flags: { requireChatReplyApproval?: boolean; requireKbHumanReview?: boolean }) =>
+      setTenantOrchestration(flags),
     onSuccess: async (res) => {
       setNotice({
         tone: "success",
-        message: `Đã cập nhật: agent review bài đăng ${res.requireContentReview ? "BẬT" : "tắt"}, duyệt tay AI reply ${res.requireChatReplyApproval ? "BẬT" : "tắt"}, AI tự duyệt tri thức ${res.requireKbHumanReview ? "tắt" : "BẬT"}.`,
+        message: `Đã cập nhật: duyệt tay AI reply ${res.requireChatReplyApproval ? "BẬT" : "tắt"}, AI tự duyệt tri thức ${res.requireKbHumanReview ? "tắt" : "BẬT"}.`,
       });
       await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
     },
@@ -457,8 +499,7 @@ export default function AgentDashboardPage() {
   // Review-gate P2: bật skip = AI reply gửi thẳng không qua critic chấm giá/cam kết (rủi ro cao).
   const skipChatReplyReview = approvalQuery.data?.skipChatReplyReview ?? false;
   const reviewGateMutation = useMutation({
-    mutationFn: (skip: boolean) =>
-      setTenantOrchestration(requireApproval, monthlyCostCapUsd, { skipChatReplyReview: skip }),
+    mutationFn: (skip: boolean) => setTenantOrchestration({ skipChatReplyReview: skip }),
     onSuccess: async (res) => {
       setNotice({
         tone: res.skipChatReplyReview ? "info" : "success",
@@ -475,8 +516,7 @@ export default function AgentDashboardPage() {
   const aiAutoReplyResumeMinutes = approvalQuery.data?.aiAutoReplyResumeMinutes ?? 5;
   const [resumeMinutesDraft, setResumeMinutesDraft] = useState<string>("");
   const resumeMinutesMutation = useMutation({
-    mutationFn: (minutes: number) =>
-      setTenantOrchestration(requireApproval, monthlyCostCapUsd, { aiAutoReplyResumeMinutes: minutes }),
+    mutationFn: (minutes: number) => setTenantOrchestration({ aiAutoReplyResumeMinutes: minutes }),
     onSuccess: async (res) => {
       setResumeMinutesDraft("");
       setNotice({
@@ -492,8 +532,7 @@ export default function AgentDashboardPage() {
   const idleAlertMinutes = approvalQuery.data?.idleAlertMinutes ?? 5;
   const [idleAlertDraft, setIdleAlertDraft] = useState<string>("");
   const idleAlertMutation = useMutation({
-    mutationFn: (minutes: number) =>
-      setTenantOrchestration(requireApproval, monthlyCostCapUsd, { idleAlertMinutes: minutes }),
+    mutationFn: (minutes: number) => setTenantOrchestration({ idleAlertMinutes: minutes }),
     onSuccess: async (res) => {
       setIdleAlertDraft("");
       setNotice({
@@ -504,6 +543,40 @@ export default function AgentDashboardPage() {
     },
     onError: (error) =>
       setNotice({ tone: "error", message: `Đặt ngưỡng cảnh báo thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
+  });
+  // Lead lifecycle: im lặng N ngày → lost; AI revenue auto-approve.
+  const leadLostAfterDays = approvalQuery.data?.leadLostAfterDays ?? 60;
+  const [leadLostDraft, setLeadLostDraft] = useState<string>("");
+  const leadLostMutation = useMutation({
+    mutationFn: (days: number) => setTenantOrchestration({ leadLostAfterDays: days }),
+    onSuccess: async (res) => {
+      setLeadLostDraft("");
+      setNotice({
+        tone: "success",
+        message:
+          res.leadLostAfterDays <= 0
+            ? "Đã tắt tự chuyển lead mất khách."
+            : `Lead im lặng ${res.leadLostAfterDays} ngày sẽ chuyển Mất khách${res.leadLostAfterDays < 30 ? " (dưới 30 ngày: bỏ qua bước re-engage)" : ""}.`,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
+    },
+    onError: (error) =>
+      setNotice({ tone: "error", message: `Đặt ngưỡng mất khách thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
+  });
+  const autoApproveLeadRevenue = approvalQuery.data?.autoApproveLeadRevenue ?? false;
+  const autoApproveRevenueMutation = useMutation({
+    mutationFn: (next: boolean) => setTenantOrchestration({ autoApproveLeadRevenue: next }),
+    onSuccess: async (res) => {
+      setNotice({
+        tone: res.autoApproveLeadRevenue ? "info" : "success",
+        message: res.autoApproveLeadRevenue
+          ? "AI ước tính doanh thu sẽ tự duyệt khi evidence có số tiền khớp (decided_by = hệ thống)."
+          : "AI ước tính doanh thu chờ sale duyệt trước khi vào KPI.",
+      });
+      await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
+    },
+    onError: (error) =>
+      setNotice({ tone: "error", message: `Đổi tự duyệt doanh thu thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
   });
   // "Tự động xây dựng kế hoạch": orchestrator quét hệ thống -> dialog checklist -> tạo schedules đã chọn.
   const [planSuggestions, setPlanSuggestions] = useState<OrchestrationPlanSuggestionsResponse | null>(null);
@@ -575,7 +648,10 @@ export default function AgentDashboardPage() {
   });
   const [capDraft, setCapDraft] = useState<string>("");
   const capMutation = useMutation({
-    mutationFn: (cap: number | null) => setTenantOrchestration(requireApproval, cap),
+    mutationFn: (cap: number | null) =>
+      cap == null
+        ? setTenantOrchestration({ clearMonthlyCostCapUsd: true })
+        : setTenantOrchestration({ monthlyCostCapUsd: cap }),
     onSuccess: async (res) => {
       setNotice({
         tone: "success",
@@ -625,39 +701,50 @@ export default function AgentDashboardPage() {
     () => localStorage.getItem("agents-onboarding-dismissed") === "1",
   );
 
-  // B6: 3 tab lưu trong URL (?tab=) — Điều phối / Đội ngũ agent / Nhật ký & chi phí.
+  // B6: tab + agent đang chọn cùng lưu trong URL để deep-link và giữ ngữ cảnh xuyên tab.
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get("tab") ?? "dieu-phoi";
-  const setTab = (next: string) =>
-    setSearchParams(
-      (params) => {
-        params.set("tab", next);
-        return params;
-      },
-      { replace: true },
-    );
+  const requestedTab = searchParams.get("tab");
+  const tab = parseAgentDashboardTab(requestedTab);
+  const requestedAgentCode = searchParams.get("agent");
+  const orchestrationSessionId = searchParams.get("sessionId");
+  const pendingSearchParamsRef = useRef(new URLSearchParams(searchParams));
+  useEffect(() => {
+    pendingSearchParamsRef.current = new URLSearchParams(searchParams);
+  }, [searchParams]);
+  const updateSearchParams = useCallback(
+    (updates: SearchParamUpdates) => {
+      const nextParams = new URLSearchParams(pendingSearchParamsRef.current);
+      for (const [key, value] of Object.entries(updates)) {
+        if (value === null) nextParams.delete(key);
+        else nextParams.set(key, value);
+      }
+      pendingSearchParamsRef.current = nextParams;
+      setSearchParams(nextParams, { replace: true });
+    },
+    [setSearchParams],
+  );
+  const setTab = (next: AgentDashboardTab) => updateSearchParams({ tab: next });
+  const handleDashboardTabKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, currentTab: AgentDashboardTab) => {
+    const currentIndex = AGENT_DASHBOARD_TABS.findIndex((item) => item.key === currentTab);
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % AGENT_DASHBOARD_TABS.length;
+    if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + AGENT_DASHBOARD_TABS.length) % AGENT_DASHBOARD_TABS.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = AGENT_DASHBOARD_TABS.length - 1;
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    const nextTab = AGENT_DASHBOARD_TABS[nextIndex];
+    setTab(nextTab.key);
+    requestAnimationFrame(() => document.getElementById(`agents-tab-${nextTab.key}`)?.focus());
+  };
 
   // Job center: mở bằng ?jobs=open (nút/chuông) hoặc ?job={id} (deep link từ thông báo).
   const selectedJobId = searchParams.get("job");
   const jobCenterOpen = Boolean(selectedJobId) || searchParams.get("jobs") === "open";
   const openJobCenter = (jobId?: string) =>
-    setSearchParams(
-      (params) => {
-        if (jobId) params.set("job", jobId);
-        else params.set("jobs", "open");
-        return params;
-      },
-      { replace: true },
-    );
-  const closeJobCenter = () =>
-    setSearchParams(
-      (params) => {
-        params.delete("job");
-        params.delete("jobs");
-        return params;
-      },
-      { replace: true },
-    );
+    updateSearchParams(jobId ? { job: jobId, jobs: null } : { job: null, jobs: "open" });
+  const closeJobCenter = () => updateSearchParams({ job: null, jobs: null });
 
   // Chỉ nút "Mở kết quả" của job kế hoạch điều hướng tới ?planResult={id} (param riêng, tách khỏi ?job=
   // vốn chỉ mở Job Center). Nạp job rồi mở dialog checklist; chọn job trong Job Center KHÔNG tự bung dialog.
@@ -674,18 +761,12 @@ export default function AgentDashboardPage() {
       })
       .finally(() => {
         if (cancelled) return;
-        setSearchParams(
-          (params) => {
-            params.delete("planResult");
-            return params;
-          },
-          { replace: true },
-        );
+        updateSearchParams({ planResult: null });
       });
     return () => {
       cancelled = true;
     };
-  }, [planResultJobId, handlePlanJobResult, setSearchParams]);
+  }, [planResultJobId, handlePlanJobResult, updateSearchParams]);
 
   const activeJobsQuery = useQuery({
     queryKey: ["jobs", "active"],
@@ -694,7 +775,6 @@ export default function AgentDashboardPage() {
   });
   const activeJobCount = activeJobsQuery.data?.items?.length ?? 0;
 
-  const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const [configAgentCode, setConfigAgentCode] = useState<string | null>(null);
   const [configTab, setConfigTab] = useState<AgentConfigTab>("prompt");
   const [settingsDraft, setSettingsDraft] = useState<Partial<UpdateAgentSettingsPayload>>({});
@@ -702,10 +782,51 @@ export default function AgentDashboardPage() {
   const [sandboxMessages, setSandboxMessages] = useState<readonly SandboxMessage[]>(DEFAULT_SANDBOX_MESSAGES);
   const selectedAgent = useMemo(() => {
     if (!agents.length) return null;
-    return agents.find((agent) => agent.code === selectedCode) ?? agents.find(isOrchestrator) ?? agents[0];
-  }, [agents, selectedCode]);
+    const requestedCode = requestedAgentCode ? normalize(requestedAgentCode) : null;
+    return agents.find((agent) => requestedCode && normalize(agent.code) === requestedCode)
+      ?? agents.find(isOrchestrator)
+      ?? agents[0];
+  }, [agents, requestedAgentCode]);
   const configAgent = useMemo(() => agents.find((agent) => agent.code === configAgentCode) ?? null, [agents, configAgentCode]);
   const selectedCost = selectedAgent ? costForAgent(costs, selectedAgent.code) : null;
+
+  useEffect(() => {
+    const updates: Record<string, string | null> = {};
+    if (requestedTab && requestedTab !== tab) updates.tab = tab;
+
+    const canValidateAgent = agentsQuery.isSuccess
+      && agentsQuery.isFetchedAfterMount
+      && !agentsQuery.isFetching
+      && !agentsQuery.isRefetchError;
+    if (canValidateAgent) {
+      const canonicalCode = selectedAgent?.code ?? null;
+      if (canonicalCode !== requestedAgentCode) updates.agent = canonicalCode;
+    }
+
+    if (Object.keys(updates).length > 0) updateSearchParams(updates);
+  }, [
+    agentsQuery.isFetchedAfterMount,
+    agentsQuery.isFetching,
+    agentsQuery.isRefetchError,
+    agentsQuery.isSuccess,
+    requestedAgentCode,
+    requestedTab,
+    selectedAgent?.code,
+    tab,
+    updateSearchParams,
+  ]);
+
+  function selectAgent(code: string) {
+    const agent = agents.find((item) => normalize(item.code) === normalize(code));
+    if (!agent) return;
+    updateSearchParams({ agent: agent.code });
+  }
+
+  function openAgentLogs(code: string) {
+    const agent = agents.find((item) => normalize(item.code) === normalize(code));
+    if (!agent) return;
+    updateSearchParams({ agent: agent.code, tab: "nhat-ky" });
+  }
 
   const settingsQuery = useQuery({
     queryKey: ["agents", configAgentCode, "settings"],
@@ -797,7 +918,7 @@ export default function AgentDashboardPage() {
   });
 
   function openAgentConfig(agent: AgentListItem, tab: AgentConfigTab = "prompt") {
-    setSelectedCode(agent.code);
+    selectAgent(agent.code);
     setConfigAgentCode(agent.code);
     setConfigTab(tab);
     setSettingsDraft({});
@@ -885,13 +1006,13 @@ export default function AgentDashboardPage() {
             className="flex items-center gap-2 rounded-lg border border-outline bg-surface-container-lowest px-3 py-2 text-body-md font-semibold text-secondary transition-colors hover:bg-surface-container-low disabled:opacity-60"
             disabled={approvalQuery.isLoading}
             onClick={() => setApprovalConfigOpen(true)}
-            title="Cấu hình các chế độ duyệt: điều phối, review bài đăng, duyệt tay AI reply, tự duyệt tri thức."
+            title="Cấu hình chế độ duyệt điều phối, AI reply, tri thức và chính sách phát hành nội dung."
             type="button"
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">tune</span>
             Cấu hình duyệt
             <span className="ml-1 rounded-full bg-primary/10 px-2 py-0.5 text-label-sm font-bold text-primary">
-              {[requireApproval, requireContentReview, requireChatReplyApproval, requireKbHumanReview].filter(Boolean).length}/4
+              {[requireApproval, requireChatReplyApproval, requireKbHumanReview, !skipChatReplyReview].filter(Boolean).length}/4
             </span>
           </button>
         </div>
@@ -921,21 +1042,27 @@ export default function AgentDashboardPage() {
         />
       ) : null}
 
-      <div className="mb-gutter flex flex-wrap gap-2">
-        {[
-          { key: "dieu-phoi", icon: "account_tree", label: "Điều phối" },
-          { key: "doi-ngu", icon: "smart_toy", label: "Đội ngũ agent" },
-          { key: "nhat-ky", icon: "receipt_long", label: "Nhật ký & chi phí" },
-        ].map((item) => (
+      <div
+        aria-label="Khu vực quản lý agent"
+        className="mb-gutter flex flex-wrap gap-2"
+        role="tablist"
+      >
+        {AGENT_DASHBOARD_TABS.map((item) => (
           <button
+            aria-controls={`agents-tabpanel-${item.key}`}
+            aria-selected={tab === item.key}
             className={[
-              "flex items-center gap-2 rounded-lg border px-4 py-2 text-body-md font-semibold transition-colors",
+              "flex items-center gap-2 rounded-lg border px-4 py-2 text-body-md font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
               tab === item.key
                 ? "border-primary bg-primary/10 text-primary"
                 : "border-outline bg-surface-container-lowest text-secondary hover:border-primary hover:text-primary",
             ].join(" ")}
+            id={`agents-tab-${item.key}`}
             key={item.key}
             onClick={() => setTab(item.key)}
+            onKeyDown={(event) => handleDashboardTabKeyDown(event, item.key)}
+            role="tab"
+            tabIndex={tab === item.key ? 0 : -1}
             type="button"
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{item.icon}</span>
@@ -944,8 +1071,14 @@ export default function AgentDashboardPage() {
         ))}
       </div>
 
-      {tab === "dieu-phoi" ? (
-        <>
+      <div
+        aria-labelledby="agents-tab-dieu-phoi"
+        hidden={tab !== "dieu-phoi"}
+        id="agents-tabpanel-dieu-phoi"
+        role="tabpanel"
+      >
+        {tab === "dieu-phoi" ? (
+          <>
       {showBindWarning ? (
         <div className="mb-gutter">
           <Alert tone="warning">
@@ -1012,39 +1145,29 @@ export default function AgentDashboardPage() {
       ) : null}
 
       <section className="mb-gutter">
-        <OrchestrationPanel live={live} />
+        <OrchestrationPanel
+          live={live}
+          onSessionIdChange={(sessionId) => updateSearchParams({ sessionId })}
+          sessionId={orchestrationSessionId}
+        />
       </section>
 
       <section className="mb-gutter">
         <SchedulesCard />
       </section>
-        </>
-      ) : null}
+          </>
+        ) : null}
+      </div>
 
-      {tab === "nhat-ky" ? (
-      <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          label="Điều phối viên"
-          value={visibleOrchestrator ? statusLabel(visibleOrchestrator.status) : "Chưa có"}
-          delta=""
-          icon="memory"
-          tone={visibleOrchestrator ? statusTone(visibleOrchestrator.status) : "neutral"}
-        />
-        <MetricCard
-          label="Agent đang hoạt động"
-          value={String(activeTaskByAgent.size)}
-          delta={activeRun ? (activeRun.goal ?? "Phiên đang chạy") : "Không có phiên chạy"}
-          icon="bolt"
-          tone={activeTaskByAgent.size > 0 ? "success" : "neutral"}
-        />
-        <MetricCard label="Chi phí AI" value={formatCurrency(totalUsd)} delta="30 ngày gần nhất" icon="toll" tone="warning" />
-        <MetricCard label="Lượt gọi AI" value={totalCalls.toLocaleString("vi-VN")} delta="Theo sổ chi phí" icon="analytics" tone="neutral" />
-      </section>
-
-      ) : null}
-
-      {tab === "doi-ngu" ? (
-      <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1fr)_360px]">
+      <section
+        aria-labelledby="agents-tab-doi-ngu"
+        className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1fr)_360px]"
+        hidden={tab !== "doi-ngu"}
+        id="agents-tabpanel-doi-ngu"
+        role="tabpanel"
+      >
+        {tab === "doi-ngu" ? (
+          <>
         <div className="space-y-gutter">
           <Card>
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1094,7 +1217,7 @@ export default function AgentDashboardPage() {
                         agent={visibleOrchestrator}
                         cost={costForAgent(costs, visibleOrchestrator.code)}
                         onConfigure={() => openAgentConfig(visibleOrchestrator)}
-                        onSelect={() => setSelectedCode(visibleOrchestrator.code)}
+                        onSelect={() => selectAgent(visibleOrchestrator.code)}
                         onToggle={() => setStatusMutation.mutate(visibleOrchestrator)}
                         pending={setStatusMutation.isPending}
                         selected={selectedAgent?.code === visibleOrchestrator.code}
@@ -1118,7 +1241,7 @@ export default function AgentDashboardPage() {
                             agent={agent}
                             cost={costForAgent(costs, agent.code)}
                             onConfigure={() => openAgentConfig(agent)}
-                            onSelect={() => setSelectedCode(agent.code)}
+                            onSelect={() => selectAgent(agent.code)}
                             onToggle={() => setStatusMutation.mutate(agent)}
                             pending={setStatusMutation.isPending}
                             selected={selectedAgent?.code === agent.code}
@@ -1208,21 +1331,68 @@ export default function AgentDashboardPage() {
                 <span className="text-secondary">{formatDateTime(selectedAgent?.lastRunAt ?? null)}</span>
               </div>
             </div>
-            <Button className="mt-5 w-full" disabled={!selectedAgent} onClick={() => selectedAgent && openAgentConfig(selectedAgent)} type="button">
-              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">settings</span>
-              Cấu hình agent
-            </Button>
+            <div className="mt-5 space-y-2">
+              <Button
+                className="w-full"
+                disabled={!selectedAgent}
+                onClick={() => selectedAgent && openAgentLogs(selectedAgent.code)}
+                type="button"
+              >
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">receipt_long</span>
+                Xem nhật ký & chi phí
+              </Button>
+              <Button
+                className="w-full"
+                disabled={!selectedAgent}
+                onClick={() => selectedAgent && openAgentConfig(selectedAgent)}
+                type="button"
+                variant="outline"
+              >
+                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">settings</span>
+                Cấu hình agent
+              </Button>
+            </div>
           </Card>
         </aside>
+          </>
+        ) : null}
       </section>
-      ) : null}
 
-      {tab === "nhat-ky" ? (
-      <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div
+        aria-labelledby="agents-tab-nhat-ky"
+        hidden={tab !== "nhat-ky"}
+        id="agents-tabpanel-nhat-ky"
+        role="tabpanel"
+      >
+        {tab === "nhat-ky" ? (
+          <>
+        <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            label="Điều phối viên"
+            value={visibleOrchestrator ? statusLabel(visibleOrchestrator.status) : "Chưa có"}
+            delta=""
+            icon="memory"
+            tone={visibleOrchestrator ? statusTone(visibleOrchestrator.status) : "neutral"}
+          />
+          <MetricCard
+            label="Agent đang hoạt động"
+            value={String(activeTaskByAgent.size)}
+            delta={activeRun ? (activeRun.goal ?? "Phiên đang chạy") : "Không có phiên chạy"}
+            icon="bolt"
+            tone={activeTaskByAgent.size > 0 ? "success" : "neutral"}
+          />
+          <MetricCard label="Chi phí AI" value={formatCurrency(totalUsd)} delta="30 ngày gần nhất" icon="toll" tone="warning" />
+          <MetricCard label="Lượt gọi AI" value={totalCalls.toLocaleString("vi-VN")} delta="Theo sổ chi phí" icon="analytics" tone="neutral" />
+        </section>
+
+        <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-gutter">
           <TerminalLog
+            agents={agents}
+            agentsLoading={agentsQuery.isLoading}
             canLoadMore={traces.length >= traceLimit}
             loading={tracesQuery.isLoading}
+            onAgentSelect={selectAgent}
             onExport={() => exportTraceCsv(selectedAgent, traces)}
             onLoadMore={() => setTraceLimit((limit) => limit + 50)}
             selectedAgent={selectedAgent}
@@ -1273,28 +1443,52 @@ export default function AgentDashboardPage() {
             <p className="text-label-caps uppercase text-on-surface-variant">Chi phí theo agent</p>
             <div className="mt-4 space-y-3">
               {costs.length ? (
-                costs.slice(0, 6).map((item) => (
-                  <div className="space-y-1" key={item.agentCode}>
-                    <div className="flex items-center justify-between gap-3 text-body-md">
-                      <span className="font-semibold text-secondary">{item.agentCode}</span>
-                      <span className="font-mono text-mono-status text-primary">{formatCurrency(item.usd)}</span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-surface-container">
-                      <div
-                        className="h-full rounded-full bg-primary"
-                        style={{ width: `${Math.min(100, totalUsd ? (item.usd / totalUsd) * 100 : 0)}%` }}
-                      />
-                    </div>
-                  </div>
-                ))
+                costs.slice(0, 6).map((item) => {
+                  const matchingAgent = agents.find((agent) => normalize(agent.code) === normalize(item.agentCode));
+                  const isSelected = Boolean(matchingAgent && selectedAgent?.code === matchingAgent.code);
+                  return (
+                    <button
+                      aria-pressed={isSelected}
+                      className={[
+                        "w-full rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50",
+                        isSelected
+                          ? "border-primary bg-primary/10"
+                          : "border-transparent hover:border-outline hover:bg-surface-container-low",
+                      ].join(" ")}
+                      disabled={!matchingAgent}
+                      key={item.agentCode}
+                      onClick={() => matchingAgent && selectAgent(matchingAgent.code)}
+                      type="button"
+                    >
+                      <span className="flex items-center justify-between gap-3 text-body-md">
+                        <span className="flex min-w-0 items-center gap-2 font-semibold text-secondary">
+                          {isSelected ? (
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-primary">check_circle</span>
+                          ) : null}
+                          <span className="truncate">{matchingAgent?.displayName || item.agentCode}</span>
+                        </span>
+                        <span className="shrink-0 font-mono text-mono-status text-primary">{formatCurrency(item.usd)}</span>
+                      </span>
+                      <span className="mt-1 block font-mono text-mono-status text-on-surface-variant">{item.agentCode}</span>
+                      <span aria-hidden="true" className="mt-2 block h-2 overflow-hidden rounded-full bg-surface-container">
+                        <span
+                          className="block h-full rounded-full bg-primary"
+                          style={{ width: `${Math.min(100, totalUsd ? (item.usd / totalUsd) * 100 : 0)}%` }}
+                        />
+                      </span>
+                    </button>
+                  );
+                })
               ) : (
                 <p className="text-body-md text-on-surface-variant">Chưa có dữ liệu chi phí agent.</p>
               )}
             </div>
           </Card>
         </aside>
-      </section>
-      ) : null}
+        </section>
+          </>
+        ) : null}
+      </div>
 
       <CreateSubAgentDialog
         editing={editingSubAgent}
@@ -1317,7 +1511,7 @@ export default function AgentDashboardPage() {
         open={approvalConfigOpen}
         onClose={() => setApprovalConfigOpen(false)}
         title="Cấu hình duyệt"
-        maxWidthClass="max-w-xl"
+        maxWidthClass="max-w-2xl"
       >
         <div className="flex flex-col">
           <ApprovalToggleRow
@@ -1331,17 +1525,9 @@ export default function AgentDashboardPage() {
             disabled={approvalMutation.isPending || approvalQuery.isLoading}
             onToggle={() => approvalMutation.mutate(!requireApproval)}
           />
-          <ApprovalToggleRow
-            icon="fact_check"
-            title="Agent review bài đăng"
-            description="Bật: bài đăng chỉ được publish khi có chữ ký duyệt của agent review (kể cả bài người đã duyệt tay). Tắt: đăng theo luồng duyệt thường."
-            enabled={requireContentReview}
-            enabledLabel="BẬT"
-            disabledLabel="Tắt"
-            tone="warning"
-            disabled={reviewFlagMutation.isPending || approvalQuery.isLoading}
-            onToggle={() => reviewFlagMutation.mutate({ requireContentReview: !requireContentReview })}
-          />
+          <div className="border-b border-outline-variant px-1 py-4">
+            <ContentPublishingPolicyControl compact />
+          </div>
           <ApprovalToggleRow
             icon="how_to_reg"
             title="Duyệt tay AI reply"
@@ -1412,6 +1598,34 @@ export default function AgentDashboardPage() {
               />
             </div>
           </div>
+          <div className="flex items-start gap-3 px-1 pt-4">
+            <span aria-hidden="true" className="material-symbols-outlined mt-0.5 text-[20px] text-on-surface-variant">person_off</span>
+            <div className="flex-1">
+              <p className="text-body-md font-semibold text-on-surface">Tự chuyển Mất khách sau (ngày)</p>
+              <p className="mt-1 text-body-sm text-on-surface-variant">
+                Lead pipeline không có tín hiệu thật quá ngưỡng này sẽ chuyển Mất khách. 0 = tắt. Dưới 30 ngày sẽ bỏ qua bước re-engage.
+                Đang áp dụng: <span className="font-semibold text-secondary">{leadLostAfterDays <= 0 ? "tắt" : `${leadLostAfterDays} ngày`}</span>.
+              </p>
+              <DaysConfigField
+                current={leadLostAfterDays}
+                draft={leadLostDraft}
+                pending={leadLostMutation.isPending || !settingsReady}
+                onDraftChange={setLeadLostDraft}
+                onSave={(days) => leadLostMutation.mutate(days)}
+              />
+            </div>
+          </div>
+          <ApprovalToggleRow
+            icon="payments"
+            title="Tự động duyệt doanh thu AI ước tính"
+            description="Bật: khi lead thành khách hàng mà sale chưa nhập số tiền, AI đọc hội thoại ước tính và duyệt luôn vào KPI (chỉ khi evidence khớp số tiền). Tắt (mặc định): AI chỉ đề xuất, sale phải duyệt/sửa số."
+            enabled={autoApproveLeadRevenue}
+            enabledLabel="BẬT"
+            disabledLabel="Tắt (sale duyệt)"
+            tone="warning"
+            disabled={autoApproveRevenueMutation.isPending || !settingsReady}
+            onToggle={() => autoApproveRevenueMutation.mutate(!autoApproveLeadRevenue)}
+          />
         </div>
       </Modal>
 
@@ -1463,6 +1677,39 @@ function MinutesConfigField({ current, draft, pending, onDraftChange, onSave }: 
       <Button
         disabled={pending || draft.trim() === "" || Number(draft) < 1}
         onClick={() => onSave(Math.min(1440, Math.round(Number(draft))))}
+        type="button"
+      >
+        Lưu
+      </Button>
+    </div>
+  );
+}
+
+interface DaysConfigFieldProps {
+  readonly current: number;
+  readonly draft: string;
+  readonly pending: boolean;
+  readonly onDraftChange: (value: string) => void;
+  readonly onSave: (days: number) => void;
+}
+
+// Lead lost threshold: 0 = tắt, max 365 ngày (khác MinutesConfigField min=1).
+function DaysConfigField({ current, draft, pending, onDraftChange, onSave }: DaysConfigFieldProps) {
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <input
+        className="w-24 rounded border border-outline bg-surface-container-lowest px-3 py-1.5 text-body-md focus:border-primary focus:outline-none"
+        min={0}
+        max={365}
+        onChange={(event) => onDraftChange(event.target.value)}
+        placeholder={String(current)}
+        type="number"
+        value={draft}
+      />
+      <span className="text-body-sm text-on-surface-variant">ngày</span>
+      <Button
+        disabled={pending || draft.trim() === "" || Number(draft) < 0 || Number(draft) > 365}
+        onClick={() => onSave(Math.min(365, Math.max(0, Math.round(Number(draft)))))}
         type="button"
       >
         Lưu

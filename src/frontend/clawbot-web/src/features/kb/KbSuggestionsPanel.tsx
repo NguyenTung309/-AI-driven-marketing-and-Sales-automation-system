@@ -196,11 +196,7 @@ export function KbSuggestionsPanel({ alwaysShow = false }: KbSuggestionsPanelPro
   const requireKbHumanReview = orchestrationQuery.data?.requireKbHumanReview ?? false;
   const autoApproveMutation = useMutation({
     mutationFn: (nextRequireHuman: boolean) =>
-      setTenantOrchestration(
-        orchestrationQuery.data?.requireApproval ?? false,
-        orchestrationQuery.data?.monthlyCostCapUsd ?? null,
-        { requireKbHumanReview: nextRequireHuman },
-      ),
+      setTenantOrchestration({ requireKbHumanReview: nextRequireHuman }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
     },

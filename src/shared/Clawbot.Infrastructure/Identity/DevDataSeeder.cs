@@ -184,6 +184,45 @@ public static partial class DevDataSeeder
                    WHERE name = N'IX_content_schedule_meta_asset_id'
                      AND object_id = OBJECT_ID(N'dbo.content_schedule'))
                 CREATE INDEX IX_content_schedule_meta_asset_id ON dbo.content_schedule(meta_asset_id);
+
+            IF OBJECT_ID(N'dbo.system_logs', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.system_logs (
+                    id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT pk_system_logs PRIMARY KEY,
+                    occurred_at DATETIMEOFFSET NOT NULL,
+                    level NVARCHAR(16) NOT NULL,
+                    source NVARCHAR(32) NOT NULL,
+                    category NVARCHAR(256) NULL,
+                    message NVARCHAR(2048) NOT NULL,
+                    exception NVARCHAR(MAX) NULL,
+                    status_code INT NULL,
+                    method NVARCHAR(10) NULL,
+                    path NVARCHAR(512) NULL,
+                    elapsed_ms FLOAT NULL,
+                    trace_id NVARCHAR(64) NULL,
+                    tenant_id UNIQUEIDENTIFIER NULL,
+                    user_id UNIQUEIDENTIFIER NULL,
+                    properties NVARCHAR(MAX) NULL
+                );
+                CREATE INDEX ix_system_logs_occurred ON dbo.system_logs(occurred_at DESC) INCLUDE (level, tenant_id);
+                CREATE INDEX ix_system_logs_tenant ON dbo.system_logs(tenant_id, occurred_at DESC);
+                CREATE INDEX ix_system_logs_trace ON dbo.system_logs(trace_id) WHERE trace_id IS NOT NULL;
+            END
+
+            IF OBJECT_ID(N'dbo.request_stats_hourly', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.request_stats_hourly (
+                    id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT pk_request_stats_hourly PRIMARY KEY,
+                    bucket_hour DATETIMEOFFSET NOT NULL,
+                    tenant_id UNIQUEIDENTIFIER NOT NULL,
+                    status_class NVARCHAR(8) NOT NULL,
+                    count BIGINT NOT NULL CONSTRAINT df_request_stats_hourly_count DEFAULT 0
+                );
+                CREATE UNIQUE INDEX ux_request_stats_hourly_bucket_tenant_class
+                    ON dbo.request_stats_hourly(bucket_hour, tenant_id, status_class);
+                CREATE INDEX ix_request_stats_hourly_tenant_bucket
+                    ON dbo.request_stats_hourly(tenant_id, bucket_hour DESC);
+            END
             """, ct);
 
     // EnsureCreated only builds the model (the tenant query filter is an unexecuted
@@ -335,20 +374,22 @@ public static partial class DevDataSeeder
     }
 
     // Orchestratable sub-agents the V2 coordinator plans over. Mirrors deploy/seed/agent-definitions.sql.
-    // SPEC-16 P2-6: reviewer-agent is tool-capable (content.approve) so it can autonomously approve drafts;
+    // SPEC-16 P2-6 / Phase 4.9: reviewer-agent uses content.review (non-publishing durable review).
     // content-agent is tool-capable (content-agent = persist draft) so the ReAct loop stores drafts, not just text.
+    // Tool grants must match ToolRegistry names (adapter Name or explicit IAgentTool.Name).
+    // Empty [] = text-only ReAct (no tool call) — BAD for lead/sale/report/research when goal needs CRM/data.
     private static readonly (string Code, string DisplayName, string AgentType, string Persona, string AllowedToolsJson)[] OrchestratorAgents =
     [
-        ("chat-agent",        "Chat Agent",        "chat",        "Handle customer conversation context and produce safe handoff summaries.", "[]"),
-        ("sale-assist-agent", "Sale Assist Agent", "sale_assist", "Help sales users draft replies, summarize conversations, and suggest next steps.", "[]"),
-        ("lead-agent",        "Lead Agent",        "lead",        "Score, classify, and prioritize leads from customer signals.", "[]"),
+        ("chat-agent",        "Chat Agent",        "chat",        "Handle customer conversation context and produce safe handoff summaries. Call chat-agent tool when a reply is needed.", """["chat-agent"]"""),
+        ("sale-assist-agent", "Sale Assist Agent", "sale_assist", "Draft/summarize/upsell for an EXISTING conversation. Call sale-assist with conversation_id + turns_json. Cannot blast cold leads without conversation context.", """["sale-assist"]"""),
+        ("lead-agent",        "Lead Agent",        "lead",        "ALWAYS call lead-agent tool. Use operation=list|find_cold (stage, topN) to query CRM — do not invent lists or ask the user for lead IDs. Also score/create/batch_score.", """["lead-agent"]"""),
         ("content-agent",     "Content Agent",     "content",     "Create campaign content briefs and channel-ready drafts.", """["content-agent"]"""),
-        ("research-agent",    "Research Agent",    "research",    "Research competitors, trends, and knowledge gaps for campaigns.", "[]"),
-        ("docs-agent",        "Docs Agent",        "docs",        "Prepare quote, brochure, onboarding, and sales document artifacts.", "[]"),
-        ("report-agent",      "Report Agent",      "report",      "Aggregate KPI, cost, and orchestration run outcomes into reports.", "[]"),
-        ("ads-agent",         "Ads Agent",         "ads",         "Plan ad tasks and review campaign signals without publishing automatically.", "[]"),
-        ("reviewer-agent",    "Reviewer Agent",    "reviewer",    "Review sub-agent outputs for quality, safety, and policy gates.", """["content.approve"]"""),
-        ("publisher-agent",   "Publisher Agent",   "publisher",   "Schedule and publish approved content to social channels via the graph publisher.", """["content.schedule","content.publish"]"""),
+        ("research-agent",    "Research Agent",    "research",    "Research competitors, trends, and knowledge gaps. Call research-agent or web.search with geo/keywords.", """["research-agent","web.search"]"""),
+        ("docs-agent",        "Docs Agent",        "docs",        "Prepare quote, brochure, onboarding documents via docs-agent tool.", """["docs-agent"]"""),
+        ("report-agent",      "Report Agent",      "report",      "Aggregate KPI via report-agent tool (snapshot/anomaly/forecast). Pass date/platform/metric as needed.", """["report-agent"]"""),
+        ("ads-agent",         "Ads Agent",         "ads",         "Plan ad tasks via ads-agent tool. High-risk actions may require approval.", """["ads-agent"]"""),
+        ("reviewer-agent",    "Reviewer Agent",    "reviewer",    "Review sub-agent outputs for quality, safety, and policy gates.", """["content.review"]"""),
+        ("publisher-agent",   "Publisher Agent",   "publisher",   "Publishing is handled by the durable worker; no autonomous publishing tools are granted by default.", "[]"),
         ("reporter-agent",    "Reporter Agent",    "reporter",    "Summarize A2A run outputs, decisions, costs, and next actions.", "[]"),
     ];
 

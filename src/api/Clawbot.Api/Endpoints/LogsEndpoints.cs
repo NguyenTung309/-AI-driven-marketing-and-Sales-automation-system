@@ -1,3 +1,4 @@
+using Clawbot.Api.Auth;
 using Clawbot.Api.Common.Pagination;
 using Clawbot.Api.Middleware;
 using Clawbot.Infrastructure.Persistence;
@@ -91,7 +92,8 @@ public static class LogsEndpoints
 
         group.MapGet("/task-runs", ListTaskRunsAsync);
         group.MapGet("/task-runs/{sessionId:guid}", GetTaskRunAsync);
-        group.MapGet("/audit", ListAuditAsync);
+        // Same audit data as /api/admin/audit-logs — gate with system.logs (QĐ3).
+        group.MapGet("/audit", ListAuditAsync).RequirePermission("system.logs");
 
         return group;
     }

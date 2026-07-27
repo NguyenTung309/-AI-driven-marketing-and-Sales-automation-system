@@ -30,9 +30,32 @@ public sealed class MetaConnection : AggregateRoot<Guid>, ITenantOwned
         DateTimeOffset? expiresAt,
         DateTimeOffset? dataAccessExpiresAt,
         DateTimeOffset at) =>
+        Create(
+            Guid.NewGuid(),
+            tenantId,
+            clientBusinessId,
+            systemUserId,
+            tokenType,
+            encryptedAccessToken,
+            grantedScopesJson,
+            expiresAt,
+            dataAccessExpiresAt,
+            at);
+
+    public static MetaConnection Create(
+        Guid id,
+        Guid tenantId,
+        string clientBusinessId,
+        string systemUserId,
+        string tokenType,
+        string encryptedAccessToken,
+        string grantedScopesJson,
+        DateTimeOffset? expiresAt,
+        DateTimeOffset? dataAccessExpiresAt,
+        DateTimeOffset at) =>
         new()
         {
-            Id = Guid.NewGuid(),
+            Id = id,
             TenantId = tenantId,
             ClientBusinessId = clientBusinessId.Trim(),
             SystemUserId = systemUserId.Trim(),
@@ -69,6 +92,12 @@ public sealed class MetaConnection : AggregateRoot<Guid>, ITenantOwned
         UpdatedAt = at;
     }
 
+    public void ReprotectAccessToken(string encryptedAccessToken, DateTimeOffset at)
+    {
+        AccessTokenEncrypted = encryptedAccessToken;
+        UpdatedAt = at;
+    }
+
     public void MarkHealthy(DateTimeOffset at)
     {
         Status = "active";
@@ -81,6 +110,18 @@ public sealed class MetaConnection : AggregateRoot<Guid>, ITenantOwned
     {
         Status = "reconnect_required";
         LastError = string.IsNullOrWhiteSpace(error) ? "meta_token_invalid" : error.Trim();
+        LastValidatedAt = at;
+        UpdatedAt = at;
+    }
+
+    // Ghi lỗi validate/sync app-level (vd. "API access blocked") mà KHÔNG ép reconnect —
+    // token/page vẫn có thể publish được; reconnect OAuth không gỡ block Meta.
+    // restoreActive: gỡ reconnect_required do validate nhầm trước đó (token còn hạn).
+    public void NoteError(string error, DateTimeOffset at, bool restoreActive = false)
+    {
+        LastError = string.IsNullOrWhiteSpace(error) ? "meta_error" : error.Trim();
+        if (restoreActive && Status == "reconnect_required")
+            Status = "active";
         LastValidatedAt = at;
         UpdatedAt = at;
     }
@@ -108,10 +149,19 @@ public sealed class MetaAsset : AggregateRoot<Guid>, ITenantOwned
     public bool IsDefault { get; private set; }
     public bool IsActive { get; private set; } = true;
     public DateTimeOffset LastSyncedAt { get; private set; }
+    // Lần cuối Page này đăng ký thành công webhook feed. Null = chưa từng đăng ký được
+    // (thường do thiếu scope pages_manage_metadata) nên comment chỉ về qua job đối soát.
+    public DateTimeOffset? FeedSubscribedAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
     private MetaAsset() { }
+
+    public void MarkFeedSubscribed(DateTimeOffset at)
+    {
+        FeedSubscribedAt = at;
+        UpdatedAt = at;
+    }
 
     public static MetaAsset CreatePage(
         Guid tenantId,
@@ -122,9 +172,30 @@ public sealed class MetaAsset : AggregateRoot<Guid>, ITenantOwned
         string encryptedAccessToken,
         bool isDefault,
         DateTimeOffset at) =>
+        CreatePage(
+            Guid.NewGuid(),
+            tenantId,
+            connectionId,
+            externalId,
+            name,
+            tasksJson,
+            encryptedAccessToken,
+            isDefault,
+            at);
+
+    public static MetaAsset CreatePage(
+        Guid id,
+        Guid tenantId,
+        Guid connectionId,
+        string externalId,
+        string name,
+        string tasksJson,
+        string encryptedAccessToken,
+        bool isDefault,
+        DateTimeOffset at) =>
         new()
         {
-            Id = Guid.NewGuid(),
+            Id = id,
             TenantId = tenantId,
             ConnectionId = connectionId,
             AssetType = "page",
@@ -148,6 +219,12 @@ public sealed class MetaAsset : AggregateRoot<Guid>, ITenantOwned
         UpdatedAt = at;
     }
 
+    public void ReprotectAccessToken(string encryptedAccessToken, DateTimeOffset at)
+    {
+        AccessTokenEncrypted = encryptedAccessToken;
+        UpdatedAt = at;
+    }
+
     public void SetDefault(bool isDefault, DateTimeOffset at)
     {
         IsDefault = isDefault;
@@ -163,7 +240,7 @@ public sealed class MetaAsset : AggregateRoot<Guid>, ITenantOwned
     }
 }
 
-public sealed class MetaOAuthState : AggregateRoot<Guid>, ITenantOwned
+public sealed class MetaOAuthState : AggregateRoot<Guid>, ITenantOwned, IAuditExempt
 {
     public Guid TenantId { get; private set; }
     public Guid UserId { get; private set; }

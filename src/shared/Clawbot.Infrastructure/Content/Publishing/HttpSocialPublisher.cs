@@ -13,9 +13,14 @@ public sealed record PublishRequest(
     string Body,
     string AssetsJson,
     DateTimeOffset ScheduledAt,
-    Guid? MetaAssetId = null);
+    Guid? MetaAssetId = null,
+    string? ProviderTargetId = null);
 
-public sealed record PublishResult(bool Success, string? PostUrl, string? Error);
+public sealed record PublishResult(
+    bool Success,
+    string? PostUrl,
+    string? Error,
+    string? ExternalId = null);
 
 public sealed class PublisherOptions
 {
@@ -42,6 +47,10 @@ public sealed class HttpSocialPublisher(HttpClient http, IOptions<PublisherOptio
         ArgumentNullException.ThrowIfNull(request);
         if (string.IsNullOrWhiteSpace(_options.Endpoint) || string.IsNullOrWhiteSpace(_options.Token))
             return new PublishResult(false, null, "publisher_not_configured");
+
+        // Phase 2.14: operator endpoint only — HTTPS/no userinfo/no private SSRF unless ops allowlist.
+        if (!Clawbot.Agents.Core.Chat.LlmBaseUrlGuard.IsAllowedBaseUrl(_options.Endpoint))
+            return new PublishResult(false, null, "publisher_endpoint_not_allowed");
 
         using var message = new HttpRequestMessage(HttpMethod.Post, new Uri(_options.Endpoint, UriKind.Absolute))
         {

@@ -1,5 +1,6 @@
 using Clawbot.Domain.Leads;
 using Clawbot.Infrastructure.Persistence;
+using Clawbot.SharedKernel.Time;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -8,14 +9,16 @@ namespace Clawbot.Infrastructure.Jobs;
 
 public sealed partial class LeadFollowUpJob(
     AppDbContext db,
+    IClock clock,
     ILogger<LeadFollowUpJob> logger)
 {
     [DisableConcurrentExecution(timeoutInSeconds: 300)]
     public async Task RunAsync(CancellationToken ct = default)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = clock.UtcNow;
         await ProcessNoShows(now, ct);
         await ProcessStaleLeads(now, ct);
+        await ProcessLostLeads(now, ct);
     }
 
     private async Task ProcessNoShows(DateTimeOffset now, CancellationToken ct)
@@ -73,12 +76,19 @@ public sealed partial class LeadFollowUpJob(
     {
         var staleThreshold = now.AddDays(-30);
 
+        // Lọc lead đã reengage TRƯỚC Take — tránh 30 lead cũ đã reengage "nuốt" slot, lead mới không bao giờ được xử lý.
+        var reengagedLeadIds = db.LeadActivities.IgnoreQueryFilters()
+            .Where(a => a.ActivityType == "reengage_attempt")
+            .Select(a => a.LeadId);
+
         var staleLeads = await db.Leads
             .IgnoreQueryFilters()
             .Where(l => l.DeletedAt == null
                 && l.Stage != "customer"
                 && l.Stage != "lost"
-                && (l.LastActivityAt == null || l.LastActivityAt < staleThreshold))
+                && (l.LastActivityAt ?? l.CreatedAt) < staleThreshold
+                && !reengagedLeadIds.Contains(l.Id))
+            .OrderBy(l => l.LastActivityAt ?? l.CreatedAt)
             .Select(l => new { l.Id, l.TenantId })
             .Take(30)
             .ToListAsync(ct);
@@ -93,13 +103,6 @@ public sealed partial class LeadFollowUpJob(
 
         foreach (var leadInfo in staleLeads)
         {
-            var alreadyReengaged = await db.LeadActivities.IgnoreQueryFilters()
-                .AnyAsync(a => a.LeadId == leadInfo.Id
-                    && a.ActivityType == "reengage_attempt"
-                    && a.OccurredAt > now.AddDays(-7), ct);
-
-            if (alreadyReengaged) continue;
-
             var activity = LeadActivity.Create(
                 leadInfo.TenantId, leadInfo.Id, "reengage_attempt",
                 "Auto: Lead inactive for 30+ days. Queued for re-engagement campaign.",
@@ -110,6 +113,80 @@ public sealed partial class LeadFollowUpJob(
 
         await db.SaveChangesAsync(ct);
         LogCompleted(logger, "stale", staleLeads.Count);
+    }
+
+    private async Task ProcessLostLeads(DateTimeOffset now, CancellationToken ct)
+    {
+        var tenantSettings = await db.Tenants
+            .IgnoreQueryFilters()
+            .Where(t => t.IsActive && t.LeadLostAfterDays > 0)
+            .Select(t => new { t.Id, t.LeadLostAfterDays })
+            .ToListAsync(ct);
+
+        foreach (var tenant in tenantSettings)
+        {
+            var threshold = now.AddDays(-tenant.LeadLostAfterDays);
+            var reengageCutoff = now.AddDays(-7);
+            var farPastThreshold = now.AddDays(-2 * tenant.LeadLostAfterDays);
+
+            // Đưa điều kiện re-engage / 2× threshold vào query trước Take — tránh starvation lead #101.
+            var candidates = await db.Leads
+                .IgnoreQueryFilters()
+                .Where(l => l.TenantId == tenant.Id
+                    && l.DeletedAt == null
+                    && l.Stage != "customer"
+                    && l.Stage != "lost"
+                    && (l.LastActivityAt ?? l.CreatedAt) < threshold
+                    && (
+                        (l.LastActivityAt ?? l.CreatedAt) < farPastThreshold
+                        || !db.LeadActivities.IgnoreQueryFilters().Any(a =>
+                            a.TenantId == tenant.Id
+                            && a.LeadId == l.Id
+                            && a.ActivityType == "reengage_attempt"
+                            && a.OccurredAt > reengageCutoff)
+                    ))
+                .OrderBy(l => l.LastActivityAt ?? l.CreatedAt)
+                .Take(100)
+                .ToListAsync(ct);
+
+            var changed = 0;
+            foreach (var lead in candidates)
+            {
+                // Re-check signal clock: inbound có thể vừa bump LastActivityAt giữa lúc load batch.
+                if ((lead.LastActivityAt ?? lead.CreatedAt) >= threshold)
+                    continue;
+
+                lead.MarkLost(
+                    $"auto: im lặng {tenant.LeadLostAfterDays}+ ngày",
+                    now,
+                    trigger: "auto_lost_sweep");
+
+                try
+                {
+                    // Save từng lead: concurrency (Stage + LastActivityAt) khi inbound vừa nhắn → skip lead đó.
+                    await db.SaveChangesAsync(ct);
+                    changed++;
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    // Detach Lead + mọi Added activity của aggregate (tránh insert stage_change giả ở save sau).
+                    foreach (var entry in db.ChangeTracker.Entries()
+                                 .Where(e => ReferenceEquals(e.Entity, lead)
+                                     || (e.Entity is LeadActivity a && a.LeadId == lead.Id))
+                                 .ToList())
+                    {
+                        entry.State = EntityState.Detached;
+                    }
+
+                    LogSkipped(logger, "lost", $"concurrency lead {lead.Id}");
+                }
+            }
+
+            if (changed == 0)
+                continue;
+
+            LogCompleted(logger, "lost", changed);
+        }
     }
 
     [LoggerMessage(EventId = 13001, Level = LogLevel.Debug,

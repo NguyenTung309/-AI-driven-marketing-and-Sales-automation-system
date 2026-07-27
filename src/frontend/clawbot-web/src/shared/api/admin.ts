@@ -86,6 +86,8 @@ export type TenantBrandingUpdate = Partial<{
 
 export interface AuditLog {
   readonly id: string;
+  readonly userId: string | null;
+  readonly userEmail: string | null;
   readonly action: string;
   readonly resourceType: string;
   readonly resourceId: string | null;
@@ -93,6 +95,39 @@ export interface AuditLog {
   readonly ipAddress: string | null;
   readonly userAgent: string | null;
   readonly occurredAt: string;
+}
+
+export interface SystemLogEntry {
+  readonly id: number;
+  readonly occurredAt: string;
+  readonly level: string;
+  readonly source: string;
+  readonly category: string | null;
+  readonly message: string;
+  readonly statusCode: number | null;
+  readonly method: string | null;
+  readonly path: string | null;
+  readonly elapsedMs: number | null;
+  readonly traceId: string | null;
+  readonly userId: string | null;
+}
+
+export interface SystemLogDetail extends SystemLogEntry {
+  readonly exception: string | null;
+  readonly tenantId: string | null;
+  readonly properties: string | null;
+}
+
+export interface SystemLogSummary {
+  readonly errors24h: number;
+  readonly warnings24h: number;
+}
+
+export interface SystemLogCursorPage {
+  readonly items: readonly SystemLogEntry[];
+  readonly nextCursor: string | null;
+  readonly total: number | null;
+  readonly summary: SystemLogSummary;
 }
 
 export interface ListUsersParams {
@@ -259,6 +294,10 @@ export interface TenantOrchestrationSettings {
   readonly skipChatReplyReview: boolean;
   /** Hội thoại chờ quá ngưỡng này (phút) thì cảnh báo sale; quá gấp đôi thì báo Trưởng phòng KD. */
   readonly idleAlertMinutes: number;
+  /** Lead im lặng quá N ngày → lost; 0 = tắt. */
+  readonly leadLostAfterDays: number;
+  /** AI ước tính doanh thu tự duyệt (default tắt). */
+  readonly autoApproveLeadRevenue: boolean;
 }
 
 export interface TenantOrchestrationUpdateResult {
@@ -270,7 +309,24 @@ export interface TenantOrchestrationUpdateResult {
   readonly aiAutoReplyResumeMinutes: number;
   readonly skipChatReplyReview: boolean;
   readonly idleAlertMinutes: number;
+  readonly leadLostAfterDays: number;
+  readonly autoApproveLeadRevenue: boolean;
 }
+
+/** PATCH-like: chỉ field được set mới gửi (undefined = BE giữ nguyên). Tránh GET fail fallback ghi đè. */
+export type TenantOrchestrationPatch = {
+  readonly requireApproval?: boolean;
+  readonly monthlyCostCapUsd?: number | null;
+  readonly clearMonthlyCostCapUsd?: boolean;
+  readonly requireContentReview?: boolean;
+  readonly requireChatReplyApproval?: boolean;
+  readonly requireKbHumanReview?: boolean;
+  readonly aiAutoReplyResumeMinutes?: number;
+  readonly skipChatReplyReview?: boolean;
+  readonly idleAlertMinutes?: number;
+  readonly leadLostAfterDays?: number;
+  readonly autoApproveLeadRevenue?: boolean;
+};
 
 export async function getTenantOrchestration(): Promise<TenantOrchestrationSettings> {
   const res = await apiClient.get<TenantOrchestrationSettings>("/api/admin/tenant/orchestration");
@@ -278,29 +334,22 @@ export async function getTenantOrchestration(): Promise<TenantOrchestrationSetti
 }
 
 export async function setTenantOrchestration(
-  requireApproval: boolean,
-  monthlyCostCapUsd?: number | null,
-  flags?: {
-    readonly requireContentReview?: boolean;
-    readonly requireChatReplyApproval?: boolean;
-    readonly requireKbHumanReview?: boolean;
-    readonly aiAutoReplyResumeMinutes?: number;
-    readonly skipChatReplyReview?: boolean;
-    readonly idleAlertMinutes?: number;
-  },
+  patch: TenantOrchestrationPatch,
 ): Promise<TenantOrchestrationUpdateResult> {
   const res = await apiClient.put<TenantOrchestrationUpdateResult>(
     "/api/admin/tenant/orchestration",
     {
-      requireApproval,
-      monthlyCostCapUsd: monthlyCostCapUsd ?? null,
-      // undefined = không gửi field -> BE giữ nguyên giá trị hiện tại
-      requireContentReview: flags?.requireContentReview,
-      requireChatReplyApproval: flags?.requireChatReplyApproval,
-      requireKbHumanReview: flags?.requireKbHumanReview,
-      aiAutoReplyResumeMinutes: flags?.aiAutoReplyResumeMinutes,
-      skipChatReplyReview: flags?.skipChatReplyReview,
-      idleAlertMinutes: flags?.idleAlertMinutes,
+      requireApproval: patch.requireApproval,
+      monthlyCostCapUsd: patch.monthlyCostCapUsd,
+      clearMonthlyCostCapUsd: patch.clearMonthlyCostCapUsd ?? false,
+      requireContentReview: patch.requireContentReview,
+      requireChatReplyApproval: patch.requireChatReplyApproval,
+      requireKbHumanReview: patch.requireKbHumanReview,
+      aiAutoReplyResumeMinutes: patch.aiAutoReplyResumeMinutes,
+      skipChatReplyReview: patch.skipChatReplyReview,
+      idleAlertMinutes: patch.idleAlertMinutes,
+      leadLostAfterDays: patch.leadLostAfterDays,
+      autoApproveLeadRevenue: patch.autoApproveLeadRevenue,
     },
   );
   return res.data;
@@ -314,6 +363,42 @@ export async function listAuditLogs(params?: {
 }): Promise<PagedResponse<AuditLog>> {
   const res = await apiClient.get<PagedResponse<AuditLog>>("/api/admin/audit-logs", { params });
   return res.data;
+}
+
+export async function listSystemLogs(params?: {
+  readonly level?: string;
+  readonly statusGroup?: string;
+  readonly source?: string;
+  readonly q?: string;
+  readonly from?: string;
+  readonly to?: string;
+  readonly cursor?: string | null;
+  readonly pageSize?: number;
+}): Promise<SystemLogCursorPage> {
+  const res = await apiClient.get<SystemLogCursorPage>("/api/admin/system-logs", { params });
+  return res.data;
+}
+
+export async function getSystemLog(id: number): Promise<SystemLogDetail> {
+  const res = await apiClient.get<SystemLogDetail>(`/api/admin/system-logs/${id}`);
+  return res.data;
+}
+
+export interface RequestStatsPoint {
+  readonly bucketHour: string;
+  readonly ok2xx: number;
+  readonly client4xx: number;
+  readonly server5xx: number;
+}
+
+export async function listRequestStatsHourly(params?: {
+  readonly hours?: number;
+}): Promise<readonly RequestStatsPoint[]> {
+  const res = await apiClient.get<{ items: readonly RequestStatsPoint[] }>(
+    "/api/admin/system-logs/stats/hourly",
+    { params },
+  );
+  return res.data.items;
 }
 
 // --- Channel Management ---
@@ -479,8 +564,12 @@ export async function runAdminScheduleJobNow(id: string): Promise<void> {
   await apiClient.post(`/api/admin/jobs/schedules/${encodeURIComponent(id)}/run-now`);
 }
 
+export type SocialChannelProvider = "zalo" | "instagram";
+export type SocialCredentialResolutionState = "absent" | "disabled" | "resolved" | "invalid";
+
 export interface SocialChannelCredential {
-  readonly provider: string;
+  readonly provider: SocialChannelProvider;
+  readonly resolutionState: SocialCredentialResolutionState;
   readonly enabled: boolean;
   readonly endpoint: string;
   readonly pageId: string;
@@ -500,13 +589,19 @@ export interface UpdateSocialChannelPayload {
   readonly oaAccessToken?: string | null;
 }
 
+export interface UpdateInstagramCredentialPayload {
+  readonly enabled: boolean;
+  readonly pageId: string;
+  readonly pageAccessToken: string | null;
+}
+
 export async function getSocialCredentials(): Promise<readonly SocialChannelCredential[]> {
   const res = await apiClient.get<{ items: readonly SocialChannelCredential[] }>("/api/admin/social-credentials");
   return res.data.items;
 }
 
 export async function updateSocialCredential(
-  provider: string,
+  provider: SocialChannelProvider,
   payload: UpdateSocialChannelPayload,
 ): Promise<SocialChannelCredential> {
   const res = await apiClient.put<SocialChannelCredential>(
@@ -514,6 +609,12 @@ export async function updateSocialCredential(
     payload,
   );
   return res.data;
+}
+
+export async function updateInstagramCredential(
+  payload: UpdateInstagramCredentialPayload,
+): Promise<SocialChannelCredential> {
+  return updateSocialCredential("instagram", payload);
 }
 
 export interface MetaAsset {
@@ -525,6 +626,18 @@ export interface MetaAsset {
   readonly isDefault: boolean;
   readonly isActive: boolean;
   readonly lastSyncedAt: string;
+  readonly canModerateComments: boolean;
+  readonly canSendPrivateReplies: boolean;
+  readonly feedSubscribedAt?: string | null;
+}
+
+export interface MetaEngagementCapability {
+  readonly missingCommentScopes: readonly string[];
+  readonly missingPrivateReplyScopes: readonly string[];
+  readonly activePageCount: number;
+  readonly commentCapablePageCount: number;
+  readonly privateReplyCapablePageCount: number;
+  readonly feedSubscribedPageCount: number;
 }
 
 export type MetaAuthorizationMode = "development_user" | "business_system_user";
@@ -559,6 +672,7 @@ export interface MetaIntegrationStatus {
   readonly lastValidatedAt?: string | null;
   readonly lastError?: string | null;
   readonly assets: readonly MetaAsset[];
+  readonly engagement?: MetaEngagementCapability | null;
 }
 
 export async function getMetaIntegrationStatus(): Promise<MetaIntegrationStatus> {

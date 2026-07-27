@@ -80,7 +80,8 @@ public static partial class LlmConfigsEndpoints
             inputUsdPer1M: req.InputUsdPer1M,
             outputUsdPer1M: req.OutputUsdPer1M,
             timeoutSeconds: req.TimeoutSeconds,
-            maxOutputTokens: req.MaxOutputTokens);
+            maxOutputTokens: req.MaxOutputTokens,
+            supportsVision: req.SupportsVision);
 
         db.LlmConfigs.Add(row);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -116,7 +117,15 @@ public static partial class LlmConfigsEndpoints
         var baseUrl = NormalizeBaseUrl(provider, req.BaseUrl);
         var credentialEndpointChanged = !string.Equals(row.Provider, provider, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(row.BaseUrl, baseUrl, StringComparison.OrdinalIgnoreCase);
-        row.UpdateConnection(provider, modelId, baseUrl, Trimmed(req.DisplayName), now, req.TimeoutSeconds, req.MaxOutputTokens);
+        row.UpdateConnection(
+            provider,
+            modelId,
+            baseUrl,
+            Trimmed(req.DisplayName),
+            now,
+            req.TimeoutSeconds,
+            req.MaxOutputTokens,
+            req.SupportsVision);
         row.UpdateRates(req.InputUsdPer1M, req.OutputUsdPer1M, now);
         if (credentialEndpointChanged)
             row.RequireKeyRotation(now);
@@ -236,7 +245,8 @@ public static partial class LlmConfigsEndpoints
         c.Id, c.Provider, c.ModelId, c.DisplayName,
         HasApiKey: !string.IsNullOrEmpty(c.ApiKeyEncrypted),
         c.BaseUrl, c.IsActive,
-        c.InputUsdPer1M, c.OutputUsdPer1M, c.CreatedAt, c.UpdatedAt, c.TimeoutSeconds, c.MaxOutputTokens);
+        c.InputUsdPer1M, c.OutputUsdPer1M, c.CreatedAt, c.UpdatedAt, c.TimeoutSeconds, c.MaxOutputTokens,
+        c.SupportsVision);
 
     private static string? Trimmed(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

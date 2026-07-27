@@ -87,29 +87,29 @@ function Get-PowerShellExecutable {
 
 function Test-DockerReadiness {
     if ($SkipDockerProbe) {
-        Add-Check "Docker/Testcontainers" "SKIP" "Docker probe skipped by -SkipDockerProbe. Full check mirrors deploy/ci/verify-testcontainers.ps1."
+        Add-Check "Docker" "SKIP" "Docker probe skipped by -SkipDockerProbe."
         return
     }
 
     $docker = Get-Command docker -ErrorAction SilentlyContinue
     if (-not $docker) {
-        Add-Check "Docker/Testcontainers" "MISSING" "Docker CLI not found. Install Docker Desktop or Docker Engine; full integration gate is deploy/ci/verify-testcontainers.ps1."
+        Add-Check "Docker" "MISSING" "Docker CLI not found. Install Docker Desktop or Docker Engine to run the local stack."
         return
     }
 
     & docker version *> $null
     if ($LASTEXITCODE -ne 0) {
-        Add-Check "Docker/Testcontainers" "FAIL" "Docker CLI exists but server is not reachable. Start Docker before running Testcontainers."
+        Add-Check "Docker" "FAIL" "Docker CLI exists but server is not reachable. Start Docker before launching the local stack."
         return
     }
 
     & docker info *> $null
     if ($LASTEXITCODE -ne 0) {
-        Add-Check "Docker/Testcontainers" "FAIL" "Docker daemon is not ready for Testcontainers."
+        Add-Check "Docker" "FAIL" "Docker daemon is not ready."
         return
     }
 
-    Add-Check "Docker/Testcontainers" "PASS" "Docker is ready for Testcontainers."
+    Add-Check "Docker" "PASS" "Docker is ready for the local stack."
 }
 
 function Test-KbAuthoringReadiness {

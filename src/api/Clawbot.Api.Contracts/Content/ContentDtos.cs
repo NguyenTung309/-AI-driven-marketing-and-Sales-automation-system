@@ -15,6 +15,26 @@ public sealed record UpdateContentBriefRequest(string Platform, string Brief);
 
 public sealed record UpdateContentBriefStatusRequest(string Status);
 
+public sealed record ContentAgentReviewDto(
+    string Status,
+    int? ReviewedRevision,
+    Guid? ReviewedByAgentId,
+    DateTimeOffset? ReviewedAt,
+    string? Reason,
+    string ImageReviewStatus,
+    int ReviewedImageCount);
+
+public sealed record ContentPublishingApprovalDto(
+    string Status,
+    string? PolicyApplied,
+    long? PolicyVersionApplied,
+    int? ApprovedRevision,
+    string? Mode,
+    Guid? ApprovedBy,
+    DateTimeOffset? ApprovedAt,
+    string? Reason,
+    string? RequirementReason);
+
 public sealed record ContentItemDto(
     Guid Id,
     Guid? BriefId,
@@ -26,7 +46,33 @@ public sealed record ContentItemDto(
     Guid? ApprovedBy,
     DateTimeOffset? ApprovedAt,
     DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    int ContentRevision = 1,
+    ContentAgentReviewDto? AgentReview = null,
+    ContentPublishingApprovalDto? PublishingApproval = null,
+    string WorkflowState = "awaiting_agent_review",
+    bool CanApprove = false,
+    bool CanReject = false,
+    bool CanRetryReview = false,
+    bool CanSchedule = false,
+    bool CanPublish = false);
+
+public sealed record ContentPublishingPolicyDto(
+    bool AgentReviewRequired,
+    string AgentReviewMode,
+    string ReviewerVisionCapability,
+    string PublishingApprovalPolicy,
+    long PolicyVersion,
     DateTimeOffset UpdatedAt);
+
+public sealed record UpdateContentPublishingPolicyRequest(string PublishingApprovalPolicy);
+
+public sealed record RetryAgentReviewRequest(int ExpectedRevision);
+
+public sealed record ReconcilePublishRequest(
+    string Outcome,
+    string? ExternalPostId = null,
+    string? ErrorCode = null);
 
 public sealed record GenerateContentItemRequest(
     Guid? BriefId,
@@ -48,11 +94,43 @@ public sealed record GenerateImagePromptResponse(
 
 public sealed record UpdateContentItemRequest(string Body, string? AssetsJson);
 
-public sealed record ContentAssetUploadResponse(string Url, string AssetsJson);
+// Url remains a derived display link; AssetId + StorageKey never accept client-supplied values.
+public sealed record ContentAssetUploadResponse(string Url, string AssetsJson, Guid AssetId = default);
 
-public sealed record RejectContentItemRequest(string? Reason);
+public sealed record ApproveContentItemRequest(int ExpectedRevision, string? OverrideReason = null);
 
-public sealed record RepurposeContentItemRequest(IReadOnlyList<string> TargetPlatforms);
+public sealed record RejectContentItemRequest(int ExpectedRevision, string? Reason);
+
+public sealed record RepurposeContentItemRequest(IReadOnlyList<string>? TargetPlatforms);
+
+// P5 §4.5: đổi hook. GET trả danh sách hook L2 đã lưu + hook đang chọn; POST chọn hookIndex để chạy lại L3+L4.
+public sealed record ContentHookOptionDto(int Index, string Text, bool Selected);
+
+public sealed record ContentItemHooksResponse(
+    bool Available,
+    IReadOnlyList<ContentHookOptionDto> Hooks);
+
+public sealed record RegenerateHookApiRequest(int HookIndex);
+
+// P5 §6: dashboard vận hành chuỗi sinh nội dung, tổng hợp từ content_generation_traces + content_items.
+public sealed record ContentChainStepMetricDto(
+    string StepId,
+    int Attempts,
+    int GateFailures,
+    double GateFailRate,
+    long P95LatencyMs);
+
+public sealed record ContentChainMetricsResponse(
+    int WindowDays,
+    int TotalRuns,
+    int FallbackRuns,
+    double FallbackRate,
+    double AvgTokensPerRun,
+    double AvgUsdCostPerRun,
+    IReadOnlyList<ContentChainStepMetricDto> Steps,
+    int ReviewApproved,
+    int ReviewTotal,
+    double ReviewApproveRate);
 
 public sealed record ContentQueueCursorPage(
     IReadOnlyList<ContentItemDto> Items,
@@ -65,7 +143,10 @@ public sealed record ContentQueueResponse(
     int Page,
     int PageSize);
 
-public sealed record ScheduleContentItemRequest(DateTimeOffset? ScheduledAt, Guid? MetaAssetId = null);
+public sealed record ScheduleContentItemRequest(
+    DateTimeOffset? ScheduledAt,
+    Guid? MetaAssetId = null,
+    bool ConfirmInstagramAccount = false);
 
 public sealed record ContentPublishTargetDto(
     Guid Id,
@@ -87,7 +168,9 @@ public sealed record ContentScheduleDto(
     Guid? MetaAssetId,
     int? LikeCount = null,
     int? CommentCount = null,
-    DateTimeOffset? EngagementSyncedAt = null);
+    DateTimeOffset? EngagementSyncedAt = null,
+    int RetryCount = 0,
+    string? LastError = null);
 
 public sealed record ContentCalendarItemDto(
     Guid ScheduleId,
@@ -100,7 +183,10 @@ public sealed record ContentCalendarItemDto(
     string? PostUrl,
     Guid? MetaAssetId,
     int? LikeCount = null,
-    int? CommentCount = null);
+    int? CommentCount = null,
+    int RetryCount = 0,
+    string? LastError = null,
+    bool RequiresInstagramAccountConfirmation = false);
 
 public sealed record ContentCalendarResponse(IReadOnlyList<ContentCalendarItemDto> Items);
 

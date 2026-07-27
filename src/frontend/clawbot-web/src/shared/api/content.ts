@@ -11,6 +11,28 @@ export interface ContentBrief {
   readonly updatedAt: string;
 }
 
+export interface ContentAgentReview {
+  readonly status: string;
+  readonly reviewedRevision: number | null;
+  readonly reviewedByAgentId: string | null;
+  readonly reviewedAt: string | null;
+  readonly reason: string | null;
+  readonly imageReviewStatus: string;
+  readonly reviewedImageCount: number;
+}
+
+export interface ContentPublishingApproval {
+  readonly status: string;
+  readonly policyApplied: string | null;
+  readonly policyVersionApplied: number | null;
+  readonly approvedRevision: number | null;
+  readonly mode: string | null;
+  readonly approvedBy: string | null;
+  readonly approvedAt: string | null;
+  readonly reason: string | null;
+  readonly requirementReason: string | null;
+}
+
 export interface ContentItem {
   readonly id: string;
   readonly briefId: string | null;
@@ -23,6 +45,51 @@ export interface ContentItem {
   readonly approvedAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly contentRevision?: number;
+  readonly agentReview?: ContentAgentReview | null;
+  readonly publishingApproval?: ContentPublishingApproval | null;
+  readonly workflowState?: string;
+  readonly canApprove?: boolean;
+  readonly canReject?: boolean;
+  readonly canRetryReview?: boolean;
+  readonly canSchedule?: boolean;
+  readonly canPublish?: boolean;
+}
+
+export type ContentPublishingApprovalPolicy = "automatic" | "human_required";
+export type ContentReviewerVisionCapability = "available" | "unavailable" | "unknown";
+
+export interface ContentPublishingPolicy {
+  readonly agentReviewRequired: boolean;
+  readonly agentReviewMode: string;
+  readonly reviewerVisionCapability: ContentReviewerVisionCapability | string;
+  readonly publishingApprovalPolicy: ContentPublishingApprovalPolicy | string;
+  readonly policyVersion: number;
+  readonly updatedAt: string;
+}
+
+export interface UpdateContentPublishingPolicyPayload {
+  readonly publishingApprovalPolicy: ContentPublishingApprovalPolicy;
+}
+
+export interface ApproveContentItemPayload {
+  readonly expectedRevision: number;
+  readonly overrideReason?: string | null;
+}
+
+export interface RejectContentItemPayload {
+  readonly expectedRevision: number;
+  readonly reason?: string | null;
+}
+
+export interface RetryAgentReviewPayload {
+  readonly expectedRevision: number;
+}
+
+export interface ReconcilePublishPayload {
+  readonly outcome: "succeeded" | "failed";
+  readonly externalPostId?: string | null;
+  readonly errorCode?: string | null;
 }
 
 export interface ContentQueueResponse {
@@ -47,6 +114,8 @@ export interface ContentSchedule {
   readonly likeCount: number | null;
   readonly commentCount: number | null;
   readonly engagementSyncedAt: string | null;
+  readonly retryCount: number;
+  readonly lastError: string | null;
 }
 
 export interface ContentCalendarItem {
@@ -61,6 +130,9 @@ export interface ContentCalendarItem {
   readonly metaAssetId: string | null;
   readonly likeCount: number | null;
   readonly commentCount: number | null;
+  readonly retryCount: number;
+  readonly lastError: string | null;
+  readonly requiresInstagramAccountConfirmation: boolean;
 }
 
 export interface ContentPublishTarget {
@@ -69,6 +141,19 @@ export interface ContentPublishTarget {
   readonly externalId: string;
   readonly name: string;
   readonly isDefault: boolean;
+}
+
+export type ContentPublishTargetMode = "linked_meta" | "standalone" | "invalid" | "unsupported";
+
+export interface ContentPublishTargetsResponse {
+  readonly mode: ContentPublishTargetMode;
+  readonly items: readonly ContentPublishTarget[];
+}
+
+export interface ScheduleContentItemPayload {
+  readonly scheduledAt: string | null;
+  readonly metaAssetId?: string | null;
+  readonly confirmInstagramAccount?: boolean;
 }
 
 export interface ContentCalendarResponse {
@@ -272,24 +357,65 @@ export async function deleteContentItem(id: string): Promise<void> {
   await apiClient.delete(`/api/content/items/${id}`);
 }
 
-export async function approveContentItem(id: string): Promise<ContentItem> {
-  const res = await apiClient.post<ContentItem>(`/api/content/items/${id}/approve`);
+export async function getContentPublishingPolicy(): Promise<ContentPublishingPolicy> {
+  const res = await apiClient.get<ContentPublishingPolicy>("/api/content/settings/publishing-policy");
   return res.data;
 }
 
-export async function rejectContentItem(id: string, reason?: string): Promise<ContentItem> {
-  const res = await apiClient.post<ContentItem>(`/api/content/items/${id}/reject`, { reason: reason?.trim() || null });
+export async function updateContentPublishingPolicy(
+  payload: UpdateContentPublishingPolicyPayload,
+): Promise<ContentPublishingPolicy> {
+  const res = await apiClient.put<ContentPublishingPolicy>("/api/content/settings/publishing-policy", payload);
   return res.data;
 }
 
-export async function scheduleContentItem(id: string, scheduledAt: string | null, metaAssetId?: string | null): Promise<ContentSchedule> {
-  const res = await apiClient.post<ContentSchedule>(`/api/content/items/${id}/schedule`, { scheduledAt, metaAssetId: metaAssetId ?? null });
+export async function approveContentItem(id: string, payload: ApproveContentItemPayload): Promise<ContentItem> {
+  const res = await apiClient.post<ContentItem>(`/api/content/items/${id}/approve`, {
+    expectedRevision: payload.expectedRevision,
+    overrideReason: payload.overrideReason?.trim() || null,
+  });
   return res.data;
 }
 
-export async function getContentPublishTargets(platform: string): Promise<readonly ContentPublishTarget[]> {
-  const res = await apiClient.get<readonly ContentPublishTarget[]>("/api/content/publish-targets", { params: { platform } });
+export async function rejectContentItem(id: string, payload: RejectContentItemPayload): Promise<ContentItem> {
+  const res = await apiClient.post<ContentItem>(`/api/content/items/${id}/reject`, {
+    expectedRevision: payload.expectedRevision,
+    reason: payload.reason?.trim() || null,
+  });
   return res.data;
+}
+
+export async function retryAgentReview(id: string, payload: RetryAgentReviewPayload): Promise<ContentItem> {
+  const res = await apiClient.post<ContentItem>(`/api/content/items/${id}/agent-review/retry`, {
+    expectedRevision: payload.expectedRevision,
+  });
+  return res.data;
+}
+
+export async function scheduleContentItem(
+  id: string,
+  payload: ScheduleContentItemPayload,
+): Promise<ContentSchedule> {
+  const res = await apiClient.post<ContentSchedule>(`/api/content/items/${id}/schedule`, {
+    scheduledAt: payload.scheduledAt,
+    metaAssetId: payload.metaAssetId ?? null,
+    confirmInstagramAccount: payload.confirmInstagramAccount ?? false,
+  });
+  return res.data;
+}
+
+export async function getContentPublishTargets(platform: string): Promise<ContentPublishTargetsResponse> {
+  const res = await apiClient.get<ContentPublishTargetsResponse | readonly ContentPublishTarget[]>("/api/content/publish-targets", { params: { platform } });
+  if (Array.isArray(res.data)) {
+    const headerMode = res.headers["x-clawbot-publish-target-mode"];
+    const mode: ContentPublishTargetMode = headerMode === "standalone"
+      || headerMode === "invalid"
+      || headerMode === "unsupported"
+      ? headerMode
+      : "linked_meta";
+    return { mode, items: res.data };
+  }
+  return res.data as ContentPublishTargetsResponse;
 }
 
 export async function repurposeContentItem(id: string, targetPlatforms: readonly string[]): Promise<JobAccepted> {
@@ -306,4 +432,68 @@ export async function getContentCalendar(params: ContentCalendarParams = {}): Pr
 
 export async function deleteContentSchedule(id: string): Promise<void> {
   await apiClient.delete(`/api/content/schedule/${id}`);
+}
+
+// Phase 4.6: privileged durable retry — resets schedule state for the Hangfire publisher (no inline provider).
+export async function retryContentSchedule(id: string): Promise<ContentSchedule> {
+  const res = await apiClient.post<ContentSchedule>(`/api/content/schedules/${id}/publish/retry`);
+  return res.data;
+}
+
+export async function reconcileContentSchedule(
+  id: string,
+  payload: ReconcilePublishPayload,
+): Promise<ContentSchedule> {
+  const res = await apiClient.post<ContentSchedule>(`/api/content/schedules/${id}/publish/reconcile`, payload);
+  return res.data;
+}
+
+// P5 §4.5: đổi hook mở bài. Chỉ khả dụng khi bài sinh bằng prompt chaining (có L1/L2 đã lưu).
+export interface ContentHookOption {
+  readonly index: number;
+  readonly text: string;
+  readonly selected: boolean;
+}
+
+export interface ContentItemHooksResponse {
+  readonly available: boolean;
+  readonly hooks: readonly ContentHookOption[];
+}
+
+export async function getContentItemHooks(id: string): Promise<ContentItemHooksResponse> {
+  const res = await apiClient.get<ContentItemHooksResponse>(`/api/content/items/${id}/hooks`);
+  return res.data;
+}
+
+// Chạy ngầm: trả jobId; bài được sửa tại chỗ (revision mới + chờ duyệt lại) khi job xong.
+export async function regenerateContentHook(id: string, hookIndex: number): Promise<JobAccepted> {
+  const res = await apiClient.post<JobAccepted>(`/api/content/items/${id}/regenerate-hook`, { hookIndex });
+  return res.data;
+}
+
+// P5 §6: chỉ số vận hành chuỗi sinh nội dung, tổng hợp từ trace trong cửa sổ N ngày.
+export interface ContentChainStepMetric {
+  readonly stepId: string;
+  readonly attempts: number;
+  readonly gateFailures: number;
+  readonly gateFailRate: number;
+  readonly p95LatencyMs: number;
+}
+
+export interface ContentChainMetrics {
+  readonly windowDays: number;
+  readonly totalRuns: number;
+  readonly fallbackRuns: number;
+  readonly fallbackRate: number;
+  readonly avgTokensPerRun: number;
+  readonly avgUsdCostPerRun: number;
+  readonly steps: readonly ContentChainStepMetric[];
+  readonly reviewApproved: number;
+  readonly reviewTotal: number;
+  readonly reviewApproveRate: number;
+}
+
+export async function getContentChainMetrics(days = 7): Promise<ContentChainMetrics> {
+  const res = await apiClient.get<ContentChainMetrics>("/api/content/chain-metrics", { params: { days } });
+  return res.data;
 }

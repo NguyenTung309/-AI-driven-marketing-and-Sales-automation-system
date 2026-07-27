@@ -7,7 +7,12 @@ import { Button } from "@/shared/ui/Button";
 import { Card } from "@/shared/ui/Card";
 import { StatusPill } from "@/shared/ui/StatusPill";
 import { useAuthStore } from "@/shared/auth/authStore";
-import { formatOperationalTraceMessage, operationalPhaseLabel, toSafeCsvCell } from "@/shared/utils/userText";
+import {
+  formatOperationalTraceMessage,
+  operationalPhaseLabel,
+  toSafeCsvCell,
+  toUserFriendlyOrchestrationError,
+} from "@/shared/utils/userText";
 import { TaskResultDetails } from "./TaskResultDetails";
 import { useOrchestrationRealtime } from "./useOrchestrationRealtime";
 import { useRunControls } from "./useRunControls";
@@ -73,7 +78,8 @@ export default function AgentRunDetailPage() {
   const toolTracesByTask = useMemo(() => {
     const map = new Map<string, OrchestrationV2Trace[]>();
     for (const trace of traceItems) {
-      if (!trace.phase?.toLowerCase().startsWith("tool")) continue;
+      const phase = trace.phase?.toLowerCase();
+      if (!phase?.startsWith("tool") || phase === "tool_skipped") continue;
       const list = map.get(trace.taskId) ?? [];
       list.push(trace);
       map.set(trace.taskId, list);
@@ -185,7 +191,11 @@ export default function AgentRunDetailPage() {
                     <StatusPill tone={taskTone(task.status)}>{taskStatusLabel(task.status)}</StatusPill>
                   </div>
                   <p className="mt-1 text-body-md text-on-surface">{task.description}</p>
-                  {task.error && <p className="text-label-sm text-error">{task.error}</p>}
+                  {task.error && (
+                    <p className="text-label-sm text-error">
+                      {toUserFriendlyOrchestrationError(task.error) ?? task.error}
+                    </p>
+                  )}
                   <TaskResultDetails task={task} toolTraces={toolTracesByTask.get(task.id) ?? []} />
                 </li>
               ))}

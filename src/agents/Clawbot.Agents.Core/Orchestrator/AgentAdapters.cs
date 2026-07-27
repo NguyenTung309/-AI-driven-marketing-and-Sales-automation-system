@@ -6,6 +6,7 @@ using Clawbot.Agents.Core.Docs;
 using Clawbot.Agents.Core.Research;
 using Clawbot.Agents.Core.SaleAssist;
 using Clawbot.Domain.Ads;
+using Clawbot.SharedKernel.Content;
 
 namespace Clawbot.Agents.Core.Orchestrator;
 
@@ -64,10 +65,17 @@ public sealed class ContentAgentAdapter(ContentAgent agent) : AgentAdapterBase("
     protected override async Task<string> ExecuteCoreAsync(AgentTask task, CancellationToken ct)
     {
         var input = task.Input;
+        if (!ContentPlatformCatalog.TryNormalizeWritable(
+                AgentTaskInput.OptionalString(input, "platform"),
+                out var platform))
+        {
+            throw new ArgumentException("content.platform_unsupported");
+        }
+
         var result = await _agent.GenerateAsync(new ContentGenerateRequest(
             AgentTaskInput.RequiredGuid(input, "tenant_id"),
             AgentTaskInput.OptionalGuid(input, "brief_id"),
-            AgentTaskInput.RequiredString(input, "platform"),
+            platform!,
             AgentTaskInput.RequiredString(input, "brief"),
             AgentTaskInput.OptionalString(input, "kb_module_code")), ct).ConfigureAwait(false);
         return Json(result);
@@ -81,11 +89,22 @@ public sealed class ResearchAgentAdapter(IResearchAgent agent) : AgentAdapterBas
     protected override async Task<string> ExecuteCoreAsync(AgentTask task, CancellationToken ct)
     {
         var input = task.Input;
-        var result = await _agent.ScanAsync(new ResearchScanRequest(
+        var geo = AgentTaskInput.OptionalString(input, "geo") ?? "VN";
+        var trends = await _agent.ScanAsync(new ResearchScanRequest(
             AgentTaskInput.RequiredGuid(input, "tenant_id"),
-            AgentTaskInput.RequiredString(input, "geo"),
+            geo,
             AgentTaskInput.StringList(input, "keywords")), ct).ConfigureAwait(false);
-        return Json(result);
+
+        return trends.Count > 0
+            ? Json(new { trends, matched = trends.Count, geo })
+            : Json(new
+            {
+                trends,
+                matched = 0,
+                geo,
+                hint = "Không có chủ đề nào khớp keyword. Tool này chỉ quét trend theo keyword và không lọc theo ngày. "
+                     + "Nếu cần nội dung mới theo ngày, hãy gọi web.search."
+            });
     }
 }
 

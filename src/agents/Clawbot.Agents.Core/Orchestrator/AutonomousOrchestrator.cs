@@ -254,8 +254,14 @@ public sealed class AutonomousOrchestrator
         var completed = plan.Tasks.Count(t => string.Equals(t.Status, "completed", StringComparison.OrdinalIgnoreCase));
         var failed = plan.Tasks.Count(t => string.Equals(t.Status, "failed", StringComparison.OrdinalIgnoreCase));
         var sb = new System.Text.StringBuilder(256);
-        sb.Append("Hoàn thành ").Append(completed).Append('/').Append(plan.Tasks.Count).Append(" công việc");
-        if (failed > 0) sb.Append(" (").Append(failed).Append(" thất bại)");
+        // Không ghi "Hoàn thành N/N" khi toàn fail — tránh UI/đọc nhầm 0 lead = thành công.
+        if (failed > 0 && completed == 0)
+            sb.Append("Thất bại ").Append(failed).Append('/').Append(plan.Tasks.Count).Append(" công việc");
+        else if (failed > 0)
+            sb.Append("Hoàn thành ").Append(completed).Append('/').Append(plan.Tasks.Count)
+                .Append(" công việc (").Append(failed).Append(" thất bại)");
+        else
+            sb.Append("Hoàn thành ").Append(completed).Append('/').Append(plan.Tasks.Count).Append(" công việc");
         sb.Append(" cho mục tiêu: ").Append(request.Goal).Append('.');
         foreach (var task in plan.Tasks)
         {
@@ -318,9 +324,11 @@ public sealed class AutonomousOrchestrator
         ex.StatusCode is System.Net.HttpStatusCode.TooManyRequests
         || (int?)ex.StatusCode >= 500;
 
-    // EARS[WHEN a data-defined agent declares allowed tools THE SYSTEM SHALL run it through the tool-capable
-    // ReAct worker so it can delegate to the registered adapters (the "hands") instead of downgrading to text-only;
-    // WHEN no definition exists THE SYSTEM SHALL fall back to the static runtime registry adapter]
+    // Data-defined agents always go through GenericLlmAgentWorker. Tool hands come from:
+    //   1) agent_definitions.allowed_tools_json when non-empty, else
+    //   2) AgentToolDefaults by code/shortName/type (orchestrator auto-grants), else
+    //   3) text-only (reporter-style).
+    // WHEN no definition exists THE SYSTEM SHALL fall back to the static runtime registry adapter.
     private IAgent ResolveAgent(string name, AgentDefinitionCatalogEntry? definition, AutonomousRunRequest request, OrchestrationPlanTask task)
     {
         if (definition is not null)
@@ -399,7 +407,7 @@ public sealed class AutonomousOrchestrator
         return new AgentTask(task.Id, task.Agent, task.Description, input, task.RoleInstruction);
     }
 
-    private static readonly string[] PromotableIdKeys = ["content_id", "schedule_id", "post_url"];
+    private static readonly string[] PromotableIdKeys = ["content_id", "schedule_id", "post_url", "lead_id", "conversation_id"];
 
     // Scans each upstream output for a tool-result JSON object (either the worker's "[tool_results]\n{json}"
     // block or a bare JSON object) and copies known id fields up to the task input if not already set.
@@ -424,6 +432,14 @@ public sealed class AutonomousOrchestrator
                         var value = el.GetString();
                         if (!string.IsNullOrWhiteSpace(value)) input[key] = value;
                     }
+                }
+
+                // lead-agent list returns lead_ids[] — promote as JSON array string for dependents.
+                if (!input.ContainsKey("lead_ids")
+                    && doc.RootElement.TryGetProperty("lead_ids", out var leadIdsEl)
+                    && leadIdsEl.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    input["lead_ids"] = leadIdsEl.GetRawText();
                 }
             }
             catch (System.Text.Json.JsonException) { /* upstream output isn't JSON (e.g. research text) — skip */ }

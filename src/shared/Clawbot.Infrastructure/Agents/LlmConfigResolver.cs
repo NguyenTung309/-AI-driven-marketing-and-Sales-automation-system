@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Globalization;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Security;
@@ -17,6 +19,10 @@ public sealed partial class LlmConfigResolver(
     IEncryptor encryptor,
     ILogger<LlmConfigResolver>? logger = null) : ILlmConfigResolver
 {
+    // Cảnh báo thiếu đơn giá lặp mỗi lượt resolve sẽ ngập log -> log 1 lần cho mỗi (config, lần sửa);
+    // admin sửa config là UpdatedAt đổi nên cảnh báo tự bật lại nếu vẫn để trống đơn giá.
+    private static readonly ConcurrentDictionary<string, byte> WarnedMissingRates = new(StringComparer.Ordinal);
+
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IEncryptor _encryptor = encryptor;
     private readonly ILogger<LlmConfigResolver>? _logger = logger;
@@ -83,6 +89,8 @@ public sealed partial class LlmConfigResolver(
             throw new LlmConfigNotConfiguredException(tenantId, agentCode);
         }
 
+        WarnMissingRates(cfg.Id, cfg.UpdatedAt, cfg.Provider, effectiveModel, cfg.InputUsdPer1M, cfg.OutputUsdPer1M);
+
         return new ResolvedLlmConfig(
             cfg.Provider,
             effectiveModel,
@@ -91,8 +99,32 @@ public sealed partial class LlmConfigResolver(
             cfg.InputUsdPer1M,
             cfg.OutputUsdPer1M,
             cfg.TimeoutSeconds,
-            cfg.MaxOutputTokens);
+            cfg.MaxOutputTokens,
+            ConfigId: cfg.Id,
+            ConfigUpdatedAt: cfg.UpdatedAt,
+            SupportsVision: cfg.SupportsVision);
     }
+
+    // Đơn giá NULL -> client LLM âm thầm dùng mặc định 3.00/15.00 USD/1M (giá Claude). Áp giá đó cho
+    // model provider khác cho ra chi phí sai lệch nhiều lần mà không ai biết -> phải cảnh báo rõ.
+    private void WarnMissingRates(
+        Guid configId, DateTimeOffset updatedAt, string provider, string model, decimal? inputRate, decimal? outputRate)
+    {
+        if (_logger is null || (inputRate is not null && outputRate is not null))
+            return;
+
+        var key = string.Create(
+            CultureInfo.InvariantCulture, $"{configId}|{updatedAt.UtcTicks}");
+        if (!WarnedMissingRates.TryAdd(key, 0))
+            return;
+
+        LogMissingRates(_logger, configId, provider, model, inputRate, outputRate);
+    }
+
+    [LoggerMessage(EventId = 7302, Level = LogLevel.Warning,
+        Message = "LLM config {ConfigId} ({Provider}/{Model}) thiếu đơn giá (input={InputRate}, output={OutputRate}): hệ thống đang áp mặc định 3.00/15.00 USD/1M của Claude, chi phí báo cáo sẽ sai nếu provider có giá khác. Hãy nhập đơn giá thật trong màn hình cấu hình LLM.")]
+    private static partial void LogMissingRates(
+        ILogger logger, Guid configId, string provider, string model, decimal? inputRate, decimal? outputRate);
 
     [LoggerMessage(EventId = 7301, Level = LogLevel.Warning,
         Message = "LLM config fallback for agent {AgentCode} tenant {TenantId}: bound config {BoundConfigId} is inactive/missing, using active config {FallbackConfigId}")]

@@ -50,18 +50,27 @@ public sealed partial class LeadAgentGrpcService(
         if (!Guid.TryParse(request.ContactId, out var contactId) || contactId == Guid.Empty)
             throw new RpcException(new Status(StatusCode.InvalidArgument, "contact_id required"));
 
-        var result = await _runner.CreateWithSkillsAsync(
-            new LeadCreateInput(
-                tenantId,
-                contactId,
-                request.SourcePlatform,
-                request.DisplayName,
-                request.Phone,
-                request.Email,
-                request.Locale,
-                request.Country,
-                request.Note),
-            context.CancellationToken).ConfigureAwait(false);
+        LeadCreateResult result;
+        try
+        {
+            result = await _runner.CreateWithSkillsAsync(
+                new LeadCreateInput(
+                    tenantId,
+                    contactId,
+                    request.SourcePlatform,
+                    request.DisplayName,
+                    request.Phone,
+                    request.Email,
+                    request.Locale,
+                    request.Country,
+                    request.Note),
+                context.CancellationToken).ConfigureAwait(false);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            // Cùng quy ước với Score: contact không tồn tại là NotFound, không phải lỗi hệ thống.
+            throw new RpcException(new Status(StatusCode.NotFound, ex.Message));
+        }
 
         var response = new LeadCreateWithSkillsResponse
         {

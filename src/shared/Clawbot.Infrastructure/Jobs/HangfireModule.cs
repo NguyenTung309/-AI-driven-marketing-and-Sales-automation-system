@@ -36,6 +36,7 @@ public static class HangfireModule
         });
 
         services.AddScoped<RetentionPurgeJob>();
+        services.AddScoped<RequestStatsFlushJob>();
         services.AddScoped<DailySummaryJob>();
         services.AddScoped<DailyKpiRollupJob>();
         services.AddScoped<RefreshTokenCleanupJob>();
@@ -45,7 +46,14 @@ public static class HangfireModule
         services.AddScoped<IWeeklyTrendScanner, GrpcWeeklyTrendScanner>();
         services.AddScoped<WeeklyTrendScanJob>();
         services.AddScoped<ContentPublishJob>();
+        // Phase 3.9: outcome_unknown never blind-retried; privileged reconcile / provider lookup.
+        services.AddScoped<ContentPublishAttemptReconciliationJob>();
+        // Phase 6.7: durable content workflow health (review debt / held / outcome_unknown / pause).
+        services.Configure<ContentWorkflowHealthOptions>(
+            cfg.GetSection(ContentWorkflowHealthOptions.SectionName));
+        services.AddScoped<ContentWorkflowHealthJob>();
         services.AddScoped<MetaEngagementSyncJob>();
+        services.AddScoped<MetaCommentSyncJob>();
         services.AddScoped<MetaConnectionHealthJob>();
         services.AddScoped<MetaBusinessIntegrationWebhookJob>();
         services.AddScoped<AdsRuleEvaluationJob>();
@@ -80,6 +88,11 @@ public static class HangfireModule
         // Lớp 2: trích facts về khách sau hội thoại idle.
         services.AddScoped<Clawbot.Agents.Core.Learning.ContactFactExtractor>();
         services.AddScoped<ContactMemoryExtractionJob>();
+        // Ước tính doanh thu lead từ hội thoại (launch từ API khi → customer, không có revenue).
+        services.AddScoped<Clawbot.Agents.Core.Lead.LeadRevenueEstimator>();
+        services.AddScoped<Clawbot.Infrastructure.Leads.ILeadNotificationRecipientResolver,
+            Clawbot.Infrastructure.Leads.LeadNotificationRecipientResolver>();
+        services.AddScoped<Clawbot.Infrastructure.Leads.LeadRevenueEstimateService>();
         // Lớp 3: bài học cho reviewer từ lý do reject + nén KB weekly.
         services.AddScoped<Clawbot.Agents.Core.Learning.AgentMistakeExtractor>();
         services.AddScoped<AgentMemoryDistillationJob>();
@@ -122,6 +135,11 @@ public static class HangfireModule
             "retention",
             j => j.RunAsync(CancellationToken.None),
             Cron.Daily(2));
+        recurring.AddOrUpdate<RequestStatsFlushJob>(
+            "request-stats-flush",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            "* * * * *");
         recurring.AddOrUpdate<DailyKpiRollupJob>(
             "kpi-daily-rollup",
             "kpi",
@@ -164,8 +182,18 @@ public static class HangfireModule
             "content",
             j => j.RunAsync(CancellationToken.None),
             "*/5 * * * *");
+        recurring.AddOrUpdate<ContentPublishAttemptReconciliationJob>(
+            "content-publish-reconcile",
+            "content",
+            j => j.RunAsync(CancellationToken.None),
+            "*/10 * * * *");
         recurring.AddOrUpdate<ContentReviewSlaJob>(
             "content-review-sla",
+            "content",
+            j => j.RunAsync(CancellationToken.None),
+            "*/5 * * * *");
+        recurring.AddOrUpdate<ContentWorkflowHealthJob>(
+            "content-workflow-health",
             "content",
             j => j.RunAsync(CancellationToken.None),
             "*/5 * * * *");
@@ -181,12 +209,17 @@ public static class HangfireModule
             "default",
             j => j.RunScanAsync(CancellationToken.None),
             "*/2 * * * *");
-        // Refresh like/comment counts on published Facebook posts (Graph API — Pancake has no metric).
+        // Refresh like/comment counts on published Facebook and Instagram posts (Graph API — Pancake has no metric).
         recurring.AddOrUpdate<MetaEngagementSyncJob>(
             "meta-engagement-sync",
             "default",
             j => j.RunAsync(CancellationToken.None),
             "*/15 * * * *");
+        recurring.AddOrUpdate<MetaCommentSyncJob>(
+            "meta-comment-sync",
+            "default",
+            j => j.RunAsync(CancellationToken.None),
+            "*/5 * * * *");
         recurring.AddOrUpdate<AdsRuleEvaluationJob>(
             "ads-rule-evaluation",
             "ads",

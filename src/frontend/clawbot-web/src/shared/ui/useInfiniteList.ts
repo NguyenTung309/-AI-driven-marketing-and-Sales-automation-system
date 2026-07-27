@@ -49,7 +49,7 @@ export interface UseInfiniteListOptions<T, TPage extends ListPageShape<T>> {
     | ((query: { state: { data: InfiniteData<TPage> | undefined } }) => number | false | undefined);
 }
 
-export interface UseInfiniteListResult<T> {
+export interface UseInfiniteListResult<T, TPage extends ListPageShape<T> = ListPageShape<T>> {
   readonly items: T[];
   readonly total: number | null;
   readonly hasNextPage: boolean;
@@ -59,12 +59,12 @@ export interface UseInfiniteListResult<T> {
   readonly error: Error | null;
   readonly fetchNextPage: () => void;
   readonly refetch: () => void;
-  readonly query: UseInfiniteQueryResult<InfiniteData<ListPageShape<T>>, Error>;
+  readonly query: UseInfiniteQueryResult<InfiniteData<TPage>, Error>;
 }
 
 export function useInfiniteList<T, TPage extends ListPageShape<T> = ListPageShape<T>>(
   options: UseInfiniteListOptions<T, TPage>,
-): UseInfiniteListResult<T> {
+): UseInfiniteListResult<T, TPage> {
   const query = useInfiniteQuery({
     queryKey: options.queryKey,
     queryFn: ({ pageParam }) => options.queryFn(pageParam),
@@ -103,6 +103,6 @@ export function useInfiniteList<T, TPage extends ListPageShape<T> = ListPageShap
     refetch: () => {
       void query.refetch();
     },
-    query: query as UseInfiniteQueryResult<InfiniteData<ListPageShape<T>>, Error>,
+    query: query as UseInfiniteQueryResult<InfiniteData<TPage>, Error>,
   };
 }

@@ -58,7 +58,8 @@ public sealed partial class DailyKpiRollupJob(
                         row.Replies,
                         row.Conversions,
                         row.AvgResponseTimeSec,
-                        row.AdSpend);
+                        row.AdSpend,
+                        row.Revenue);
                 }
 
                 await _db.SaveChangesAsync(ct).ConfigureAwait(false);

@@ -37,15 +37,19 @@ public sealed class Lead : AggregateRoot<Guid>, ITenantOwned
 
     public void AdjustScore(int delta, string reason, DateTimeOffset at)
     {
+        // Out-of-order: không lùi LastActivityAt; message cũ không được reactivated lost.
+        var isStale = LastActivityAt is { } prev && prev > at;
+        if (isStale)
+            at = LastActivityAt!.Value;
+
         var previousScore = Score;
         var previousStage = Stage;
         Score = Math.Max(0, Score + delta);
-        Stage = Score switch
-        {
-            >= 70 => "hot",
-            >= 30 => "warm",
-            _     => "cold",
-        };
+
+        var isTerminal = previousStage is "customer" or "lost";
+        var isReactivating = previousStage == "lost" && delta > 0 && !isStale;
+        if (!isTerminal || isReactivating)
+            Stage = PipelineStageFromScore(Score);
 
         var metaJson = JsonSerializer.Serialize(new
         {
@@ -60,12 +64,117 @@ public sealed class Lead : AggregateRoot<Guid>, ITenantOwned
         _activities.Add(LeadActivity.Create(TenantId, Id, "score_adjust", reason, at, metaJson));
         LastActivityAt = at;
 
+        if (isReactivating)
+        {
+            AddStageChangeActivity(previousStage, Stage, reason, at, byUserId: null, "reactivated");
+            Raise(new Events.LeadReactivated(TenantId, Id, OwnerUserId, Score, at));
+        }
+
         // Raise on upward stage transition only (consumed by Lead-2 auto-assign+notify / Lead-3 drip-enroll).
-        if (Stage == "hot" && previousStage != "hot")
+        if (!isReactivating && Stage == "hot" && previousStage != "hot")
             Raise(new Events.LeadBecameHot(TenantId, Id, OwnerUserId, Score, at));
-        else if (Stage == "warm" && previousStage == "cold")
+        else if (!isReactivating && Stage == "warm" && previousStage == "cold")
             Raise(new Events.LeadBecameWarm(TenantId, Id, Score, at));
     }
 
+    public void MarkCustomer(
+        string reason,
+        DateTimeOffset at,
+        Guid? byUserId = null,
+        string trigger = "manual")
+    {
+        if (Stage == "customer")
+            return;
+
+        var previousStage = Stage;
+        Stage = "customer";
+        LastActivityAt = at;
+        AddStageChangeActivity(previousStage, Stage, reason, at, byUserId, trigger);
+        Raise(new Events.LeadBecameCustomer(TenantId, Id, OwnerUserId, Score, at));
+    }
+
+    public void MarkLost(
+        string reason,
+        DateTimeOffset at,
+        Guid? byUserId = null,
+        string trigger = "manual")
+    {
+        if (Stage == "lost")
+            return;
+
+        var previousStage = Stage;
+        Stage = "lost";
+        AddStageChangeActivity(previousStage, Stage, reason, at, byUserId, trigger);
+    }
+
+    public void ReopenStage(string reason, DateTimeOffset at, Guid? byUserId)
+    {
+        if (Stage is not ("customer" or "lost"))
+            return;
+
+        var previousStage = Stage;
+        Stage = PipelineStageFromScore(Score);
+        LastActivityAt = at;
+        AddStageChangeActivity(previousStage, Stage, reason, at, byUserId, "manual");
+    }
+
+    public bool ReactivateFromInbound(DateTimeOffset at)
+    {
+        if (Stage != "lost")
+            return false;
+        // Message cũ / out-of-order không được hồi sinh và không kéo LastActivityAt lùi.
+        if (LastActivityAt is { } prev && prev >= at)
+            return false;
+
+        var previousStage = Stage;
+        Stage = PipelineStageFromScore(Score);
+        LastActivityAt = at;
+        AddStageChangeActivity(previousStage, Stage, "customer_inbound", at, byUserId: null, "reactivated");
+        Raise(new Events.LeadReactivated(TenantId, Id, OwnerUserId, Score, at));
+        return true;
+    }
+
+    /// <summary>
+    /// Tin inbound (kể cả không match scoring rule) vẫn reset đồng hồ im lặng —
+    /// tránh auto-lost khi khách nhắn "ok" / "dạ" không sinh delta.
+    /// lost → ReactivateFromInbound; customer/pipeline → chỉ bump LastActivityAt.
+    /// </summary>
+    public bool TouchInboundActivity(DateTimeOffset at)
+    {
+        if (Stage == "lost")
+            return ReactivateFromInbound(at);
+
+        if (LastActivityAt is { } prev && prev >= at)
+            return false;
+
+        LastActivityAt = at;
+        return true;
+    }
+
     public void Assign(Guid userId) => OwnerUserId = userId;
+
+    private void AddStageChangeActivity(
+        string previousStage,
+        string newStage,
+        string reason,
+        DateTimeOffset at,
+        Guid? byUserId,
+        string trigger)
+    {
+        var metaJson = JsonSerializer.Serialize(new
+        {
+            previousStage,
+            newStage,
+            byUserId,
+            trigger,
+        });
+        _activities.Add(LeadActivity.Create(TenantId, Id, "stage_change", reason, at, metaJson));
+    }
+
+    private static string PipelineStageFromScore(int score) => score switch
+    {
+        >= 70 => "hot",
+        >= 30 => "warm",
+        _ => "cold",
+    };
 }

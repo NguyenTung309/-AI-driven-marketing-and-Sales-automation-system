@@ -16,6 +16,8 @@ export interface TokenAgentUsage {
   readonly monthlyQuotaTokens: number;
   readonly alertPercent: number;
   readonly usagePercent: number;
+  /** Có ít nhất một lượt gọi token/cost do hệ thống ước lượng (provider không trả usage). */
+  readonly hasEstimated: boolean;
 }
 
 export interface TokenModelUsage {
@@ -24,6 +26,7 @@ export interface TokenModelUsage {
   readonly totalTokens: number;
   readonly usd: number;
   readonly percent: number;
+  readonly hasEstimated: boolean;
 }
 
 export interface TokenAlertSettings {
@@ -46,6 +49,11 @@ export interface TokenUsageResponse {
   readonly agents: readonly TokenAgentUsage[];
   readonly models: readonly TokenModelUsage[];
   readonly alert: TokenAlertSettings;
+  /** Phần chi phí provider báo thật (usd = measuredUsd + estimatedUsd). */
+  readonly measuredUsd: number;
+  /** Phần chi phí hệ thống ước lượng cục bộ — thấp hơn hóa đơn thật, phải gắn nhãn khi hiển thị. */
+  readonly estimatedUsd: number;
+  readonly hasEstimated: boolean;
 }
 
 export interface TokenQuotaUpdate {

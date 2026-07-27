@@ -16,7 +16,8 @@ public sealed partial class ForecastPrecomputeJob(
     IClock clock,
     ILogger<ForecastPrecomputeJob> logger)
 {
-    private static readonly string[] Platforms = ["all", "zalo", "facebook", "instagram", "tiktok", "youtube"];
+    private static readonly string[] Platforms =
+        ["all", "facebook", "zalo", "instagram", "tiktok", "youtube"];
     private static readonly string[] Metrics = ["leads", "dms", "replies", "conversions", "cpl", "ad_spend"];
 
     private readonly AppDbContext _db = db;

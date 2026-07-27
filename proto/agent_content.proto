@@ -10,6 +10,9 @@ service ContentAgent {
   // Review-gate P1: reviewer-agent chấm một content item; verdict=approve thì stamp ApprovedByAgentId,
   // reject thì demote kèm lý do, needs_human giữ nguyên chờ người (fail-closed).
   rpc Review (ReviewContentRequest) returns (ReviewContentResponse);
+  // Prompt chaining P5 (§4.5): chạy lại L3+L4 với hook marketer chọn, tái dùng L1/L2 đã lưu; revise body
+  // tại chỗ item cũ. Chỉ chạy được khi item có ảnh chụp chuỗi (chain_plan_json/chain_outline_json).
+  rpc RegenerateHook (RegenerateHookRequest) returns (ContentResponse);
 }
 
 message ContentRequest {
@@ -38,6 +41,13 @@ message RepurposeRequest {
   string content_id = 2;
   repeated string target_channels = 3;
   string source_body = 4;
+}
+
+message RegenerateHookRequest {
+  string tenant_id = 1;
+  string content_id = 2;
+  int32 hook_index = 3;
+  int32 expected_revision = 4;
 }
 
 message ReviewContentRequest {

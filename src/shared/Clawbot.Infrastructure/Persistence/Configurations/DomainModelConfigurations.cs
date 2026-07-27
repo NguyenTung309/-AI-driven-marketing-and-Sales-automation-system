@@ -42,11 +42,22 @@ public sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.Property(x => x.WidgetGreeting).HasMaxLength(1024);
         builder.Property(x => x.RequireOrchestrationApproval).HasDefaultValue(false);
         builder.Property(x => x.RequireContentReview).HasDefaultValue(false);
+        builder.Property(x => x.ContentPublishingApprovalPolicy)
+            .HasMaxLength(32)
+            .HasDefaultValue(Tenant.ContentPublishingPolicyHumanRequired)
+            .IsRequired();
+        builder.Property(x => x.ContentPublishingPolicyVersion).HasDefaultValue(1L);
+        builder.Property(x => x.ContentPublishingPolicyUpdatedAt).IsRequired();
         builder.Property(x => x.RequireChatReplyApproval).HasDefaultValue(false);
         builder.Property(x => x.SkipChatReplyReview).HasDefaultValue(false);
         builder.Property(x => x.MonthlyCostCapUsd).HasColumnType("decimal(12,2)");
         builder.Property(x => x.AiAutoReplyResumeMinutes).HasColumnName("ai_auto_reply_resume_minutes").HasDefaultValue(5);
         builder.Property(x => x.IdleAlertMinutes).HasColumnName("idle_alert_minutes").HasDefaultValue(5);
+        builder.Property(x => x.LeadLostAfterDays)
+            .HasColumnName("lead_lost_after_days")
+            .HasDefaultValue(60)
+            .ValueGeneratedNever();
+        builder.Property(x => x.AutoApproveLeadRevenue).HasColumnName("auto_approve_lead_revenue").HasDefaultValue(false);
         builder.HasIndex(x => x.Slug).IsUnique();
     }
 }
@@ -105,6 +116,7 @@ public sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.Property(x => x.Action).HasMaxLength(64).IsRequired();
         builder.Property(x => x.ResourceType).HasMaxLength(64).IsRequired();
         builder.Property(x => x.UserAgent).HasMaxLength(HttpAuditContext.MaxUserAgentLength);
+        builder.Property(x => x.EventKey).HasMaxLength(256);
         builder.Property(x => x.IpAddress)
             .HasConversion(
                 v => v == null ? null : v.ToString(),
@@ -112,6 +124,11 @@ public sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
             .HasMaxLength(45);
         builder.HasIndex(x => new { x.TenantId, x.OccurredAt });
         builder.HasIndex(x => new { x.ResourceType, x.ResourceId });
+        builder.HasIndex(x => new { x.TenantId, x.EventKey })
+            .IsUnique()
+            .HasFilter("[event_key] IS NOT NULL");
+        builder.HasIndex(x => new { x.TenantId, x.ResourceId, x.StateSequence })
+            .HasFilter("[state_sequence] IS NOT NULL");
     }
 }
 
@@ -153,9 +170,11 @@ public sealed class MessageConfiguration : IEntityTypeConfiguration<Message>
         builder.Property(x => x.SenderType).HasMaxLength(16).IsRequired();
         builder.Property(x => x.ContentType).HasMaxLength(32);
         builder.Property(x => x.AttachmentUrl).HasMaxLength(2048);
+        builder.Property(x => x.ParentCommentId).HasColumnName("parent_comment_id").HasMaxLength(256);
         builder.Property(x => x.Status).HasMaxLength(32).IsRequired().HasDefaultValue("sent");
         builder.HasIndex(x => new { x.ConversationId, x.SentAt });
         builder.HasIndex(x => new { x.TenantId, x.SentAt });
+        builder.HasIndex(x => new { x.TenantId, x.ParentCommentId });
     }
 }
 
@@ -165,7 +184,9 @@ public sealed class LeadConfiguration : IEntityTypeConfiguration<Lead>
     {
         builder.ToTable("leads");
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.Stage).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.Stage).HasMaxLength(32).IsRequired().IsConcurrencyToken();
+        // Cùng Stage: inbound TouchInbound chỉ đổi LastActivityAt — token này chặn auto-lost ghi đè lead vừa nhắn.
+        builder.Property(x => x.LastActivityAt).IsConcurrencyToken();
         builder.Property(x => x.SourcePlatform).HasMaxLength(32);
         builder.HasMany(x => x.Activities).WithOne().HasForeignKey(a => a.LeadId).OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(x => new { x.TenantId, x.Stage, x.Score });
@@ -180,6 +201,23 @@ public sealed class LeadActivityConfiguration : IEntityTypeConfiguration<LeadAct
         builder.HasKey(x => x.Id);
         builder.Property(x => x.ActivityType).HasMaxLength(64).IsRequired();
         builder.HasIndex(x => new { x.LeadId, x.OccurredAt });
+    }
+}
+
+public sealed class LeadRevenueConfiguration : IEntityTypeConfiguration<LeadRevenue>
+{
+    public void Configure(EntityTypeBuilder<LeadRevenue> builder)
+    {
+        builder.ToTable("lead_revenues");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Amount).HasPrecision(18, 2);
+        builder.Property(x => x.Currency).HasMaxLength(8).IsRequired();
+        builder.Property(x => x.Source).HasMaxLength(16).IsRequired();
+        builder.Property(x => x.Status).HasMaxLength(16).IsRequired().IsConcurrencyToken();
+        builder.Property(x => x.Evidence).HasMaxLength(1000);
+        builder.HasOne<Lead>().WithMany().HasForeignKey(x => x.LeadId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(x => new { x.TenantId, x.Status, x.CreatedAt });
+        builder.HasIndex(x => x.LeadId);
     }
 }
 
@@ -424,7 +462,6 @@ public sealed class AgentSessionConfiguration : IEntityTypeConfiguration<AgentSe
         builder.Property(x => x.ReplanCount).HasDefaultValue(0);
         builder.Property(x => x.UserId).HasColumnName("user_id");
         builder.Property(x => x.ArchivedAt).HasColumnName("archived_at");
-        builder.Property(x => x.RowVersion).IsRowVersion();
         builder.HasMany(x => x.Traces).WithOne().HasForeignKey(t => t.SessionId).OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(x => new { x.TenantId, x.StartedAt });
         builder.HasIndex(x => new { x.TenantId, x.Status, x.StartedAt });
@@ -575,10 +612,30 @@ public sealed class ContentItemConfiguration : IEntityTypeConfiguration<ContentI
     {
         builder.ToTable("content_items");
         builder.HasKey(x => x.Id);
+        builder.HasAlternateKey(x => new { x.TenantId, x.Id });
         builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
         builder.Property(x => x.Status).HasMaxLength(32).IsRequired();
         builder.Property(x => x.ApprovedByAgentId).HasColumnName("approved_by_agent_id");
         builder.Property(x => x.RejectedReason).HasMaxLength(1024);
+        builder.Property(x => x.ContentRevision).HasDefaultValue(1);
+        builder.Property(x => x.AgentReviewStatus)
+            .HasMaxLength(24)
+            .HasDefaultValue(ContentItem.ReviewStatusPending)
+            .IsRequired();
+        builder.Property(x => x.AgentReviewReason).HasMaxLength(ContentItem.MaxReviewReasonLength);
+        builder.Property(x => x.ImageReviewStatus)
+            .HasMaxLength(24)
+            .HasDefaultValue(ContentItem.ImageReviewStatusPending)
+            .IsRequired();
+        builder.Property(x => x.ReviewedImageCount).HasDefaultValue(0);
+        builder.Property(x => x.AgentReviewAttemptCount).HasDefaultValue(0);
+        builder.Property(x => x.PublishingPolicyApplied).HasMaxLength(32);
+        builder.Property(x => x.HumanApprovalRequirementReason).HasMaxLength(32);
+        builder.Property(x => x.ApprovalMode).HasMaxLength(16);
+        builder.Property(x => x.ApprovalReason).HasMaxLength(ContentItem.MaxApprovalReasonLength);
+        // Prompt chaining P4: ảnh chụp L1/L2 để repurpose tái dùng (§4.5). NVARCHAR(MAX) — plan+outline có thể dài.
+        builder.Property(x => x.ChainPlanJson).HasColumnName("chain_plan_json");
+        builder.Property(x => x.ChainOutlineJson).HasColumnName("chain_outline_json");
         builder.HasIndex(x => new { x.TenantId, x.Status, x.CreatedAt });
     }
 }
@@ -587,17 +644,253 @@ public sealed class ContentScheduleConfiguration : IEntityTypeConfiguration<Cont
 {
     public void Configure(EntityTypeBuilder<ContentSchedule> builder)
     {
-        builder.ToTable("content_schedule");
+        // SQL Server writer-gate trigger forbids OUTPUT without INTO; EF must not use OUTPUT clause.
+        builder.ToTable("content_schedule", table =>
+            table.HasTrigger("TR_content_schedule_writer_gate"));
         builder.HasKey(x => x.Id);
+        builder.HasAlternateKey(x => new { x.TenantId, x.Id });
         builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
-        builder.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.ContentRevision);
+        builder.Property(x => x.ActiveRevisionSlot).HasColumnName("active_revision_slot");
+        builder.Property(x => x.ApprovalMode).HasMaxLength(16);
+        builder.Property(x => x.Status)
+            .HasMaxLength(32)
+            .HasDefaultValue(ContentSchedule.StatusPending)
+            .IsRequired();
         builder.Property(x => x.PostUrl).HasMaxLength(512);
+        builder.Property(x => x.ExternalPostId)
+            .HasColumnName("external_post_id")
+            .HasMaxLength(ContentSchedule.MaxExternalPostIdLength);
+        builder.Property(x => x.ProviderTargetId).HasColumnName("provider_target_id").HasMaxLength(128);
+        builder.Property(x => x.MetaCommentsSyncedAt).HasColumnName("meta_comments_synced_at");
+        builder.Property(x => x.LastError).HasColumnName("last_error").HasMaxLength(ContentSchedule.MaxLastErrorLength);
+        builder.Property(x => x.LastErrorCode).HasMaxLength(128);
+        builder.Property(x => x.RetryCount).HasColumnName("retry_count");
         builder.HasOne<MetaAsset>()
             .WithMany()
             .HasForeignKey(x => x.MetaAssetId)
             .OnDelete(DeleteBehavior.SetNull);
+        builder.HasOne<ContentItem>()
+            .WithMany()
+            .HasForeignKey(x => new { x.TenantId, x.ContentItemId })
+            .HasPrincipalKey(x => new { x.TenantId, x.Id })
+            .OnDelete(DeleteBehavior.NoAction);
         builder.HasIndex(x => x.MetaAssetId);
         builder.HasIndex(x => new { x.TenantId, x.ScheduledAt });
+        builder.HasIndex(x => new
+            {
+                x.TenantId,
+                x.ContentItemId,
+                x.ActiveRevisionSlot,
+            })
+            .IsUnique()
+            .HasFilter("[active_revision_slot] IS NOT NULL");
+    }
+}
+
+public sealed class ContentReviewTaskConfiguration : IEntityTypeConfiguration<ContentReviewTask>
+{
+    public void Configure(EntityTypeBuilder<ContentReviewTask> builder)
+    {
+        builder.ToTable("content_review_tasks");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Status).HasMaxLength(24).IsRequired();
+        builder.Property(x => x.LastErrorCode).HasMaxLength(128);
+        // Refine P6 (§4.7): số vòng sửa-tự-động đã dùng cho revision này; đúng 1 vòng nên chỉ 0→1.
+        builder.Property(x => x.RefineAttemptCount).HasDefaultValue(0);
+        builder.HasOne<ContentItem>()
+            .WithMany()
+            .HasForeignKey(x => new { x.TenantId, x.ContentItemId })
+            .HasPrincipalKey(x => new { x.TenantId, x.Id })
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasIndex(x => new { x.TenantId, x.ContentItemId, x.ContentRevision }).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.Status, x.NextAttemptAt });
+        builder.HasIndex(x => new { x.TenantId, x.Status, x.LeaseExpiresAt });
+    }
+}
+
+public sealed class ContentRenderTaskConfiguration : IEntityTypeConfiguration<ContentRenderTask>
+{
+    public void Configure(EntityTypeBuilder<ContentRenderTask> builder)
+    {
+        builder.ToTable("content_render_tasks", table =>
+        {
+            table.HasCheckConstraint(
+                "CK_content_render_tasks_revision",
+                "source_revision > 0 AND source_revision < 2147483647 AND template_version > 0 AND attempt_count >= 0");
+            table.HasCheckConstraint(
+                "CK_content_render_tasks_status",
+                "status IN ('pending', 'leased', 'completed', 'failed', 'canceled_stale')");
+            table.HasCheckConstraint(
+                "CK_content_render_tasks_preset",
+                "preset IN ('1200x630', '1080x1080')");
+            table.HasCheckConstraint(
+                "CK_content_render_tasks_state",
+                "(status = 'pending' AND lease_token IS NULL AND claimed_lease_token IS NULL AND lease_expires_at IS NULL AND completed_at IS NULL AND output_asset_id IS NULL AND completed_revision IS NULL) OR "
+                + "(status = 'leased' AND lease_token IS NOT NULL AND (claimed_lease_token IS NULL OR claimed_lease_token = lease_token) AND lease_expires_at IS NOT NULL AND completed_at IS NULL AND output_asset_id IS NULL AND completed_revision IS NULL) OR "
+                + "(status = 'completed' AND lease_token IS NULL AND claimed_lease_token IS NULL AND lease_expires_at IS NULL AND completed_at IS NOT NULL AND output_asset_id IS NOT NULL AND completed_revision = source_revision + 1) OR "
+                + "(status IN ('failed', 'canceled_stale') AND lease_token IS NULL AND claimed_lease_token IS NULL AND lease_expires_at IS NULL AND completed_at IS NOT NULL AND output_asset_id IS NULL AND completed_revision IS NULL)");
+        });
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.TemplateId)
+            .HasMaxLength(ContentRenderTask.MaxTemplateIdLength)
+            .IsRequired();
+        builder.Property(x => x.TemplateHash).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.Preset)
+            .HasMaxLength(ContentRenderTask.MaxPresetLength)
+            .IsRequired();
+        builder.Property(x => x.CanonicalSlotsJson)
+            .HasMaxLength(ContentRenderTask.MaxCanonicalSlotsUtf8Bytes)
+            .IsRequired();
+        builder.Property(x => x.SlotsHash).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.Status)
+            .HasMaxLength(24)
+            .HasDefaultValue(ContentRenderTask.StatusPending)
+            .IsRequired();
+        builder.Property(x => x.AttemptCount).HasDefaultValue(0);
+        builder.Property(x => x.LastErrorCode)
+            .HasMaxLength(ContentRenderTask.MaxErrorCodeLength);
+        builder.HasOne<ContentItem>()
+            .WithMany()
+            .HasForeignKey(x => new { x.TenantId, x.ContentItemId })
+            .HasPrincipalKey(x => new { x.TenantId, x.Id })
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasIndex(x => new { x.TenantId, x.ContentItemId, x.SourceRevision })
+            .IsUnique()
+            .HasDatabaseName("UX_content_render_tasks_item_revision");
+        builder.HasIndex(x => new { x.TenantId, x.Status, x.NextAttemptAt, x.CreatedAt })
+            .HasDatabaseName("IX_content_render_tasks_due");
+        builder.HasIndex(x => new { x.TenantId, x.Status, x.LeaseExpiresAt })
+            .HasDatabaseName("IX_content_render_tasks_expired_lease");
+    }
+}
+
+public sealed class ContentAssetConfiguration : IEntityTypeConfiguration<ContentAsset>
+{
+    public void Configure(EntityTypeBuilder<ContentAsset> builder)
+    {
+        builder.ToTable("content_assets");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.StorageKey).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.Status).HasMaxLength(24).IsRequired();
+        builder.Property(x => x.Sha256).HasColumnType("binary(32)");
+        builder.Property(x => x.ContentType).HasMaxLength(128);
+        builder.Property(x => x.OriginalFileName).HasMaxLength(255);
+        builder.Property(x => x.LastErrorCode).HasMaxLength(128);
+        builder.HasOne<ContentItem>()
+            .WithMany()
+            .HasForeignKey(x => new { x.TenantId, x.ContentItemId })
+            .HasPrincipalKey(x => new { x.TenantId, x.Id })
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasIndex(x => x.StorageKey).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.ContentItemId, x.Status, x.SortOrder });
+        builder.HasIndex(x => new { x.TenantId, x.ContentItemId, x.SortOrder })
+            .IsUnique()
+            .HasFilter("[status] = 'ready'");
+        builder.HasIndex(x => new { x.Status, x.CreatedAt });
+    }
+}
+
+public sealed class ContentPublishAttemptConfiguration : IEntityTypeConfiguration<ContentPublishAttempt>
+{
+    public void Configure(EntityTypeBuilder<ContentPublishAttempt> builder)
+    {
+        // SQL Server writer-gate trigger forbids OUTPUT without INTO; EF must not use OUTPUT clause.
+        builder.ToTable("content_publish_attempts", table =>
+            table.HasTrigger("TR_content_publish_attempts_writer_gate"));
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.IdempotencyKey).HasMaxLength(160).IsRequired();
+        builder.Property(x => x.BodySnapshot).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.AssetsSnapshotJson).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.SnapshotSha256).HasColumnType("binary(32)").IsRequired();
+        builder.Property(x => x.Status).HasMaxLength(24).IsRequired();
+        builder.Property(x => x.ProviderRequestId).HasMaxLength(256);
+        builder.Property(x => x.ExternalPostId).HasMaxLength(256);
+        builder.Property(x => x.LastErrorCode).HasMaxLength(128);
+        builder.HasOne<ContentSchedule>()
+            .WithMany()
+            .HasForeignKey(x => new { x.TenantId, x.ScheduleId })
+            .HasPrincipalKey(x => new { x.TenantId, x.Id })
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<ContentItem>()
+            .WithMany()
+            .HasForeignKey(x => new { x.TenantId, x.ContentItemId })
+            .HasPrincipalKey(x => new { x.TenantId, x.Id })
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasIndex(x => x.AttemptToken).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.IdempotencyKey }).IsUnique();
+        // One active claim only; failed/outcome_unknown/succeeded rows may coexist for history/retry.
+        builder.HasIndex(x => new
+            {
+                x.TenantId,
+                x.ScheduleId,
+                x.ContentItemId,
+                x.ContentRevision,
+                x.PublishTargetId,
+            })
+            .IsUnique()
+            .HasFilter("[status] IN ('claimed', 'transmitted')");
+        builder.HasIndex(x => new { x.TenantId, x.Status, x.ClaimedAt });
+        builder.HasIndex(x => new { x.TenantId, x.Status, x.LeaseExpiresAt });
+    }
+}
+
+public sealed class ContentWorkflowMetricsHourlyConfiguration
+    : IEntityTypeConfiguration<ContentWorkflowMetricsHourly>
+{
+    public void Configure(EntityTypeBuilder<ContentWorkflowMetricsHourly> builder)
+    {
+        builder.ToTable("content_workflow_metrics_hourly");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).ValueGeneratedOnAdd();
+        builder.Property(x => x.ReviewPassedCount).HasDefaultValue(0L);
+        builder.Property(x => x.ReviewRejectedCount).HasDefaultValue(0L);
+        builder.Property(x => x.ReviewNeedsHumanCount).HasDefaultValue(0L);
+        builder.Property(x => x.ReviewFailedCount).HasDefaultValue(0L);
+        builder.Property(x => x.ImageReviewedCount).HasDefaultValue(0L);
+        builder.Property(x => x.ImageNotApplicableCount).HasDefaultValue(0L);
+        builder.Property(x => x.ImageSkippedUnsupportedCount).HasDefaultValue(0L);
+        builder.Property(x => x.ImageFailedCount).HasDefaultValue(0L);
+        builder.Property(x => x.HumanFallbackCount).HasDefaultValue(0L);
+        builder.Property(x => x.HumanOverrideCount).HasDefaultValue(0L);
+        builder.Property(x => x.HumanRejectCount).HasDefaultValue(0L);
+        builder.Property(x => x.HeldScheduleCount).HasDefaultValue(0L);
+        builder.Property(x => x.PublishSucceededCount).HasDefaultValue(0L);
+        builder.Property(x => x.PublishFailedCount).HasDefaultValue(0L);
+        builder.Property(x => x.PublishOutcomeUnknownCount).HasDefaultValue(0L);
+        builder.Property(x => x.ReviewLatencyMsSum).HasDefaultValue(0L);
+        builder.Property(x => x.ReviewLatencySampleCount).HasDefaultValue(0L);
+        builder.Property(x => x.PublishLatencyMsSum).HasDefaultValue(0L);
+        builder.Property(x => x.PublishLatencySampleCount).HasDefaultValue(0L);
+        builder.Property(x => x.LlmInputTokens).HasDefaultValue(0L);
+        builder.Property(x => x.LlmOutputTokens).HasDefaultValue(0L);
+        builder.Property(x => x.LlmCostUsd).HasPrecision(18, 6).HasDefaultValue(0m);
+        builder.HasIndex(x => new { x.TenantId, x.HourUtc }).IsUnique();
+        builder.HasIndex(x => x.HourUtc);
+    }
+}
+
+public sealed class ContentGenerationTraceConfiguration
+    : IEntityTypeConfiguration<ContentGenerationTrace>
+{
+    public void Configure(EntityTypeBuilder<ContentGenerationTrace> builder)
+    {
+        builder.ToTable("content_generation_traces");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).ValueGeneratedOnAdd();
+        builder.Property(x => x.StepId).HasMaxLength(ContentGenerationTrace.StepIdMaxLength).IsRequired();
+        builder.Property(x => x.PromptVersion).HasMaxLength(ContentGenerationTrace.PromptVersionMaxLength).IsRequired();
+        builder.Property(x => x.Model).HasMaxLength(ContentGenerationTrace.ModelMaxLength);
+        builder.Property(x => x.GateResult).HasMaxLength(ContentGenerationTrace.GateResultMaxLength).IsRequired();
+        builder.Property(x => x.PayloadJson).HasMaxLength(ContentGenerationTrace.PayloadJsonMaxLength);
+        builder.Property(x => x.InputTokens).HasDefaultValue(0);
+        builder.Property(x => x.OutputTokens).HasDefaultValue(0);
+        builder.Property(x => x.UsdCost).HasPrecision(18, 6).HasDefaultValue(0m);
+        builder.Property(x => x.LatencyMs).HasDefaultValue(0L);
+        // Truy vấn theo tenant + thời gian (retention 30 ngày, xem trace gần nhất); nhóm theo lượt chạy chuỗi.
+        builder.HasIndex(x => new { x.TenantId, x.CreatedAt });
+        builder.HasIndex(x => x.ChainRunId);
     }
 }
 
@@ -648,6 +941,7 @@ public sealed class MetaAssetConfiguration : IEntityTypeConfiguration<MetaAsset>
         builder.Property(x => x.Name).HasMaxLength(256).IsRequired();
         builder.Property(x => x.TasksJson).HasColumnName("tasks_json").IsRequired();
         builder.Property(x => x.AccessTokenEncrypted).HasColumnName("access_token_encrypted").IsRequired();
+        builder.Property(x => x.FeedSubscribedAt).HasColumnName("feed_subscribed_at");
         builder.HasOne<Tenant>()
             .WithMany()
             .HasForeignKey(x => x.TenantId)
@@ -748,6 +1042,8 @@ public sealed class KpiDailyConfiguration : IEntityTypeConfiguration<KpiDaily>
         builder.ToTable("kpi_daily");
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.AdSpend).HasPrecision(18, 2);
+        builder.Property(x => x.Revenue).HasPrecision(18, 2);
         builder.HasIndex(x => new { x.TenantId, x.Date, x.Platform }).IsUnique();
     }
 }
@@ -828,6 +1124,7 @@ public sealed class LlmConfigConfiguration : IEntityTypeConfiguration<LlmConfig>
         builder.Property(x => x.OutputUsdPer1M).HasColumnName("output_usd_per_1m").HasColumnType("decimal(10,4)");
         builder.Property(x => x.TimeoutSeconds).HasColumnName("timeout_seconds");
         builder.Property(x => x.MaxOutputTokens).HasColumnName("max_output_tokens");
+        builder.Property(x => x.SupportsVision).HasColumnName("supports_vision");
         builder.HasIndex(x => new { x.TenantId, x.IsActive });
     }
 }
@@ -872,7 +1169,9 @@ public sealed class InboxConfiguration : IEntityTypeConfiguration<Inbox>
         builder.Property(x => x.ExternalPageId).HasMaxLength(128).IsRequired();
         builder.Property(x => x.AvatarUrl).HasMaxLength(512);
         builder.Property(x => x.EncryptedAccessToken).HasColumnName("encrypted_access_token").HasMaxLength(1024);
-        builder.HasIndex(x => new { x.TenantId, x.Platform, x.ExternalPageId }).HasFilter("is_active = 1");
+        builder.HasIndex(x => new { x.TenantId, x.Platform, x.ExternalPageId })
+            .IsUnique()
+            .HasFilter("[is_active] = 1 AND [deleted_at] IS NULL");
     }
 }
 

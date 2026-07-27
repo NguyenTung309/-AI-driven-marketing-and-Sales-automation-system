@@ -4,6 +4,9 @@ namespace Clawbot.Domain.Tenants;
 
 public sealed class Tenant : AggregateRoot<Guid>
 {
+    public const string ContentPublishingPolicyAutomatic = "automatic";
+    public const string ContentPublishingPolicyHumanRequired = "human_required";
+
     public string Slug { get; private set; } = string.Empty;
     public string DisplayName { get; private set; } = string.Empty;
     public string PlanName { get; private set; } = "free";
@@ -18,6 +21,10 @@ public sealed class Tenant : AggregateRoot<Guid>
     // Review-gate P1 (QĐ1: default OFF, opt-in per tenant): khi bật, item chỉ được publish khi có
     // chữ ký reviewer agent (ContentItem.ApprovedByAgentId).
     public bool RequireContentReview { get; private set; }
+    // Agent review luôn bắt buộc; policy này chỉ quyết định có cần người duyệt sau review hay không.
+    public string ContentPublishingApprovalPolicy { get; private set; } = ContentPublishingPolicyHumanRequired;
+    public long ContentPublishingPolicyVersion { get; private set; } = 1;
+    public DateTimeOffset ContentPublishingPolicyUpdatedAt { get; private set; }
     // Review-gate P3 manual-mode: khi bật, MỌI AI reply hold thành pending_approval chờ người duyệt
     // (không gửi tự động); tin sale gõ tay miễn (QĐ5).
     public bool RequireChatReplyApproval { get; private set; }
@@ -34,6 +41,10 @@ public sealed class Tenant : AggregateRoot<Guid>
     // Hội thoại mở không hoạt động quá ngưỡng này (phút) thì cảnh báo sale; quá gấp đôi thì
     // escalate Trưởng phòng KD. Cấu hình per-tenant, mặc định 5.
     public int IdleAlertMinutes { get; private set; } = 5;
+    // Lead pipeline không có tín hiệu thật quá ngưỡng này sẽ chuyển lost; 0 = tắt.
+    public int LeadLostAfterDays { get; private set; } = 60;
+    // AI ước tính doanh thu được duyệt tự động; mặc định tắt để sale kiểm tra số tiền.
+    public bool AutoApproveLeadRevenue { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     private Tenant() { }
@@ -46,6 +57,9 @@ public sealed class Tenant : AggregateRoot<Guid>
             DisplayName = displayName,
             PlanName = planName,
             IsActive = true,
+            ContentPublishingApprovalPolicy = ContentPublishingPolicyHumanRequired,
+            ContentPublishingPolicyVersion = 1,
+            ContentPublishingPolicyUpdatedAt = createdAt,
             CreatedAt = createdAt,
         };
 
@@ -71,6 +85,20 @@ public sealed class Tenant : AggregateRoot<Guid>
     public void SetRequireContentReview(bool requireReview) =>
         RequireContentReview = requireReview;
 
+    public void SetContentPublishingApprovalPolicy(string policy, DateTimeOffset updatedAt)
+    {
+        var normalized = policy?.Trim().ToLowerInvariant();
+        if (normalized is not (ContentPublishingPolicyAutomatic or ContentPublishingPolicyHumanRequired))
+            throw new ArgumentException("content_publishing_policy_invalid", nameof(policy));
+        if (string.Equals(ContentPublishingApprovalPolicy, normalized, StringComparison.Ordinal))
+            return;
+
+        var nextVersion = checked(ContentPublishingPolicyVersion + 1);
+        ContentPublishingApprovalPolicy = normalized;
+        ContentPublishingPolicyVersion = nextVersion;
+        ContentPublishingPolicyUpdatedAt = updatedAt;
+    }
+
     public void SetRequireChatReplyApproval(bool requireApproval) =>
         RequireChatReplyApproval = requireApproval;
 
@@ -91,6 +119,12 @@ public sealed class Tenant : AggregateRoot<Guid>
     // <= 0 → về mặc định 5 phút; clamp trần 1 ngày để tránh cấu hình vô lý.
     public void SetIdleAlertMinutes(int minutes) =>
         IdleAlertMinutes = minutes <= 0 ? 5 : Math.Min(minutes, 1440);
+
+    public void SetLeadLostAfterDays(int days) =>
+        LeadLostAfterDays = days < 0 ? 60 : Math.Min(days, 365);
+
+    public void SetAutoApproveLeadRevenue(bool autoApprove) =>
+        AutoApproveLeadRevenue = autoApprove;
 
     private static string? NormalizeNullable(string? value)
     {

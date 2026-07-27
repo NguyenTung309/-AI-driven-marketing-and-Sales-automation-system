@@ -5,7 +5,7 @@ namespace Clawbot.Domain.Notifications;
 /// <summary>
 /// Persisted alert for the notification center. <see cref="UserId"/> null = tenant broadcast.
 /// </summary>
-public sealed class Notification : Entity<Guid>, ITenantOwned
+public sealed class Notification : Entity<Guid>, ITenantOwned, IAuditExempt
 {
     public Guid TenantId { get; private set; }
     public Guid? UserId { get; private set; }

@@ -67,6 +67,30 @@ public sealed class OpenAiChatClient : IClaudeChatClient
     private decimal OutputRate => _config.OutputUsdPer1M ?? DefaultOutputUsdPer1M;
     private decimal Cost(int inTok, int outTok) => (inTok * InputRate + outTok * OutputRate) / 1_000_000m;
 
+    // Fallback ước lượng khi endpoint OpenAI-compatible không trả usage (gateway tự dựng hay bỏ field
+    // này). Điều kiện AND: output_tokens = 0 với input_tokens > 0 là số thật của provider, đừng đè.
+    private ClaudeReply BuildReply(
+        string text,
+        int inTok,
+        int outTok,
+        string systemPrompt,
+        IReadOnlyList<ChatTurn> history,
+        string userMessage)
+    {
+        if (inTok != 0 || outTok != 0)
+            return new ClaudeReply(text, inTok, outTok, Cost(inTok, outTok), _config.Model);
+
+        var estimatedIn = LlmTokenEstimator.CountPrompt(_config.Model, systemPrompt, history, userMessage);
+        var estimatedOut = LlmTokenEstimator.CountText(_config.Model, text);
+        return new ClaudeReply(
+            text,
+            estimatedIn,
+            estimatedOut,
+            Cost(estimatedIn, estimatedOut),
+            _config.Model,
+            IsEstimated: true);
+    }
+
     public async Task<ClaudeReply> CompleteAsync(
         string systemPrompt,
         IReadOnlyList<ChatTurn> history,
@@ -82,7 +106,7 @@ public sealed class OpenAiChatClient : IClaudeChatClient
             var text = string.Concat(value.Content.Select(part => part.Text));
             var inTok = value.Usage?.InputTokenCount ?? 0;
             var outTok = value.Usage?.OutputTokenCount ?? 0;
-            return new ClaudeReply(text, inTok, outTok, Cost(inTok, outTok), _config.Model);
+            return BuildReply(text, inTok, outTok, systemPrompt, history, userMessage);
         }
         catch (Exception ex) when (CanUseDirectFallback(ex))
         {
@@ -106,7 +130,7 @@ public sealed class OpenAiChatClient : IClaudeChatClient
         if (reply.Text.Length > 0)
             yield return new ClaudeStreamChunk(reply.Text, Final: false, 0, 0, 0m, reply.Model);
 
-        yield return new ClaudeStreamChunk(string.Empty, Final: true, reply.InputTokens, reply.OutputTokens, reply.UsdCost, reply.Model);
+        yield return new ClaudeStreamChunk(string.Empty, Final: true, reply.InputTokens, reply.OutputTokens, reply.UsdCost, reply.Model, reply.IsEstimated);
     }
 
     // Only emit a token cap when the config sets one explicitly. The OpenAI SDK serializes
@@ -158,7 +182,7 @@ public sealed class OpenAiChatClient : IClaudeChatClient
         if (!response.IsSuccessStatusCode)
             throw new HttpRequestException("OpenAI-compatible fallback failed.", null, response.StatusCode);
 
-        return ParseDirectReply(body);
+        return ParseDirectReply(body, systemPrompt, history, userMessage);
     }
 
     private string BuildDirectUrl() => _config.BaseUrl!.TrimEnd('/') + "/chat/completions";
@@ -177,13 +201,17 @@ public sealed class OpenAiChatClient : IClaudeChatClient
         return JsonSerializer.Serialize(new DirectRequest(_config.Model, messages, _config.MaxOutputTokens), DirectJsonOptions);
     }
 
-    private ClaudeReply ParseDirectReply(string body)
+    private ClaudeReply ParseDirectReply(
+        string body,
+        string systemPrompt = "",
+        IReadOnlyList<ChatTurn>? history = null,
+        string userMessage = "")
     {
         var parsed = JsonSerializer.Deserialize<DirectResponse>(body);
         var text = ExtractDirectText(parsed?.Choices?.FirstOrDefault()?.Message?.Content);
         var inTok = parsed?.Usage?.PromptTokens ?? 0;
         var outTok = parsed?.Usage?.CompletionTokens ?? 0;
-        return new ClaudeReply(text, inTok, outTok, Cost(inTok, outTok), _config.Model);
+        return BuildReply(text, inTok, outTok, systemPrompt, history ?? [], userMessage);
     }
 
     private static string ExtractDirectText(JsonElement? content)
