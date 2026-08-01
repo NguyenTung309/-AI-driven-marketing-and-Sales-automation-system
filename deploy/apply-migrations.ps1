@@ -15,6 +15,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$SqlCmdPath,
 
+    [ValidateRange(0, 9999)]
     [int]$BaselineNumber = 0,
 
     [switch]$BaselineExisting,
@@ -24,6 +25,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ($BaselineExisting -and $BaselineNumber -lt 1) {
+    throw "BaselineNumber must be between 1 and 9999 when BaselineExisting is set."
+}
 
 function Invoke-SqlQuery {
     param([Parameter(Mandatory = $true)][string]$Query)
@@ -121,8 +126,24 @@ END CATCH;
 }
 
 $baselineMarker = "__baseline_$($BaselineNumber.ToString("D4"))__"
-$historyCount = [int](Invoke-SqlQuery "SET NOCOUNT ON; SELECT COUNT(1) FROM dbo.schema_migrations;")
-if ($BaselineExisting -and $historyCount -eq 0) {
+$validHistoryCount = [int](Invoke-SqlQuery @"
+SET NOCOUNT ON;
+SELECT COUNT(1)
+FROM dbo.schema_migrations
+WHERE (
+        LEN(filename) = 17
+        AND filename COLLATE Latin1_General_100_BIN2
+            LIKE N'[_][_]baseline[_][0-9][0-9][0-9][0-9][_][_]' COLLATE Latin1_General_100_BIN2
+    )
+    OR (
+        LEN(filename) >= 10
+        AND TRY_CONVERT(INT, LEFT(filename, 4)) IS NOT NULL
+        AND SUBSTRING(filename, 5, 1) = N'_'
+        AND RIGHT(filename, 4) COLLATE Latin1_General_100_BIN2
+            = N'.sql' COLLATE Latin1_General_100_BIN2
+    );
+"@)
+if ($BaselineExisting -and $validHistoryCount -eq 0) {
     Invoke-SqlQuery @"
 SET NOCOUNT ON;
 INSERT INTO dbo.schema_migrations (filename, applied_at)
@@ -132,7 +153,14 @@ SELECT 1;
     Write-Output "[BASELINE] Existing repaired schema through migration $($BaselineNumber.ToString("D4"))."
 }
 
-$hasBaseline = (Invoke-SqlQuery "SET NOCOUNT ON; SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.schema_migrations WHERE filename = N'$baselineMarker') THEN 1 ELSE 0 END;") -eq "1"
+$highestBaselineNumber = [int](Invoke-SqlQuery @"
+SET NOCOUNT ON;
+SELECT COALESCE(MAX(TRY_CONVERT(INT, SUBSTRING(filename, 12, 4))), 0)
+FROM dbo.schema_migrations
+WHERE LEN(filename) = 17
+  AND filename COLLATE Latin1_General_100_BIN2
+      LIKE N'[_][_]baseline[_][0-9][0-9][0-9][0-9][_][_]' COLLATE Latin1_General_100_BIN2;
+"@)
 $migrationFiles = Get-ChildItem -LiteralPath $MigrationsDir -Filter "*.sql" -File | Sort-Object Name
 
 foreach ($file in $migrationFiles) {
@@ -141,8 +169,8 @@ foreach ($file in $migrationFiles) {
     }
 
     $migrationNumber = [int]$file.Name.Substring(0, 4)
-    if ($hasBaseline -and $migrationNumber -le $BaselineNumber) {
-        Write-Output "[SKIP] $($file.Name) (baseline)"
+    if ($highestBaselineNumber -gt 0 -and $migrationNumber -le $highestBaselineNumber) {
+        Write-Output "[SKIP] $($file.Name) (baseline $($highestBaselineNumber.ToString("D4")))"
         continue
     }
 

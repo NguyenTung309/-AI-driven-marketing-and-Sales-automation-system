@@ -222,6 +222,7 @@ public sealed partial class ChatAgentGrpcService(
                 {
                     channelMessageId = await _channelAdapter.SendAsync(
                         tenantId,
+                        conversation.Platform,
                         conversation.ExternalThreadId,
                         reply.Text,
                         ct).ConfigureAwait(false);
@@ -251,8 +252,12 @@ public sealed partial class ChatAgentGrpcService(
                     if (channelMessageId is not null)
                         persistedReply.SetExternalMessageId(channelMessageId);
                     persistedReply.MarkSent();
-                    session.AppendTrace("chat", "chat-agent", "sent",
-                        $"reply sent to channel {conversation.Platform} thread={conversation.ExternalThreadId}", _clock.UtcNow);
+                    session.AppendTrace(
+                        "chat",
+                        "chat-agent",
+                        "sent",
+                        $"reply sent to channel {conversation.Platform}",
+                        _clock.UtcNow);
                     await _db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
                 }
             }

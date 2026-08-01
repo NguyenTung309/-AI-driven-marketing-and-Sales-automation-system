@@ -25,32 +25,54 @@ public static partial class InboxTokenEncryptionMigrator
         {
             var inboxes = await db.Inboxes
                 .IgnoreQueryFilters()
+                .AsNoTracking()
                 .Where(i => i.EncryptedAccessToken != null)
-                .ToListAsync(ct).ConfigureAwait(false);
+                .Select(i => new { i.Id, i.EncryptedAccessToken })
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
 
+            // Chot mot moc thoi gian cho ca luot: SetProperty nhan tham so thay vi bieu thuc phu thuoc
+            // provider (SQLite khong dich duoc DateTimeOffset.UtcNow), va moi dong migrate cung mot moc.
+            var migratedAt = DateTimeOffset.UtcNow;
             var migrated = 0;
             foreach (var inbox in inboxes)
             {
                 var stored = inbox.EncryptedAccessToken!;
-                if (PancakeTokenCipher.IsEncrypted(encryptor, stored)) continue;
-                inbox.SetAccessToken(encryptor.Encrypt(stored), DateTimeOffset.UtcNow);
-                migrated++;
+                if (PancakeTokenCipher.IsEncrypted(encryptor, stored))
+                    continue;
+
+                if (PancakeTokenCipher.HasAuthenticatedEnvelope(stored)
+                    || PancakeTokenCipher.HasLegacyCiphertextEnvelope(stored))
+                {
+                    throw new InvalidOperationException(
+                        $"inbox_token_encryption_key_mismatch:{inbox.Id}");
+                }
+
+                var encrypted = encryptor.Encrypt(stored);
+                var updated = await db.Inboxes
+                    .IgnoreQueryFilters()
+                    .Where(i => i.Id == inbox.Id && i.EncryptedAccessToken == stored)
+                    .ExecuteUpdateAsync(
+                        setters => setters
+                            .SetProperty(i => i.EncryptedAccessToken, encrypted)
+                            .SetProperty(i => i.UpdatedAt, migratedAt),
+                        ct)
+                    .ConfigureAwait(false);
+                migrated += updated;
             }
 
-            if (migrated > 0)
-                await db.SaveChangesAsync(ct).ConfigureAwait(false);
             LogMigrated(logger, migrated, inboxes.Count);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Best-effort: never block startup — plaintext rows keep working via DecryptOrRaw until next boot.
             LogFailed(logger, ex);
+            throw;
         }
     }
 
     [LoggerMessage(EventId = 6030, Level = LogLevel.Information, Message = "InboxTokenEncryptionMigrator: encrypted {Migrated} legacy plaintext token(s) of {Total} inbox rows")]
     private static partial void LogMigrated(ILogger logger, int migrated, int total);
 
-    [LoggerMessage(EventId = 6031, Level = LogLevel.Warning, Message = "InboxTokenEncryptionMigrator: failed; plaintext rows still readable via fallback")]
+    [LoggerMessage(EventId = 6031, Level = LogLevel.Critical, Message = "InboxTokenEncryptionMigrator: failed; startup must stop to avoid credential corruption")]
     private static partial void LogFailed(ILogger logger, Exception ex);
 }

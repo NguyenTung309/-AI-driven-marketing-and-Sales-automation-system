@@ -20,7 +20,8 @@ public interface ICommentChannelAdapterResolver
 public sealed class TenantCommentChannelAdapterResolver(
     ICommentChannelAdapter pancake,
     MetaCommentChannelAdapter meta,
-    Clawbot.Infrastructure.Channels.Pancake.IPancakeConfigResolver pancakeConfig) : ICommentChannelAdapterResolver
+    Clawbot.Infrastructure.Channels.Pancake.IPancakeConfigResolver pancakeConfig,
+    Clawbot.Infrastructure.Channels.Pancake.IPancakePageTokenResolver pageTokenResolver) : ICommentChannelAdapterResolver
 {
     public async Task<ICommentChannelAdapter?> ResolveAsync(
         Guid tenantId,
@@ -31,12 +32,17 @@ public sealed class TenantCommentChannelAdapterResolver(
         var config = await pancakeConfig.ResolveAsync(tenantId, ct).ConfigureAwait(false);
         var separator = externalThreadId.IndexOf(':', StringComparison.Ordinal);
         var pageId = separator > 0 ? externalThreadId[..separator] : externalThreadId;
-        if (config is not null
+        var pancakeToken = config is not null
             && (string.IsNullOrWhiteSpace(config.PageId)
-                || string.Equals(config.PageId, pageId, StringComparison.Ordinal)))
-        {
+                || string.Equals(config.PageId, pageId, StringComparison.Ordinal))
+            ? await pageTokenResolver.ResolveAsync(
+                tenantId,
+                platform,
+                pageId,
+                ct).ConfigureAwait(false)
+            : null;
+        if (pancakeToken is not null)
             return pancake;
-        }
 
         if (string.Equals(platform, "facebook", StringComparison.OrdinalIgnoreCase)
             || string.Equals(platform, "instagram", StringComparison.OrdinalIgnoreCase))
@@ -69,21 +75,26 @@ public sealed class MetaCommentChannelAdapter(
                     AutoReplenishment = true,
                 }));
 
-    private readonly Dictionary<(Guid TenantId, string PageId), MetaReplyContext?> _contextCache = [];
+    private readonly Dictionary<(Guid TenantId, string Platform, string PageId), MetaReplyContext?> _contextCache = [];
 
     public async Task<string?> SendCommentReplyAsync(
         Guid tenantId,
+        string platform,
         string externalThreadId,
         string commentMessageId,
         string text,
         CancellationToken ct = default)
     {
-        var context = await ResolveContextAsync(tenantId, externalThreadId, ct).ConfigureAwait(false)
+        var context = await ResolveContextAsync(
+            tenantId,
+            platform,
+            externalThreadId,
+            ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("meta_comment_target_unavailable");
         var commentId = ValidateIdentifier(commentMessageId, nameof(commentMessageId));
         var message = ValidateText(text);
         using var lease = await RateLimiter.AcquireAsync(
-            $"tenant:{tenantId}:meta:{context.PageId}",
+            $"tenant:{tenantId}:meta:{context.Platform}:{context.PageId}",
             1,
             ct).ConfigureAwait(false);
         if (!lease.IsAcquired)
@@ -106,6 +117,7 @@ public sealed class MetaCommentChannelAdapter(
 
     public async Task<string?> SendPrivateReplyAsync(
         Guid tenantId,
+        string platform,
         string externalThreadId,
         string postId,
         string commentMessageId,
@@ -113,14 +125,18 @@ public sealed class MetaCommentChannelAdapter(
         string text,
         CancellationToken ct = default)
     {
-        var context = await ResolveContextAsync(tenantId, externalThreadId, ct).ConfigureAwait(false)
+        var context = await ResolveContextAsync(
+            tenantId,
+            platform,
+            externalThreadId,
+            ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("meta_comment_target_unavailable");
         var commentId = ValidateIdentifier(commentMessageId, nameof(commentMessageId));
         _ = ValidateIdentifier(postId, nameof(postId));
         _ = ValidateIdentifier(fromId, nameof(fromId));
         var message = ValidateText(text);
         using var lease = await RateLimiter.AcquireAsync(
-            $"tenant:{tenantId}:meta:{context.PageId}",
+            $"tenant:{tenantId}:meta:{context.Platform}:{context.PageId}",
             1,
             ct).ConfigureAwait(false);
         if (!lease.IsAcquired)
@@ -162,16 +178,25 @@ public sealed class MetaCommentChannelAdapter(
 
     private async Task<MetaReplyContext?> ResolveContextAsync(
         Guid tenantId,
+        string platform,
         string externalThreadId,
         CancellationToken ct)
     {
-        if (tenantId == Guid.Empty || string.IsNullOrWhiteSpace(externalThreadId))
+        if (tenantId == Guid.Empty
+            || string.IsNullOrWhiteSpace(platform)
+            || string.IsNullOrWhiteSpace(externalThreadId))
+        {
+            return null;
+        }
+
+        var normalizedPlatform = platform.Trim().ToLowerInvariant();
+        if (normalizedPlatform is not ("facebook" or "instagram"))
             return null;
         var separator = externalThreadId.IndexOf(':', StringComparison.Ordinal);
         var pageId = separator > 0 ? externalThreadId[..separator] : externalThreadId;
         if (!IsSafeIdentifier(pageId))
             return null;
-        var key = (tenantId, pageId);
+        var key = (tenantId, normalizedPlatform, pageId);
         if (_contextCache.TryGetValue(key, out var cached))
             return cached;
 
@@ -179,11 +204,10 @@ public sealed class MetaCommentChannelAdapter(
             .IgnoreQueryFilters()
             .AsNoTracking()
             .Where(value => value.TenantId == tenantId
+                && value.Platform == normalizedPlatform
                 && value.ExternalPageId == pageId
                 && value.IsActive
-                && value.DeletedAt == null
-                && (value.Platform == "facebook" || value.Platform == "instagram"))
-            .OrderBy(value => value.Platform)
+                && value.DeletedAt == null)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
         if (inbox is null)
         {
