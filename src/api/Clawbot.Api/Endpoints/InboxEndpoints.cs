@@ -452,7 +452,7 @@ public static class InboxEndpoints
         try
         {
             // Token per-kenh: adapter tu resolve page access token cua inbox (PancakePageTokenResolver)
-            channelMessageId = await adapter.SendAsync(tenant.TenantId, conv.ExternalThreadId, body.Content, ct).ConfigureAwait(false);
+            channelMessageId = await adapter.SendAsync(tenant.TenantId, conv.Platform, conv.ExternalThreadId, body.Content, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -497,6 +497,7 @@ public static class InboxEndpoints
             .Select(c => new
             {
                 c.Id,
+                c.Platform,
                 c.ExternalThreadId,
                 c.AssignedTo,
                 c.InboxId,
@@ -518,6 +519,7 @@ public static class InboxEndpoints
             conversation.Id,
             messageId,
             actorUserId,
+            conversation.Platform,
             conversation.ExternalThreadId,
             conversation.AssignedTo,
             conversation.InboxId,
@@ -605,7 +607,7 @@ public static class InboxEndpoints
         string? channelMessageId;
         try
         {
-            channelMessageId = await adapter.SendAsync(tenant.TenantId, conv.ExternalThreadId, msg.Content, ct).ConfigureAwait(false);
+            channelMessageId = await adapter.SendAsync(tenant.TenantId, conv.Platform, conv.ExternalThreadId, msg.Content, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

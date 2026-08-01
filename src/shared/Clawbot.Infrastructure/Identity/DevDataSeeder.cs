@@ -55,25 +55,33 @@ public static partial class DevDataSeeder
                     platform NVARCHAR(32) NOT NULL,
                     external_page_id NVARCHAR(128) NOT NULL,
                     avatar_url NVARCHAR(512) NULL,
-                    encrypted_access_token NVARCHAR(1024) NULL,
+                    encrypted_access_token NVARCHAR(MAX) NULL,
+                    encrypted_refresh_token NVARCHAR(MAX) NULL,
+                    encrypted_webhook_secret NVARCHAR(MAX) NULL,
+                    token_expires_at DATETIMEOFFSET NULL,
                     is_active BIT NOT NULL DEFAULT 1,
                     created_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(),
                     updated_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(),
                     deleted_at DATETIMEOFFSET NULL);
 
             IF OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.inboxes', N'encrypted_access_token') IS NULL
-                ALTER TABLE dbo.inboxes ADD encrypted_access_token NVARCHAR(1024) NULL;
+                ALTER TABLE dbo.inboxes ADD encrypted_access_token NVARCHAR(MAX) NULL;
 
-            IF OBJECT_ID(N'dbo.channel_tokens', N'U') IS NULL AND OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL
-                CREATE TABLE dbo.channel_tokens (
-                    inbox_id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_channel_tokens PRIMARY KEY REFERENCES dbo.inboxes(id),
-                    access_token_encrypted NVARCHAR(MAX) NOT NULL,
-                    refresh_token_encrypted NVARCHAR(MAX) NULL,
-                    webhook_secret_encrypted NVARCHAR(MAX) NOT NULL,
-                    token_expires_at DATETIMEOFFSET NULL,
-                    is_active BIT NOT NULL DEFAULT 1,
-                    created_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(),
-                    updated_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME());
+            IF EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.inboxes')
+                  AND name = N'encrypted_access_token'
+                  AND (max_length <> -1 OR is_nullable = 0))
+                ALTER TABLE dbo.inboxes ALTER COLUMN encrypted_access_token NVARCHAR(MAX) NULL;
+
+            IF OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.inboxes', N'encrypted_refresh_token') IS NULL
+                ALTER TABLE dbo.inboxes ADD encrypted_refresh_token NVARCHAR(MAX) NULL;
+
+            IF OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.inboxes', N'encrypted_webhook_secret') IS NULL
+                ALTER TABLE dbo.inboxes ADD encrypted_webhook_secret NVARCHAR(MAX) NULL;
+
+            IF OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.inboxes', N'token_expires_at') IS NULL
+                ALTER TABLE dbo.inboxes ADD token_expires_at DATETIMEOFFSET NULL;
 
             IF OBJECT_ID(N'dbo.inbox_members', N'U') IS NULL AND OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.users', N'U') IS NOT NULL
                 CREATE TABLE dbo.inbox_members (
@@ -81,13 +89,6 @@ public static partial class DevDataSeeder
                     agent_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.users(id),
                     tenant_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.tenants(id),
                     CONSTRAINT PK_inbox_members PRIMARY KEY (inbox_id, agent_id));
-
-            IF OBJECT_ID(N'dbo.conversation_read_state', N'U') IS NULL AND OBJECT_ID(N'dbo.users', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL
-                CREATE TABLE dbo.conversation_read_state (
-                    user_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.users(id),
-                    conversation_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.conversations(id),
-                    last_read_at DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(),
-                    CONSTRAINT PK_conversation_read_state PRIMARY KEY (user_id, conversation_id));
 
             IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'inbox_id') IS NULL
                 ALTER TABLE dbo.conversations ADD inbox_id UNIQUEIDENTIFIER NULL REFERENCES dbo.inboxes(id);
@@ -98,11 +99,48 @@ public static partial class DevDataSeeder
             IF OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.conversations', N'snoozed_until') IS NULL
                 ALTER TABLE dbo.conversations ADD snoozed_until DATETIMEOFFSET NULL;
 
+            IF OBJECT_ID(N'dbo.labels', N'U') IS NULL AND OBJECT_ID(N'dbo.tenants', N'U') IS NOT NULL
+                CREATE TABLE dbo.labels (
+                    id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_labels PRIMARY KEY DEFAULT NEWID(),
+                    tenant_id UNIQUEIDENTIFIER NOT NULL CONSTRAINT FK_labels_tenants REFERENCES dbo.tenants(id),
+                    name NVARCHAR(128) NOT NULL,
+                    color NVARCHAR(32) NOT NULL CONSTRAINT DF_labels_color DEFAULT N'#6366f1',
+                    created_at DATETIMEOFFSET NOT NULL CONSTRAINT DF_labels_created_at DEFAULT SYSUTCDATETIME(),
+                    deleted_at DATETIMEOFFSET NULL);
+
+            IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.labels') AND name = N'color' AND system_type_id = 231 AND max_length <> 64)
+                EXEC(N'ALTER TABLE dbo.labels ALTER COLUMN color NVARCHAR(32) NOT NULL;');
+
+            IF OBJECT_ID(N'dbo.labels', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_labels_tenant_name' AND object_id = OBJECT_ID(N'dbo.labels'))
+                CREATE UNIQUE INDEX ix_labels_tenant_name ON dbo.labels (tenant_id, name) WHERE deleted_at IS NULL;
+
+            IF OBJECT_ID(N'dbo.conversation_labels', N'U') IS NULL AND OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.labels', N'U') IS NOT NULL
+                CREATE TABLE dbo.conversation_labels (
+                    conversation_id UNIQUEIDENTIFIER NOT NULL CONSTRAINT FK_conversation_labels_conversations REFERENCES dbo.conversations(id),
+                    label_id UNIQUEIDENTIFIER NOT NULL CONSTRAINT FK_conversation_labels_labels REFERENCES dbo.labels(id),
+                    created_at DATETIMEOFFSET NOT NULL CONSTRAINT DF_conversation_labels_created_at DEFAULT SYSUTCDATETIME(),
+                    CONSTRAINT PK_conversation_labels PRIMARY KEY (conversation_id, label_id));
+
+            IF OBJECT_ID(N'dbo.conversation_labels', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_conv_labels_label' AND object_id = OBJECT_ID(N'dbo.conversation_labels'))
+                CREATE INDEX ix_conv_labels_label ON dbo.conversation_labels (label_id);
+
+            IF OBJECT_ID(N'dbo.conversation_notes', N'U') IS NULL AND OBJECT_ID(N'dbo.tenants', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.conversations', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.users', N'U') IS NOT NULL
+                CREATE TABLE dbo.conversation_notes (
+                    id UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_conversation_notes PRIMARY KEY DEFAULT NEWID(),
+                    tenant_id UNIQUEIDENTIFIER NOT NULL CONSTRAINT FK_conversation_notes_tenants REFERENCES dbo.tenants(id),
+                    conversation_id UNIQUEIDENTIFIER NOT NULL CONSTRAINT FK_conversation_notes_conversations REFERENCES dbo.conversations(id),
+                    created_by_user_id UNIQUEIDENTIFIER NOT NULL CONSTRAINT FK_conversation_notes_users REFERENCES dbo.users(id),
+                    created_by_display_name NVARCHAR(256) NULL,
+                    content NVARCHAR(2000) NOT NULL,
+                    type NVARCHAR(32) NOT NULL CONSTRAINT DF_conversation_notes_type DEFAULT N'private',
+                    created_at DATETIMEOFFSET NOT NULL CONSTRAINT DF_conversation_notes_created_at DEFAULT SYSUTCDATETIME(),
+                    updated_at DATETIMEOFFSET NOT NULL CONSTRAINT DF_conversation_notes_updated_at DEFAULT SYSUTCDATETIME());
+
+            IF OBJECT_ID(N'dbo.conversation_notes', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_notes_conv' AND object_id = OBJECT_ID(N'dbo.conversation_notes'))
+                CREATE INDEX ix_notes_conv ON dbo.conversation_notes (conversation_id);
+
             IF OBJECT_ID(N'dbo.inboxes', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_inboxes_external' AND object_id = OBJECT_ID(N'dbo.inboxes'))
                 CREATE INDEX ix_inboxes_external ON dbo.inboxes (tenant_id, platform, external_page_id) WHERE is_active = 1;
-
-            IF OBJECT_ID(N'dbo.conversation_read_state', N'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ix_convread_conv' AND object_id = OBJECT_ID(N'dbo.conversation_read_state'))
-                CREATE INDEX ix_convread_conv ON dbo.conversation_read_state (conversation_id);
 
             IF OBJECT_ID(N'dbo.contacts', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.contacts', N'avatar_url') IS NULL
                 ALTER TABLE dbo.contacts ADD avatar_url NVARCHAR(512) NULL;

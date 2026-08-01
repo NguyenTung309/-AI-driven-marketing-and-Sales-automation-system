@@ -111,34 +111,60 @@ public sealed class PancakeChannelAdapter(
         return Task.FromResult<IReadOnlyList<ChannelMessage>>(list);
     }
 
-    public Task<string?> SendAsync(Guid tenantId, string externalThreadId, string text, CancellationToken ct = default) =>
-        SendAsync(tenantId, externalThreadId, text, accessToken: null, ct);
+    public Task<string?> SendAsync(
+        Guid tenantId,
+        string platform,
+        string externalThreadId,
+        string text,
+        CancellationToken ct = default) =>
+        SendAsync(tenantId, platform, externalThreadId, text, accessToken: null, ct);
 
-    public Task<string?> SendAsync(Guid tenantId, string externalThreadId, string text, string? accessToken, CancellationToken ct = default) =>
-        SendPayloadAsync(tenantId, externalThreadId, accessToken,
+    public Task<string?> SendAsync(
+        Guid tenantId,
+        string platform,
+        string externalThreadId,
+        string text,
+        string? accessToken,
+        CancellationToken ct = default) =>
+        SendPayloadAsync(tenantId, platform, externalThreadId, accessToken,
             senderId => new SendBody("reply_inbox", text, senderId), ct);
 
     // Comment auto-reply: rep công khai dưới comment (spec: action reply_comment + message_id).
-    public Task<string?> SendCommentReplyAsync(Guid tenantId, string externalThreadId, string commentMessageId, string text, CancellationToken ct = default)
+    public Task<string?> SendCommentReplyAsync(
+        Guid tenantId,
+        string platform,
+        string externalThreadId,
+        string commentMessageId,
+        string text,
+        CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(commentMessageId))
             throw new ArgumentException("comment message id required", nameof(commentMessageId));
-        return SendPayloadAsync(tenantId, externalThreadId, accessToken: null,
+        return SendPayloadAsync(tenantId, platform, externalThreadId, accessToken: null,
             senderId => new SendBody("reply_comment", text, senderId, MessageId: commentMessageId), ct);
     }
 
     // Private reply từ comment (spec: action private_replies + post_id + message_id + from_id; FB/IG only).
-    public Task<string?> SendPrivateReplyAsync(Guid tenantId, string externalThreadId, string postId, string commentMessageId, string fromId, string text, CancellationToken ct = default)
+    public Task<string?> SendPrivateReplyAsync(
+        Guid tenantId,
+        string platform,
+        string externalThreadId,
+        string postId,
+        string commentMessageId,
+        string fromId,
+        string text,
+        CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(postId)) throw new ArgumentException("post id required", nameof(postId));
         if (string.IsNullOrEmpty(commentMessageId)) throw new ArgumentException("comment message id required", nameof(commentMessageId));
         if (string.IsNullOrEmpty(fromId)) throw new ArgumentException("from id required", nameof(fromId));
-        return SendPayloadAsync(tenantId, externalThreadId, accessToken: null,
+        return SendPayloadAsync(tenantId, platform, externalThreadId, accessToken: null,
             senderId => new SendBody("private_replies", text, senderId, MessageId: commentMessageId, PostId: postId, FromId: fromId), ct);
     }
 
     private async Task<string?> SendPayloadAsync(
         Guid tenantId,
+        string platform,
         string externalThreadId,
         string? accessToken,
         Func<string?, SendBody> payloadFactory,
@@ -146,8 +172,15 @@ public sealed class PancakeChannelAdapter(
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("tenant id required", nameof(tenantId));
+        ArgumentException.ThrowIfNullOrWhiteSpace(platform);
         if (string.IsNullOrEmpty(externalThreadId))
             throw new ArgumentException("thread id required", nameof(externalThreadId));
+
+        var normalizedPlatform = platform.Trim().ToLowerInvariant();
+        if (normalizedPlatform.Length > 32)
+            throw new ArgumentOutOfRangeException(
+                nameof(platform),
+                "Platform must not exceed 32 characters.");
 
         var (threadPart, pagePart) = SplitThread(externalThreadId);
         var cfg = await _resolver.ResolveAsync(tenantId, ct).ConfigureAwait(false)
@@ -160,8 +193,8 @@ public sealed class PancakeChannelAdapter(
         // EARS[WHEN sending to a Pancake thread THE SYSTEM SHALL rate-limit per tenant + page (5/s) so tenants
         // never share a bucket; WHEN no page is identifiable THE SYSTEM SHALL fall back to the tenant bucket]
         var rateKey = string.IsNullOrEmpty(pagePart)
-            ? $"tenant:{tenantId}"
-            : $"tenant:{tenantId}:page:{pagePart}";
+            ? $"tenant:{tenantId}:platform:{normalizedPlatform}"
+            : $"tenant:{tenantId}:platform:{normalizedPlatform}:page:{pagePart}";
         using var lease = await OutboundLimiter.AcquireAsync(rateKey, 1, ct).ConfigureAwait(false);
         if (!lease.IsAcquired)
             throw new InvalidOperationException("Pancake outbound rate limit exceeded for page/tenant.");
@@ -174,7 +207,11 @@ public sealed class PancakeChannelAdapter(
         {
             var pageToken = _pageTokenResolver is null
                 ? null
-                : await _pageTokenResolver.ResolveAsync(tenantId, pagePart, ct).ConfigureAwait(false);
+                : await _pageTokenResolver.ResolveAsync(
+                    tenantId,
+                    normalizedPlatform,
+                    pagePart,
+                    ct).ConfigureAwait(false);
             outboundToken = pageToken?.PageAccessToken
                 ?? throw new InvalidOperationException("Pancake page token not configured for specified tenant/page.");
             senderId = pageToken.SenderId;
@@ -187,7 +224,7 @@ public sealed class PancakeChannelAdapter(
             throw new InvalidOperationException("Pancake access_token not configured.");
 
         // Send API only supports v1 (polling/webhook use v2).
-        var sendBaseUrl = cfg.BaseUrl
+        var sendBaseUrl = PancakeEndpointPolicy.NormalizeBaseUrl(cfg.BaseUrl)
             .Replace("/v2/", "/v1/")
             .Replace("/v2", "/v1");
 

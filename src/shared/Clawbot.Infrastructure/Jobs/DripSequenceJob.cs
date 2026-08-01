@@ -118,7 +118,12 @@ public sealed partial class DripSequenceJob(
                     continue;
                 }
 
-                await adapter.SendAsync(conversation.TenantId, conversation.ExternalThreadId, body, ct).ConfigureAwait(false);
+                await adapter.SendAsync(
+                    conversation.TenantId,
+                    conversation.Platform,
+                    conversation.ExternalThreadId,
+                    body,
+                    ct).ConfigureAwait(false);
                 conversation.AppendMessage("out", "agent", body, "text", now);
                 // AI tự nhắn khách: gom nhóm (hàng chục tin/ngày) — 1 dòng "x12", không phải 12 dòng.
                 await publisher.PublishAsync(new NotificationRequest(
