@@ -92,6 +92,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<AgentSession> AgentSessions => Set<AgentSession>();
     public DbSet<Inbox> Inboxes => Set<Inbox>();
     public DbSet<InboxMember> InboxMembers => Set<InboxMember>();
+    public DbSet<ChannelToken> ChannelTokens => Set<ChannelToken>();
     public DbSet<AgentTrace> AgentTraces => Set<AgentTrace>();
     public DbSet<LlmCostEntry> LlmCostLedger => Set<LlmCostEntry>();
 
@@ -111,7 +112,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<ContentAsset> ContentAssets => Set<ContentAsset>();
     public DbSet<ContentPublishAttempt> ContentPublishAttempts => Set<ContentPublishAttempt>();
     public DbSet<ContentWorkflowMetricsHourly> ContentWorkflowMetricsHourly => Set<ContentWorkflowMetricsHourly>();
-    public DbSet<ContentGenerationTrace> ContentGenerationTraces => Set<ContentGenerationTrace>();
     public DbSet<SocialCredential> SocialCredentials => Set<SocialCredential>();
 
     // Meta business integrations
@@ -138,6 +138,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
     // Channels & LLM configs
     public DbSet<PancakeConfig> PancakeConfigs => Set<PancakeConfig>();
+    public DbSet<PancakePage> PancakePages => Set<PancakePage>();
     public DbSet<LlmConfig> LlmConfigs => Set<LlmConfig>();
     public DbSet<EmbeddingConfig> EmbeddingConfigs => Set<EmbeddingConfig>();
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();

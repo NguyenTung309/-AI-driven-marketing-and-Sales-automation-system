@@ -20,7 +20,7 @@ public sealed partial class WebSearchTool(
     private const int MaxSnippetChars = 400;
 
     public string Name => "web.search";
-    public string Description => "Tìm web công khai qua SearXNG: tin mới, bài đăng, giá và đối thủ. Dùng tool này khi cần nội dung mới theo ngày.";
+    public string Description => "Tìm kiếm web (SearXNG self-host): tra cứu thông tin công khai như giá thị trường, đối thủ, tin tức.";
     public string InputSchemaJson =>
         """{"type":"object","properties":{"query":{"type":"string","description":"Từ khóa tìm kiếm"},"max_results":{"type":"string","description":"Số kết quả tối đa 1-10, mặc định 5"}},"required":["query"]}""";
     public string RequiredPermission => "";

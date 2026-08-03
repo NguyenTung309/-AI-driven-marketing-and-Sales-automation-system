@@ -7,7 +7,7 @@ import { Card } from "@/shared/ui/Card";
 import { Modal } from "@/shared/ui/Modal";
 import { StatusPill } from "@/shared/ui/StatusPill";
 import { useAuthStore } from "@/shared/auth/authStore";
-import { operationalPhaseLabel, toSafeOperationalText, toUserFriendlyOrchestrationError } from "@/shared/utils/userText";
+import { toSafeOperationalText, operationalPhaseLabel } from "@/shared/utils/userText";
 import { TaskResultDetails } from "./TaskResultDetails";
 import { TaskDagCanvas } from "./TaskDagCanvas";
 import { a2aStatusLabel, statusLabel, statusTone, taskStatusLabel, taskTone } from "./orchestrationStatus";
@@ -32,9 +32,18 @@ const POLL_INTERVAL_MS = 3_000;
 // Khớp AutonomousOrchestratorOptions.PerTaskEstimateUsd mặc định (server có thể cấu hình khác).
 const PER_TASK_ESTIMATE_USD = 0.01;
 
+// B4: map mã lỗi máy trong traces sang diễn giải hành động được.
+const FAILURE_HINTS: readonly { readonly needle: string; readonly message: string }[] = [
+  { needle: "llm_config_not_configured", message: "Có agent trong kế hoạch chưa được gắn LLM. Mở Sơ đồ agent → Cấu hình → tab LLM để gắn, rồi gửi lại mục tiêu." },
+  { needle: "cost_cap", message: "Phiên bị chặn vì vượt hạn mức chi phí AI của tháng. Kiểm tra thẻ Chi phí AI hoặc nâng hạn mức trước khi chạy lại." },
+  { needle: "planning_failed", message: "Orchestrator không lập được kế hoạch từ mục tiêu này. Viết mục tiêu cụ thể hơn (kênh, số lượng, thời hạn) rồi gửi lại." },
+  { needle: "tool_permission_denied", message: "Một agent bị chặn vì thiếu quyền dùng công cụ. Kiểm tra danh sách công cụ được phép của agent trong phần Cấu hình." },
+  { needle: "max_rounds", message: "Đã dùng hết số lần lập lại kế hoạch cho phép — mục tiêu có thể quá phức tạp, thử chia nhỏ thành nhiều mục tiêu." },
+];
+
 function failureExplanation(traces: readonly OrchestrationV2Trace[]): string | null {
-  const haystack = traces.map((trace) => `${trace.phase} ${trace.message}`).join(" ");
-  return toUserFriendlyOrchestrationError(haystack);
+  const haystack = traces.map((trace) => `${trace.phase} ${trace.message}`).join(" ").toLowerCase();
+  return FAILURE_HINTS.find((hint) => haystack.includes(hint.needle))?.message ?? null;
 }
 
 // Khớp AutonomousOrchestratorOptions.MaxRounds mặc định (server có thể cấu hình khác qua appsettings).
@@ -114,8 +123,7 @@ export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange 
   const toolTracesByTask = useMemo(() => {
     const map = new Map<string, OrchestrationV2Trace[]>();
     for (const trace of traceItems) {
-      const phase = trace.phase?.toLowerCase();
-      if (!phase?.startsWith("tool") || phase === "tool_skipped") continue;
+      if (!trace.phase?.toLowerCase().startsWith("tool")) continue;
       const list = map.get(trace.taskId) ?? [];
       list.push(trace);
       map.set(trace.taskId, list);
@@ -466,11 +474,7 @@ export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange 
                 )}
               </div>
               <p className="mt-2 text-body-md text-on-surface">{selectedTask.description}</p>
-              {selectedTask.error && (
-                <p className="mt-1 text-label-sm text-error">
-                  {toUserFriendlyOrchestrationError(selectedTask.error) ?? selectedTask.error}
-                </p>
-              )}
+              {selectedTask.error && <p className="mt-1 text-label-sm text-error">{selectedTask.error}</p>}
               <TaskResultDetails task={selectedTask} toolTraces={toolTracesByTask.get(selectedTask.id) ?? []} />
               {taskMessages.length > 0 && (
                 <details className="mt-3">

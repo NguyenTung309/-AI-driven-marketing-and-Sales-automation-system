@@ -12,5 +12,4 @@ public sealed record ChannelMessage(
     // confirms the payload; defaults keep DM ingestion unchanged.
     string MessageType = "text",
     string? ParentPostId = null,
-    string? AttachmentUrl = null,
-    string? ParentCommentId = null);
+    string? AttachmentUrl = null);

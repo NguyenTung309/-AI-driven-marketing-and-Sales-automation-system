@@ -78,17 +78,6 @@ public sealed class LeadAgentRunner(
 
     public async Task<LeadCreateResult> CreateWithSkillsAsync(LeadCreateInput input, CancellationToken ct)
     {
-        // Contact phải có thật và thuộc đúng tenant. Đường HTTP đã chặn ở LeadsEndpoints, nhưng đường
-        // orchestration lấy contact_id thẳng từ kế hoạch của LLM nên chỉ được kiểm định dạng GUID —
-        // một id bịa sẽ nổ FK leads.contact_id lúc SaveChanges, kéo theo cả trace trong cùng batch.
-        // Kiểm trước mọi skill để hỏng thì hỏng sớm, không tốn lượt gọi spam/dedup/enrich.
-        var contactExists = await _db.Contacts
-            .IgnoreQueryFilters()
-            .AnyAsync(c => c.Id == input.ContactId && c.TenantId == input.TenantId, ct)
-            .ConfigureAwait(false);
-        if (!contactExists)
-            throw new KeyNotFoundException($"contact not found: {input.ContactId:D}");
-
         var spamSignal = await _spam.EvaluateAsync(input.Note ?? "", input.SourcePlatform, null, ct).ConfigureAwait(false);
 
         var dedupCandidates = await _dedup.FindCandidatesAsync(

@@ -1,24 +1,11 @@
 import { apiClient } from "./client";
 import type { JobAccepted } from "./jobs";
 
-/** Kiểu dữ liệu của một trường trong biểu mẫu tạo tài liệu. */
-export type TemplateFieldType = "text" | "multiline" | "number" | "currency" | "date";
-
-export interface TemplateField {
-  readonly key: string;
-  readonly label: string;
-  readonly type: TemplateFieldType;
-  readonly required: boolean;
-  readonly placeholder: string | null;
-  readonly sample: string | null;
-}
-
 export interface DocumentTemplate {
   readonly id: string;
   readonly code: string;
   readonly docType: string;
   readonly templateHtml: string;
-  readonly fields: readonly TemplateField[];
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -68,7 +55,6 @@ export interface DocumentTemplatePayload {
   readonly code: string;
   readonly docType: string;
   readonly templateHtml: string;
-  readonly fields?: readonly TemplateField[] | null;
 }
 
 export interface DocumentListResponse<T> {
@@ -76,11 +62,6 @@ export interface DocumentListResponse<T> {
   readonly total: number;
   readonly page: number;
   readonly pageSize: number;
-}
-
-/** API cũ có thể không trả fields; chuẩn hoá để UI luôn nhận mảng. */
-function normalizeTemplate(tpl: DocumentTemplate): DocumentTemplate {
-  return Array.isArray(tpl.fields) ? tpl : { ...tpl, fields: [] };
 }
 
 export async function listDocumentTemplates(
@@ -92,16 +73,14 @@ export async function listDocumentTemplates(
   );
   const data = res.data as DocumentListResponse<DocumentTemplate> | readonly DocumentTemplate[];
   if (Array.isArray(data)) {
-    const items = data.map(normalizeTemplate);
-    return { items, total: items.length, page: 1, pageSize: items.length || 50 };
+    return { items: data, total: data.length, page: 1, pageSize: data.length || 50 };
   }
-  const page = data as DocumentListResponse<DocumentTemplate>;
-  return { ...page, items: (page.items ?? []).map(normalizeTemplate) };
+  return data as DocumentListResponse<DocumentTemplate>;
 }
 
 export async function createDocumentTemplate(payload: DocumentTemplatePayload): Promise<DocumentTemplate> {
   const res = await apiClient.post<DocumentTemplate>("/api/docs/templates", payload);
-  return normalizeTemplate(res.data);
+  return res.data;
 }
 
 export async function updateDocumentTemplate(id: string, payload: Omit<DocumentTemplatePayload, "code">): Promise<void> {

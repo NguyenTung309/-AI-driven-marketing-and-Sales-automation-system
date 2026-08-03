@@ -27,7 +27,6 @@ public sealed class ContentReviewExecutor(ContentReviewer reviewer) : IContentRe
             outcome.ReviewStatus,
             outcome.ImageReviewStatus,
             outcome.ReviewedImageCount,
-            outcome.ReasonCode,
-            outcome.Reason);
+            outcome.ReasonCode);
     }
 }

@@ -28,10 +28,8 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("vi-VN").format(Math.round(value));
 }
 
-// 4 chữ số thập phân: chi phí một lượt gọi thường dưới $0.005, làm tròn 2 số sẽ hiện $0.00 và
-// khiến người dùng tưởng hệ thống không ghi nhận chi phí.
 function formatUsd(value: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(value);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
 }
 
 function errorMessage(error: unknown) {
@@ -108,7 +106,7 @@ function UsageBar({ percent, tone = "primary" }: { readonly percent: number; rea
 }
 
 function ModelMix({ data }: { readonly data: TokenUsageResponse }) {
-  const rows = data.models.length > 0 ? data.models : [{ model: "Chưa có dữ liệu sử dụng", calls: 0, totalTokens: 0, usd: 0, percent: 0, hasEstimated: false }];
+  const rows = data.models.length > 0 ? data.models : [{ model: "Chưa có dữ liệu sử dụng", calls: 0, totalTokens: 0, usd: 0, percent: 0 }];
 
   return (
     <Card>
@@ -118,10 +116,7 @@ function ModelMix({ data }: { readonly data: TokenUsageResponse }) {
           <div key={model.model} className="grid grid-cols-[112px_minmax(0,1fr)_64px] items-center gap-3">
             <div>
               <p className="truncate font-mono text-mono-status text-secondary">{model.model}</p>
-              <p className="text-label-sm text-on-surface-variant">
-                {formatUsd(model.usd)}
-                {model.hasEstimated ? <span className="ml-1 text-warning" title="Chi phí ước lượng cục bộ vì nhà cung cấp không trả token">(ước lượng)</span> : null}
-              </p>
+              <p className="text-label-sm text-on-surface-variant">{formatUsd(model.usd)}</p>
             </div>
             <div className="h-4 overflow-hidden rounded-full bg-surface-container-high">
               <div className={`h-full rounded-full ${MODEL_COLORS[index % MODEL_COLORS.length]}`} style={{ width: `${Math.max(2, model.percent)}%` }} />
@@ -265,16 +260,6 @@ export default function TokenManagementPage() {
           <Alert tone="error">{errorMessage(currentError)}</Alert>
         </div>
       ) : null}
-      {data?.hasEstimated ? (
-        <div className="mb-gutter">
-          <Alert tone="warning">
-            Nhà cung cấp LLM không trả về số token nên {formatUsd(data.estimatedUsd)} trong tổng {formatUsd(data.usd)} là
-            <strong> ước lượng cục bộ</strong> (phần nhà cung cấp báo thật: {formatUsd(data.measuredUsd)}). Số ước lượng
-            thường THẤP HƠN hóa đơn thật vì không thấy token suy luận nội bộ — dùng để theo dõi xu hướng và hạn mức, không
-            dùng để đối chiếu hóa đơn.
-          </Alert>
-        </div>
-      ) : null}
 
       <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-3">
         <MetricCard
@@ -335,12 +320,7 @@ export default function TokenManagementPage() {
                     <tr className="hover:bg-surface-container-low" key={agent.code}>
                       <td className="px-4 py-4">
                         <p className="font-semibold text-secondary">{agent.moduleName}</p>
-                        <p className="font-mono text-mono-status text-on-surface-variant">
-                          {agent.displayName}
-                          {agent.hasEstimated ? (
-                            <span className="ml-1 text-warning" title="Chi phí ước lượng cục bộ vì nhà cung cấp không trả token">(ước lượng)</span>
-                          ) : null}
-                        </p>
+                        <p className="font-mono text-mono-status text-on-surface-variant">{agent.displayName}</p>
                       </td>
                       <td className="px-4 py-4">
                         <div className="min-w-[160px]">

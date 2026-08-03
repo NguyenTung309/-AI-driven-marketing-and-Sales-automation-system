@@ -16,12 +16,7 @@ public sealed record ContentReviewExecutionRequest(
     Guid ContentItemId,
     int ExpectedRevision,
     string Platform,
-    string Body,
-    // Refine (P6, §4.7): ảnh chụp L1/L2 của item để chạy lại L3+L4 khi reviewer reject. null = bài single-shot
-    // (chain tắt / chưa lưu) => bỏ qua refine, về hàng chờ người. BriefId để gán trace refine đúng bài.
-    Guid? BriefId = null,
-    string? ChainPlanJson = null,
-    string? ChainOutlineJson = null);
+    string Body);
 
 public sealed record ContentReviewExecutionResult
 {
@@ -29,16 +24,12 @@ public sealed record ContentReviewExecutionResult
     public string ImageReviewStatus { get; }
     public int ReviewedImageCount { get; }
     public string ReasonCode { get; }
-    // Lý do reject tự do (tiếng Việt) từ reviewer — refine (P6, §4.7) bơm vào L3 làm góp ý cần khắc phục.
-    // ReasonCode là mã cố định (passed/reviewer_error/agent_non_pass); Reason là văn bản người/LLM đọc được.
-    public string? Reason { get; }
 
     public ContentReviewExecutionResult(
         string reviewStatus,
         string imageReviewStatus,
         int reviewedImageCount,
-        string? reasonCode,
-        string? reason = null)
+        string? reasonCode)
     {
         if (reviewStatus is not (
             ContentItem.ReviewStatusPassed
@@ -89,7 +80,6 @@ public sealed record ContentReviewExecutionResult
         ImageReviewStatus = imageReviewStatus;
         ReviewedImageCount = reviewedImageCount;
         ReasonCode = expectedReasonCode;
-        Reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
     }
 }
 
@@ -150,8 +140,7 @@ public sealed class ContentReviewCoordinator(
     IContentReviewExecutor executor,
     IContentPublishingApprovalPolicyResolver policyResolver,
     IClock clock,
-    IContentAutoScheduler? autoScheduler = null,
-    IContentRefiner? refiner = null) : IContentReviewCoordinator
+    IContentAutoScheduler? autoScheduler = null) : IContentReviewCoordinator
 {
     private const string StartedAction = "content.agent_review.started";
     private const string CompletedAction = "content.agent_review.completed";
@@ -162,7 +151,6 @@ public sealed class ContentReviewCoordinator(
         new(JsonSerializerDefaults.Web);
 
     private readonly IContentAutoScheduler? _autoScheduler = autoScheduler;
-    private readonly IContentRefiner? _refiner = refiner;
 
     public Task ProcessAsync(
         Guid taskId,
@@ -182,131 +170,21 @@ public sealed class ContentReviewCoordinator(
         if (execution is null)
             return;
 
-        var result = await RunReviewAsync(execution, cancellationToken);
-
-        // Refine (P6, §4.7): reviewer reject kèm lý do máy đọc được + bài có L1/L2 đã lưu + chưa refine vòng nào
-        // => chạy lại L3+L4 với lý do reject, sửa body TẠI CHỖ (giữ revision, review vẫn running), rồi chấm lại
-        // ĐÚNG 1 lần bằng chính reviewer cũ. Vòng 2 vẫn reject => rơi về hàng chờ người (không refine tiếp).
-        if (_refiner is not null && ShouldRefine(result, execution))
+        ContentReviewExecutionResult result;
+        try
         {
-            var refined = await TryApplyRefineAsync(execution, result, leaseToken, cancellationToken);
-            if (refined is not null)
-            {
-                execution = refined;
-                result = await RunReviewAsync(execution, cancellationToken);
-            }
+            result = await executor.ReviewAsync(execution.Request, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            result = ReviewerFailure();
         }
 
         await CompleteAsync(execution, leaseToken, result, cancellationToken);
-    }
-
-    private async Task<ContentReviewExecutionResult> RunReviewAsync(
-        ClaimedExecution execution,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await executor.ReviewAsync(execution.Request, cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            return ReviewerFailure();
-        }
-    }
-
-    // Chỉ reject (lý do máy đọc được, không rỗng) mới vào vòng sửa — needs_human/failed KHÔNG bao giờ kích refine
-    // (§4.7). Bài thiếu L1/L2 (single-shot cũ / chain tắt) => bỏ qua. Bộ đếm 1-vòng kiểm lại trong transaction.
-    private static bool ShouldRefine(ContentReviewExecutionResult result, ClaimedExecution execution) =>
-        result.ReviewStatus == ContentItem.ReviewStatusRejected
-        && !string.IsNullOrWhiteSpace(result.Reason)
-        && !string.IsNullOrWhiteSpace(execution.Request.ChainPlanJson)
-        && !string.IsNullOrWhiteSpace(execution.Request.ChainOutlineJson);
-
-    // Chạy L3+L4 với lý do reject rồi ghi body mới TẠI CHỖ dưới lease đang giữ (không đổi revision, review vẫn
-    // running). Trả execution mới (body + rowversion cập nhật) để chấm lại; null => giữ nguyên, CompleteAsync ghi
-    // reject như thường. Guard: task còn lease + chưa refine vòng nào + item đúng revision/rowversion.
-    private async Task<ClaimedExecution?> TryApplyRefineAsync(
-        ClaimedExecution execution,
-        ContentReviewExecutionResult rejectResult,
-        Guid leaseToken,
-        CancellationToken cancellationToken)
-    {
-        var request = execution.Request;
-        ContentDraftRefineResult? draft;
-        try
-        {
-            draft = await _refiner!.RefineAsync(
-                new ContentRefineRequest(
-                    request.TenantId,
-                    request.BriefId,
-                    request.Platform,
-                    request.ChainPlanJson,
-                    request.ChainOutlineJson,
-                    rejectResult.Reason!),
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            return null;
-        }
-
-        if (draft is null || string.IsNullOrWhiteSpace(draft.Body))
-            return null;
-
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        try
-        {
-            var at = await GetLeaseTransitionTimeAsync(cancellationToken);
-            var task = await LoadClaimedTaskAsync(
-                execution.TaskId, request, leaseToken, at, cancellationToken);
-            if (task is null || task.RefineAttemptCount > 0)
-                return null;
-
-            var item = await LoadTaskItemAsync(task, cancellationToken);
-            if (item is null
-                || item.ContentRevision != task.ContentRevision
-                || !item.RowVersion.SequenceEqual(execution.ItemRowVersion))
-            {
-                return null;
-            }
-
-            item.ApplyAgentRefine(draft.Body, at);
-            task.RecordRefineAttempt(leaseToken, at);
-            await SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-
-            // Body + rowversion đổi sau khi ghi — execution mới để chấm lại và để fence CompleteAsync không báo conflict.
-            return execution with
-            {
-                Request = request with { Body = item.Body },
-                ItemRowVersion = item.RowVersion.ToArray(),
-            };
-        }
-        // Lease hết hạn (chưa worker nào reclaim) hoặc item đổi trạng thái dưới chân refine: ApplyAgentRefine +
-        // RecordRefineAttempt ném InvalidOperationException (content_review_not_running / content_item_deleted /
-        // content_review_task_lease_expired), và SaveChangesAsync bung lại InvalidOperationException nội tại. Cùng
-        // nghĩa "mất quyền dưới lease" như nhánh DbUpdateException (rowversion) — degrade về null để CompleteAsync
-        // rơi vào fence lease tự no-op, đồng nhất với cách coordinator xử lý tranh lease ở mọi chỗ khác (không ném
-        // exception ra worker). Trên SqlServer, LoadClaimedTaskAsync chỉ khớp lease theo danh tính (HasLeaseIdentity,
-        // không kiểm hạn) nên khe hết-hạn-chưa-reclaim mới rơi tới đây; nhánh này khép kín nó.
-        catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            db.ChangeTracker.Clear();
-            return null;
-        }
-        finally
-        {
-            db.ChangeTracker.Clear();
-        }
     }
 
     private async Task<ClaimedExecution?> ClaimAsync(
@@ -404,10 +282,7 @@ public sealed class ContentReviewCoordinator(
                     item.Id,
                     task.ContentRevision,
                     item.Platform,
-                    item.Body,
-                    item.BriefId,
-                    item.ChainPlanJson,
-                    item.ChainOutlineJson),
+                    item.Body),
                 reviewer.Id,
                 item.RowVersion.ToArray());
         }

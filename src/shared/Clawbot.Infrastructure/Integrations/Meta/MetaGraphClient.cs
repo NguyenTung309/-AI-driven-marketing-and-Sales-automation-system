@@ -145,11 +145,6 @@ public interface IMetaGraphClient
         IReadOnlyDictionary<string, string> fields,
         string accessToken,
         CancellationToken ct = default);
-    Task SubscribePageFeedAsync(
-        Guid tenantId,
-        string pageId,
-        string pageAccessToken,
-        CancellationToken ct = default);
 }
 
 public sealed partial class MetaGraphClient(
@@ -160,7 +155,6 @@ public sealed partial class MetaGraphClient(
     private static readonly TimeSpan InstagramContainerPollDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan InstagramPermalinkLookupTimeout = TimeSpan.FromSeconds(5);
     private const int InstagramContainerPollAttempts = 30;
-    private const int MaxResponseBytes = 4 * 1024 * 1024;
     private const int InstagramContainerNotReadyCode = 9007;
     private const int InstagramContainerNotReadySubcode = 2207027;
 
@@ -562,31 +556,6 @@ public sealed partial class MetaGraphClient(
         return await PostAsync(options, relativePath, fields, accessToken, ct).ConfigureAwait(false);
     }
 
-    public async Task SubscribePageFeedAsync(
-        Guid tenantId,
-        string pageId,
-        string pageAccessToken,
-        CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(pageId)
-            || !pageId.Trim().All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-'))
-        {
-            throw new ArgumentException("pageId invalid", nameof(pageId));
-        }
-        if (string.IsNullOrWhiteSpace(pageAccessToken))
-            throw new ArgumentException("pageAccessToken required", nameof(pageAccessToken));
-
-        using var document = await PostAsync(
-            tenantId,
-            $"{pageId.Trim()}/subscribed_apps",
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["subscribed_fields"] = "feed",
-            },
-            pageAccessToken,
-            ct).ConfigureAwait(false);
-    }
-
     private async Task<JsonDocument> PostAsync(
         MetaGraphOptions options,
         string relativePath,
@@ -606,33 +575,12 @@ public sealed partial class MetaGraphClient(
         return await SendAsync(request, ct).ConfigureAwait(false);
     }
 
-    private static async Task<string?> ReadResponseBodyAsync(HttpContent content, CancellationToken ct)
-    {
-        await using var stream = await content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        await using var buffer = new MemoryStream();
-        var chunk = new byte[64 * 1024];
-        var total = 0;
-        while (true)
-        {
-            var read = await stream.ReadAsync(chunk.AsMemory(), ct).ConfigureAwait(false);
-            if (read == 0)
-                break;
-            total += read;
-            if (total > MaxResponseBytes)
-                return null;
-            await buffer.WriteAsync(chunk.AsMemory(0, read), ct).ConfigureAwait(false);
-        }
-        return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, checked((int)buffer.Length));
-    }
-
     private async Task<JsonDocument> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         var body = response.Content is null
             ? string.Empty
-            : await ReadResponseBodyAsync(response.Content, ct).ConfigureAwait(false);
-        if (body is null)
-            throw new MetaGraphException("meta_response_too_large", (int)response.StatusCode);
+            : await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         LogUsageHeaders(response);
 
         JsonDocument? parsed = null;

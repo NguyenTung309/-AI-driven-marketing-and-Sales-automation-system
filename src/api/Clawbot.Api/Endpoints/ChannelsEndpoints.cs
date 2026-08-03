@@ -2,7 +2,6 @@ using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Channels;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Channels;
-using Clawbot.Infrastructure.Channels.Pancake;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Security;
@@ -54,17 +53,7 @@ public static class ChannelsEndpoints
             db.PancakeConfigs.Add(row);
         }
 
-        if (!PancakeEndpointPolicy.TryNormalizeBaseUrl(
-                body.BaseUrl ?? row.BaseUrl,
-                out var normalizedBaseUrl))
-        {
-            return Results.BadRequest(new
-            {
-                error = "pancake_base_url_not_allowed",
-            });
-        }
-
-        row.UpdateEndpoint(normalizedBaseUrl, body.SendPathTemplate ?? row.SendPathTemplate,
+        row.UpdateEndpoint(body.BaseUrl ?? row.BaseUrl, body.SendPathTemplate ?? row.SendPathTemplate,
             body.AuthMode ?? row.AuthMode, clock.UtcNow);
         row.UpdateSignature(body.SignatureHeader ?? row.SignatureHeader,
             body.SignatureAlgo ?? row.SignatureAlgo,

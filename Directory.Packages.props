@@ -31,9 +31,6 @@
     <PackageVersion Include="MathNet.Numerics" Version="5.0.0" />
     <PackageVersion Include="Microsoft.ML" Version="5.0.0" />
     <PackageVersion Include="Microsoft.ML.TimeSeries" Version="5.0.0" />
-    <PackageVersion Include="Microsoft.ML.Tokenizers" Version="1.0.3" />
-    <PackageVersion Include="Microsoft.ML.Tokenizers.Data.O200kBase" Version="1.0.3" />
-    <PackageVersion Include="Microsoft.ML.Tokenizers.Data.Cl100kBase" Version="1.0.3" />
     <PackageVersion Include="Microsoft.SemanticKernel" Version="1.77.0" />
     <PackageVersion Include="Grpc.AspNetCore" Version="2.66.0" />
     <PackageVersion Include="Grpc.Net.Client" Version="2.66.0" />
@@ -45,7 +42,7 @@
     <PackageVersion Include="Lib.Net.Http.WebPush" Version="3.3.1" />
     <PackageVersion Include="QuestPDF" Version="2024.12.3" />
     <PackageVersion Include="DocumentFormat.OpenXml" Version="3.1.0" />
-    <PackageVersion Include="PdfPig" Version="0.1.15" />
+    <PackageVersion Include="PdfPig" Version="0.1.14" />
     <PackageVersion Include="xunit" Version="2.9.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />

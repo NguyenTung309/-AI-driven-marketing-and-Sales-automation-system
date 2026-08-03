@@ -9,8 +9,7 @@ BEGIN TRANSACTION;
 DELETE FROM messages;
 DELETE FROM conversation_labels;
 DELETE FROM conversation_notes;
-IF OBJECT_ID(N'dbo.conversation_read_state', N'U') IS NOT NULL
-    DELETE FROM conversation_read_state;
+DELETE FROM conversation_read_state;
 DELETE FROM conversations;
 DELETE FROM processed_messages;
 DELETE FROM contact_external_ids;

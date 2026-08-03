@@ -89,22 +89,11 @@ public sealed class ResearchAgentAdapter(IResearchAgent agent) : AgentAdapterBas
     protected override async Task<string> ExecuteCoreAsync(AgentTask task, CancellationToken ct)
     {
         var input = task.Input;
-        var geo = AgentTaskInput.OptionalString(input, "geo") ?? "VN";
-        var trends = await _agent.ScanAsync(new ResearchScanRequest(
+        var result = await _agent.ScanAsync(new ResearchScanRequest(
             AgentTaskInput.RequiredGuid(input, "tenant_id"),
-            geo,
+            AgentTaskInput.RequiredString(input, "geo"),
             AgentTaskInput.StringList(input, "keywords")), ct).ConfigureAwait(false);
-
-        return trends.Count > 0
-            ? Json(new { trends, matched = trends.Count, geo })
-            : Json(new
-            {
-                trends,
-                matched = 0,
-                geo,
-                hint = "Không có chủ đề nào khớp keyword. Tool này chỉ quét trend theo keyword và không lọc theo ngày. "
-                     + "Nếu cần nội dung mới theo ngày, hãy gọi web.search."
-            });
+        return Json(result);
     }
 }
 

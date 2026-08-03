@@ -14,7 +14,7 @@ public sealed partial class PancakeConfigResolver(
 {
     // Verified (SPEC-16 §5.1): page ops run under pages.fm/api/public_api/v1 with the page_access_token.
     // The previous default (pancake.vn/api/v1) targeted the wrong host and sent the user token where a page token is required.
-    private const string DefaultBaseUrl = PancakeEndpointPolicy.DefaultPublicApiBaseUrl;
+    private const string DefaultBaseUrl = "https://pages.fm/api/public_api/v1";
     private const string DefaultSendPath = "/pages/{page_id}/conversations/{thread_id}/messages";
     private const string DefaultSigHeader = "x-pancake-signature";
 
@@ -124,14 +124,15 @@ public sealed partial class PancakeConfigResolver(
         catch (System.Security.Cryptography.CryptographicException) { return string.Empty; }
     }
 
+    // pages.fm public_api là host send đúng; pancake.vn (legacy seed) gửi sẽ 404/401.
     private static string PreferSendBaseUrl(string? primary, string? secondary)
     {
         foreach (var candidate in new[] { primary, secondary })
         {
-            if (PancakeEndpointPolicy.TryNormalizeBaseUrl(candidate, out var normalized))
-                return normalized;
+            if (string.IsNullOrWhiteSpace(candidate)) continue;
+            if (candidate.Contains("pancake.vn", StringComparison.OrdinalIgnoreCase)) continue;
+            return candidate;
         }
-
         return DefaultBaseUrl;
     }
 

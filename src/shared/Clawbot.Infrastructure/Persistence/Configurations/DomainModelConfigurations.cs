@@ -170,11 +170,9 @@ public sealed class MessageConfiguration : IEntityTypeConfiguration<Message>
         builder.Property(x => x.SenderType).HasMaxLength(16).IsRequired();
         builder.Property(x => x.ContentType).HasMaxLength(32);
         builder.Property(x => x.AttachmentUrl).HasMaxLength(2048);
-        builder.Property(x => x.ParentCommentId).HasColumnName("parent_comment_id").HasMaxLength(256);
         builder.Property(x => x.Status).HasMaxLength(32).IsRequired().HasDefaultValue("sent");
         builder.HasIndex(x => new { x.ConversationId, x.SentAt });
         builder.HasIndex(x => new { x.TenantId, x.SentAt });
-        builder.HasIndex(x => new { x.TenantId, x.ParentCommentId });
     }
 }
 
@@ -391,6 +389,25 @@ public sealed class PancakeConfigConfiguration : IEntityTypeConfiguration<Pancak
         builder.Property(x => x.SendPathTemplate).HasMaxLength(512).IsRequired();
         builder.Property(x => x.AuthMode).HasMaxLength(16).IsRequired();
         builder.HasIndex(x => x.TenantId).IsUnique();
+    }
+}
+
+public sealed class PancakePageConfiguration : IEntityTypeConfiguration<PancakePage>
+{
+    public void Configure(EntityTypeBuilder<PancakePage> builder)
+    {
+        builder.ToTable("pancake_pages");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.PageId).HasMaxLength(128).IsRequired();
+        builder.Property(x => x.Name).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.Platform).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.PageAccessTokenEncrypted).HasColumnName("page_access_token_encrypted").HasMaxLength(2048).IsRequired();
+        builder.Property(x => x.PageTokenMintedAt).HasColumnName("page_token_minted_at");
+        // One row per (tenant, page_id); a tenant cannot duplicate a page connection.
+        builder.HasIndex(x => new { x.TenantId, x.PageId }).IsUnique();
+        // ponytail: global query filter for soft delete declared separately (LESSON-005). Tenant filter is applied
+        // via ITenantOwned convention in the shared model setup; keep this one to the soft-delete concern only.
+        builder.HasQueryFilter(x => x.DeletedAt == null);
     }
 }
 
@@ -614,9 +631,6 @@ public sealed class ContentItemConfiguration : IEntityTypeConfiguration<ContentI
         builder.Property(x => x.HumanApprovalRequirementReason).HasMaxLength(32);
         builder.Property(x => x.ApprovalMode).HasMaxLength(16);
         builder.Property(x => x.ApprovalReason).HasMaxLength(ContentItem.MaxApprovalReasonLength);
-        // Prompt chaining P4: ảnh chụp L1/L2 để repurpose tái dùng (§4.5). NVARCHAR(MAX) — plan+outline có thể dài.
-        builder.Property(x => x.ChainPlanJson).HasColumnName("chain_plan_json");
-        builder.Property(x => x.ChainOutlineJson).HasColumnName("chain_outline_json");
         builder.HasIndex(x => new { x.TenantId, x.Status, x.CreatedAt });
     }
 }
@@ -639,11 +653,7 @@ public sealed class ContentScheduleConfiguration : IEntityTypeConfiguration<Cont
             .HasDefaultValue(ContentSchedule.StatusPending)
             .IsRequired();
         builder.Property(x => x.PostUrl).HasMaxLength(512);
-        builder.Property(x => x.ExternalPostId)
-            .HasColumnName("external_post_id")
-            .HasMaxLength(ContentSchedule.MaxExternalPostIdLength);
         builder.Property(x => x.ProviderTargetId).HasColumnName("provider_target_id").HasMaxLength(128);
-        builder.Property(x => x.MetaCommentsSyncedAt).HasColumnName("meta_comments_synced_at");
         builder.Property(x => x.LastError).HasColumnName("last_error").HasMaxLength(ContentSchedule.MaxLastErrorLength);
         builder.Property(x => x.LastErrorCode).HasMaxLength(128);
         builder.Property(x => x.RetryCount).HasColumnName("retry_count");
@@ -677,8 +687,6 @@ public sealed class ContentReviewTaskConfiguration : IEntityTypeConfiguration<Co
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Status).HasMaxLength(24).IsRequired();
         builder.Property(x => x.LastErrorCode).HasMaxLength(128);
-        // Refine P6 (§4.7): số vòng sửa-tự-động đã dùng cho revision này; đúng 1 vòng nên chỉ 0→1.
-        builder.Property(x => x.RefineAttemptCount).HasDefaultValue(0);
         builder.HasOne<ContentItem>()
             .WithMany()
             .HasForeignKey(x => new { x.TenantId, x.ContentItemId })
@@ -852,29 +860,6 @@ public sealed class ContentWorkflowMetricsHourlyConfiguration
     }
 }
 
-public sealed class ContentGenerationTraceConfiguration
-    : IEntityTypeConfiguration<ContentGenerationTrace>
-{
-    public void Configure(EntityTypeBuilder<ContentGenerationTrace> builder)
-    {
-        builder.ToTable("content_generation_traces");
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).ValueGeneratedOnAdd();
-        builder.Property(x => x.StepId).HasMaxLength(ContentGenerationTrace.StepIdMaxLength).IsRequired();
-        builder.Property(x => x.PromptVersion).HasMaxLength(ContentGenerationTrace.PromptVersionMaxLength).IsRequired();
-        builder.Property(x => x.Model).HasMaxLength(ContentGenerationTrace.ModelMaxLength);
-        builder.Property(x => x.GateResult).HasMaxLength(ContentGenerationTrace.GateResultMaxLength).IsRequired();
-        builder.Property(x => x.PayloadJson).HasMaxLength(ContentGenerationTrace.PayloadJsonMaxLength);
-        builder.Property(x => x.InputTokens).HasDefaultValue(0);
-        builder.Property(x => x.OutputTokens).HasDefaultValue(0);
-        builder.Property(x => x.UsdCost).HasPrecision(18, 6).HasDefaultValue(0m);
-        builder.Property(x => x.LatencyMs).HasDefaultValue(0L);
-        // Truy vấn theo tenant + thời gian (retention 30 ngày, xem trace gần nhất); nhóm theo lượt chạy chuỗi.
-        builder.HasIndex(x => new { x.TenantId, x.CreatedAt });
-        builder.HasIndex(x => x.ChainRunId);
-    }
-}
-
 public sealed class SocialCredentialConfiguration : IEntityTypeConfiguration<SocialCredential>
 {
     public void Configure(EntityTypeBuilder<SocialCredential> builder)
@@ -922,7 +907,6 @@ public sealed class MetaAssetConfiguration : IEntityTypeConfiguration<MetaAsset>
         builder.Property(x => x.Name).HasMaxLength(256).IsRequired();
         builder.Property(x => x.TasksJson).HasColumnName("tasks_json").IsRequired();
         builder.Property(x => x.AccessTokenEncrypted).HasColumnName("access_token_encrypted").IsRequired();
-        builder.Property(x => x.FeedSubscribedAt).HasColumnName("feed_subscribed_at");
         builder.HasOne<Tenant>()
             .WithMany()
             .HasForeignKey(x => x.TenantId)
@@ -1149,14 +1133,8 @@ public sealed class InboxConfiguration : IEntityTypeConfiguration<Inbox>
         builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
         builder.Property(x => x.ExternalPageId).HasMaxLength(128).IsRequired();
         builder.Property(x => x.AvatarUrl).HasMaxLength(512);
-        builder.Property(x => x.EncryptedAccessToken).HasColumnName("encrypted_access_token");
-        builder.Property(x => x.EncryptedRefreshToken).HasColumnName("encrypted_refresh_token");
-        builder.Property(x => x.EncryptedWebhookSecret).HasColumnName("encrypted_webhook_secret");
-        builder.Property(x => x.TokenExpiresAt).HasColumnName("token_expires_at");
-        builder.Property(x => x.PageTokenMintedAt).HasColumnName("page_token_minted_at");
-        builder.HasIndex(x => new { x.TenantId, x.Platform, x.ExternalPageId })
-            .IsUnique()
-            .HasFilter("[is_active] = 1 AND [deleted_at] IS NULL");
+        builder.Property(x => x.EncryptedAccessToken).HasColumnName("encrypted_access_token").HasMaxLength(1024);
+        builder.HasIndex(x => new { x.TenantId, x.Platform, x.ExternalPageId }).HasFilter("is_active = 1");
     }
 }
 
@@ -1167,6 +1145,18 @@ public sealed class InboxMemberConfiguration : IEntityTypeConfiguration<InboxMem
         builder.ToTable("inbox_members");
         builder.HasKey(x => new { x.InboxId, x.AgentId });
         builder.HasOne<Inbox>().WithMany().HasForeignKey(x => x.InboxId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class ChannelTokenConfiguration : IEntityTypeConfiguration<ChannelToken>
+{
+    public void Configure(EntityTypeBuilder<ChannelToken> builder)
+    {
+        builder.ToTable("channel_tokens");
+        builder.HasKey(x => x.InboxId);
+        builder.HasOne<Inbox>().WithOne().HasForeignKey<ChannelToken>(x => x.InboxId).OnDelete(DeleteBehavior.Cascade);
+        builder.Property(x => x.AccessTokenEncrypted).IsRequired();
+        builder.Property(x => x.WebhookSecretEncrypted).IsRequired();
     }
 }
 

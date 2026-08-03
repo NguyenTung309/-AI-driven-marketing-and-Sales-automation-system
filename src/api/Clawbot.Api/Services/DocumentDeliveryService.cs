@@ -82,12 +82,7 @@ public sealed class DocumentDeliveryService(
 
         try
         {
-            await adapter.SendAsync(
-                    doc.TenantId,
-                    "zalo",
-                    threadId,
-                    BuildMessage(doc.FileUrl, FormatExpiry(doc.ExpiresAt)),
-                    ct)
+            await adapter.SendAsync(doc.TenantId, threadId, BuildMessage(doc.FileUrl, FormatExpiry(doc.ExpiresAt)), ct)
                 .ConfigureAwait(false);
         }
         catch (InvalidOperationException)

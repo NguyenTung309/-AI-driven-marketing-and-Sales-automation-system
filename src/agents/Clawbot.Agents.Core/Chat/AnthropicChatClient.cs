@@ -44,20 +44,9 @@ public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig confi
         var text = string.Concat(dto.Content?.Where(c => c.Type == "text").Select(c => c.Text) ?? Array.Empty<string>());
         var inTok = dto.Usage?.InputTokens ?? 0;
         var outTok = dto.Usage?.OutputTokens ?? 0;
+        var cost = (inTok * InputRate + outTok * OutputRate) / 1_000_000m;
 
-        if (inTok != 0 || outTok != 0)
-            return new ClaudeReply(text, inTok, outTok, CalculateCost(inTok, outTok), _config.Model);
-
-        // Anthropic thật luôn trả usage; nhánh này chỉ chạy khi đứng sau proxy làm mất field usage.
-        var estimatedIn = LlmTokenEstimator.CountPrompt(_config.Model, systemPrompt, history, userMessage);
-        var estimatedOut = LlmTokenEstimator.CountText(_config.Model, text);
-        return new ClaudeReply(
-            text,
-            estimatedIn,
-            estimatedOut,
-            CalculateCost(estimatedIn, estimatedOut),
-            _config.Model,
-            IsEstimated: true);
+        return new ClaudeReply(text, inTok, outTok, cost, _config.Model);
     }
 
     public async IAsyncEnumerable<ClaudeStreamChunk> StreamAsync(
@@ -74,7 +63,7 @@ public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig confi
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
 
-        await foreach (var chunk in ReadStreamChunksAsync(resp.Content, systemPrompt, history, userMessage, ct).ConfigureAwait(false))
+        await foreach (var chunk in ReadStreamChunksAsync(resp.Content, ct).ConfigureAwait(false))
             yield return chunk;
     }
 
@@ -109,15 +98,11 @@ public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig confi
 
     private async IAsyncEnumerable<ClaudeStreamChunk> ReadStreamChunksAsync(
         HttpContent content,
-        string systemPrompt,
-        IReadOnlyList<ChatTurn> history,
-        string userMessage,
         [EnumeratorCancellation] CancellationToken ct)
     {
         await using var stream = await content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false);
         var data = new StringBuilder();
-        var visible = new StringBuilder();
         var inputTokens = 0;
         var outputTokens = 0;
 
@@ -130,10 +115,7 @@ public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig confi
             if (line.Length == 0)
             {
                 if (TryReadStreamChunk(data, ref inputTokens, ref outputTokens) is { } chunk)
-                {
-                    visible.Append(chunk.Text);
                     yield return chunk;
-                }
                 data.Clear();
                 continue;
             }
@@ -147,17 +129,7 @@ public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig confi
         }
 
         if (TryReadStreamChunk(data, ref inputTokens, ref outputTokens) is { } finalDataChunk)
-        {
-            visible.Append(finalDataChunk.Text);
             yield return finalDataChunk;
-        }
-
-        var estimated = inputTokens == 0 && outputTokens == 0;
-        if (estimated)
-        {
-            inputTokens = LlmTokenEstimator.CountPrompt(_config.Model, systemPrompt, history, userMessage);
-            outputTokens = LlmTokenEstimator.CountText(_config.Model, visible.ToString());
-        }
 
         yield return new ClaudeStreamChunk(
             string.Empty,
@@ -165,8 +137,7 @@ public sealed class AnthropicChatClient(HttpClient http, ResolvedLlmConfig confi
             inputTokens,
             outputTokens,
             CalculateCost(inputTokens, outputTokens),
-            _config.Model,
-            IsEstimated: estimated);
+            _config.Model);
     }
 
     private decimal CalculateCost(int inputTokens, int outputTokens) =>

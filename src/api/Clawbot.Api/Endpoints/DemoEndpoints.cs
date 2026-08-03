@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using Clawbot.Api.Services;
-using Clawbot.Infrastructure.Channels.Pancake;
 using Clawbot.SharedKernel.Demo;
 using Clawbot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -159,9 +158,7 @@ public static partial class DemoEndpoints
         return Results.Ok(new { traceId, status = "accepted" });
     }
 
-    // //////////////////////////////////////////////////////////////
-    // Internal processing (async after ACK)
-    // //////////////////////////////////////////////////////////////
+
 
     private static async Task ProcessWebhookAsync(
         string traceId, string rawBody,
@@ -171,12 +168,10 @@ public static partial class DemoEndpoints
     {
         try
         {
-            // Truncate at 256KB for storage
             var truncatedBody = rawBody.Length > 256_000
                 ? rawBody[..256_000] + "...[TRUNCATED]"
                 : rawBody;
 
-            // Attempt to parse basic fields for trace
             object? parsed = null;
             string? platform = null;
             string? text = null;
@@ -342,10 +337,8 @@ public static partial class DemoEndpoints
                     }
                     else
                     {
-                        var configuredBaseUrl = string.IsNullOrEmpty(config.PancakeBaseUrl)
-                            ? PancakeEndpointPolicy.DefaultPublicApiBaseUrl
-                            : config.PancakeBaseUrl;
-                        var sendBaseUrl = PancakeEndpointPolicy.NormalizeBaseUrl(configuredBaseUrl)
+                        var sendBaseUrl = (string.IsNullOrEmpty(config.PancakeBaseUrl) ?
+                            "https://pages.fm/api/public_api/v1" : config.PancakeBaseUrl)
                             .Replace("/v2/", "/v1/")
                             .Replace("/v2", "/v1");
                         // Thread ID c? th? ? d?ng composite page_id:thread_id -> c?n t?ch
@@ -480,19 +473,7 @@ public static partial class DemoEndpoints
         store.UpdateToken(req.Token);
         if (req.PageAccessToken is not null) store.UpdatePageAccessToken(req.PageAccessToken);
         if (req.PageId is not null) store.UpdatePageId(req.PageId);
-        if (req.BaseUrl is not null)
-        {
-            if (!PancakeEndpointPolicy.TryNormalizeBaseUrl(req.BaseUrl, out var normalizedBaseUrl))
-            {
-                return Results.BadRequest(new
-                {
-                    error = "pancake_base_url_not_allowed",
-                });
-            }
-
-            store.UpdateBaseUrl(normalizedBaseUrl);
-        }
-
+        if (req.BaseUrl is not null) store.UpdateBaseUrl(req.BaseUrl);
         return Results.Ok(new { status = "pancake_config_updated" });
     }
     private static IResult SetWebhookSecretAsync(

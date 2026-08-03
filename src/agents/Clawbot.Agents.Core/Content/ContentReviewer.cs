@@ -137,11 +137,6 @@ public sealed class ContentReviewer(
         if (LooksLikeInstructionInjection(body))
             return new ContentReviewResult(ContentReviewResult.NeedsHuman, "suspicious_embedded_instructions");
 
-        // Lint tất định (§4.7): cam kết tuyệt đối / link lạ / ký tự rác => đẩy người duyệt TRƯỚC khi gọi LLM.
-        var lint = ContentLint.Check(body);
-        if (!lint.Succeeded)
-            return new ContentReviewResult(ContentReviewResult.NeedsHuman, lint.ErrorCode);
-
         var evidence = await RetrieveEvidenceAsync(tenantId, body, ct).ConfigureAwait(false);
         var memory = await LoadUntrustedMemoryAsync(tenantId, ct).ConfigureAwait(false);
 
@@ -211,18 +206,6 @@ public sealed class ContentReviewer(
                 ReviewedImageCount: 0,
                 ReasonCode: "agent_non_pass",
                 Reason: "suspicious_embedded_instructions");
-        }
-
-        // Lint tất định (§4.7): cùng luật với ReviewAsync — cam kết tuyệt đối / link lạ / ký tự rác => người duyệt.
-        var lint = ContentLint.Check(body);
-        if (!lint.Succeeded)
-        {
-            return new ContentItemReviewOutcome(
-                ContentItem.ReviewStatusNeedsHuman,
-                ContentItem.ImageReviewStatusNotApplicable,
-                ReviewedImageCount: 0,
-                ReasonCode: "agent_non_pass",
-                Reason: lint.ErrorCode);
         }
 
         if (_reviewClientFactory is null || _llmConfigResolver is null)
@@ -495,7 +478,7 @@ public sealed class ContentReviewer(
 
     private async Task RecordCostAsync(Guid tenantId, ClaudeReply reply, CancellationToken ct)
     {
-        if (_costTracker is null || (reply.UsdCost <= 0m && reply.InputTokens <= 0 && reply.OutputTokens <= 0))
+        if (_costTracker is null || reply.UsdCost <= 0m)
             return;
 
         await _costTracker.RecordAsync(new CostEntry(
@@ -506,9 +489,7 @@ public sealed class ContentReviewer(
             reply.OutputTokens,
             reply.UsdCost,
             _llmScope.Current?.CostAt ?? DateTimeOffset.UtcNow,
-            _llmScope.Current?.ReservationId,
-            SessionId: null,
-            IsEstimated: reply.IsEstimated), ct).ConfigureAwait(false);
+            _llmScope.Current?.ReservationId), ct).ConfigureAwait(false);
     }
 
     private async Task RecordEnvelopeCostAsync(
@@ -516,8 +497,7 @@ public sealed class ContentReviewer(
         ReviewCompletionEnvelope envelope,
         CancellationToken ct)
     {
-        if (_costTracker is null
-            || (envelope.UsdCost <= 0m && envelope.InputTokens <= 0 && envelope.OutputTokens <= 0))
+        if (_costTracker is null || envelope.UsdCost <= 0m)
             return;
 
         await _costTracker.RecordAsync(new CostEntry(
@@ -528,8 +508,6 @@ public sealed class ContentReviewer(
             envelope.OutputTokens,
             envelope.UsdCost,
             _llmScope.Current?.CostAt ?? DateTimeOffset.UtcNow,
-            _llmScope.Current?.ReservationId,
-            SessionId: null,
-            IsEstimated: envelope.IsEstimated), ct).ConfigureAwait(false);
+            _llmScope.Current?.ReservationId), ct).ConfigureAwait(false);
     }
 }

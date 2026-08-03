@@ -33,10 +33,7 @@ public sealed class RefreshTokenService(
 
         if (token.RevokedAt is not null)
         {
-            // A token that was rotated (has a successor) and is replayed within the grace
-            // window is a benign multi-tab F5 race → issue a NEW sibling in the same family
-            // instead of treating it as theft (D10). We cannot return the original successor
-            // because only the hash is stored.
+            
             var rotatedWithinGrace = token.ReplacedBy is not null
                 && token.RevokedAt.Value.AddSeconds(_opt.GraceSeconds) >= now;
 
@@ -47,7 +44,7 @@ public sealed class RefreshTokenService(
                 await db.SaveChangesAsync(ct);
                 return new RotateResult(RotateOutcome.Success, siblingRaw, sibling.ExpiresAt, token.UserId, token.FamilyId);
             }
-
+  
             // Reuse of a revoked token outside the grace window → treat as theft, revoke family.
             await RevokeFamilyAsync(token.FamilyId, now, ct);
             return new RotateResult(RotateOutcome.Reuse, null, default, token.UserId, token.FamilyId);

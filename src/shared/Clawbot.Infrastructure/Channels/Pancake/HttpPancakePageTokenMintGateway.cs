@@ -38,8 +38,7 @@ public sealed partial class HttpPancakePageTokenMintGateway(
 
         // EARS[WHEN minting a page token THE SYSTEM SHALL call the Pancake user API with the user access token and
         // return the new page token, refusing to proceed if the response carries no token]
-        var baseUrl = PancakeEndpointPolicy.NormalizeBaseUrl(_options.BaseUrl);
-        var url = $"{baseUrl}/pages/{Uri.EscapeDataString(pageId)}/generate_page_access_token?access_token={Uri.EscapeDataString(userAccessToken)}";
+        var url = $"{_options.BaseUrl.TrimEnd('/')}/pages/{Uri.EscapeDataString(pageId)}/generate_page_access_token?access_token={Uri.EscapeDataString(userAccessToken)}";
         using var resp = await _http.PostAsync(url, content: null, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
 
@@ -66,8 +65,7 @@ public sealed partial class HttpPancakePageTokenMintGateway(
     public async Task<IReadOnlyList<PancakePageSummary>> ListAsync(string userAccessToken, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(userAccessToken);
-        var baseUrl = PancakeEndpointPolicy.NormalizeBaseUrl(_options.BaseUrl);
-        var url = $"{baseUrl}/pages?access_token={Uri.EscapeDataString(userAccessToken)}";
+        var url = $"{_options.BaseUrl.TrimEnd('/')}/pages?access_token={Uri.EscapeDataString(userAccessToken)}";
         using var resp = await _http.GetAsync(url, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
         var doc = await resp.Content.ReadFromJsonAsync<JsonDocument>(JsonOpts, ct).ConfigureAwait(false);

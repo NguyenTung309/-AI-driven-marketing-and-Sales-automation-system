@@ -15,7 +15,6 @@ import {
   updateSocialCredential,
   validateMetaConnection,
   type MetaAuthorizationMode,
-  type MetaEngagementCapability,
   type MetaIntegrationStatus,
   type SocialChannelCredential,
   type UpdateInstagramCredentialPayload,
@@ -328,14 +327,6 @@ function MetaCard({
                     {page.tasks.length ? (
                       <span className="mt-1 block text-label-sm text-on-surface-variant">Quyền tài sản: {page.tasks.join(", ")}</span>
                     ) : null}
-                    <span className="mt-1 flex flex-wrap gap-1.5">
-                      <CapabilityChip ok={page.canModerateComments} label="Trả lời bình luận" />
-                      <CapabilityChip ok={page.canSendPrivateReplies} label="Nhắn riêng từ bình luận" />
-                      <CapabilityChip
-                        ok={Boolean(page.feedSubscribedAt)}
-                        label={page.feedSubscribedAt ? "Webhook bình luận" : "Webhook bình luận (dùng đối soát)"}
-                      />
-                    </span>
                   </span>
                   {page.tasks.some((task) => task.toUpperCase() === "CREATE_CONTENT") ? (
                     page.isDefault ? <StatusPill tone="success">Mặc định</StatusPill> : null
@@ -348,7 +339,6 @@ function MetaCard({
           ) : (
             <Alert tone="warning">Meta chưa trả về Page nào có quyền. Hãy kiểm tra tài sản đã chọn trong màn cấp quyền.</Alert>
           )}
-          <MetaEngagementSummary engagement={status?.engagement} />
         </div>
       ) : null}
 
@@ -366,67 +356,6 @@ function MetaCard({
         </Button>
       </div>
     </Card>
-  );
-}
-
-function CapabilityChip({ ok, label }: { readonly ok: boolean; readonly label: string }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-label-sm ${
-        ok ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-800"
-      }`}
-    >
-      <span aria-hidden="true" className="material-symbols-outlined text-[14px]">
-        {ok ? "check_circle" : "error"}
-      </span>
-      {label}
-    </span>
-  );
-}
-
-// Comment engagement phụ thuộc hai thứ độc lập: task trên từng Page và scope trên token.
-// Thiếu vế nào cũng làm auto-reply im lặng nên phải nói rõ đang thiếu cái gì.
-function MetaEngagementSummary({ engagement }: { readonly engagement: MetaEngagementCapability | null | undefined }) {
-  if (!engagement) return null;
-
-  const {
-    activePageCount,
-    commentCapablePageCount,
-    privateReplyCapablePageCount,
-    feedSubscribedPageCount,
-    missingCommentScopes,
-    missingPrivateReplyScopes,
-  } = engagement;
-
-  return (
-    <div className="mt-4 rounded-lg border border-outline bg-surface p-4">
-      <h5 className="text-title-sm text-secondary">Năng lực bình luận (dự phòng khi chưa nối Pancake)</h5>
-      <dl className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div>
-          <dt className="text-label-caps uppercase text-on-surface-variant">Page trả lời được bình luận</dt>
-          <dd className="mt-1 text-body-md text-secondary">{commentCapablePageCount}/{activePageCount}</dd>
-        </div>
-        <div>
-          <dt className="text-label-caps uppercase text-on-surface-variant">Page nhắn riêng được</dt>
-          <dd className="mt-1 text-body-md text-secondary">{privateReplyCapablePageCount}/{activePageCount}</dd>
-        </div>
-        <div>
-          <dt className="text-label-caps uppercase text-on-surface-variant">Page đã đăng ký webhook</dt>
-          <dd className="mt-1 text-body-md text-secondary">{feedSubscribedPageCount}/{activePageCount}</dd>
-        </div>
-      </dl>
-      {missingCommentScopes.length ? (
-        <Alert tone="warning">Thiếu quyền trả lời bình luận: {missingCommentScopes.join(", ")}. Cấp lại quyền để bật.</Alert>
-      ) : null}
-      {missingPrivateReplyScopes.length ? (
-        <Alert tone="warning">Thiếu quyền nhắn riêng từ bình luận: {missingPrivateReplyScopes.join(", ")}.</Alert>
-      ) : null}
-      {feedSubscribedPageCount < activePageCount ? (
-        <p className="mt-2 text-label-sm text-on-surface-variant">
-          Page chưa đăng ký webhook vẫn nhận bình luận qua job đối soát mỗi 5 phút, chỉ chậm hơn thời gian thực.
-        </p>
-      ) : null}
-    </div>
   );
 }
 

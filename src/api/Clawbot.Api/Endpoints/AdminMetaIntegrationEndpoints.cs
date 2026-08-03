@@ -39,8 +39,7 @@ public sealed record MetaIntegrationStatusResponse(
     DateTimeOffset? DataAccessExpiresAt,
     DateTimeOffset? LastValidatedAt,
     string? LastError,
-    IReadOnlyList<MetaAssetSnapshot> Assets,
-    MetaEngagementCapabilitySnapshot? Engagement);
+    IReadOnlyList<MetaAssetSnapshot> Assets);
 
 public static partial class AdminMetaIntegrationEndpoints
 {
@@ -361,8 +360,7 @@ public static partial class AdminMetaIntegrationEndpoints
             value.DataAccessExpiresAt,
             value.LastValidatedAt,
             value.LastError,
-            value.Assets,
-            value.Engagement);
+            value.Assets);
 
     private static Guid? CurrentUserId(ClaimsPrincipal user)
     {

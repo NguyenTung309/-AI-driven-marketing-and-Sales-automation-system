@@ -42,9 +42,7 @@ public sealed class ClawbotChatCompletionService(
     private async Task RecordCostAsync(ClaudeReply reply, CancellationToken ct)
     {
         var current = _llmScope?.Current;
-        if (_costTracker is null
-            || current is null
-            || (reply.UsdCost <= 0m && reply.InputTokens <= 0 && reply.OutputTokens <= 0))
+        if (_costTracker is null || current is null || reply.UsdCost <= 0m)
             return;
 
         await _costTracker.RecordAsync(new CostEntry(
@@ -55,9 +53,7 @@ public sealed class ClawbotChatCompletionService(
             reply.OutputTokens,
             reply.UsdCost,
             current.Value.CostAt ?? DateTimeOffset.UtcNow,
-            current.Value.ReservationId,
-            SessionId: null,
-            IsEstimated: reply.IsEstimated), ct).ConfigureAwait(false);
+            current.Value.ReservationId), ct).ConfigureAwait(false);
     }
 
     private static (string SystemPrompt, IReadOnlyList<ChatTurn> History, string UserMessage) Map(ChatHistory chatHistory)

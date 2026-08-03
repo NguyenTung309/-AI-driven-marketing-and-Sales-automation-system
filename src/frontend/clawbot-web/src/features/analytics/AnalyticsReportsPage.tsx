@@ -111,12 +111,11 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
-// 4 chữ số thập phân: chi phí một agent/lượt gọi thường dưới $0.005, làm tròn 2 số sẽ hiện $0.00.
 function formatUsd(value: number): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 4,
+    maximumFractionDigits: 2,
   }).format(value);
 }
 

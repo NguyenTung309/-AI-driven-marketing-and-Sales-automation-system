@@ -4,15 +4,15 @@
     container_name: clawbot-sqlserver
     environment:
       ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?MSSQL_SA_PASSWORD is required}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Clawbot!2026}
       MSSQL_PID: Developer
     ports:
-      - "127.0.0.1:11433:1433"
+      - "11433:1433"
     volumes:
       - sqlserver_data:/var/opt/mssql
       - D:/qnh-convert/db_sobannganh:/mnt/db_sobannganh
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"${MSSQL_SA_PASSWORD:?MSSQL_SA_PASSWORD is required}\" -C -Q 'SELECT 1' || exit 1"]
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"${MSSQL_SA_PASSWORD:-Clawbot!2026}\" -C -Q 'SELECT 1' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -21,7 +21,7 @@
     image: redis:7-alpine
     container_name: clawbot-redis
     ports:
-      - "127.0.0.1:6379:6379"
+      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -32,11 +32,11 @@
     image: rabbitmq:3-management
     container_name: clawbot-rabbitmq
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?RABBITMQ_USER is required}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
     ports:
-      - "127.0.0.1:5672:5672"
-      - "127.0.0.1:15672:15672"
+      - "5672:5672"
+      - "15672:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
@@ -47,8 +47,8 @@
     image: qdrant/qdrant:latest
     container_name: clawbot-qdrant
     ports:
-      - "127.0.0.1:6333:6333"
-      - "127.0.0.1:6334:6334"
+      - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
 
@@ -57,7 +57,7 @@
     image: searxng/searxng:latest
     container_name: clawbot-searxng
     ports:
-      - "127.0.0.1:8888:8080"
+      - "8888:8080"
     volumes:
       - ./searxng:/etc/searxng
     restart: unless-stopped
@@ -67,11 +67,11 @@
     container_name: clawbot-minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_USER:?MINIO_USER is required}
-      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:?MINIO_PASSWORD is required}
+      MINIO_ROOT_USER: ${MINIO_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-minio12345}
     ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+      - "9000:9000"
+      - "9001:9001"
     volumes:
       - minio_data:/data
 
@@ -81,7 +81,7 @@
     environment:
       POSTGRES_DB: metabase
       POSTGRES_USER: metabase
-      POSTGRES_PASSWORD: ${METABASE_PASSWORD:?METABASE_PASSWORD is required}
+      POSTGRES_PASSWORD: ${METABASE_PASSWORD:-metabase12345}
     volumes:
       - metabase_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -94,13 +94,13 @@
     image: metabase/metabase:latest
     container_name: clawbot-metabase
     ports:
-      - "127.0.0.1:3000:3000"
+      - "3000:3000"
     environment:
       MB_DB_TYPE: postgres
       MB_DB_DBNAME: metabase
       MB_DB_PORT: 5432
       MB_DB_USER: metabase
-      MB_DB_PASS: ${METABASE_PASSWORD:?METABASE_PASSWORD is required}
+      MB_DB_PASS: ${METABASE_PASSWORD:-metabase12345}
       MB_DB_HOST: postgres
     depends_on:
       postgres:
@@ -120,17 +120,16 @@
       dockerfile: src/api/Clawbot.Api/Dockerfile
     container_name: clawbot-api
     ports:
-      - "127.0.0.1:15874:15874"
+      - "15874:15874"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://0.0.0.0:15874
-      - ConnectionStrings__SqlServer=Server=sqlserver,1433;Database=clawbot;User Id=sa;Password=${MSSQL_SA_PASSWORD:?MSSQL_SA_PASSWORD is required};TrustServerCertificate=True
+      - ConnectionStrings__SqlServer=Server=sqlserver,1433;Database=clawbot;User Id=sa;Password=${MSSQL_SA_PASSWORD:-Clawbot!2026};TrustServerCertificate=True
       - ConnectionStrings__Redis=redis:6379
-      - ConnectionStrings__RabbitMq=amqp://${RABBITMQ_USER:?RABBITMQ_USER is required}:${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}@rabbitmq:5672
+      - ConnectionStrings__RabbitMq=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672
       - Vector__Qdrant__Host=qdrant
-      # Shared cryptographic settings. Development defaults only; override both outside local use.
-      - Jwt__SigningKey=${JWT_SIGNING_KEY:?JWT_SIGNING_KEY is required}
-      - Encryption__Base64Key=${ENCRYPTION_BASE64_KEY:?ENCRYPTION_BASE64_KEY is required}
+      # JWT signing key (HS256 needs >=32 bytes). Dev default here; override in staging/prod.
+      - Jwt__SigningKey=${JWT_SIGNING_KEY:-dev-only-jwt-signing-key-change-before-staging-0123456789}
       # Pancake tokens - doc tu file .env (cung thu muc)
       - PANCAKE_ACCESS_TOKEN=${PANCAKE_ACCESS_TOKEN:-}
       - PANCAKE_PAGE_ACCESS_TOKEN=${PANCAKE_PAGE_ACCESS_TOKEN:-}
@@ -165,14 +164,13 @@
       dockerfile: src/gateway/Clawbot.Gateway/Dockerfile
     container_name: clawbot-gateway
     ports:
-      - "127.0.0.1:15873:15873"
+      - "15873:15873"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://0.0.0.0:15873
-      # No fallback secret: an unset value must fail HMAC checks, not silently accept a published default.
-      - Gateway__Pancake__WebhookSecret=${PANCAKE_WEBHOOK_SECRET:-}
+      - Gateway__Pancake__WebhookSecret=${PANCAKE_WEBHOOK_SECRET:-dev-secret-replace-before-staging}
       # Must match clawbot-api's Jwt__SigningKey so the gateway can verify forwarded tokens.
-      - Jwt__SigningKey=${JWT_SIGNING_KEY:?JWT_SIGNING_KEY is required}
+      - Jwt__SigningKey=${JWT_SIGNING_KEY:-dev-only-jwt-signing-key-change-before-staging-0123456789}
       # Pancake tokens - doc tu file .env (cung thu muc)
       - PANCAKE_ACCESS_TOKEN=${PANCAKE_ACCESS_TOKEN:-}
       - PANCAKE_PAGE_ACCESS_TOKEN=${PANCAKE_PAGE_ACCESS_TOKEN:-}

@@ -15,8 +15,6 @@ public sealed record ContentTrendScanJobPayload(string WeekOf);
 
 public sealed record ContentImagePromptJobPayload(GenerateImagePromptRequest Request);
 
-public sealed record ContentRegenerateHookJobPayload(Guid ContentItemId, int HookIndex);
-
 // Chuyển thể bài sang các nền tảng khác — mỗi nền tảng là 1 lượt gọi agent.
 public sealed class ContentRepurposeJobHandler(ContentAgent.ContentAgentClient grpc) : IJobHandler
 {
@@ -92,30 +90,5 @@ public sealed class ContentImagePromptJobHandler(ContentImagePromptService servi
         var result = await service.GenerateAsync(ctx.TenantId, payload.Request, ct).ConfigureAwait(false);
 
         return new JobResult("/content?tab=queue", result.Prompt);
-    }
-}
-
-// Đổi hook (P5, §4.5): chạy lại L3+L4 với hook marketer chọn, sửa bài tại chỗ (revision mới + chờ review lại).
-public sealed class ContentRegenerateHookJobHandler(ContentAgent.ContentAgentClient grpc) : IJobHandler
-{
-    public const string JobType = "content.regenerate-hook";
-
-    public string Type => JobType;
-
-    public async Task<JobResult> RunAsync(JobContext ctx, CancellationToken ct)
-    {
-        var payload = JsonSerializer.Deserialize<ContentRegenerateHookJobPayload>(ctx.PayloadJson)
-            ?? throw new InvalidOperationException("Thiếu bài hoặc hook cho việc đổi hook.");
-
-        var resp = await grpc.RegenerateHookAsync(new RegenerateHookRequest
-        {
-            TenantId = ctx.TenantId.ToString(),
-            ContentId = payload.ContentItemId.ToString(),
-            HookIndex = payload.HookIndex,
-        }, cancellationToken: ct).ResponseAsync.ConfigureAwait(false);
-
-        return new JobResult(
-            $"/content?tab=queue&itemId={resp.ContentId}",
-            "Đã đổi hook, bài chờ duyệt lại.");
     }
 }

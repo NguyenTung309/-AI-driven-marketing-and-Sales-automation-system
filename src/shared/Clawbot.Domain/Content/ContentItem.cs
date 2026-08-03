@@ -51,12 +51,6 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
     public DateTimeOffset? ApprovedAt { get; private set; }
     public string? RejectedReason { get; private set; }
 
-    // Prompt chaining P4: ảnh chụp L1 (plan) + L2 (outline, kèm SelectedHookIndex) dạng JSON — CHỈ set khi chuỗi
-    // chạy đủ 4 mắt xích thành công. Repurpose/đổi hook (§4.5) tái dùng để chạy lại chỉ L3+L4, khỏi gọi lại LLM/RAG
-    // cho L1/L2. NULL = bài tạo bằng single-shot (hoặc chain tắt) => repurpose chạy full chuỗi từ body.
-    public string? ChainPlanJson { get; private set; }
-    public string? ChainOutlineJson { get; private set; }
-
     public int ContentRevision { get; private set; } = 1;
     public string AgentReviewStatus { get; private set; } = ReviewStatusPending;
     public int? AgentReviewedRevision { get; private set; }
@@ -93,9 +87,7 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
         Guid? createdBy,
         DateTimeOffset createdAt,
         Guid? briefId = null,
-        Guid? createdByAgentId = null,
-        string? chainPlanJson = null,
-        string? chainOutlineJson = null) =>
+        Guid? createdByAgentId = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -105,8 +97,6 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
             Body = body,
             CreatedBy = createdBy,
             CreatedByAgentId = createdByAgentId,
-            ChainPlanJson = chainPlanJson,
-            ChainOutlineJson = chainOutlineJson,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         };
@@ -318,33 +308,6 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
         var nextRevision = checked(ContentRevision + 1);
         Body = normalizedBody;
         InvalidateForRevision(nextRevision, at);
-    }
-
-    // Đổi hook (P5, §4.5): body mới do chạy lại L3+L4 với hook marketer chọn; ChainOutlineJson cập nhật hook đã chọn
-    // để lần đổi sau vẫn tái dùng. Luôn tạo revision mới + reset review (như ReviseBody) kể cả khi body trùng —
-    // marketer đã chủ động đổi hook nên cần review lại. ChainPlanJson giữ nguyên (L1 không đổi khi chỉ đổi hook).
-    public void ReviseForHookChange(string body, string chainOutlineJson, DateTimeOffset at)
-    {
-        var normalizedBody = NormalizeRequired(body, int.MaxValue, "content_body_required");
-        EnsureRevisionCanChange();
-        var nextRevision = checked(ContentRevision + 1);
-        Body = normalizedBody;
-        if (!string.IsNullOrWhiteSpace(chainOutlineJson))
-            ChainOutlineJson = chainOutlineJson;
-        InvalidateForRevision(nextRevision, at);
-    }
-
-    // Refine (P6, §4.7): reviewer reject kèm lý do => content-agent viết lại L3+L4, đổi body NGAY TRONG lượt review
-    // đang chạy. GIỮ NGUYÊN revision + GIỮ review đang running (khác ReviseBody: không tạo revision mới, không reset
-    // review) — coordinator chấm lại chính body này rồi RecordAgentReview đóng lượt. ChainPlanJson/OutlineJson không đổi.
-    public void ApplyAgentRefine(string body, DateTimeOffset at)
-    {
-        var normalizedBody = NormalizeRequired(body, int.MaxValue, "content_body_required");
-        EnsureNotPublishedOrDeleted();
-        if (AgentReviewStatus != ReviewStatusRunning)
-            throw new InvalidOperationException("content_review_not_running");
-        Body = normalizedBody;
-        UpdatedAt = at;
     }
 
     public void ReviseAssets(string assetsJson, DateTimeOffset at)

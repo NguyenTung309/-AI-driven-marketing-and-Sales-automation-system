@@ -89,7 +89,7 @@ public static class AdminChannelsEndpoints
                 i.Name,
                 i.Platform,
                 status = i.EncryptedAccessToken != null ? "connected" : "not_configured",
-                mintedAt = i.PageTokenMintedAt,
+                mintedAt = (DateTimeOffset?)i.UpdatedAt,
             })
             .ToListAsync(ct).ConfigureAwait(false);
         return Results.Ok(new { items = pages });

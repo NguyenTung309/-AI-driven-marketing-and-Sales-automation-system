@@ -11,9 +11,7 @@ public sealed record CostEntry(
     decimal UsdCost,
     DateTimeOffset At,
     Guid? ReservationId = null,
-    Guid? SessionId = null,
-    // IsEstimated: provider không trả usage nên token/cost là ước lượng cục bộ (thấp hơn hóa đơn thật).
-    bool IsEstimated = false);
+    Guid? SessionId = null);
 
 public sealed record CostSummary(Guid TenantId, decimal MonthToDateUsd, decimal CapUsd, float PercentUsed);
 
@@ -51,10 +49,7 @@ internal sealed class InMemoryLlmCostTracker : ILlmCostTracker, ILlmCostReservat
     public Task RecordAsync(CostEntry entry, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(entry);
-
-        // Chỉ bỏ qua khi KHÔNG có gì để ghi. Trước đây guard là `UsdCost <= 0` nên lượt có token
-        // nhưng rate = 0 (hoặc provider không trả usage) bị nuốt sạch -> ledger rỗng, cap vô hiệu.
-        if (entry.UsdCost <= 0m && entry.InputTokens <= 0 && entry.OutputTokens <= 0)
+        if (entry.UsdCost <= 0m)
             return Task.CompletedTask;
 
         var key = (entry.TenantId, entry.At.Year, entry.At.Month);

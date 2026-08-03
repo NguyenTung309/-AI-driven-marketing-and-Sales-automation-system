@@ -25,7 +25,7 @@ public static partial class AuthEndpoints
 
     private static readonly JsonSerializerOptions MeJsonOptions = new()
     {
-        PropertyNamingPolicy = null // Preserve C# property names
+        PropertyNamingPolicy = null
     };
 
     [LoggerMessage(EventId = 2001, Level = LogLevel.Information,
@@ -38,9 +38,9 @@ public static partial class AuthEndpoints
     {
         var group = app.MapGroup("/auth").RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
 
-        group.MapPost("/login", LoginAsync).AllowAnonymous().RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
-        group.MapPost("/login/2fa", LoginWithTwoFactorAsync).AllowAnonymous().RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
-        group.MapPost("/refresh", RefreshAsync).AllowAnonymous().RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
+        group.MapPost("/login", LoginAsync).AllowAnonymous();
+        group.MapPost("/login/2fa", LoginWithTwoFactorAsync).AllowAnonymous();
+        group.MapPost("/refresh", RefreshAsync).AllowAnonymous();
         group.MapPost("/logout", LogoutAsync).AllowAnonymous();
         group.MapPost("/reset/request", RequestResetAsync).AllowAnonymous();
         group.MapPost("/reset/confirm", ConfirmResetAsync).AllowAnonymous();
@@ -68,11 +68,8 @@ public static partial class AuthEndpoints
         if (user is null || !user.IsActive()) return Results.Unauthorized();
 
         var check = await signIn.CheckPasswordSignInAsync(user, req.Password, lockoutOnFailure: true);
-        if (check.IsLockedOut) return Results.Unauthorized();
-        if (!check.Succeeded) return Results.Unauthorized();
-
-        // CheckPasswordSignInAsync validates password + lockout only; it never reports
-        // RequiresTwoFactor. Check 2FA explicitly so enabled accounts are challenged.
+        if (check.IsLockedOut || !check.Succeeded) return Results.Unauthorized();
+        
         if (await users.GetTwoFactorEnabledAsync(user))
             return Results.Json(new { requiresTwoFactor = true }, statusCode: 202);
 
@@ -164,30 +161,34 @@ public static partial class AuthEndpoints
         ILogger<Program> log)
     {
         var user = await users.FindByEmailAsync(req.Email);
-        if (user is null) return Results.Ok(); // Avoid email enumeration.
+        if (user is null) return Results.Ok();
 
         var token = await users.GeneratePasswordResetTokenAsync(user);
         var otp = GenerateOtp();
         cache.Set(ResetOtpCacheKey(req.Email, otp), token, ResetOtpTtl);
 
         LogResetOtpIssued(log, req.Email, otp);
-        await email.SendAsync(req.Email, "Dat lai mat khau Hoc Ba",
-            $"Ma OTP dat lai mat khau cua ban: {otp}. Ma co hieu luc trong 10 phut.");
+        await email.SendAsync(req.Email, "Đặt lại mật khẩu HocBa",
+            $"Mã OTP đặt lại mật khẩu của bạn: {otp}. Mã có hiệu lực trong 10 phút.");
         return Results.Ok();
     }
 
     private static async Task<IResult> ChangePasswordAsync(
         ChangePasswordRequest req,
         ClaimsPrincipal principal,
-        UserManager<AppUser> users)
+        UserManager<AppUser> users,
+        IRefreshTokenService refreshTokens,
+        CancellationToken ct)
     {
         var user = await users.GetUserAsync(principal);
         if (user is null) return Results.Unauthorized();
 
         var result = await users.ChangePasswordAsync(user, req.CurrentPassword, req.NewPassword);
-        return result.Succeeded
-            ? Results.Ok()
-            : Results.BadRequest(result.Errors.Select(e => e.Description));
+        if (!result.Succeeded)
+            return Results.BadRequest(result.Errors.Select(e => e.Description));
+
+        await refreshTokens.RevokeAllForUserAsync(user.Id, ct);
+        return Results.Ok();
     }
 
     private static async Task<IResult> ConfirmResetAsync(

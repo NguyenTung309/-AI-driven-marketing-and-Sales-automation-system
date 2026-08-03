@@ -135,11 +135,6 @@ public static class AdminUsersEndpoints
         if ((!string.IsNullOrWhiteSpace(req.PancakeAccessToken) || !string.IsNullOrWhiteSpace(req.PancakePageId)) && !canManageToken)
             return Results.Forbid();
 
-        // Chan truoc khi ghi: neu de den ConnectPancakePageAsync moi bao inbox_not_found thi user +
-        // role da commit, caller nhan 400 nhung du lieu van doi (va lan thu lai bao trung email).
-        var pageError = await ValidatePancakePageAsync(db, tenantId, req.PancakePageId, req.PancakePlatform, req.PancakeAccessToken, ct);
-        if (pageError is not null) return pageError;
-
         var user = new AppUser
         {
             Id = Guid.NewGuid(),
@@ -172,38 +167,6 @@ public static class AdminUsersEndpoints
         return Results.Created($"/api/admin/users/{user.Id}", new { user.Id, user.Email, user.DisplayName });
     }
 
-    // Inbox mac dinh la zalo khi form khong chon nen tang — dung chung cho ca buoc kiem tra truoc va buoc ghi.
-    private static string NormalizePlatform(string? platform) =>
-        string.IsNullOrWhiteSpace(platform) ? "zalo" : platform.Trim().ToLowerInvariant();
-
-    private static IResult InboxNotFound() =>
-        Results.BadRequest(new { error = "inbox_not_found", message = "Kênh chưa tồn tại - nhập kèm Pancake Page Access Token để tạo kênh." });
-
-    // Kiem tra page_id truoc khi doi user. Chi truong hop "co page_id, khong co token" moi hong duoc:
-    // co token thi StorePageTokenDirectAsync tu tao/cap nhat inbox nen tra cuu sau do chac chan thay.
-    private static async Task<IResult?> ValidatePancakePageAsync(
-        AppDbContext db,
-        Guid tenantId,
-        string? pageId,
-        string? platform,
-        string? pageAccessToken,
-        CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(pageId)) return null;
-        if (!string.IsNullOrWhiteSpace(pageAccessToken)) return null;
-
-        var plat = NormalizePlatform(platform);
-        var trimmed = pageId.Trim();
-        var exists = await db.Inboxes
-            .IgnoreQueryFilters()
-            .AnyAsync(i => i.TenantId == tenantId
-                && i.Platform == plat
-                && i.ExternalPageId == trimmed
-                && i.DeletedAt == null, ct);
-
-        return exists ? null : InboxNotFound();
-    }
-
     // Cau hinh kenh tu form user: upsert inbox (page_id + token encrypted) roi gan user lam member.
     // Polling inbound + gui outbound deu doc token tu inbox nay.
     private static async Task<IResult?> ConnectPancakePageAsync(
@@ -219,7 +182,7 @@ public static class AdminUsersEndpoints
         CancellationToken ct)
     {
         pageId = pageId.Trim();
-        var plat = NormalizePlatform(platform);
+        var plat = string.IsNullOrWhiteSpace(platform) ? "zalo" : platform.Trim();
         var name = channelName?.Trim() ?? string.Empty;
 
         if (!string.IsNullOrWhiteSpace(pageAccessToken))
@@ -230,12 +193,9 @@ public static class AdminUsersEndpoints
 
         var inbox = await db.Inboxes
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(i => i.TenantId == tenantId
-                && i.Platform == plat
-                && i.ExternalPageId == pageId
-                && i.DeletedAt == null, ct);
+            .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.ExternalPageId == pageId && i.DeletedAt == null, ct);
         if (inbox is null)
-            return InboxNotFound();
+            return Results.BadRequest(new { error = "inbox_not_found", message = "Kênh chưa tồn tại - nhập kèm Pancake Page Access Token để tạo kênh." });
 
         // Doi ten hien thi khong can nhap lai token
         if (name.Length > 0 && inbox.Name != name)
@@ -283,10 +243,6 @@ public static class AdminUsersEndpoints
             return Results.Forbid();
 
         if (!hasUserChange && !hasTokenChange) return Results.NoContent();
-
-        // Nhu CreateAsync: role/lockout commit ngay qua UserManager, nen phai chan page_id sai truoc khi doi user.
-        var pageError = await ValidatePancakePageAsync(db, tenants.Require().TenantId, req.PancakePageId, req.PancakePlatform, req.PancakeAccessToken, ct);
-        if (pageError is not null) return pageError;
 
         if (req.DisplayName is not null) user.DisplayName = req.DisplayName;
         if (req.IsActive is { } active)

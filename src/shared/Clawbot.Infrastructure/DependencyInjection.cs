@@ -5,23 +5,23 @@ using Clawbot.Agents.Core.Skills;
 using Clawbot.Agents.Core.Skills.Content;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Application.Abstractions;
-using Clawbot.Infrastructure.Ads;
 using Clawbot.Infrastructure.Analytics;
 using Clawbot.Infrastructure.Audit;
 using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Channels.Pancake;
-using Clawbot.Infrastructure.Content.Publishing;
 using Clawbot.Infrastructure.Email;
+using Clawbot.Infrastructure.Content.Publishing;
+using Clawbot.Infrastructure.Ads;
+using Clawbot.Infrastructure.Leads;
+using Clawbot.SharedKernel.Audit;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Integrations.Meta;
-using Clawbot.Infrastructure.Leads;
 using Clawbot.Infrastructure.Multitenancy;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.Infrastructure.Resilience;
 using Clawbot.Infrastructure.Security;
 using Clawbot.Infrastructure.Time;
 using Clawbot.Infrastructure.Vectors;
-using Clawbot.SharedKernel.Audit;
 using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Content;
 using Clawbot.SharedKernel.Multitenancy;
@@ -152,7 +152,6 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(Math.Clamp(options.TimeoutSeconds, 5, 120));
         }).RemoveAllLoggers();
         services.AddScoped<IMetaIntegrationService, MetaIntegrationService>();
-        services.AddScoped<Channels.Meta.IMetaInboxProvisioner, Channels.Meta.MetaInboxProvisioner>();
         services.Configure<EncryptionOptions>(cfg.GetSection("Encryption"));
         services.AddSingleton<IEncryptor, AesEncryptor>();
         // Per-(tenant, agent) LLM provider resolution (decrypts the bound LlmConfig at call time).
@@ -185,8 +184,7 @@ public static class DependencyInjection
         services.AddScoped<IPancakePageTokenResolver, PancakePageTokenResolver>();
         services.AddScoped<IPancakePageTokenService, PancakePageTokenService>();
         services.AddHttpClient<IPageTokenMintGateway, HttpPancakePageTokenMintGateway>()
-            .ConfigurePrimaryHttpMessageHandler(PancakeEndpointPolicy.CreateNoRedirectHandler)
-            .RemoveAllLoggers()
+            .AddPolicyHandler(HttpResiliencePolicies.Retry())
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(15)));
         // SPEC-16 Module M-3/M-4: same gateway also lists pages (IPageListGateway) for the admin connect flow.
@@ -195,16 +193,12 @@ public static class DependencyInjection
 
         // Outbound message POSTs are not idempotent; never auto-retry after an ambiguous response.
         services.AddHttpClient<IChannelAdapter, PancakeChannelAdapter>()
-            .ConfigurePrimaryHttpMessageHandler(PancakeEndpointPolicy.CreateNoRedirectHandler)
-            .RemoveAllLoggers()
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
         // Comment auto-reply: cùng instance adapter Pancake, expose thêm action reply_comment/private_replies.
         services.AddScoped<ICommentChannelAdapter>(sp =>
             sp.GetRequiredService<IChannelAdapter>() as ICommentChannelAdapter
             ?? throw new InvalidOperationException("ICommentChannelAdapter not available"));
-        services.AddScoped<Channels.Meta.MetaCommentChannelAdapter>();
-        services.AddScoped<Channels.Meta.ICommentChannelAdapterResolver, Channels.Meta.TenantCommentChannelAdapterResolver>();
         // Native Facebook/Zalo publishing is always available so DB-backed connections take effect without a restart.
         services.Configure<GraphPublisherOptions>(cfg.GetSection(GraphPublisherOptions.SectionName));
         services.AddScoped<EfSocialCredentialResolver>();

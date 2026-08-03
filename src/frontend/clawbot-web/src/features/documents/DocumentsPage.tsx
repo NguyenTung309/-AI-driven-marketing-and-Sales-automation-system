@@ -24,24 +24,10 @@ import {
   type DocumentListResponse,
   type DocumentTemplate,
   type GeneratedDocument,
-  type TemplateField,
 } from "@/shared/api/documents";
-import { DocumentFieldsForm } from "./DocumentFieldsForm";
-import { DocumentPreview } from "./DocumentPreview";
-import { TemplateFieldsEditor } from "./TemplateFieldsEditor";
-import {
-  applyVars,
-  cleanVars,
-  formFieldsFor,
-  missingRequired,
-  sampleVars,
-  syncFieldsWithBody,
-  TEMPLATE_PRESETS,
-  type TemplatePreset,
-} from "./templateModel";
 
 type NoticeTone = "info" | "success" | "warning" | "error";
-type PreviewMode = "fill" | "document";
+type PreviewMode = "template" | "document";
 
 interface NoticeState {
   readonly tone: NoticeTone;
@@ -52,26 +38,19 @@ interface TemplateDraft {
   readonly id: string | null;
   readonly code: string;
   readonly docType: string;
-  readonly body: string;
-  readonly fields: readonly TemplateField[];
+  readonly templateHtml: string;
 }
 
 const EMPTY_TEMPLATES: readonly DocumentTemplate[] = [];
 const EMPTY_DOCUMENTS: readonly GeneratedDocument[] = [];
 
-function draftFromPreset(preset: TemplatePreset): TemplateDraft {
-  return { id: null, code: preset.code, docType: preset.docType, body: preset.body, fields: preset.fields };
-}
-
-function draftFromTemplate(template: DocumentTemplate): TemplateDraft {
-  return {
-    id: template.id,
-    code: template.code,
-    docType: template.docType,
-    body: template.templateHtml,
-    fields: formFieldsFor(template),
-  };
-}
+const NEW_TEMPLATE: TemplateDraft = {
+  id: null,
+  code: "",
+  docType: "quote",
+  templateHtml:
+    "<h1>Báo giá khóa học</h1>\n<p>Xin chào {{ ten_khach }},</p>\n<p>Gói học phù hợp: {{ khoa_hoc }}.</p>\n<p>Học phí ưu đãi: {{ hoc_phi }}.</p>",
+};
 
 function normalize(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
@@ -119,11 +98,53 @@ function docStatusLabel(doc: GeneratedDocument): string {
   return "Sẵn sàng";
 }
 
-function firstLine(body: string, max = 90): string {
-  const line = body.replace(/\r\n/g, "\n").split("\n").find((item) => item.trim().length > 0) ?? "";
-  const clean = line.trim();
+function compact(value: string, max = 96): string {
+  const clean = value.replace(/\s+/g, " ").trim();
   if (clean.length <= max) return clean;
   return `${clean.slice(0, max - 1)}…`;
+}
+
+function templateToDraft(template: DocumentTemplate): TemplateDraft {
+  return {
+    id: template.id,
+    code: template.code,
+    docType: template.docType,
+    templateHtml: template.templateHtml,
+  };
+}
+
+function parseVars(value: string): Record<string, string> | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("{")) {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Dữ liệu điền mẫu phải là danh sách tên và giá trị.");
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).map(([key, rawValue]) => [key, typeof rawValue === "string" ? rawValue : String(rawValue)])
+    );
+  }
+
+  const entries = trimmed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const index = line.indexOf("=");
+      if (index <= 0) throw new Error("Mỗi dòng cần có tên và giá trị tương ứng.");
+      return [line.slice(0, index).trim(), line.slice(index + 1).trim()];
+    });
+  return Object.fromEntries(entries);
+}
+
+function applyVars(templateHtml: string, varsText: string): string {
+  try {
+    const vars = parseVars(varsText) ?? {};
+    return templateHtml.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_match, key: string) => vars[key] ?? `{{ ${key} }}`);
+  } catch {
+    return templateHtml;
+  }
 }
 
 function metricCards(templates: readonly DocumentTemplate[], documents: readonly GeneratedDocument[]) {
@@ -164,52 +185,56 @@ function TemplateList({
   if (!templates.length) {
     return (
       <div className="rounded-lg border border-dashed border-outline bg-surface p-4 text-body-md text-on-surface-variant">
-        Chưa có mẫu tài liệu nào. Chọn một mẫu dựng sẵn bên dưới để bắt đầu.
+        Chưa có mẫu tài liệu nào.
       </div>
     );
   }
   return (
     <div className="space-y-2">
-      {templates.map((template) => {
-        const fieldCount = formFieldsFor(template).length;
-        return (
-          <button
-            key={template.id}
-            type="button"
-            onClick={() => onSelect(template)}
-            className={`w-full rounded-lg border p-3 text-left transition-colors ${
-              selectedId === template.id ? "border-primary bg-red-50" : "border-outline bg-white hover:border-primary/40"
-            }`}
-          >
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="font-mono text-mono-status font-bold text-primary">{template.code}</span>
-              <StatusPill tone="neutral">{docTypeLabel(template.docType)}</StatusPill>
-            </div>
-            <p className="text-body-md text-secondary">{firstLine(template.templateHtml)}</p>
-            <p className="mt-2 text-label-sm text-on-surface-variant">
-              {fieldCount} trường cần nhập · cập nhật {formatDateTime(template.updatedAt)}
-            </p>
-          </button>
-        );
-      })}
+      {templates.map((template) => (
+        <button
+          key={template.id}
+          type="button"
+          onClick={() => onSelect(template)}
+          className={`w-full rounded-lg border p-3 text-left transition-colors ${
+            selectedId === template.id ? "border-primary bg-red-50" : "border-outline bg-white hover:border-primary/40"
+          }`}
+        >
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="font-mono text-mono-status font-bold text-primary">{template.code}</span>
+            <StatusPill tone="neutral">{docTypeLabel(template.docType)}</StatusPill>
+          </div>
+          <p className="text-label-sm text-on-surface-variant">{compact(template.templateHtml, 120)}</p>
+          <p className="mt-2 text-label-sm text-on-surface-variant">Cập nhật {formatDateTime(template.updatedAt)}</p>
+        </button>
+      ))}
     </div>
   );
 }
 
-function PresetPicker({ onPick }: { readonly onPick: (preset: TemplatePreset) => void }) {
+function TemplateListWithScroll({
+  templates,
+  selectedId,
+  onSelect,
+  hasNextPage,
+  isFetchingNextPage,
+  onLoadMore,
+}: {
+  readonly templates: readonly DocumentTemplate[];
+  readonly selectedId: string | null;
+  readonly onSelect: (template: DocumentTemplate) => void;
+  readonly hasNextPage: boolean;
+  readonly isFetchingNextPage: boolean;
+  readonly onLoadMore: () => void;
+}) {
   return (
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-      {TEMPLATE_PRESETS.map((preset) => (
-        <button
-          key={preset.id}
-          type="button"
-          onClick={() => onPick(preset)}
-          className="rounded-lg border border-outline bg-white p-3 text-left transition-colors hover:border-primary/60"
-        >
-          <span className="block text-body-md font-bold text-secondary">{preset.name}</span>
-          <span className="mt-1 block text-label-sm text-on-surface-variant">{preset.description}</span>
-        </button>
-      ))}
+    <div>
+      <TemplateList templates={templates} selectedId={selectedId} onSelect={onSelect} />
+      <InfiniteScrollSentinel
+        hasNextPage={hasNextPage}
+        isFetchingNextPage={isFetchingNextPage}
+        onLoadMore={onLoadMore}
+      />
     </div>
   );
 }
@@ -220,7 +245,7 @@ function TemplateEditor({
   deleting,
   error,
   onDraft,
-  onPickPreset,
+  onNew,
   onSave,
   onDelete,
 }: {
@@ -229,95 +254,73 @@ function TemplateEditor({
   readonly deleting: boolean;
   readonly error: unknown;
   readonly onDraft: (draft: TemplateDraft) => void;
-  readonly onPickPreset: (preset: TemplatePreset) => void;
+  readonly onNew: () => void;
   readonly onSave: () => void;
   readonly onDelete: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-
   return (
     <Card>
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-headline-sm text-secondary">Thiết lập mẫu</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">
-            Dành cho người quản lý: chọn mẫu dựng sẵn hoặc chỉnh nội dung và các trường cần nhập.
-          </p>
+          <h2 className="text-headline-sm text-secondary">Mẫu tài liệu</h2>
+          <p className="mt-1 text-body-md text-on-surface-variant">Quản lý mẫu nội dung cho agent tài liệu.</p>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={() => setOpen((value) => !value)}>
-          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">{open ? "expand_less" : "expand_more"}</span>
-          {open ? "Thu gọn" : "Mở thiết lập"}
+        <Button type="button" variant="outline" size="sm" onClick={onNew}>
+          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">add</span>
+          Mẫu mới
         </Button>
       </div>
 
-      {!open ? null : (
-        <div className="mt-4">
-          {error ? <Alert tone="error">{errorMessage(error)}</Alert> : null}
+      {error ? <Alert tone="error">{errorMessage(error)}</Alert> : null}
 
-          <p className="mb-2 mt-4 text-label-caps uppercase text-secondary">Mẫu dựng sẵn</p>
-          <PresetPicker onPick={onPickPreset} />
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_150px]">
+        <label className="block">
+          <span className="mb-1 block text-label-caps uppercase text-secondary">Mã mẫu</span>
+          <input
+            className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary disabled:bg-surface"
+            value={draft.code}
+            disabled={Boolean(draft.id)}
+            onChange={(event) => onDraft({ ...draft, code: event.target.value.toUpperCase() })}
+            placeholder="BAO-GIA-HSK"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-label-caps uppercase text-secondary">Loại</span>
+          <select
+            className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
+            value={draft.docType}
+            onChange={(event) => onDraft({ ...draft, docType: event.target.value })}
+          >
+            <option value="quote">Báo giá</option>
+            <option value="brochure">Tờ giới thiệu</option>
+            <option value="onboarding">Hồ sơ nhập học</option>
+            <option value="slide">Bài trình chiếu</option>
+          </select>
+        </label>
+      </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_150px]">
-            <label className="block">
-              <span className="mb-1 block text-label-caps uppercase text-secondary">Mã mẫu</span>
-              <input
-                className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary disabled:bg-surface"
-                value={draft.code}
-                disabled={Boolean(draft.id)}
-                onChange={(event) => onDraft({ ...draft, code: event.target.value.toUpperCase() })}
-                placeholder="BAO-GIA-KHOA-HOC"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-label-caps uppercase text-secondary">Loại</span>
-              <select
-                className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
-                value={draft.docType}
-                onChange={(event) => onDraft({ ...draft, docType: event.target.value })}
-              >
-                <option value="quote">Báo giá</option>
-                <option value="brochure">Tờ giới thiệu</option>
-                <option value="onboarding">Hồ sơ nhập học</option>
-                <option value="slide">Bài trình chiếu</option>
-              </select>
-            </label>
-          </div>
+      <label className="mt-3 block">
+        <span className="mb-1 block text-label-caps uppercase text-secondary">Nội dung mẫu</span>
+        <textarea
+          className="min-h-[240px] w-full resize-y rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary"
+          value={draft.templateHtml}
+          onChange={(event) => onDraft({ ...draft, templateHtml: event.target.value })}
+          placeholder="<h1>{{ ten_khach }}</h1>"
+        />
+      </label>
 
-          <label className="mt-3 block">
-            <span className="mb-1 block text-label-caps uppercase text-secondary">Nội dung mẫu</span>
-            <textarea
-              className="min-h-[220px] w-full resize-y rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
-              value={draft.body}
-              onChange={(event) => onDraft({ ...draft, body: event.target.value })}
-              placeholder={"BÁO GIÁ KHÓA HỌC\n\nKính gửi {{ ten_khach }},"}
-            />
-            <span className="mt-1 block text-label-sm text-on-surface-variant">
-              Viết như văn bản thường. Dòng đầu tiên thành tiêu đề. Chỗ nào cần điền thì đặt {"{{ ten_truong }}"}.
-            </span>
-          </label>
-
-          <div className="mt-4">
-            <TemplateFieldsEditor
-              fields={draft.fields}
-              onChange={(fields) => onDraft({ ...draft, fields })}
-              onSyncFromBody={() => onDraft({ ...draft, fields: syncFieldsWithBody(draft.body, draft.fields) })}
-            />
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button type="button" onClick={onSave} disabled={saving || !draft.code.trim() || !draft.body.trim()}>
-              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">save</span>
-              {saving ? "Đang lưu..." : draft.id ? "Cập nhật mẫu" : "Lưu mẫu mới"}
-            </Button>
-            {draft.id ? (
-              <Button type="button" variant="ghost" onClick={onDelete} disabled={deleting}>
-                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">delete</span>
-                Xóa mẫu
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      )}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button type="button" onClick={onSave} disabled={saving || !draft.code.trim() || !draft.templateHtml.trim()}>
+          <span aria-hidden="true" className="material-symbols-outlined text-[18px]">save</span>
+          {saving ? "Đang lưu..." : draft.id ? "Cập nhật mẫu" : "Tạo mẫu"}
+        </Button>
+        {draft.id ? (
+          <Button type="button" variant="ghost" onClick={onDelete} disabled={deleting}>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">delete</span>
+            Xóa mẫu
+          </Button>
+        ) : null}
+      </div>
     </Card>
   );
 }
@@ -325,36 +328,30 @@ function TemplateEditor({
 function GeneratePanel({
   templates,
   templateCode,
-  fields,
-  values,
-  missingKeys,
   contactId,
+  varsText,
   sentVia,
   generating,
   generatingKit,
   error,
   onTemplateCode,
-  onValue,
-  onFillSample,
   onContactId,
+  onVarsText,
   onSentVia,
   onGenerate,
   onGenerateKit,
 }: {
   readonly templates: readonly DocumentTemplate[];
   readonly templateCode: string;
-  readonly fields: readonly TemplateField[];
-  readonly values: Readonly<Record<string, string>>;
-  readonly missingKeys: readonly string[];
   readonly contactId: string;
+  readonly varsText: string;
   readonly sentVia: string;
   readonly generating: boolean;
   readonly generatingKit: boolean;
   readonly error: unknown;
   readonly onTemplateCode: (value: string) => void;
-  readonly onValue: (key: string, value: string) => void;
-  readonly onFillSample: () => void;
   readonly onContactId: (value: string) => void;
+  readonly onVarsText: (value: string) => void;
   readonly onSentVia: (value: string) => void;
   readonly onGenerate: () => void;
   readonly onGenerateKit: () => void;
@@ -362,22 +359,11 @@ function GeneratePanel({
   const busy = generating || generatingKit;
   return (
     <Card>
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-headline-sm text-secondary">Điền thông tin và tạo</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">
-            Chọn mẫu, điền các ô bên dưới. Chọn gửi email để hệ thống gửi luôn cho khách.
-          </p>
-        </div>
-        {fields.length ? (
-          <Button type="button" variant="ghost" size="sm" onClick={onFillSample}>
-            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">edit_note</span>
-            Điền dữ liệu mẫu
-          </Button>
-        ) : null}
+      <div className="mb-4">
+        <h2 className="text-headline-sm text-secondary">Tạo và gửi</h2>
+        <p className="mt-1 text-body-md text-on-surface-variant">Chọn gửi email để hệ thống gửi tài liệu và ghi nhận trạng thái đã gửi.</p>
       </div>
       {error ? <Alert tone="error">{errorMessage(error)}</Alert> : null}
-
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block">
           <span className="mb-1 block text-label-caps uppercase text-secondary">Mẫu tài liệu</span>
@@ -389,7 +375,7 @@ function GeneratePanel({
             <option value="">Chọn mẫu tài liệu</option>
             {templates.map((template) => (
               <option key={template.id} value={template.code}>
-                {template.code} — {docTypeLabel(template.docType)}
+                {template.code}
               </option>
             ))}
           </select>
@@ -406,27 +392,24 @@ function GeneratePanel({
           </select>
         </label>
       </div>
-
-      <div className="mt-4">
-        {!templateCode ? (
-          <div className="rounded-lg border border-dashed border-outline bg-surface p-4 text-body-md text-on-surface-variant">
-            Chọn một mẫu để hiện các ô cần điền.
-          </div>
-        ) : (
-          <DocumentFieldsForm fields={fields} values={values} missingKeys={missingKeys} onChange={onValue} />
-        )}
-      </div>
-
       <label className="mt-3 block">
-        <span className="mb-1 block text-label-caps uppercase text-secondary">Gắn khách hàng (không bắt buộc)</span>
+        <span className="mb-1 block text-label-caps uppercase text-secondary">Mã khách hàng</span>
         <input
           className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary"
           value={contactId}
           onChange={(event) => onContactId(event.target.value)}
-          placeholder="Dán mã khách hàng để tự điền tên, điện thoại, email"
+          placeholder="Nhập mã khách hàng nếu có"
         />
       </label>
-
+      <label className="mt-3 block">
+        <span className="mb-1 block text-label-caps uppercase text-secondary">Dữ liệu điền mẫu</span>
+        <textarea
+          className="min-h-[132px] w-full resize-y rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary"
+          value={varsText}
+          onChange={(event) => onVarsText(event.target.value)}
+          placeholder={"ten_khach=Nguyễn Minh Anh\nkhoa_hoc=HSK 4 cấp tốc\nhoc_phi=4.500.000đ"}
+        />
+      </label>
       <div className="mt-4 flex flex-wrap gap-2">
         <Button type="button" onClick={onGenerate} disabled={busy || !templateCode}>
           <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{sentVia === "email" ? "outgoing_mail" : "picture_as_pdf"}</span>
@@ -516,24 +499,27 @@ function GeneratedList({
 
 function PreviewPanel({
   mode,
-  body,
+  templateHtml,
+  varsText,
   document,
   onMode,
 }: {
   readonly mode: PreviewMode;
-  readonly body: string;
+  readonly templateHtml: string;
+  readonly varsText: string;
   readonly document: GeneratedDocument | null;
   readonly onMode: (mode: PreviewMode) => void;
 }) {
+  const previewHtml = applyVars(templateHtml, varsText);
   return (
     <Card className="p-0">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline p-card-padding">
         <div>
           <h2 className="text-headline-sm text-secondary">Xem trước</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">Bản xem trước dựng đúng cách file PDF sẽ in ra.</p>
+          <p className="mt-1 text-body-md text-on-surface-variant">Mẫu nội dung hoặc tài liệu đã tạo từ agent tài liệu.</p>
         </div>
         <div className="flex rounded border border-outline bg-white p-1">
-          {(["fill", "document"] as const).map((item) => (
+          {(["template", "document"] as const).map((item) => (
             <button
               key={item}
               type="button"
@@ -542,7 +528,7 @@ function PreviewPanel({
                 mode === item ? "bg-primary text-on-primary" : "text-on-surface-variant hover:bg-surface-container-low"
               }`}
             >
-              {item === "fill" ? "Bản nháp" : "File đã tạo"}
+              {item === "template" ? "Mẫu" : "Tài liệu"}
             </button>
           ))}
         </div>
@@ -563,13 +549,12 @@ function PreviewPanel({
         </div>
       ) : (
         <div className="p-card-padding">
-          {body.trim() ? (
-            <DocumentPreview body={body} />
-          ) : (
-            <div className="rounded-lg border border-dashed border-outline bg-surface p-4 text-body-md text-on-surface-variant">
-              Chọn mẫu tài liệu để xem trước.
-            </div>
-          )}
+          <iframe
+            className="h-[560px] w-full rounded-lg border border-outline bg-white"
+            sandbox=""
+            srcDoc={`<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Inter,Arial,sans-serif;line-height:1.5;padding:32px;color:#1e293b}h1{color:#d32f2f}</style></head><body>${previewHtml}</body></html>`}
+            title="Xem trước mẫu tài liệu"
+          />
         </div>
       )}
     </Card>
@@ -578,15 +563,14 @@ function PreviewPanel({
 
 export default function DocumentsPage() {
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState<TemplateDraft>(() => draftFromPreset(TEMPLATE_PRESETS[0]!));
+  const [draft, setDraft] = useState<TemplateDraft>(NEW_TEMPLATE);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [generateTemplateCode, setGenerateTemplateCode] = useState("");
   const [contactId, setContactId] = useState("");
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [missingKeys, setMissingKeys] = useState<readonly string[]>([]);
+  const [varsText, setVarsText] = useState("ten_khach=Nguyễn Minh Anh\nkhoa_hoc=HSK 4 cấp tốc\nhoc_phi=4.500.000đ");
   const [sentVia, setSentVia] = useState("");
-  const [previewMode, setPreviewMode] = useState<PreviewMode>("fill");
+  const [previewMode, setPreviewMode] = useState<PreviewMode>("template");
   const [notice, setNotice] = useState<NoticeState | null>(null);
 
   const templatesList = useInfiniteList<DocumentTemplate, DocumentListResponse<DocumentTemplate>>({
@@ -611,50 +595,23 @@ export default function DocumentsPage() {
   const generatedQuery = generatedList.query;
   const templates = templatesList.items.length ? templatesList.items : EMPTY_TEMPLATES;
   const documents = generatedList.items.length ? generatedList.items : EMPTY_DOCUMENTS;
-  const templatesById = useMemo(
-    () => new Map<string, DocumentTemplate>(templates.map((template) => [template.id, template] as [string, DocumentTemplate])),
-    [templates],
-  );
+  const templatesById = useMemo(() => new Map<string, DocumentTemplate>(templates.map((template) => [template.id, template] as [string, DocumentTemplate])), [templates]);
   const selectedDocument = documents.find((doc) => doc.id === selectedDocId) ?? documents[0] ?? null;
-  const generateTemplate = templates.find((template) => template.code === generateTemplateCode) ?? null;
-  const formFields = useMemo(() => formFieldsFor(generateTemplate), [generateTemplate]);
+  const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? null;
   const metrics = metricCards(templates, documents);
   const apiError = templatesQuery.error ?? generatedQuery.error;
 
-  // Đang chỉnh mẫu nào thì xem trước theo bản nháp đó, để thấy ngay thay đổi chưa lưu.
-  const previewSource = generateTemplate
-    ? draft.id === generateTemplate.id
-      ? draft.body
-      : generateTemplate.templateHtml
-    : draft.body;
-  const previewBody = applyVars(previewSource, values);
-
-  // Đổi mẫu thì nạp sẵn giá trị mẫu để người dùng thấy kết quả ngay, không phải nhập từ số 0.
-  // Làm ngay trong handler chọn mẫu (không dùng effect) để tránh ghi đè khi người dùng đang nhập.
-  function changeTemplateCode(code: string) {
-    setGenerateTemplateCode(code);
-    setMissingKeys([]);
-    const next = templates.find((template) => template.code === code) ?? null;
-    setValues(next ? sampleVars(formFieldsFor(next)) : {});
-  }
-
   const saveTemplateMutation = useMutation<DocumentTemplate | null>({
     mutationFn: async () => {
-      const fields = syncFieldsWithBody(draft.body, draft.fields);
       if (draft.id) {
-        await updateDocumentTemplate(draft.id, { docType: draft.docType, templateHtml: draft.body.trim(), fields });
+        await updateDocumentTemplate(draft.id, { docType: draft.docType, templateHtml: draft.templateHtml.trim() });
         return null;
       }
-      return createDocumentTemplate({
-        code: draft.code.trim().toUpperCase(),
-        docType: draft.docType,
-        templateHtml: draft.body.trim(),
-        fields,
-      });
+      return createDocumentTemplate({ code: draft.code.trim().toUpperCase(), docType: draft.docType, templateHtml: draft.templateHtml.trim() });
     },
     onSuccess: async (template) => {
       if (template) {
-        setDraft(draftFromTemplate(template));
+        setDraft(templateToDraft(template));
         setSelectedTemplateId(template.id);
         setGenerateTemplateCode(template.code);
       }
@@ -666,9 +623,8 @@ export default function DocumentsPage() {
   const deleteTemplateMutation = useMutation({
     mutationFn: (id: string) => deleteDocumentTemplate(id),
     onSuccess: async () => {
-      setDraft(draftFromPreset(TEMPLATE_PRESETS[0]!));
+      setDraft(NEW_TEMPLATE);
       setSelectedTemplateId(null);
-      setGenerateTemplateCode("");
       setNotice({ tone: "success", message: "Đã xóa mẫu tài liệu." });
       await queryClient.invalidateQueries({ queryKey: ["documents", "templates"] });
     },
@@ -677,13 +633,15 @@ export default function DocumentsPage() {
   // Sinh tài liệu chạy ngầm: theo dõi job để tự làm mới danh sách khi xong.
   const [generateJobId, setGenerateJobId] = useState<string | null>(null);
   const generateMutation = useMutation({
-    mutationFn: () =>
-      generateDocument({
-        templateCode: generateTemplateCode,
+    mutationFn: () => {
+      const vars = parseVars(varsText);
+      return generateDocument({
+        templateCode: generateTemplateCode || draft.code,
         contactId: contactId.trim() || null,
-        vars: cleanVars(values),
+        vars,
         sentVia: sentVia || null,
-      }),
+      });
+    },
     onSuccess: (job) => {
       setGenerateJobId(job.jobId);
       setNotice({ tone: "info", message: "Đang tạo tài liệu ở chế độ nền. Xong sẽ có thông báo." });
@@ -691,12 +649,14 @@ export default function DocumentsPage() {
   });
 
   const generateKitMutation = useMutation({
-    mutationFn: () =>
-      generateDocumentKit({
+    mutationFn: () => {
+      const vars = parseVars(varsText);
+      return generateDocumentKit({
         contactId: contactId.trim() || null,
-        vars: cleanVars(values),
+        vars,
         sentVia: sentVia || null,
-      }),
+      });
+    },
     onSuccess: (job) => {
       setGenerateJobId(job.jobId);
       setNotice({ tone: "info", message: "Đang tạo bộ tài liệu ở chế độ nền. Xong sẽ có thông báo." });
@@ -714,41 +674,17 @@ export default function DocumentsPage() {
     }
   });
 
-  // Chặn ngay ở form: thiếu trường bắt buộc thì không gọi API để khỏi chờ job rồi mới báo lỗi.
-  function startGenerate() {
-    if (!generateTemplateCode) {
-      setNotice({ tone: "warning", message: "Chọn mẫu tài liệu trước khi tạo." });
-      return;
-    }
-    const missing = missingRequired(formFields, values);
-    if (missing.length) {
-      setMissingKeys(missing.map((field) => field.key));
-      setNotice({
-        tone: "warning",
-        message: `Còn thiếu: ${missing.map((field) => field.label).join(", ")}.`,
-      });
-      return;
-    }
-    setMissingKeys([]);
-    setPreviewMode("fill");
-    generateMutation.mutate();
-  }
-
   function selectTemplate(template: DocumentTemplate) {
     setSelectedTemplateId(template.id);
-    setDraft(draftFromTemplate(template));
+    setDraft(templateToDraft(template));
     setGenerateTemplateCode(template.code);
-    setValues(sampleVars(formFieldsFor(template)));
-    setMissingKeys([]);
-    setPreviewMode("fill");
+    setPreviewMode("template");
   }
 
-  function pickPreset(preset: TemplatePreset) {
+  function newTemplate() {
     setSelectedTemplateId(null);
-    setDraft(draftFromPreset(preset));
-    setGenerateTemplateCode("");
-    setValues(sampleVars(preset.fields));
-    setPreviewMode("fill");
+    setDraft(NEW_TEMPLATE);
+    setPreviewMode("template");
   }
 
   return (
@@ -758,7 +694,7 @@ export default function DocumentsPage() {
           <div>
             <h1 className="text-headline-md text-secondary">Thư viện tài liệu & gửi báo giá</h1>
             <p className="mt-1 text-body-md text-on-surface-variant">
-              Chọn mẫu, điền thông tin, hệ thống tạo file PDF và gửi cho khách.
+              Quản lý mẫu, xem trước và tạo tài liệu tự động.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -772,6 +708,18 @@ export default function DocumentsPage() {
             >
               <span aria-hidden="true" className="material-symbols-outlined text-[18px]">refresh</span>
               Làm mới
+            </Button>
+            <Button
+              type="button"
+              onClick={() => generateMutation.mutate()}
+              disabled={generateMutation.isPending || generateKitMutation.isPending || !(generateTemplateCode || draft.code)}
+            >
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+              Tạo PDF
+            </Button>
+            <Button type="button" variant="outline" onClick={() => generateKitMutation.mutate()} disabled={generateMutation.isPending || generateKitMutation.isPending} data-testid="Generate kit">
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">inventory_2</span>
+              Tạo bộ tài liệu
             </Button>
           </div>
         </div>
@@ -799,8 +747,10 @@ export default function DocumentsPage() {
               </div>
               <StatusPill tone="neutral">{templates.length}</StatusPill>
             </div>
-            <TemplateList templates={templates} selectedId={selectedTemplateId} onSelect={selectTemplate} />
-            <InfiniteScrollSentinel
+            <TemplateListWithScroll
+              templates={templates}
+              selectedId={selectedTemplateId}
+              onSelect={selectTemplate}
               hasNextPage={templatesList.hasNextPage}
               isFetchingNextPage={templatesList.isFetchingNextPage}
               onLoadMore={templatesList.fetchNextPage}
@@ -813,7 +763,7 @@ export default function DocumentsPage() {
             deleting={deleteTemplateMutation.isPending}
             error={saveTemplateMutation.error ?? deleteTemplateMutation.error}
             onDraft={setDraft}
-            onPickPreset={pickPreset}
+            onNew={newTemplate}
             onSave={() => saveTemplateMutation.mutate()}
             onDelete={() => {
               if (draft.id) deleteTemplateMutation.mutate(draft.id);
@@ -822,28 +772,28 @@ export default function DocumentsPage() {
         </div>
 
         <div className="space-y-gutter">
-          <div className="grid grid-cols-1 gap-gutter 2xl:grid-cols-[minmax(0,1fr)_380px]">
-            <PreviewPanel mode={previewMode} body={previewBody} document={selectedDocument} onMode={setPreviewMode} />
+          <div className="grid grid-cols-1 gap-gutter 2xl:grid-cols-[minmax(0,1fr)_360px]">
+            <PreviewPanel
+              mode={previewMode}
+              templateHtml={draft.templateHtml || selectedTemplate?.templateHtml || ""}
+              varsText={varsText}
+              document={selectedDocument}
+              onMode={setPreviewMode}
+            />
             <GeneratePanel
               templates={templates}
               templateCode={generateTemplateCode}
-              fields={formFields}
-              values={values}
-              missingKeys={missingKeys}
               contactId={contactId}
+              varsText={varsText}
               sentVia={sentVia}
               generating={generateMutation.isPending}
               generatingKit={generateKitMutation.isPending}
               error={generateMutation.error ?? generateKitMutation.error}
-              onTemplateCode={changeTemplateCode}
-              onValue={(key, value) => {
-                setValues((previous) => ({ ...previous, [key]: value }));
-                setMissingKeys((previous) => previous.filter((item) => item !== key));
-              }}
-              onFillSample={() => setValues((previous) => ({ ...previous, ...sampleVars(formFields) }))}
+              onTemplateCode={setGenerateTemplateCode}
               onContactId={setContactId}
+              onVarsText={setVarsText}
               onSentVia={setSentVia}
-              onGenerate={startGenerate}
+              onGenerate={() => generateMutation.mutate()}
               onGenerateKit={() => generateKitMutation.mutate()}
             />
           </div>

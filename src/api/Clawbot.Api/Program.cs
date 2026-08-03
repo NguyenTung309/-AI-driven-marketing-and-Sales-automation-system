@@ -10,7 +10,6 @@ using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.Application;
 using Clawbot.Infrastructure;
-using Clawbot.Infrastructure.Channels.Pancake;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Notifications;
@@ -121,7 +120,6 @@ builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jo
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentRepurposeJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentTrendScanJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentImagePromptJobHandler>();
-builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentRegenerateHookJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.AdsEvaluateJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.AdsLookalikeJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.KbClassifyUploadJobHandler>();
@@ -198,9 +196,7 @@ if (demoOpts.Mode)
     builder.Services.AddHttpClient();
     // Pancake authenticates with page_access_token in the query string. Disable framework HTTP
     // request logging for this named client so credentials never land in application logs.
-    builder.Services.AddHttpClient("Pancake")
-        .ConfigurePrimaryHttpMessageHandler(PancakeEndpointPolicy.CreateNoRedirectHandler)
-        .RemoveAllLoggers();
+    builder.Services.AddHttpClient("Pancake").RemoveAllLoggers();
     builder.Services.AddSingleton<DemoRuntimeConfigStore>();
     builder.Services.AddSingleton<DemoTraceService>();
     builder.Services.AddHostedService<PancakePollingService>();
@@ -381,7 +377,6 @@ app.MapAdminJobs();
 app.MapAdminSocialCredentials();
 app.MapAdminMetaIntegration();
 app.MapMetaBusinessIntegrationWebhooks();
-app.MapMetaPageWebhooks();
 app.MapAdminInboxEndpoints();
 app.MapAdminChannelsEndpoints();
 app.MapTenantBranding();

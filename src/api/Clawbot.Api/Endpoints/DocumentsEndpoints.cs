@@ -17,6 +17,7 @@ namespace Clawbot.Api.Endpoints;
 
 public static class DocumentsEndpoints
 {
+    private static readonly string[] DefaultKitTemplateCodes = ["ONBOARDING-KIT", "BROCHURE-HSK", "SLIDE-DEMO-5"];
     private static readonly byte[] TransparentGif =
         Convert.FromBase64String("R0lGODlhAQABAPAAAP///wAAACH5BAAAAAAALAAAAAABAAEAAAICRAEAOw==");
 
@@ -98,7 +99,6 @@ public static class DocumentsEndpoints
     // Bộ tài liệu: luồng nặng nhất (nhiều doc/1 lần) — job có tiến độ theo từng doc.
     private static async Task<IResult> GenerateKitAsync(
         GenerateDocumentKitRequest body,
-        AppDbContext db,
         ITenantAccessor tenants,
         IJobLauncher jobs,
         HttpContext http,
@@ -107,17 +107,7 @@ public static class DocumentsEndpoints
         _ = tenants.Require();
         var templateCodes = NormalizeKitTemplateCodes(body.TemplateCodes);
         if (templateCodes.Length == 0)
-        {
-            // Không chỉ định mã -> lấy toàn bộ mẫu hiện có của tenant (tối đa 10), thay cho danh sách hardcode cũ.
-            templateCodes = await db.DocumentTemplates.AsNoTracking()
-                .Where(t => t.DeletedAt == null)
-                .OrderBy(t => t.Code)
-                .Select(t => t.Code)
-                .Take(10)
-                .ToArrayAsync(ct).ConfigureAwait(false);
-        }
-        if (templateCodes.Length == 0)
-            return Results.BadRequest(new { error = "Chưa có mẫu tài liệu nào để tạo bộ." });
+            return Results.BadRequest(new { error = "templateCodes required" });
 
         var jobId = await jobs.LaunchAsync(
             DocsKitJobHandler.JobType,
@@ -135,33 +125,10 @@ public static class DocumentsEndpoints
             ? id
             : null;
 
-    private static List<TemplateFieldDto> MapFields(IReadOnlyList<TemplateField> fields) =>
-        fields
-            .Select(f => new TemplateFieldDto(f.Key, f.Label, f.Type, f.Required, f.Placeholder, f.Sample))
-            .ToList();
-
-    private static string SerializeFields(IReadOnlyList<TemplateFieldDto>? fields)
-    {
-        if (fields is null || fields.Count == 0)
-            return "[]";
-        var domain = fields
-            .Where(f => !string.IsNullOrWhiteSpace(f.Key))
-            .Select(f => new TemplateField(
-                f.Key.Trim(),
-                string.IsNullOrWhiteSpace(f.Label) ? f.Key.Trim() : f.Label.Trim(),
-                TemplateField.NormalizeType(f.Type),
-                f.Required,
-                f.Placeholder,
-                f.Sample))
-            .ToList();
-        return TemplateFieldSchema.Serialize(domain);
-    }
-
     private static string[] NormalizeKitTemplateCodes(IReadOnlyList<string>? templateCodes)
     {
-        if (templateCodes is not { Count: > 0 })
-            return [];
-        return templateCodes
+        var values = templateCodes is { Count: > 0 } ? templateCodes : DefaultKitTemplateCodes;
+        return values
             .Select(code => code.Trim())
             .Where(code => code.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -217,18 +184,12 @@ public static class DocumentsEndpoints
         if (pageSize is < 1 or > 200) pageSize = 50;
         var query = db.DocumentTemplates.AsNoTracking().Where(t => t.DeletedAt == null);
         var total = await query.CountAsync(ct).ConfigureAwait(false);
-        // Parse fields_json xảy ra trong bộ nhớ (EF không phân giải JSON được), nên project ra bản ghi thô trước.
-        var rows = await query
+        var items = await query
             .OrderBy(t => t.Code)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(t => new { t.Id, t.Code, t.DocType, t.TemplateHtml, t.FieldsJson, t.CreatedAt, t.UpdatedAt })
+            .Select(t => new DocumentTemplateDto(t.Id, t.Code, t.DocType, t.TemplateHtml, t.CreatedAt, t.UpdatedAt))
             .ToListAsync(ct).ConfigureAwait(false);
-        var items = rows
-            .Select(t => new DocumentTemplateDto(
-                t.Id, t.Code, t.DocType, t.TemplateHtml,
-                MapFields(TemplateFieldSchema.Parse(t.FieldsJson)), t.CreatedAt, t.UpdatedAt))
-            .ToList();
         return Results.Ok(new { items, total, page, pageSize });
     }
 
@@ -248,14 +209,12 @@ public static class DocumentsEndpoints
         if (exists) return Results.Conflict(new { error = "code already exists" });
 
         var docType = string.IsNullOrWhiteSpace(body.DocType) ? "quote" : body.DocType;
-        var fieldsJson = SerializeFields(body.Fields);
-        var tpl = DocumentTemplate.Create(tenant.TenantId, body.Code, docType, body.TemplateHtml, clock.UtcNow, fieldsJson);
+        var tpl = DocumentTemplate.Create(tenant.TenantId, body.Code, docType, body.TemplateHtml, clock.UtcNow);
         db.DocumentTemplates.Add(tpl);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return Results.Created($"/api/docs/templates/{tpl.Id}",
-            new DocumentTemplateDto(tpl.Id, tpl.Code, tpl.DocType, tpl.TemplateHtml,
-                MapFields(TemplateFieldSchema.Parse(tpl.FieldsJson)), tpl.CreatedAt, tpl.UpdatedAt));
+            new DocumentTemplateDto(tpl.Id, tpl.Code, tpl.DocType, tpl.TemplateHtml, tpl.CreatedAt, tpl.UpdatedAt));
     }
 
     private static async Task<IResult> UpdateTemplateAsync(
@@ -267,17 +226,14 @@ public static class DocumentsEndpoints
         CancellationToken ct)
     {
         _ = tenants.Require();
-        // Nội dung rỗng sẽ xóa trắng mẫu đang dùng — chặn như lúc tạo mới.
-        if (string.IsNullOrWhiteSpace(body.TemplateHtml))
-            return Results.BadRequest(new { error = "templateHtml required" });
-
         var tpl = await db.DocumentTemplates
             .FirstOrDefaultAsync(t => t.Id == id && t.DeletedAt == null, ct).ConfigureAwait(false);
         if (tpl is null) return Results.NotFound();
 
-        // Fields == null nghĩa là client không đụng tới schema trường -> giữ nguyên bản cũ.
-        var fieldsJson = body.Fields is null ? null : SerializeFields(body.Fields);
-        tpl.Update(body.DocType, body.TemplateHtml, fieldsJson, clock.UtcNow);
+        var entry = db.Entry(tpl);
+        entry.Property("DocType").CurrentValue = string.IsNullOrWhiteSpace(body.DocType) ? tpl.DocType : body.DocType;
+        entry.Property("TemplateHtml").CurrentValue = body.TemplateHtml;
+        entry.Property("UpdatedAt").CurrentValue = clock.UtcNow;
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.NoContent();
     }

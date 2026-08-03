@@ -103,35 +103,6 @@ public sealed record RejectContentItemRequest(int ExpectedRevision, string? Reas
 
 public sealed record RepurposeContentItemRequest(IReadOnlyList<string>? TargetPlatforms);
 
-// P5 §4.5: đổi hook. GET trả danh sách hook L2 đã lưu + hook đang chọn; POST chọn hookIndex để chạy lại L3+L4.
-public sealed record ContentHookOptionDto(int Index, string Text, bool Selected);
-
-public sealed record ContentItemHooksResponse(
-    bool Available,
-    IReadOnlyList<ContentHookOptionDto> Hooks);
-
-public sealed record RegenerateHookApiRequest(int HookIndex);
-
-// P5 §6: dashboard vận hành chuỗi sinh nội dung, tổng hợp từ content_generation_traces + content_items.
-public sealed record ContentChainStepMetricDto(
-    string StepId,
-    int Attempts,
-    int GateFailures,
-    double GateFailRate,
-    long P95LatencyMs);
-
-public sealed record ContentChainMetricsResponse(
-    int WindowDays,
-    int TotalRuns,
-    int FallbackRuns,
-    double FallbackRate,
-    double AvgTokensPerRun,
-    double AvgUsdCostPerRun,
-    IReadOnlyList<ContentChainStepMetricDto> Steps,
-    int ReviewApproved,
-    int ReviewTotal,
-    double ReviewApproveRate);
-
 public sealed record ContentQueueCursorPage(
     IReadOnlyList<ContentItemDto> Items,
     string? NextCursor,

@@ -16,10 +16,6 @@ public sealed class LlmCostEntry : Entity<Guid>, ITenantOwned
     public decimal Usd { get; private set; }
     // Phiên điều phối sinh ra chi phí này (null cho gọi LLM ngoài run: chat, content thủ công...).
     public Guid? SessionId { get; private set; }
-
-    // true = provider không trả usage nên token/cost do hệ thống đếm cục bộ. Số này THẤP HƠN hóa đơn
-    // thật (không thấy reasoning token) -> báo cáo phải tách riêng và gắn nhãn, không trộn làm số thật.
-    public bool IsEstimated { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     private LlmCostEntry() { }
@@ -32,8 +28,7 @@ public sealed class LlmCostEntry : Entity<Guid>, ITenantOwned
         int outputTokens,
         decimal usd,
         DateTimeOffset createdAt,
-        Guid? sessionId = null,
-        bool isEstimated = false) =>
+        Guid? sessionId = null) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -44,7 +39,6 @@ public sealed class LlmCostEntry : Entity<Guid>, ITenantOwned
             OutputTokens = outputTokens,
             Usd = usd,
             SessionId = sessionId,
-            IsEstimated = isEstimated,
             CreatedAt = createdAt,
         };
 
@@ -69,14 +63,7 @@ public sealed class LlmCostEntry : Entity<Guid>, ITenantOwned
         Usd = 0m;
     }
 
-    public void ApplyReservation(
-        string agentCode,
-        string model,
-        int inputTokens,
-        int outputTokens,
-        decimal usd,
-        Guid? sessionId = null,
-        bool isEstimated = false)
+    public void ApplyReservation(string agentCode, string model, int inputTokens, int outputTokens, decimal usd, Guid? sessionId = null)
     {
         if (!string.Equals(AgentCode, ReservationAgentCode, StringComparison.Ordinal))
             throw new InvalidOperationException("Only cost reservation rows can be applied.");
@@ -87,6 +74,5 @@ public sealed class LlmCostEntry : Entity<Guid>, ITenantOwned
         OutputTokens = outputTokens;
         Usd = Math.Max(0m, usd);
         SessionId = sessionId;
-        IsEstimated = isEstimated;
     }
 }

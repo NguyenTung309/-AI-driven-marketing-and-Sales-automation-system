@@ -8,11 +8,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Clawbot.Infrastructure.Messaging;
 
-// Ingests channel messages published by PancakePollingService (and any future adapter path).
-// At-least-once delivery is safe: the ingestor dedups on external_message_id.
-// After ingesting an inbound customer message, triggers the AI auto-reply when the conversation
-// has the "AI dang chat" flag on — the ChatAgent gRPC call persists the reply and sends it to
-// the channel itself (SPEC-16 P2-10), so this consumer only drains the stream.
 public sealed partial class ChannelInboundMessageConsumer(
     IChannelMessageIngestor ingestor,
     AppDbContext db,
@@ -21,13 +16,13 @@ public sealed partial class ChannelInboundMessageConsumer(
     ILogger<ChannelInboundMessageConsumer> logger)
     : IConsumer<ChannelInboundMessageReceived>
 {
-    private const int HistoryLimit = 10;
+    private const int HistoryLimit = 10; 
 
     private readonly IChannelMessageIngestor _ingestor = ingestor;
     private readonly AppDbContext _db = db;
     private readonly IInboxNotifier _notifier = notifier;
     private readonly IChatAutoReplyGateway _chatAgent = chatAgent;
-    private readonly ILogger<ChannelInboundMessageConsumer> _logger = logger;
+    private readonly ILogger<ChannelIn    boundMessageConsumer> _logger = logger;
 
     public async Task Consume(ConsumeContext<ChannelInboundMessageReceived> context)
     {
@@ -42,8 +37,8 @@ public sealed partial class ChannelInboundMessageConsumer(
         }
     }
 
-    // Best-effort: a reply failure must not fail the ingest (throwing would redeliver the message,
-    // the ingest would dedup, and the reply would never be retried anyway).
+    // Best-effort: Phản hồi thất bại không ảnh hưởng đến quá trình nhận tin nhắn 
+    // loại bỏ các tin nhắn trùng lặp
     private async Task TryAutoReplyAsync(ChannelInboundMessageReceived msg, Guid conversationId, CancellationToken ct)
     {
         // Comment thread: chat auto-reply gửi reply_inbox là SAI ngữ nghĩa (phải reply_comment/private_replies)
@@ -62,7 +57,7 @@ public sealed partial class ChannelInboundMessageConsumer(
 
         try
         {
-            // Tracked (không AsNoTracking): có thể cần TryResumeAiAutoReply -> SaveChanges khi qua mốc hẹn.
+            // Tracked : có thể cần TryResumeAiAutoReply -> SaveChanges khi qua mốc hẹn.
             var conv = await _db.Conversations
                 .IgnoreQueryFilters()
                 .Where(c => c.Id == conversationId && c.TenantId == msg.TenantId)

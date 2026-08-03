@@ -64,10 +64,7 @@ public sealed partial class ContentAgentGrpcService(
             createdBy: null,
             now,
             briefId: draft.BriefId,
-            createdByAgentId: generatorAgentId,
-            // P4: lưu L1/L2 khi chuỗi chạy đủ (null với single-shot) để repurpose/đổi hook tái dùng, khỏi chạy lại.
-            chainPlanJson: draft.ChainPlanJson,
-            chainOutlineJson: draft.ChainOutlineJson);
+            createdByAgentId: generatorAgentId);
         _db.ContentItems.Add(item);
         _db.ContentReviewTasks.Add(
             ContentGenerationPersistence.CreateImmediateReviewTask(
@@ -121,7 +118,7 @@ public sealed partial class ContentAgentGrpcService(
         var source = await _db.ContentItems
             .IgnoreQueryFilters()
             .Where(i => i.TenantId == tenantId && i.Id == contentId && i.DeletedAt == null)
-            .Select(i => new { i.Id, i.BriefId, i.Body, i.ChainPlanJson, i.ChainOutlineJson })
+            .Select(i => new { i.Id, i.BriefId, i.Body })
             .FirstOrDefaultAsync(context.CancellationToken).ConfigureAwait(false)
             ?? throw new RpcException(new Status(StatusCode.NotFound, "content item not found"));
 
@@ -130,16 +127,10 @@ public sealed partial class ContentAgentGrpcService(
         var now = _clock.UtcNow;
         foreach (var target in targets)
         {
-            // P4 (§4.5): bài gốc có L1/L2 đã lưu => tái dùng, chạy lại CHỈ L3+L4 cho nền tảng đích (rẻ hơn, giữ thông
-            // điệp). Null (bài single-shot cũ / chain tắt / JSON hỏng) => quay về chạy full chuỗi từ body như trước.
-            var draft = await _agent.RepurposeFromChainAsync(
-                    new CoreContent.ContentRepurposeFromChainRequest(
-                        tenantId, source.BriefId, target, source.ChainPlanJson, source.ChainOutlineJson),
-                    context.CancellationToken).ConfigureAwait(false)
-                ?? await _agent.GenerateAsync(
-                    new CoreContent.ContentGenerateRequest(
-                        tenantId, source.BriefId, target, sourceBody, KbModuleCode: null),
-                    context.CancellationToken).ConfigureAwait(false);
+            var draft = await _agent.GenerateAsync(
+                new CoreContent.ContentGenerateRequest(
+                    tenantId, source.BriefId, target, sourceBody, KbModuleCode: null),
+                context.CancellationToken).ConfigureAwait(false);
 
             var item = ContentItem.Create(
                 tenantId,
@@ -148,9 +139,7 @@ public sealed partial class ContentAgentGrpcService(
                 createdBy: null,
                 now,
                 briefId: draft.BriefId,
-                createdByAgentId: generatorAgentId,
-                chainPlanJson: draft.ChainPlanJson,
-                chainOutlineJson: draft.ChainOutlineJson);
+                createdByAgentId: generatorAgentId);
             created.Add((item, draft));
         }
 
@@ -183,59 +172,6 @@ public sealed partial class ContentAgentGrpcService(
         };
         response.Variants.AddRange(created.Select(c => ToVariant(c.Item)));
         return response;
-    }
-
-    // Đổi hook (P5, §4.5): tái dùng L1/L2 đã lưu của CHÍNH item, chạy lại L3+L4 với hook marketer chọn thay hook
-    // tự động. Sửa item TẠI CHỖ (revision mới + reset review), không tạo item mới. Bài chưa có L1/L2 (single-shot cũ)
-    // hoặc hookIndex không hợp lệ => FailedPrecondition, giữ nguyên bài.
-    public override async Task<ContentResponse> RegenerateHook(RegenerateHookRequest request, ServerCallContext context)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(context);
-        var tenantId = ParseTenantId(request.TenantId);
-        if (!Guid.TryParse(request.ContentId, out var contentId) || contentId == Guid.Empty)
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "content_id required"));
-        if (request.HookIndex < 0)
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "hook_index invalid"));
-
-        var item = await _db.ContentItems
-            .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.Id == contentId && i.DeletedAt == null,
-                context.CancellationToken).ConfigureAwait(false)
-            ?? throw new RpcException(new Status(StatusCode.NotFound, "content item not found"));
-
-        var draft = await _agent.RegenerateHookAsync(
-            new CoreContent.ContentRegenerateHookRequest(
-                tenantId, item.BriefId, item.Platform, item.ChainPlanJson, item.ChainOutlineJson, request.HookIndex),
-            context.CancellationToken).ConfigureAwait(false);
-        if (draft is null)
-        {
-            // Chuỗi tắt / bài không có L1/L2 / hookIndex ngoài dải / resume fallback — không đổi được bài.
-            throw new RpcException(new Status(StatusCode.FailedPrecondition, "content.regenerate_hook_unavailable"));
-        }
-
-        var now = _clock.UtcNow;
-        try
-        {
-            item.ReviseForHookChange(draft.Body, draft.ChainOutlineJson ?? item.ChainOutlineJson ?? string.Empty, now);
-        }
-        catch (InvalidOperationException ex)
-        {
-            throw new RpcException(new Status(StatusCode.FailedPrecondition, ex.Message));
-        }
-
-        _db.ContentReviewTasks.Add(
-            ContentGenerationPersistence.CreateImmediateReviewTask(tenantId, item.Id, item.ContentRevision, now));
-        await _db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
-        LogDraftGenerated(
-            _logger, tenantId, item.Id, item.Platform, draft.InputTokens, draft.OutputTokens, draft.LatencyMs);
-
-        return new ContentResponse
-        {
-            ContentId = item.Id.ToString(),
-            Title = item.Platform,
-            Body = item.Body,
-            Variants = { ToVariant(item) },
-        };
     }
 
     // Review-gate P1: chấm một content item bằng reviewer-agent. Verdict approve => stamp ApprovedByAgentId

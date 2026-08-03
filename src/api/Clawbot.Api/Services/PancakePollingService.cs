@@ -1,14 +1,12 @@
-using System.Linq;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Clawbot.Domain.Channels;
 using Clawbot.Infrastructure.Channels;
-using Clawbot.Infrastructure.Channels.Pancake;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Demo;
 using Clawbot.SharedKernel.Multitenancy;
 using Microsoft.EntityFrameworkCore;
+using Clawbot.SharedKernel.Security;
 
 namespace Clawbot.Api.Services;
 
@@ -18,7 +16,7 @@ public sealed partial class PancakePollingService : BackgroundService
     private readonly DemoRuntimeConfigStore _config;
     private readonly IHttpClientFactory _httpFactory;
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly Clawbot.SharedKernel.Security.IEncryptor _encryptor;
+    private readonly IEncryptor _encryptor;
     private readonly ILogger<PancakePollingService> _log;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -27,7 +25,7 @@ public sealed partial class PancakePollingService : BackgroundService
         WriteIndented = false,
     };
 
-    private const string DefaultBaseUrl = PancakeEndpointPolicy.DefaultPublicApiBaseUrl;
+    private const string DefaultBaseUrl = "https://pages.fm/api/public_api/v1";
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(10);
     // Pancake v2 conversations co luc tra updated_at/snippet cu (stale) khien gate watermark bo lo tin.
     // Moi SweepEveryNPasses vong (~60s) doc thang messages cua SweepTopConversations hoi thoai gan nhat,
@@ -42,7 +40,7 @@ public sealed partial class PancakePollingService : BackgroundService
         IHttpClientFactory httpFactory,
         ILogger<PancakePollingService> log,
         IServiceScopeFactory scopeFactory,
-        Clawbot.SharedKernel.Security.IEncryptor encryptor)
+        IEncryptor encryptor)
     {
         _traces = traces;
         _config = config;
@@ -67,9 +65,6 @@ public sealed partial class PancakePollingService : BackgroundService
     [LoggerMessage(EventId = 5009, Level = LogLevel.Warning, Message = "Publish inbound message failed for {MsgId}: {Ex}")]
     private static partial void LogIngestFailed(ILogger logger, string msgId, string ex);
 
-    [LoggerMessage(EventId = 5011, Level = LogLevel.Warning, Message = "Pancake inbox poll failed for {Platform} page {PageId}")]
-    private static partial void LogInboxPollFailed(ILogger logger, Exception exception, string platform, string pageId);
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         LogStarted(_log);
@@ -80,11 +75,9 @@ public sealed partial class PancakePollingService : BackgroundService
         {
             try
             {
-                // DB inboxes must poll regardless of demo env vars; env-var page is a fallback inside
                 var pollStart = DateTime.UtcNow;
                 var sweep = pass % SweepEveryNPasses == 0;
                 var ok = await PollConversationsAsync(_config.Get(), sweep, stoppingToken);
-                // Watermark advances only on a clean pass, and to the pass START so nothing lands in a gap
                 if (ok) _lastPollUtc = pollStart;
                 pass++;
                 await Task.Delay(PollInterval, stoppingToken);
@@ -100,100 +93,52 @@ public sealed partial class PancakePollingService : BackgroundService
 
     private async Task<bool> PollConversationsAsync(DemoRuntimeConfig cfg, bool sweep, CancellationToken ct)
     {
-        var configuredBaseUrl = string.IsNullOrEmpty(cfg.PancakeBaseUrl)
-            ? DefaultBaseUrl
-            : cfg.PancakeBaseUrl;
-        var baseUrl = PancakeEndpointPolicy.NormalizeBaseUrl(configuredBaseUrl);
+        var baseUrl = string.IsNullOrEmpty(cfg.PancakeBaseUrl) ? DefaultBaseUrl : cfg.PancakeBaseUrl;
         var client = _httpFactory.CreateClient("Pancake");
         var ok = true;
 
-        // 1. Poll all inboxes with tokens from DB
         try
         {
+            //tao DI scope tam thoi lay appdbContext moi cho moi luot poll
+            //neu khong tao scope moi moi lan poll thi se bi loi
             using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<Clawbot.Infrastructure.Persistence.AppDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var inboxes = await db.Inboxes
                 .IgnoreQueryFilters()
-                .Where(i => i.EncryptedAccessToken != null
-                    && i.IsActive
-                    && i.DeletedAt == null
-                    && (i.Platform == "pancake"
-                        || i.Platform == "facebook"
-                        || i.Platform == "zalo"
-                        || i.Platform == "tiktok"
-                        || i.Platform == "instagram"))
+                .Where(i => i.EncryptedAccessToken != null && i.IsActive)
+                .Select(i => new
+                {
+                    i.TenantId,
+                    i.ExternalPageId,
+                    i.EncryptedAccessToken
+                })
                 .ToListAsync(ct);
 
             LogPollCount(_log, inboxes.Count);
-            ok &= await PollInboxesAsync(client, baseUrl, inboxes, sweep, ct);
+
+            foreach (var inbox in inboxes)
+            {
+                if (string.IsNullOrEmpty(inbox.EncryptedAccessToken)) continue;
+                var token = PancakeTokenCipher.DecryptOrRaw(_encryptor, inbox.EncryptedAccessToken);
+                if (string.IsNullOrEmpty(token)) continue;
+
+                // Ingest duoi tenant SO HUU inbox; neu dung demo resolver toan cuc, inbox va hoi thoai
+                // roi vao 2 tenant khac nhau -> ResolveInboxIdAsync khong khop -> inbox_id NULL -> auto-owner chet.
+                ok &= await PollPageAsync(client, baseUrl, inbox.ExternalPageId, token, inbox.TenantId, sweep, ct);
+            }
         }
         catch (Exception ex)
         {
-#pragma warning disable CA1848
+            #pragma warning disable CA1848
             _log.LogWarning(ex, "Failed to poll inboxes from DB, falling back to env-var page");
+            #pragma warning restore CA1848 
             ok = false;
         }
 
         // 2. Fallback: poll the env-var page (demo mode) — khong biet tenant, dung demo resolver
         if (!string.IsNullOrEmpty(cfg.PancakePageId) && !string.IsNullOrEmpty(cfg.PancakePageAccessToken))
         {
-            ok &= await PollPageAsync(
-                client,
-                baseUrl,
-                cfg.PancakePageId,
-                cfg.PancakePageAccessToken,
-                platform: "zalo",
-                tenantId: null,
-                sweep,
-                ct);
-        }
-
-        return ok;
-    }
-
-    internal async Task<bool> PollInboxesAsync(
-        HttpClient client,
-        string baseUrl,
-        IReadOnlyList<Inbox> inboxes,
-        bool sweep,
-        CancellationToken ct)
-    {
-        var ok = true;
-        foreach (var inbox in inboxes)
-        {
-            if (string.IsNullOrEmpty(inbox.EncryptedAccessToken))
-                continue;
-
-            try
-            {
-                // Legacy rows may still hold a raw JWT until the startup migrator re-encrypts them.
-                var token = Clawbot.Infrastructure.Channels.Pancake.PancakeTokenCipher.DecryptOrRaw(
-                    _encryptor,
-                    inbox.EncryptedAccessToken);
-                if (string.IsNullOrEmpty(token))
-                    continue;
-
-                // Ingest duoi tenant SO HUU inbox; neu dung demo resolver toan cuc, inbox va hoi thoai
-                // roi vao 2 tenant khac nhau -> ResolveInboxIdAsync khong khop -> inbox_id NULL -> auto-owner chet.
-                ok &= await PollPageAsync(
-                    client,
-                    baseUrl,
-                    inbox.ExternalPageId,
-                    token,
-                    inbox.Platform,
-                    inbox.TenantId,
-                    sweep,
-                    ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                ok = false;
-                LogInboxPollFailed(_log, ex, inbox.Platform, inbox.ExternalPageId);
-            }
+            ok &= await PollPageAsync(client, baseUrl, cfg.PancakePageId, cfg.PancakePageAccessToken, tenantId: null, sweep, ct);
         }
 
         return ok;
@@ -245,15 +190,7 @@ public sealed partial class PancakePollingService : BackgroundService
             string.IsNullOrWhiteSpace(customer?.AvatarUrl) ? conversation.From?.AvatarUrl : customer.AvatarUrl);
     }
 
-    private async Task<bool> PollPageAsync(
-        HttpClient client,
-        string baseUrl,
-        string pageId,
-        string token,
-        string platform,
-        Guid? tenantId,
-        bool sweep,
-        CancellationToken ct)
+    private async Task<bool> PollPageAsync(HttpClient client, string baseUrl, string pageId, string token, Guid? tenantId, bool sweep, CancellationToken ct)
     {
         var ok = true;
         var convUrl = $"https://pages.fm/api/public_api/v2/pages/{pageId}/conversations?page_access_token={token}&per_page=50";
@@ -293,18 +230,18 @@ public sealed partial class PancakePollingService : BackgroundService
             var messages = msgData?.Messages;
             if (messages is null || messages.Length == 0) continue;
             using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<Clawbot.Infrastructure.Persistence.AppDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             // Publish qua RabbitMQ (EF bus outbox): SaveChanges ghi ProcessedMessages + outbox atomically,
             // ChannelInboundMessageConsumer lo phan ingest (ordered, co retry)
             var publisher = scope.ServiceProvider.GetRequiredService<MassTransit.IPublishEndpoint>();
             // Inbox path: tenant so huu inbox. Env-var fallback: khong biet tenant -> demo resolver.
             var resolvedTenantId = tenantId
-                ?? await scope.ServiceProvider.GetRequiredService<Clawbot.SharedKernel.Multitenancy.ITenantResolver>()
+                ?? await scope.ServiceProvider.GetRequiredService<ITenantResolver>()
                     .ResolveTenantIdAsync(ct);
 
             // Batch-load already processed message IDs for this conversation
             var processedIds = (await db.ProcessedMessages
-                .Where(p => p.TenantId == resolvedTenantId && p.Platform == platform && p.ConversationExternalId == convId)
+                .Where(p => p.TenantId == resolvedTenantId && p.Platform == "zalo" && p.ConversationExternalId == convId)
                 .Select(p => p.ExternalMessageId)
                 .ToListAsync(ct))
                 .ToHashSet();
@@ -319,84 +256,84 @@ public sealed partial class PancakePollingService : BackgroundService
                 try
                 {
 
-                    var metadata = new Dictionary<string, string>
-                    {
-                        ["external_message_id"] = msg.Id,
-                        ["content_type"] = "text",
-                    };
-
-                    var sender = MapSender(msg, conv, pageId);
-                    foreach (var pair in sender.Metadata)
-                    {
-                        metadata[pair.Key] = pair.Value;
-                    }
-
-                    // Conversation counterpart (group or 1-1 customer): authoritative for the left-list contact
-                    var counterpart = GetConversationCounterpart(conv);
-                    if (!string.IsNullOrEmpty(counterpart.Name)) metadata["conversation_name"] = counterpart.Name;
-                    if (!string.IsNullOrEmpty(counterpart.AvatarUrl)) metadata["conversation_avatar_url"] = counterpart.AvatarUrl;
-                    if (conv.From?.IsGroup == true) metadata["is_group"] = "true";
-                    if (conv.From?.Id is { Length: > 0 } fromId) metadata["from_id"] = fromId;
-
-                    // Parse attachments for rich content
-                    // Use per-message text; fallback to conv.Snippet when msg.Message is empty
-                    string text = !string.IsNullOrWhiteSpace(msg.Message) ? msg.Message! : snippet;
-                    if (msg.Attachments != null && msg.Attachments.Count > 0)
-                    {
-                        var att = msg.Attachments[0];
-                        switch (att.Type)
-                        {
-                            case "photo":
-                                metadata["content_type"] = "photo";
-                                text = att.Url ?? "";
-                                break;
-                            case "sticker":
-                                metadata["content_type"] = "sticker";
-                                text = att.Url ?? "";
-                                break;
-                            case "document":
-                                metadata["content_type"] = "document";
-                                text = att.Name ?? "Tai lieu";
-                                if (!string.IsNullOrEmpty(att.Url)) metadata["attachment_url"] = att.Url;
-                                break;
-                            case "audio":
-                                metadata["content_type"] = "audio";
-                                text = att.Name ?? "Am thanh";
-                                if (!string.IsNullOrEmpty(att.Url)) metadata["attachment_url"] = att.Url;
-                                break;
-                            case "video":
-                                metadata["content_type"] = "video";
-                                text = att.Name ?? "Video";
-                                if (!string.IsNullOrEmpty(att.Url)) metadata["attachment_url"] = att.Url;
-                                break;
-                            case "pzl_chat_recommended":
-                                metadata["content_type"] = "call_missed";
-                                text = "Cuoc goi nhlo";
-                                break;
-                        }
-                    }
-
-                    // Comment auto-reply: conversation type COMMENT (list API có type + post_id) phải mang
-                    // messageType=comment + ParentPostId — thiếu là ingest thành tin text thường và
-                    // CommentAutoReplyJob không bao giờ thấy comment từ đường polling.
-                    var isComment = string.Equals(conv.Type, "COMMENT", StringComparison.OrdinalIgnoreCase);
-                    var channelMsg = new Clawbot.SharedKernel.Channels.ChannelMessage(
-                        Channel: platform, ExternalThreadId: $"{pageId}:{convId}",
-                        ExternalUserId: sender.ExternalUserId, Text: text,
-                        SentAt: msg.InsertedAt.HasValue ? new DateTimeOffset(msg.InsertedAt.Value, TimeSpan.Zero) : (conv.UpdatedAt.HasValue ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow),
-                        Metadata: metadata,
-                        MessageType: isComment ? "comment" : "text",
-                        ParentPostId: isComment ? conv.PostId : null);
-                    await publisher.Publish(new Clawbot.SharedKernel.Channels.ChannelInboundMessageReceived(resolvedTenantId, channelMsg), ct);
-                    db.ProcessedMessages.Add(new ProcessedMessage(resolvedTenantId, platform, msg.Id, convId));
-                    LogProcessedNew(_log, msg.Id, convId);
-                    newCount++;
-                }
-                catch (Exception ex)
+                 var metadata = new Dictionary<string, string>
                 {
-                    ok = false;
-                    LogIngestFailed(_log, msg.Id, ex.Message);
+                    ["external_message_id"] = msg.Id,
+                    ["content_type"] = "text",
+                };
+
+                var sender = MapSender(msg, conv, pageId);
+                foreach (var pair in sender.Metadata)
+                {
+                    metadata[pair.Key] = pair.Value;
                 }
+
+                // Conversation counterpart (group or 1-1 customer): authoritative for the left-list contact
+                var counterpart = GetConversationCounterpart(conv);
+                if (!string.IsNullOrEmpty(counterpart.Name)) metadata["conversation_name"] = counterpart.Name;
+                if (!string.IsNullOrEmpty(counterpart.AvatarUrl)) metadata["conversation_avatar_url"] = counterpart.AvatarUrl;
+                if (conv.From?.IsGroup == true) metadata["is_group"] = "true";
+                if (conv.From?.Id is { Length: > 0 } fromId) metadata["from_id"] = fromId;
+
+                // Parse attachments for rich content
+                // Use per-message text; fallback to conv.Snippet when msg.Message is empty
+                string text = !string.IsNullOrWhiteSpace(msg.Message) ? msg.Message! : snippet;
+                if (msg.Attachments != null && msg.Attachments.Count > 0)
+                {
+                    var att = msg.Attachments[0];
+                    switch (att.Type)
+                    {
+                        case "photo":
+                            metadata["content_type"] = "photo";
+                            text = att.Url ?? "";
+                            break;
+                        case "sticker":
+                            metadata["content_type"] = "sticker";
+                            text = att.Url ?? "";
+                            break;
+                        case "document":
+                            metadata["content_type"] = "document";
+                            text = att.Name ?? "Tai lieu";
+                            if (!string.IsNullOrEmpty(att.Url)) metadata["attachment_url"] = att.Url;
+                            break;
+                        case "audio":
+                            metadata["content_type"] = "audio";
+                            text = att.Name ?? "Am thanh";
+                            if (!string.IsNullOrEmpty(att.Url)) metadata["attachment_url"] = att.Url;
+                            break;
+                        case "video":
+                            metadata["content_type"] = "video";
+                            text = att.Name ?? "Video";
+                            if (!string.IsNullOrEmpty(att.Url)) metadata["attachment_url"] = att.Url;
+                            break;
+                        case "pzl_chat_recommended":
+                            metadata["content_type"] = "call_missed";
+                            text = "Cuoc goi nho";
+                            break;
+                    }
+                }
+
+                // Comment auto-reply: conversation type COMMENT (list API có type + post_id) phải mang
+                // messageType=comment + ParentPostId — thiếu là ingest thành tin text thường và
+                // CommentAutoReplyJob không bao giờ thấy comment từ đường polling.
+                var isComment = string.Equals(conv.Type, "COMMENT", StringComparison.OrdinalIgnoreCase);
+                var channelMsg = new ChannelMessage(
+                    Channel: "zalo", ExternalThreadId: $"{pageId}:{convId}",
+                    ExternalUserId: sender.ExternalUserId, Text: text,
+                    SentAt: msg.InsertedAt.HasValue ? new DateTimeOffset(msg.InsertedAt.Value, TimeSpan.Zero) : (conv.UpdatedAt.HasValue ? new DateTimeOffset(conv.UpdatedAt.Value, TimeSpan.Zero) : DateTimeOffset.UtcNow),
+                    Metadata: metadata,
+                    MessageType: isComment ? "comment" : "text",
+                    ParentPostId: isComment ? conv.PostId : null);
+                await publisher.Publish(new ChannelInboundMessageReceived(resolvedTenantId, channelMsg), ct);
+                db.ProcessedMessages.Add(new ProcessedMessage(resolvedTenantId, "zalo", msg.Id, convId));
+                LogProcessedNew(_log, msg.Id, convId);
+                newCount++;
+            }
+            catch (Exception ex)
+            {
+                ok = false;
+                LogIngestFailed(_log, msg.Id, ex.Message);
+            }
             }
 
             // Sweep vong lai hoi thoai da xu ly het: khong co gi de luu, khong tao trace rac
@@ -408,68 +345,67 @@ public sealed partial class PancakePollingService : BackgroundService
             var traceId = await _traces.CreateTraceAsync();
             await _traces.AppendStepAsync(traceId, new DemoTraceStep
             {
-                Layer = "pancake_poll",
-                Status = DemoTraceStepStatus.Success,
-                Output = new() { ["action"] = "inbound_message", ["platform"] = platform, ["text"] = "[REDACTED]", ["conversation_id"] = convId, ["message_count"] = conv.MessageCount },
+                Layer = "pancake_poll", Status = DemoTraceStepStatus.Success,
+                Output = new() { ["action"] = "inbound_message", ["platform"] = "zalo", ["text"] = "[REDACTED]", ["conversation_id"] = convId, ["message_count"] = conv.MessageCount },
             });
             await _traces.CompleteTraceAsync(traceId);
         }
 
         return ok;
     }
-    internal sealed record PancakeSenderMapResult(
-        string ExternalUserId,
-        IReadOnlyDictionary<string, string> Metadata);
-    public sealed record PancakeConversationsResponse(bool? Success, PancakeConversation[]? Conversations);
-    public sealed record PancakeMessagesResponse(bool? Success, PancakeMessage[]? Messages);
-    public sealed record PancakeMessage(
-        string? Id,
-        string? Message,
-        PancakeMessageSender? From,
-        IReadOnlyList<PancakeAttachment>? Attachments,
-        DateTime? InsertedAt);
-    public sealed record PancakeMessageSender(
-        string? Id,
-        string? Name,
-        string? AvatarUrl,
-        bool? IsGroup,
-        string? AdminId,
-        bool? IsAutomated);
-    public sealed record PancakeAttachment(
-        string? Type,
-        string? Url,
-        string? OriginUrl,
-        string? Name,
-        string? MimeType,
-        PancakeImageData? ImageData);
-    public sealed record PancakeImageData(int? Width, int? Height);
+internal sealed record PancakeSenderMapResult(
+    string ExternalUserId,
+    IReadOnlyDictionary<string, string> Metadata);
+public sealed record PancakeConversationsResponse(bool? Success, PancakeConversation[]? Conversations);
+public sealed record PancakeMessagesResponse(bool? Success, PancakeMessage[]? Messages);
+public sealed record PancakeMessage(
+    string? Id,
+    string? Message,
+    PancakeMessageSender? From,
+    IReadOnlyList<PancakeAttachment>? Attachments,
+    DateTime? InsertedAt);
+public sealed record PancakeMessageSender(
+    string? Id,
+    string? Name,
+    string? AvatarUrl,
+    bool? IsGroup,
+    string? AdminId,
+    bool? IsAutomated);
+public sealed record PancakeAttachment(
+    string? Type,
+    string? Url,
+    string? OriginUrl,
+    string? Name,
+    string? MimeType,
+    PancakeImageData? ImageData);
+public sealed record PancakeImageData(int? Width, int? Height);
 
 
-    public sealed record PancakeFrom(
-        string? Id,
-        string? Name,
-        string? AvatarUrl,
-        bool? IsGroup);
+public sealed record PancakeFrom(
+    string? Id,
+    string? Name,
+    string? AvatarUrl,
+    bool? IsGroup);
 
 
-    public sealed record PancakeLastSentBy(
-        string? Id,
-        string? Name,
-        string? DisplayName,
-        string? AvatarUrl,
-        string? AdminName);
+public sealed record PancakeLastSentBy(
+    string? Id,
+    string? Name,
+    string? DisplayName,
+    string? AvatarUrl,
+    string? AdminName);
 
 
-    public sealed record PancakeCustomer(
-        string? Id,
-        string? Name,
-        string? AvatarUrl,
-        string? FbId);
+public sealed record PancakeCustomer(
+    string? Id,
+    string? Name,
+    string? AvatarUrl,
+    string? FbId);
 
-    public sealed record PancakeConversation(
-        string? Id, string? Type, string? Snippet, int? MessageCount,
-        DateTime? UpdatedAt, DateTime? InsertedAt, string? PageId,
-        PancakeFrom? From, PancakeLastSentBy? LastSentBy,
-        IReadOnlyList<PancakeCustomer>? Customers,
-        string? PostId = null);
+public sealed record PancakeConversation(
+    string? Id, string? Type, string? Snippet, int? MessageCount,
+    DateTime? UpdatedAt, DateTime? InsertedAt, string? PageId,
+    PancakeFrom? From, PancakeLastSentBy? LastSentBy,
+    IReadOnlyList<PancakeCustomer>? Customers,
+    string? PostId = null);
 }

@@ -43,14 +43,9 @@ internal sealed class AdapterTool(IAgent agent, string description, string permi
 {
     public string Name => agent.Name;
     public string Description { get; } = description;
-    public string InputSchemaJson { get; } = InputSchemaFor(agent.Name);
+    public string InputSchemaJson { get; } = "{}";
     public string RequiredPermission { get; } = permission;
     public ToolRiskLevel RiskLevel { get; } = riskLevel;
-
-    private static string InputSchemaFor(string name) =>
-        string.Equals(name, "research-agent", StringComparison.OrdinalIgnoreCase)
-            ? """{"type":"object","properties":{"geo":{"type":"string","description":"Mã khu vực, mặc định VN"},"keywords":{"type":"array","items":{"type":"string"},"description":"Từ khóa trend, có thể bỏ trống để dùng mặc định"}},"additionalProperties":false}"""
-            : "{}";
 
     public async Task<ToolResult> InvokeAsync(IReadOnlyDictionary<string, string> args, ToolContext ctx, CancellationToken ct)
     {
@@ -92,7 +87,7 @@ public static class ToolRegistryFactory
             ["docs-agent"] = ("Render a document (pdf/docx) from a template and variables. Args: template_code, template_body, vars_json.", "docs:write", ToolRiskLevel.Low),
             ["sale-assist"] = ("Summarize a conversation, draft a reply, or suggest an upsell. REQUIRES conversation_id + turns_json. Args: operation=summarize|draft|upsell.", "sale-assist:use", ToolRiskLevel.Low),
             ["chat-agent"] = ("Reply to a customer chat message using RAG + conversation memory. Args: user_text, conversation_id?, history.", "conversations:write", ToolRiskLevel.High),
-            ["research-agent"] = ("Quét trend thị trường theo geo + keywords (nguồn trend công khai). Không lọc theo ngày và không lấy tin mới nhất. Args: geo (mặc định VN), keywords (có thể bỏ trống).", "", ToolRiskLevel.Low),
+            ["research-agent"] = ("Scan market research by geo and keywords. Args: geo, keywords.", "", ToolRiskLevel.Low),
             // SPEC-16 P4-3: explicit AgentService-layer tools (ContentTools.cs) declared here so the admin upsert
             // can validate their names + permissions. Build() skips them (no adapter with these names is registered).
             // Phase 4.9: content.review is canonical (queues durable agent review only — never publishes).
@@ -102,7 +97,7 @@ public static class ToolRegistryFactory
             ["content.schedule"] = ("Queue an approved content revision for publishing.", "content:publish", ToolRiskLevel.High),
             ["content.publish"] = ("Queue an existing approved schedule for the durable publisher.", "content:publish", ToolRiskLevel.High),
             // Read-only external search (SearXNG self-host), no tenant-data write -> no permission gate.
-            ["web.search"] = ("Tìm web công khai qua SearXNG: tin mới, bài đăng, giá và đối thủ. Dùng tool này khi cần nội dung mới theo ngày. Args: query, max_results.", "", ToolRiskLevel.Low),
+            ["web.search"] = ("Search the public web (prices, competitors, news) via self-hosted SearXNG.", "", ToolRiskLevel.Low),
         };
 
     // Builds the registry from adapter-wrapped tools PLUS any explicit IAgentTool registrations (AgentService-layer

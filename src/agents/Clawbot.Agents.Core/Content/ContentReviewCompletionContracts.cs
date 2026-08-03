@@ -103,9 +103,7 @@ public sealed record ReviewCompletionEnvelope(
     int InputTokens = 0,
     int OutputTokens = 0,
     decimal UsdCost = 0m,
-    string Model = "",
-    // IsEstimated: provider không trả usage -> token/cost do LlmTokenEstimator đếm cục bộ (thấp hơn thực tế).
-    bool IsEstimated = false)
+    string Model = "")
 {
     public string RawText { get; } = RawText ?? string.Empty;
     public string FinishReason { get; } = FinishReason ?? string.Empty;

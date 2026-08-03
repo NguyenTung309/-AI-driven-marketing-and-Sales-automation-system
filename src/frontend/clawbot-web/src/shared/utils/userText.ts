@@ -13,25 +13,6 @@ const STATUS_MESSAGES: Partial<Record<number, string>> = {
   429: "Bạn thao tác quá nhanh. Vui lòng thử lại sau ít phút.",
 };
 
-const ORCHESTRATION_FAILURE_HINTS: readonly { readonly needle: string; readonly message: string }[] = [
-  { needle: "llm_config_not_configured", message: "Có agent trong kế hoạch chưa được gắn LLM. Mở Sơ đồ agent → Cấu hình → tab LLM để gắn, rồi gửi lại mục tiêu." },
-  { needle: "cost_cap", message: "Phiên bị chặn vì vượt hạn mức chi phí AI của tháng. Kiểm tra thẻ Chi phí AI hoặc nâng hạn mức trước khi chạy lại." },
-  { needle: "planning_failed", message: "Orchestrator không lập được kế hoạch từ mục tiêu này. Viết mục tiêu cụ thể hơn (kênh, số lượng, thời hạn) rồi gửi lại." },
-  { needle: "tool_permission_denied", message: "Một agent bị chặn vì thiếu quyền dùng công cụ. Kiểm tra danh sách công cụ được phép của agent trong phần Cấu hình." },
-  { needle: "refused_without_tool_use", message: "Agent chưa gọi công cụ nào nên không có kết quả thực tế. Hãy chạy lại mục tiêu sau khi kiểm tra công cụ được cấp cho agent." },
-  { needle: "blocked_missing_tool_use", message: "Agent kết thúc khi chưa gọi công cụ cần thiết. Hãy chạy lại mục tiêu để hệ thống yêu cầu agent thực hiện hành động." },
-  { needle: "tool_execution_incomplete", message: "Agent đã thử công cụ nhưng chưa hoàn tất bước thực thi. Kiểm tra nhật ký công cụ rồi chạy lại mục tiêu." },
-  { needle: "unknown_tool", message: "Agent gọi một công cụ không tồn tại nên hành động đó chưa được thực hiện. Kiểm tra danh sách công cụ được cấp cho agent rồi chạy lại." },
-  { needle: "tool_error", message: "Công cụ gặp lỗi khi chạy nên bước này chưa hoàn tất. Xem nhật ký công cụ để biết chi tiết rồi chạy lại mục tiêu." },
-  { needle: "re_act_loop_exhausted", message: "Agent dùng hết số bước gọi công cụ mà chưa ra kết quả cuối. Thu hẹp phạm vi mục tiêu rồi chạy lại." },
-  { needle: "max_rounds", message: "Đã dùng hết số lần lập lại kế hoạch cho phép — mục tiêu có thể quá phức tạp, thử chia nhỏ thành nhiều mục tiêu." },
-];
-
-export function toUserFriendlyOrchestrationError(value: string | null | undefined): string | null {
-  const haystack = (value ?? "").toLowerCase();
-  return ORCHESTRATION_FAILURE_HINTS.find((hint) => haystack.includes(hint.needle))?.message ?? null;
-}
-
 export interface UserFriendlyErrorOptions {
   readonly fallback?: string;
   readonly statusMessages?: Partial<Record<number, string>>;
@@ -101,7 +82,6 @@ export function operationalPhaseLabel(value: string | null | undefined): string 
   if (normalized === "input") return "Đầu vào";
   if (normalized === "reply") return "Phản hồi";
   if (normalized === "tool_blocked") return "Công cụ bị chặn";
-  if (normalized === "tool_skipped") return "Chưa gọi công cụ";
   if (normalized.includes("tool")) return "Công cụ";
   if (normalized.includes("plan")) return "Lập kế hoạch";
   if (normalized.includes("block") || normalized.includes("missing")) return "Bị chặn";

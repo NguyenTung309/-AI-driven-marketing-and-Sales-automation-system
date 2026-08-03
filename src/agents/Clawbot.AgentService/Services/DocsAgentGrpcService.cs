@@ -34,7 +34,7 @@ public sealed partial class DocsAgentGrpcService(
         var template = await _db.DocumentTemplates
             .IgnoreQueryFilters()
             .Where(t => t.TenantId == tenantId && t.Code == request.TemplateCode && t.DeletedAt == null)
-            .Select(t => new { t.Id, t.Code, t.DocType, t.TemplateHtml, t.FieldsJson })
+            .Select(t => new { t.Id, t.Code, t.DocType, t.TemplateHtml })
             .FirstOrDefaultAsync(ct).ConfigureAwait(false)
             ?? throw new RpcException(new Status(StatusCode.NotFound, $"template '{request.TemplateCode}' not found"));
 
@@ -75,18 +75,6 @@ public sealed partial class DocsAgentGrpcService(
         }
 
         await AddKnowledgeVarsAsync(tenantId, vars, ct).ConfigureAwait(false);
-
-        // Kiểm tra trường bắt buộc SAU khi đã tự điền từ contact/KB — thiếu thì báo lỗi rõ tên trường,
-        // không sinh PDF rỗng âm thầm (SPEC-07: thiếu field -> lỗi kèm danh sách key).
-        var fields = Clawbot.Domain.Documents.TemplateFieldSchema.Parse(template.FieldsJson);
-        var missing = Clawbot.Domain.Documents.TemplateFieldSchema.MissingRequired(fields, vars);
-        if (missing.Count > 0)
-        {
-            var labels = string.Join(", ", missing.Select(f => f.Label));
-            throw new RpcException(new Status(
-                StatusCode.InvalidArgument,
-                $"Thiếu thông tin bắt buộc để tạo tài liệu: {labels}."));
-        }
 
         var renderRequest = new CoreDocs.DocsRenderRequest(
             tenantId, template.Code, template.DocType, template.TemplateHtml, vars, branding);

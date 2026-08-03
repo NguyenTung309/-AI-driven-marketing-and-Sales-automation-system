@@ -53,7 +53,6 @@ public static class HangfireModule
             cfg.GetSection(ContentWorkflowHealthOptions.SectionName));
         services.AddScoped<ContentWorkflowHealthJob>();
         services.AddScoped<MetaEngagementSyncJob>();
-        services.AddScoped<MetaCommentSyncJob>();
         services.AddScoped<MetaConnectionHealthJob>();
         services.AddScoped<MetaBusinessIntegrationWebhookJob>();
         services.AddScoped<AdsRuleEvaluationJob>();
@@ -209,17 +208,12 @@ public static class HangfireModule
             "default",
             j => j.RunScanAsync(CancellationToken.None),
             "*/2 * * * *");
-        // Refresh like/comment counts on published Facebook and Instagram posts (Graph API — Pancake has no metric).
+        // Refresh like/comment counts on published Facebook posts (Graph API — Pancake has no metric).
         recurring.AddOrUpdate<MetaEngagementSyncJob>(
             "meta-engagement-sync",
             "default",
             j => j.RunAsync(CancellationToken.None),
             "*/15 * * * *");
-        recurring.AddOrUpdate<MetaCommentSyncJob>(
-            "meta-comment-sync",
-            "default",
-            j => j.RunAsync(CancellationToken.None),
-            "*/5 * * * *");
         recurring.AddOrUpdate<AdsRuleEvaluationJob>(
             "ads-rule-evaluation",
             "ads",

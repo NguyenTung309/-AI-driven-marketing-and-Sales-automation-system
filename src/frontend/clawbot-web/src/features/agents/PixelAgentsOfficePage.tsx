@@ -169,12 +169,7 @@ function Metric({ icon, label, value }: { readonly icon: string; readonly label:
 
 function TraceRow({ trace }: { readonly trace: AgentTraceItem }) {
   const tone = normalize(trace.phase);
-  // tool_skipped/tool_blocked là "chưa làm được", không phải thành công — không tô xanh như bước hoàn tất.
-  const dot = tone.includes("error") || tone.includes("fail")
-    ? "bg-red-500"
-    : tone.includes("warn") || tone.includes("skip") || tone.includes("block")
-      ? "bg-amber-500"
-      : "bg-green-500";
+  const dot = tone.includes("error") ? "bg-red-500" : tone.includes("warn") ? "bg-amber-500" : "bg-green-500";
   return (
     <li className="grid grid-cols-[18px_minmax(0,1fr)] gap-3 border-b border-slate-200 py-3 last:border-b-0">
       <span className={`mt-1 size-3 ${dot}`} />

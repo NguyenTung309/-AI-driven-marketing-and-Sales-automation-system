@@ -68,25 +68,16 @@ public sealed class OpenAiResponsesChatClient : IClaudeChatClient
         if (!isEventStream)
         {
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            return ParseReply(body, systemPrompt, history, userMessage);
+            return ParseReply(body);
         }
 
-        return await ReadSseReplyAsync(response, systemPrompt, history, userMessage, ct).ConfigureAwait(false);
+        return await ReadSseReplyAsync(response, ct).ConfigureAwait(false);
     }
 
-    // Gom SSE: response.output_text.delta -> text hiển thị; response.completed -> usage.
-    // reasoning_summary_text.delta gom riêng: KHÔNG đưa vào text trả về, chỉ dùng để ước lượng
-    // output token khi gateway không trả usage (probe: 403 reasoning delta / 4 output delta —
-    // nếu chỉ đếm text hiển thị thì ước lượng lệch hàng chục lần).
-    private async Task<ClaudeReply> ReadSseReplyAsync(
-        HttpResponseMessage response,
-        string systemPrompt,
-        IReadOnlyList<ChatTurn> history,
-        string userMessage,
-        CancellationToken ct)
+    // Gom SSE: response.output_text.delta -> text; response.completed -> usage. Bỏ reasoning deltas.
+    private async Task<ClaudeReply> ReadSseReplyAsync(HttpResponseMessage response, CancellationToken ct)
     {
         var text = new StringBuilder();
-        var reasoning = new StringBuilder();
         var inTok = 0;
         var outTok = 0;
 
@@ -106,11 +97,6 @@ public sealed class OpenAiResponsesChatClient : IClaudeChatClient
                 {
                     if (doc.RootElement.TryGetProperty("delta", out var delta) && delta.ValueKind == JsonValueKind.String)
                         text.Append(delta.GetString());
-                }
-                else if (string.Equals(type, "response.reasoning_summary_text.delta", StringComparison.Ordinal))
-                {
-                    if (doc.RootElement.TryGetProperty("delta", out var delta) && delta.ValueKind == JsonValueKind.String)
-                        reasoning.Append(delta.GetString());
                 }
                 else if (string.Equals(type, "response.completed", StringComparison.Ordinal))
                 {
@@ -134,35 +120,7 @@ public sealed class OpenAiResponsesChatClient : IClaudeChatClient
             }
         }
 
-        var visible = text.ToString();
-        return BuildReply(visible, inTok, outTok, systemPrompt, history, userMessage, reasoning.ToString());
-    }
-
-    // Gộp một chỗ duy nhất quyết định dùng usage thật hay ước lượng cục bộ.
-    // Điều kiện là AND (cả hai đều 0): provider hợp lệ có thể trả output_tokens = 0 cho câu trả lời
-    // rỗng — không được ghi đè số thật của provider.
-    private ClaudeReply BuildReply(
-        string visibleText,
-        int inTok,
-        int outTok,
-        string systemPrompt,
-        IReadOnlyList<ChatTurn> history,
-        string userMessage,
-        string reasoningSummary)
-    {
-        if (inTok != 0 || outTok != 0)
-            return new ClaudeReply(visibleText, inTok, outTok, Cost(inTok, outTok), _config.Model);
-
-        var estimatedIn = LlmTokenEstimator.CountPrompt(_config.Model, systemPrompt, history, userMessage);
-        var estimatedOut = LlmTokenEstimator.CountText(_config.Model, visibleText)
-            + LlmTokenEstimator.CountText(_config.Model, reasoningSummary);
-        return new ClaudeReply(
-            visibleText,
-            estimatedIn,
-            estimatedOut,
-            Cost(estimatedIn, estimatedOut),
-            _config.Model,
-            IsEstimated: true);
+        return new ClaudeReply(text.ToString(), inTok, outTok, Cost(inTok, outTok), _config.Model);
     }
 
     // Giống OpenAiChatClient: không stream thật (usage phải chắc chắn cho cost cap) — resolve trọn
@@ -178,7 +136,7 @@ public sealed class OpenAiResponsesChatClient : IClaudeChatClient
         if (reply.Text.Length > 0)
             yield return new ClaudeStreamChunk(reply.Text, Final: false, 0, 0, 0m, reply.Model);
 
-        yield return new ClaudeStreamChunk(string.Empty, Final: true, reply.InputTokens, reply.OutputTokens, reply.UsdCost, reply.Model, reply.IsEstimated);
+        yield return new ClaudeStreamChunk(string.Empty, Final: true, reply.InputTokens, reply.OutputTokens, reply.UsdCost, reply.Model);
     }
 
     // Migrate mapping: messages -> input items; system -> instructions; max_tokens -> max_output_tokens.
@@ -203,11 +161,7 @@ public sealed class OpenAiResponsesChatClient : IClaudeChatClient
             Stream: true), JsonOpts);
     }
 
-    internal ClaudeReply ParseReply(
-        string body,
-        string systemPrompt = "",
-        IReadOnlyList<ChatTurn>? history = null,
-        string userMessage = "")
+    internal ClaudeReply ParseReply(string body)
     {
         var parsed = JsonSerializer.Deserialize<ResponsesResponse>(body);
         var text = new StringBuilder();
@@ -223,7 +177,7 @@ public sealed class OpenAiResponsesChatClient : IClaudeChatClient
 
         var inTok = parsed?.Usage?.InputTokens ?? 0;
         var outTok = parsed?.Usage?.OutputTokens ?? 0;
-        return BuildReply(text.ToString(), inTok, outTok, systemPrompt, history ?? [], userMessage, string.Empty);
+        return new ClaudeReply(text.ToString(), inTok, outTok, Cost(inTok, outTok), _config.Model);
     }
 
     private sealed record ResponsesRequest(

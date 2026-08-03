@@ -9,10 +9,6 @@ public sealed record PancakePageToken(string PageAccessToken, string PageId, str
 // not connected or has no stored token yet (caller mints on demand).
 public interface IPancakePageTokenResolver
 {
-    Task<PancakePageToken?> ResolveAsync(
-        Guid tenantId,
-        string platform,
-        string pageId,
-        CancellationToken ct = default);
+    Task<PancakePageToken?> ResolveAsync(Guid tenantId, string pageId, CancellationToken ct = default);
 }
 

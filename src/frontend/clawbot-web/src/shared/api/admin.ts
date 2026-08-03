@@ -626,18 +626,6 @@ export interface MetaAsset {
   readonly isDefault: boolean;
   readonly isActive: boolean;
   readonly lastSyncedAt: string;
-  readonly canModerateComments: boolean;
-  readonly canSendPrivateReplies: boolean;
-  readonly feedSubscribedAt?: string | null;
-}
-
-export interface MetaEngagementCapability {
-  readonly missingCommentScopes: readonly string[];
-  readonly missingPrivateReplyScopes: readonly string[];
-  readonly activePageCount: number;
-  readonly commentCapablePageCount: number;
-  readonly privateReplyCapablePageCount: number;
-  readonly feedSubscribedPageCount: number;
 }
 
 export type MetaAuthorizationMode = "development_user" | "business_system_user";
@@ -672,7 +660,6 @@ export interface MetaIntegrationStatus {
   readonly lastValidatedAt?: string | null;
   readonly lastError?: string | null;
   readonly assets: readonly MetaAsset[];
-  readonly engagement?: MetaEngagementCapability | null;
 }
 
 export async function getMetaIntegrationStatus(): Promise<MetaIntegrationStatus> {

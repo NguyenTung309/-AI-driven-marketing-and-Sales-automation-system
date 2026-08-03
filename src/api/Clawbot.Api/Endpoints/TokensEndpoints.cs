@@ -24,12 +24,7 @@ public sealed record TokenUsageResponse(
     double? CacheHitRatioPercent,
     IReadOnlyList<TokenAgentUsageResponse> Agents,
     IReadOnlyList<TokenModelUsageResponse> Models,
-    TokenAlertSettingsResponse Alert,
-    // Tách phần chi phí ước lượng cục bộ (provider không trả usage) khỏi phần provider báo thật.
-    // Usd vẫn là tổng cả hai để không phá consumer cũ; UI phải gắn nhãn khi HasEstimated = true.
-    decimal MeasuredUsd,
-    decimal EstimatedUsd,
-    bool HasEstimated);
+    TokenAlertSettingsResponse Alert);
 
 public sealed record TokenAgentUsageResponse(
     string Code,
@@ -46,16 +41,14 @@ public sealed record TokenAgentUsageResponse(
     decimal Usd,
     int MonthlyQuotaTokens,
     int AlertPercent,
-    double UsagePercent,
-    bool HasEstimated);
+    double UsagePercent);
 
 public sealed record TokenModelUsageResponse(
     string Model,
     int Calls,
     int TotalTokens,
     decimal Usd,
-    double Percent,
-    bool HasEstimated);
+    double Percent);
 
 public sealed record TokenAlertSettingsResponse(bool Enabled, int LowBalanceThresholdTokens);
 
@@ -121,8 +114,6 @@ public static class TokensEndpoints
         var totalOutput = costs.Sum(cost => cost.OutputTokens);
         var totalTokens = totalInput + totalOutput;
         var totalUsd = costs.Sum(cost => cost.Usd);
-        var estimatedUsd = costs.Where(cost => cost.IsEstimated).Sum(cost => cost.Usd);
-        var measuredUsd = totalUsd - estimatedUsd;
 
         var alert = agents.Count > 0 ? ReadTokenConfig(agents[0].ConfigJson).TokenAlerts : new TokenAlertConfig();
         var agentRows = agents.Select(agent =>
@@ -149,8 +140,7 @@ public static class TokensEndpoints
                 agentCosts.Sum(cost => cost.Usd),
                 quota,
                 Math.Clamp(config.TokenQuota.AlertPercent > 0 ? config.TokenQuota.AlertPercent : DefaultAlertPercent(agent.AgentType), 50, 100),
-                Math.Round(tokens * 100d / quota, 1),
-                agentCosts.Exists(cost => cost.IsEstimated));
+                Math.Round(tokens * 100d / quota, 1));
         }).ToList();
 
         var monthlyQuota = agentRows.Sum(row => row.MonthlyQuotaTokens);
@@ -168,8 +158,7 @@ public static class TokensEndpoints
                     group.Count(),
                     tokens,
                     group.Sum(cost => cost.Usd),
-                    totalTokens == 0 ? 0 : Math.Round(tokens * 100d / totalTokens, 1),
-                    group.Any(cost => cost.IsEstimated));
+                    totalTokens == 0 ? 0 : Math.Round(tokens * 100d / totalTokens, 1));
             })
             .OrderByDescending(row => row.TotalTokens)
             .ToList();
@@ -188,10 +177,7 @@ public static class TokensEndpoints
             null,
             agentRows,
             modelRows,
-            new TokenAlertSettingsResponse(alert.Enabled, alert.LowBalanceThresholdTokens),
-            measuredUsd,
-            estimatedUsd,
-            estimatedUsd > 0m || costs.Exists(cost => cost.IsEstimated)));
+            new TokenAlertSettingsResponse(alert.Enabled, alert.LowBalanceThresholdTokens)));
     }
 
     private static async Task<IResult> UpdateSettingsAsync(

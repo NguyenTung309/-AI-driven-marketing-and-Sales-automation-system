@@ -149,19 +149,10 @@ public sealed class MetaAsset : AggregateRoot<Guid>, ITenantOwned
     public bool IsDefault { get; private set; }
     public bool IsActive { get; private set; } = true;
     public DateTimeOffset LastSyncedAt { get; private set; }
-    // Lần cuối Page này đăng ký thành công webhook feed. Null = chưa từng đăng ký được
-    // (thường do thiếu scope pages_manage_metadata) nên comment chỉ về qua job đối soát.
-    public DateTimeOffset? FeedSubscribedAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
     private MetaAsset() { }
-
-    public void MarkFeedSubscribed(DateTimeOffset at)
-    {
-        FeedSubscribedAt = at;
-        UpdatedAt = at;
-    }
 
     public static MetaAsset CreatePage(
         Guid tenantId,

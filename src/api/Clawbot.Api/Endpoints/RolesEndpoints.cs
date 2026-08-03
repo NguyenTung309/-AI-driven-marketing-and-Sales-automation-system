@@ -96,8 +96,6 @@ var roles = app.MapGroup("/api/rbac/roles").RequirePermission("rbac:manage").Req
         return Results.NoContent();
     }
 
-    // SPEC-11 D7: read/write role_permissions keyed on the fixed Identity AppRole.Id (the
-    // same store the backend resolves permissions from) â€” not the domain RbacRoles + tenant.
     private static async Task<IResult> ListRolePermissionsAsync(
         Guid id,
         AppDbContext db,
@@ -134,7 +132,6 @@ var roles = app.MapGroup("/api/rbac/roles").RequirePermission("rbac:manage").Req
             db.RolePermissions.Add(RolePermission.Create(id, permissionId));
 
         await db.SaveChangesAsync(ct);
-        // SPEC-11 D7: invalidate the cache so the permission change takes effect immediately.
         await permissions.InvalidateAsync(id, ct);
         return Results.NoContent();
     }
