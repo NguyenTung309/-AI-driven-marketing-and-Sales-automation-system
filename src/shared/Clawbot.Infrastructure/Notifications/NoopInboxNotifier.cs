@@ -12,4 +12,7 @@ public sealed class NoopInboxNotifier : IInboxNotifier
 
     public Task NotifyConversationUpdatedAsync(Guid tenantId, InboxConversationEvent evt, CancellationToken ct = default) =>
         Task.CompletedTask;
+
+    public Task NotifyTypingAsync(Guid tenantId, InboxTypingEvent evt, CancellationToken ct = default) =>
+        Task.CompletedTask;
 }

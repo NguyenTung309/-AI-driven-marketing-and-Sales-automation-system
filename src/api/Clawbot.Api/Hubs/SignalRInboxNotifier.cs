@@ -19,6 +19,10 @@ public sealed class SignalRInboxNotifier(IHubContext<InboxHub> hub) : IInboxNoti
         _hub.Clients.Groups(TargetGroups(tenantId, evt.InboxId, evt.AssignedTo))
             .SendAsync("conversation", evt, ct);
 
+    public Task NotifyTypingAsync(Guid tenantId, InboxTypingEvent evt, CancellationToken ct = default) =>
+        _hub.Clients.Groups(TargetGroups(tenantId, evt.InboxId, evt.AssignedTo))
+            .SendAsync("typing", evt, ct);
+
     private static List<string> TargetGroups(Guid tenantId, Guid? inboxId, Guid? assignedTo)
     {
         var groups = new HashSet<string>(StringComparer.Ordinal)

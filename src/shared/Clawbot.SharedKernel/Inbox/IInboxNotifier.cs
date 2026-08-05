@@ -5,6 +5,7 @@ public interface IInboxNotifier
     Task NotifyMessageAsync(Guid tenantId, InboxMessageEvent evt, CancellationToken ct = default);
     Task NotifyMessageStatusAsync(Guid tenantId, InboxMessageStatusEvent evt, CancellationToken ct = default);
     Task NotifyConversationUpdatedAsync(Guid tenantId, InboxConversationEvent evt, CancellationToken ct = default);
+    Task NotifyTypingAsync(Guid tenantId, InboxTypingEvent evt, CancellationToken ct = default);
 }
 
 public sealed record InboxMessageEvent(
@@ -33,4 +34,13 @@ public sealed record InboxConversationEvent(
     string Status,
     Guid? AssignedTo,
     DateTimeOffset? LastMessageAt,
+    Guid? InboxId = null);
+
+// IsTyping=true khi AI bắt đầu sinh auto-reply, false khi đã lưu tin/thất bại — FE hiện bong bóng
+// "AI đang soạn phản hồi". Source hiện chỉ có "ai"; để mở cho typing của sale sau này.
+public sealed record InboxTypingEvent(
+    Guid ConversationId,
+    bool IsTyping,
+    string Source = "ai",
+    Guid? AssignedTo = null,
     Guid? InboxId = null);

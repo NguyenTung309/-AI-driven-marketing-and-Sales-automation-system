@@ -1,3 +1,4 @@
+using Clawbot.Domain.Conversations;
 using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
@@ -98,25 +99,36 @@ public sealed partial class ChannelInboundMessageConsumer(
                 return;
             }
 
-            // Recent context, oldest-first, excluding the message just ingested.
-            // ChatRequest.history is role-less; ChatAgent maps even/odd -> user/assistant, close enough for context.
-            // Loại tin blocked (draft bị từ chối/chặn): khách chưa từng thấy, đưa vào history làm model tưởng đã trả lời.
-            var history = await _db.Messages
-                .IgnoreQueryFilters()
-                .AsNoTracking()
-                .Where(m => m.ConversationId == conversationId && m.TenantId == msg.TenantId
-                    && !(m.Direction == "out" && m.Status == "blocked"))
-                .OrderByDescending(m => m.SentAt)
-                .Skip(1)
-                .Take(HistoryLimit)
-                .OrderBy(m => m.SentAt)
-                .Select(m => m.Content)
-                .ToListAsync(ct).ConfigureAwait(false);
+            // Mọi guard đã qua — báo FE "AI đang soạn" trước khi generate; luôn clear ở finally
+            // (kể cả khi reply lỗi/cancel) để bong bóng typing không kẹt trên UI.
+            await NotifyTypingSafeAsync(msg.TenantId, conv, isTyping: true, ct).ConfigureAwait(false);
+            try
+            {
+                // Recent context, oldest-first, excluding the message just ingested.
+                // ChatRequest.history is role-less; ChatAgent maps even/odd -> user/assistant, close enough for context.
+                // Loại tin blocked (draft bị từ chối/chặn): khách chưa từng thấy, đưa vào history làm model tưởng đã trả lời.
+                var history = await _db.Messages
+                    .IgnoreQueryFilters()
+                    .AsNoTracking()
+                    .Where(m => m.ConversationId == conversationId && m.TenantId == msg.TenantId
+                        && !(m.Direction == "out" && m.Status == "blocked"))
+                    .OrderByDescending(m => m.SentAt)
+                    .Skip(1)
+                    .Take(HistoryLimit)
+                    .OrderBy(m => m.SentAt)
+                    .Select(m => m.Content)
+                    .ToListAsync(ct).ConfigureAwait(false);
 
-            // Strip HTML trước khi đưa vào ChatAgent: tin Pancake bọc <div>/<br> — đẩy raw vào LLM
-            // vừa bẩn prompt vừa từng khiến model echo nguyên tin khách (kèm thẻ div) làm reply.
-            var userText = ChannelMessageIngestor.StripHtml(msg.Message.Text);
-            await _chatAgent.ReplyAsync(msg.TenantId, conversationId, userText, history, ct).ConfigureAwait(false);
+                // Strip HTML trước khi đưa vào ChatAgent: tin Pancake bọc <div>/<br> — đẩy raw vào LLM
+                // vừa bẩn prompt vừa từng khiến model echo nguyên tin khách (kèm thẻ div) làm reply.
+                var userText = ChannelMessageIngestor.StripHtml(msg.Message.Text);
+                await _chatAgent.ReplyAsync(msg.TenantId, conversationId, userText, history, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                // CancellationToken.None: nếu ct đã cancel thì lệnh clear vẫn phải đi.
+                await NotifyTypingSafeAsync(msg.TenantId, conv, isTyping: false, CancellationToken.None).ConfigureAwait(false);
+            }
 
             await _notifier.NotifyConversationUpdatedAsync(msg.TenantId,
                 new InboxConversationEvent(conversationId, conv.Status, conv.AssignedTo, conv.LastMessageAt, conv.InboxId), ct).ConfigureAwait(false);
@@ -125,6 +137,20 @@ public sealed partial class ChannelInboundMessageConsumer(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogAutoReplyFailed(_logger, ex, conversationId);
+        }
+    }
+
+    // Best-effort: notify lỗi không được làm hỏng auto-reply.
+    private async Task NotifyTypingSafeAsync(Guid tenantId, Conversation conv, bool isTyping, CancellationToken ct)
+    {
+        try
+        {
+            await _notifier.NotifyTypingAsync(tenantId,
+                new InboxTypingEvent(conv.Id, isTyping, "ai", conv.AssignedTo, conv.InboxId), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogTypingNotifyFailed(_logger, ex, conv.Id, isTyping);
         }
     }
 
@@ -147,6 +173,10 @@ public sealed partial class ChannelInboundMessageConsumer(
     [LoggerMessage(EventId = 9112, Level = LogLevel.Warning,
         Message = "AI auto-reply failed for conversation {ConversationId}")]
     private static partial void LogAutoReplyFailed(ILogger logger, Exception ex, Guid conversationId);
+
+    [LoggerMessage(EventId = 9115, Level = LogLevel.Warning,
+        Message = "Failed to notify typing={IsTyping} for conversation {ConversationId}; realtime indicator lost")]
+    private static partial void LogTypingNotifyFailed(ILogger logger, Exception ex, Guid conversationId, bool isTyping);
 }
 
 // ponytail: ConcurrentMessageLimit=1 keeps per-conversation ordering with today's traffic;

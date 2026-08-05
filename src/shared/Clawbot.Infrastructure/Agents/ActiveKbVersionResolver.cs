@@ -6,7 +6,7 @@ namespace Clawbot.Infrastructure.Agents;
 
 public sealed class ActiveKbVersionResolver(AppDbContext db) : IActiveKbVersionResolver
 {
-    public async Task<IReadOnlySet<string>> ResolveActiveVersionIdsAsync(Guid tenantId, string? moduleCode, CancellationToken ct = default)
+    public async Task<IReadOnlySet<string>> ResolveActiveVersionIdsAsync(Guid tenantId, IReadOnlyCollection<string>? moduleCodes, CancellationToken ct = default)
     {
         var query =
             from version in db.KbVersions.IgnoreQueryFilters().AsNoTracking()
@@ -16,8 +16,8 @@ public sealed class ActiveKbVersionResolver(AppDbContext db) : IActiveKbVersionR
                 && version.Status == "deployed"
             select new { version.Id, module.Code };
 
-        if (!string.IsNullOrWhiteSpace(moduleCode))
-            query = query.Where(row => row.Code == moduleCode);
+        if (moduleCodes is { Count: > 0 })
+            query = query.Where(row => moduleCodes.Contains(row.Code));
 
         // Materialize the Guids, then ToString() in C# (lowercase). Doing .Id.ToString() inside the
         // query makes EF emit SQL Server CONVERT, which returns UPPERCASE GUIDs — those then fail the
