@@ -156,6 +156,7 @@ public sealed partial class CommentAutoReplyJob(
         {
             var replyExternalId = await adapter.SendCommentReplyAsync(
                 conversation.TenantId,
+                conversation.Platform,
                 conversation.ExternalThreadId,
                 inbound.ExternalMessageId,
                 reply,
@@ -236,6 +237,7 @@ public sealed partial class CommentAutoReplyJob(
                 {
                     var dmExternalId = await adapter.SendPrivateReplyAsync(
                         conversation.TenantId,
+                        conversation.Platform,
                         conversation.ExternalThreadId,
                         inbound.ParentPostId,
                         inbound.ExternalMessageId,

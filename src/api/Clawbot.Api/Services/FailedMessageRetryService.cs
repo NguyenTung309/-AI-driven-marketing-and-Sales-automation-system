@@ -41,6 +41,7 @@ public sealed partial class FailedMessageRetryService(
         Guid conversationId,
         Guid messageId,
         Guid actorUserId,
+        string platform,
         string externalThreadId,
         Guid? assignedTo,
         Guid? inboxId,
@@ -97,7 +98,14 @@ public sealed partial class FailedMessageRetryService(
             return prepared;
 
         return await DeliverAsync(
-            message, tenantId, conversationId, externalThreadId, assignedTo, inboxId, deliveryCts.Token)
+            message,
+            tenantId,
+            conversationId,
+            platform,
+            externalThreadId,
+            assignedTo,
+            inboxId,
+            deliveryCts.Token)
             .ConfigureAwait(false);
     }
 
@@ -131,6 +139,7 @@ public sealed partial class FailedMessageRetryService(
         Message message,
         Guid tenantId,
         Guid conversationId,
+        string platform,
         string externalThreadId,
         Guid? assignedTo,
         Guid? inboxId,
@@ -140,7 +149,11 @@ public sealed partial class FailedMessageRetryService(
         try
         {
             externalMessageId = await adapter.SendAsync(
-                tenantId, externalThreadId, message.Content, ct).ConfigureAwait(false);
+                tenantId,
+                platform,
+                externalThreadId,
+                message.Content,
+                ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is ChannelSendRejectedException or InvalidOperationException or ArgumentException)
         {

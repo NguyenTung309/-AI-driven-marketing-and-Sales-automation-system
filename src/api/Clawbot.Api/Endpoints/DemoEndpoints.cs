@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using Clawbot.Api.Services;
+using Clawbot.Infrastructure.Channels.Pancake;
 using Clawbot.SharedKernel.Demo;
 using Clawbot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -341,8 +342,10 @@ public static partial class DemoEndpoints
                     }
                     else
                     {
-                        var sendBaseUrl = (string.IsNullOrEmpty(config.PancakeBaseUrl) ?
-                            "https://pages.fm/api/public_api/v1" : config.PancakeBaseUrl)
+                        var configuredBaseUrl = string.IsNullOrEmpty(config.PancakeBaseUrl)
+                            ? PancakeEndpointPolicy.DefaultPublicApiBaseUrl
+                            : config.PancakeBaseUrl;
+                        var sendBaseUrl = PancakeEndpointPolicy.NormalizeBaseUrl(configuredBaseUrl)
                             .Replace("/v2/", "/v1/")
                             .Replace("/v2", "/v1");
                         // Thread ID c? th? ? d?ng composite page_id:thread_id -> c?n t?ch
@@ -477,7 +480,19 @@ public static partial class DemoEndpoints
         store.UpdateToken(req.Token);
         if (req.PageAccessToken is not null) store.UpdatePageAccessToken(req.PageAccessToken);
         if (req.PageId is not null) store.UpdatePageId(req.PageId);
-        if (req.BaseUrl is not null) store.UpdateBaseUrl(req.BaseUrl);
+        if (req.BaseUrl is not null)
+        {
+            if (!PancakeEndpointPolicy.TryNormalizeBaseUrl(req.BaseUrl, out var normalizedBaseUrl))
+            {
+                return Results.BadRequest(new
+                {
+                    error = "pancake_base_url_not_allowed",
+                });
+            }
+
+            store.UpdateBaseUrl(normalizedBaseUrl);
+        }
+
         return Results.Ok(new { status = "pancake_config_updated" });
     }
     private static IResult SetWebhookSecretAsync(

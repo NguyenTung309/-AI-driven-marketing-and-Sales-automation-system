@@ -274,7 +274,7 @@ children.push(makeTable(
   [
     ['Tenancy & RBAC', 'tenants', 'Multi-tenant root + plan_name + settings JSON'],
     ['Tenancy & RBAC', 'users', 'AspNet Identity extended với tenant_id, display_name'],
-    ['Tenancy & RBAC', 'roles + permissions + role_permissions + user_roles', 'RBAC tenant-scoped (4 bảng)'],
+    ['Tenancy & RBAC', 'roles + permissions + role_permissions + AspNetUserRoles', 'Permission RBAC tenant-scoped; user assignments use ASP.NET Identity'],
     ['Tenancy & RBAC', 'api_keys', 'API key per tenant'],
     ['Tenancy & RBAC', 'audit_logs', 'Append-only: action + resource + diff_json + ip'],
     ['Contacts', 'contacts', 'Khách unified, lifetime_score, soft-delete'],

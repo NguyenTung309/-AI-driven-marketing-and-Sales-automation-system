@@ -176,7 +176,7 @@ app.MapGrpcService<ReportAgentGrpcService>();
 app.MapGrpcService<ResearchAgentGrpcService>();
 app.MapGet("/", () => "ClawBot Agent Service — use a gRPC client to call services.");
 
-// SPEC-16 Module M-1: bootstrap the Pancake page token from env vars into the encrypted pancake_pages store,
+// SPEC-16 Module M-1: bootstrap the Pancake page token from env vars into the encrypted inbox credential store,
 // so the live token never lives in appsettings.json. Best-effort (never crashes startup); no-op when env absent.
 await Clawbot.Infrastructure.Channels.Pancake.PancakeBootstrapSeeder.BootstrapAsync(app.Services, builder.Configuration).ConfigureAwait(false);
 

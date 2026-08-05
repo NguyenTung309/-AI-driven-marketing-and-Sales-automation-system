@@ -10,6 +10,7 @@ using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.Application;
 using Clawbot.Infrastructure;
+using Clawbot.Infrastructure.Channels.Pancake;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Notifications;
@@ -197,7 +198,9 @@ if (demoOpts.Mode)
     builder.Services.AddHttpClient();
     // Pancake authenticates with page_access_token in the query string. Disable framework HTTP
     // request logging for this named client so credentials never land in application logs.
-    builder.Services.AddHttpClient("Pancake").RemoveAllLoggers();
+    builder.Services.AddHttpClient("Pancake")
+        .ConfigurePrimaryHttpMessageHandler(PancakeEndpointPolicy.CreateNoRedirectHandler)
+        .RemoveAllLoggers();
     builder.Services.AddSingleton<DemoRuntimeConfigStore>();
     builder.Services.AddSingleton<DemoTraceService>();
     builder.Services.AddHostedService<PancakePollingService>();

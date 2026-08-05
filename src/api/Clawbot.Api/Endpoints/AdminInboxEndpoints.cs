@@ -256,7 +256,7 @@ public static class AdminInboxEndpoints
         CancellationToken ct)
     {
         const int maxNameLength = 256;
-        const int maxEncryptedTokenLength = 1024;
+        const int maxPageAccessTokenLength = 16_384;
         var hasName = body.Name is not null;
         var hasToken = body.PageAccessToken is not null;
         if (!hasName && !hasToken)
@@ -271,6 +271,8 @@ public static class AdminInboxEndpoints
         var token = body.PageAccessToken?.Trim();
         if (hasToken && string.IsNullOrEmpty(token))
             return Results.BadRequest(new { error = "page_access_token_invalid", message = "Pancake Page Access Token khong hop le." });
+        if (token?.Length > maxPageAccessTokenLength)
+            return Results.BadRequest(new { error = "page_access_token_too_long", message = "Pancake Page Access Token qua dai." });
 
         var tenantId = tenants.Require().TenantId;
         var inbox = await db.Inboxes
@@ -284,8 +286,6 @@ public static class AdminInboxEndpoints
         if (hasToken)
         {
             var encryptedToken = encryptor.Encrypt(token!);
-            if (encryptedToken.Length > maxEncryptedTokenLength)
-                return Results.BadRequest(new { error = "page_access_token_invalid", message = "Pancake Page Access Token qua dai." });
             inbox.SetAccessToken(encryptedToken, now);
         }
 

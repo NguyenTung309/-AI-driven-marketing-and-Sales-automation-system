@@ -394,25 +394,6 @@ public sealed class PancakeConfigConfiguration : IEntityTypeConfiguration<Pancak
     }
 }
 
-public sealed class PancakePageConfiguration : IEntityTypeConfiguration<PancakePage>
-{
-    public void Configure(EntityTypeBuilder<PancakePage> builder)
-    {
-        builder.ToTable("pancake_pages");
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.PageId).HasMaxLength(128).IsRequired();
-        builder.Property(x => x.Name).HasMaxLength(256).IsRequired();
-        builder.Property(x => x.Platform).HasMaxLength(64).IsRequired();
-        builder.Property(x => x.PageAccessTokenEncrypted).HasColumnName("page_access_token_encrypted").HasMaxLength(2048).IsRequired();
-        builder.Property(x => x.PageTokenMintedAt).HasColumnName("page_token_minted_at");
-        // One row per (tenant, page_id); a tenant cannot duplicate a page connection.
-        builder.HasIndex(x => new { x.TenantId, x.PageId }).IsUnique();
-        // ponytail: global query filter for soft delete declared separately (LESSON-005). Tenant filter is applied
-        // via ITenantOwned convention in the shared model setup; keep this one to the soft-delete concern only.
-        builder.HasQueryFilter(x => x.DeletedAt == null);
-    }
-}
-
 public sealed class ChatScenarioConfiguration : IEntityTypeConfiguration<ChatScenario>
 {
     public void Configure(EntityTypeBuilder<ChatScenario> builder)
@@ -1168,7 +1149,11 @@ public sealed class InboxConfiguration : IEntityTypeConfiguration<Inbox>
         builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
         builder.Property(x => x.ExternalPageId).HasMaxLength(128).IsRequired();
         builder.Property(x => x.AvatarUrl).HasMaxLength(512);
-        builder.Property(x => x.EncryptedAccessToken).HasColumnName("encrypted_access_token").HasMaxLength(1024);
+        builder.Property(x => x.EncryptedAccessToken).HasColumnName("encrypted_access_token");
+        builder.Property(x => x.EncryptedRefreshToken).HasColumnName("encrypted_refresh_token");
+        builder.Property(x => x.EncryptedWebhookSecret).HasColumnName("encrypted_webhook_secret");
+        builder.Property(x => x.TokenExpiresAt).HasColumnName("token_expires_at");
+        builder.Property(x => x.PageTokenMintedAt).HasColumnName("page_token_minted_at");
         builder.HasIndex(x => new { x.TenantId, x.Platform, x.ExternalPageId })
             .IsUnique()
             .HasFilter("[is_active] = 1 AND [deleted_at] IS NULL");
@@ -1182,18 +1167,6 @@ public sealed class InboxMemberConfiguration : IEntityTypeConfiguration<InboxMem
         builder.ToTable("inbox_members");
         builder.HasKey(x => new { x.InboxId, x.AgentId });
         builder.HasOne<Inbox>().WithMany().HasForeignKey(x => x.InboxId).OnDelete(DeleteBehavior.Cascade);
-    }
-}
-
-public sealed class ChannelTokenConfiguration : IEntityTypeConfiguration<ChannelToken>
-{
-    public void Configure(EntityTypeBuilder<ChannelToken> builder)
-    {
-        builder.ToTable("channel_tokens");
-        builder.HasKey(x => x.InboxId);
-        builder.HasOne<Inbox>().WithOne().HasForeignKey<ChannelToken>(x => x.InboxId).OnDelete(DeleteBehavior.Cascade);
-        builder.Property(x => x.AccessTokenEncrypted).IsRequired();
-        builder.Property(x => x.WebhookSecretEncrypted).IsRequired();
     }
 }
 

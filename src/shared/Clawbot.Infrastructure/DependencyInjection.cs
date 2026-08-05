@@ -5,23 +5,23 @@ using Clawbot.Agents.Core.Skills;
 using Clawbot.Agents.Core.Skills.Content;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Application.Abstractions;
+using Clawbot.Infrastructure.Ads;
 using Clawbot.Infrastructure.Analytics;
 using Clawbot.Infrastructure.Audit;
 using Clawbot.Infrastructure.Channels;
 using Clawbot.Infrastructure.Channels.Pancake;
-using Clawbot.Infrastructure.Email;
 using Clawbot.Infrastructure.Content.Publishing;
-using Clawbot.Infrastructure.Ads;
-using Clawbot.Infrastructure.Leads;
-using Clawbot.SharedKernel.Audit;
+using Clawbot.Infrastructure.Email;
 using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Integrations.Meta;
+using Clawbot.Infrastructure.Leads;
 using Clawbot.Infrastructure.Multitenancy;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.Infrastructure.Resilience;
 using Clawbot.Infrastructure.Security;
 using Clawbot.Infrastructure.Time;
 using Clawbot.Infrastructure.Vectors;
+using Clawbot.SharedKernel.Audit;
 using Clawbot.SharedKernel.Channels;
 using Clawbot.SharedKernel.Content;
 using Clawbot.SharedKernel.Multitenancy;
@@ -185,7 +185,8 @@ public static class DependencyInjection
         services.AddScoped<IPancakePageTokenResolver, PancakePageTokenResolver>();
         services.AddScoped<IPancakePageTokenService, PancakePageTokenService>();
         services.AddHttpClient<IPageTokenMintGateway, HttpPancakePageTokenMintGateway>()
-            .AddPolicyHandler(HttpResiliencePolicies.Retry())
+            .ConfigurePrimaryHttpMessageHandler(PancakeEndpointPolicy.CreateNoRedirectHandler)
+            .RemoveAllLoggers()
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(15)));
         // SPEC-16 Module M-3/M-4: same gateway also lists pages (IPageListGateway) for the admin connect flow.
@@ -194,6 +195,8 @@ public static class DependencyInjection
 
         // Outbound message POSTs are not idempotent; never auto-retry after an ambiguous response.
         services.AddHttpClient<IChannelAdapter, PancakeChannelAdapter>()
+            .ConfigurePrimaryHttpMessageHandler(PancakeEndpointPolicy.CreateNoRedirectHandler)
+            .RemoveAllLoggers()
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
         // Comment auto-reply: cùng instance adapter Pancake, expose thêm action reply_comment/private_replies.
