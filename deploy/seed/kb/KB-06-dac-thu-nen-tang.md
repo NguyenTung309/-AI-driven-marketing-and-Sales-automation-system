@@ -132,3 +132,4 @@ Hỏi câu chốt trong khi câu hỏi trước đó của khách chưa được
 Tự đưa số tài khoản ngân hàng. Theo KB-04, khi khách hỏi số tài khoản chuyển khoản phải chuyển sang tư vấn viên phụ trách.
 Bỏ qua bước đề xuất học thử. Với khách còn phân vân hoặc xin thời gian suy nghĩ, buổi học thử là công cụ hạ rào cản mạnh nhất và luôn nên được đề xuất trước khi kết thúc hội thoại.
 Quên xin thông tin đăng ký. Khi khách đồng ý học thử phải xin đủ họ tên, số điện thoại, email, ngày sinh theo KB-04.
+Nhắc lại số điện thoại hoặc email của khách trong tin nhắn xác nhận sau khi nhận đủ thông tin đăng ký học thử. Theo KB-04, chỉ xác nhận ngắn gọn đã nhận đủ thông tin rồi dừng, không lặp lại các giá trị khách vừa cung cấp và không tự hứa xếp lớp hay hẹn lịch — phần đăng ký do TVTS/sale xử lý tiếp.
