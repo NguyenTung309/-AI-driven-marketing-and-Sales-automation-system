@@ -37,6 +37,14 @@ public static class ContentEndpoints
         "image/png",
         "image/webp",
     };
+    private static readonly HashSet<string> TrustedSocialPostHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "facebook.com",
+        "www.facebook.com",
+        "m.facebook.com",
+        "instagram.com",
+        "www.instagram.com",
+    };
 
     public static IEndpointRouteBuilder MapContent(this IEndpointRouteBuilder app)
     {
@@ -77,6 +85,7 @@ public static class ContentEndpoints
         grp.MapPost("/items/{id:guid}/regenerate-hook", RegenerateHookAsync).RequirePermission("content:write");
         // P5 §6: dashboard vận hành chuỗi sinh nội dung (fallback rate, gate fail/step, token/độ trễ, review approve).
         grp.MapGet("/chain-metrics", ChainMetricsAsync).RequirePermission("content:read");
+        grp.MapGet("/post-performance", PostPerformanceAsync).RequirePermission("content:read");
         grp.MapGet("/calendar", CalendarAsync).RequirePermission("content:read");
         grp.MapGet("/publish-targets", PublishTargetsAsync).RequirePermission("content:read");
         grp.MapDelete("/schedule/{id:guid}", DeleteScheduleAsync).RequirePermission("content:write");
@@ -892,6 +901,260 @@ public static class ContentEndpoints
         values.Sort();
         var rank = (int)Math.Ceiling(0.95 * values.Count) - 1;
         return values[Math.Clamp(rank, 0, values.Count - 1)];
+    }
+
+    private static async Task<IResult> PostPerformanceAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        [FromQuery] int? days,
+        [FromQuery] string? platform,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var normalizedPlatform = string.IsNullOrWhiteSpace(platform)
+            ? null
+            : platform.Trim().ToLowerInvariant();
+        if (normalizedPlatform is not null and not ("facebook" or "instagram"))
+        {
+            return Error(
+                http,
+                StatusCodes.Status400BadRequest,
+                "content.post_performance_platform_invalid",
+                "platform must be facebook or instagram.");
+        }
+
+        var windowDays = NormalizePostPerformanceWindowDays(days);
+        var response = await BuildPostPerformanceAsync(
+            db,
+            clock.UtcNow,
+            windowDays,
+            normalizedPlatform,
+            ct).ConfigureAwait(false);
+        return Results.Ok(response);
+    }
+
+    internal static int NormalizePostPerformanceWindowDays(int? days) =>
+        days is >= 1 and <= 90 ? days.Value : 30;
+
+    internal static async Task<ContentPostPerformanceResponse> BuildPostPerformanceAsync(
+        AppDbContext db,
+        DateTimeOffset to,
+        int windowDays,
+        string? platform,
+        CancellationToken ct)
+    {
+        var from = to.AddDays(-windowDays);
+        var schedules = db.ContentSchedules.AsNoTracking()
+            .Where(schedule => schedule.Status == ContentSchedule.StatusPosted
+                && schedule.PostedAt.HasValue
+                && schedule.PostedAt >= from
+                && schedule.PostedAt < to
+                && (schedule.Platform == "facebook" || schedule.Platform == "instagram"));
+        if (platform is not null)
+            schedules = schedules.Where(schedule => schedule.Platform == platform);
+
+        var aggregate = await schedules
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Posts = group.Count(),
+                SyncedPosts = group.Count(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue),
+                Likes = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.LikeCount),
+                Comments = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.CommentCount),
+                OldestEngagementAttemptAt = group.Where(schedule => schedule.EngagementSyncedAt.HasValue)
+                    .Min(schedule => schedule.EngagementSyncedAt),
+            })
+            .SingleOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        var totals = aggregate is null
+            ? CreatePostPerformanceTotals(0, 0, null, null)
+            : CreatePostPerformanceTotals(
+                aggregate.Posts,
+                aggregate.SyncedPosts,
+                aggregate.Likes,
+                aggregate.Comments);
+        var freshness = new ContentPostPerformanceFreshnessDto(
+            totals.SyncedPosts,
+            totals.Posts - totals.SyncedPosts,
+            aggregate?.OldestEngagementAttemptAt);
+
+        var platformRows = await schedules
+            .GroupBy(schedule => schedule.Platform)
+            .Select(group => new
+            {
+                Platform = group.Key,
+                Posts = group.Count(),
+                SyncedPosts = group.Count(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue),
+                Likes = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.LikeCount),
+                Comments = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.CommentCount),
+            })
+            .OrderBy(row => row.Platform)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var byPlatform = platformRows
+            .Select(row => new ContentPostPerformancePlatformDto(
+                row.Platform,
+                row.Posts,
+                row.SyncedPosts,
+                row.SyncedPosts > 0 ? row.Likes : null,
+                row.SyncedPosts > 0 ? row.Comments : null,
+                CalculateAverageEngagement(row.SyncedPosts, row.Likes, row.Comments)))
+            .ToList();
+
+        var targetRows = await schedules
+            .GroupBy(schedule => schedule.MetaAssetId)
+            .Select(group => new
+            {
+                MetaAssetId = group.Key,
+                Posts = group.Count(),
+                SyncedPosts = group.Count(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue),
+                Likes = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.LikeCount),
+                Comments = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.CommentCount),
+            })
+            .OrderByDescending(row => row.Posts)
+            .ThenBy(row => row.MetaAssetId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var assetIds = targetRows
+            .Where(row => row.MetaAssetId.HasValue)
+            .Select(row => row.MetaAssetId!.Value)
+            .ToArray();
+        var assetNames = await db.MetaAssets.AsNoTracking()
+            .Where(asset => assetIds.Contains(asset.Id))
+            .ToDictionaryAsync(asset => asset.Id, asset => asset.Name, ct)
+            .ConfigureAwait(false);
+        var byTarget = targetRows
+            .Select(row => new ContentPostPerformanceTargetDto(
+                row.MetaAssetId,
+                row.MetaAssetId is null
+                    ? "Không xác định Page"
+                    : assetNames.TryGetValue(row.MetaAssetId.Value, out var name)
+                        ? name
+                        : row.MetaAssetId.Value.ToString(),
+                row.Posts,
+                row.SyncedPosts,
+                row.SyncedPosts > 0 ? row.Likes : null,
+                row.SyncedPosts > 0 ? row.Comments : null,
+                CalculateAverageEngagement(row.SyncedPosts, row.Likes, row.Comments)))
+            .ToList();
+
+        var dailyRows = await schedules
+            .GroupBy(schedule => schedule.PostedAt!.Value.Date)
+            .Select(group => new
+            {
+                Date = group.Key,
+                Posts = group.Count(),
+                SyncedPosts = group.Count(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue),
+                Likes = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.LikeCount),
+                Comments = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.CommentCount),
+            })
+            .OrderBy(row => row.Date)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var daily = dailyRows
+            .Select(row => new ContentPostPerformanceDailyDto(
+                DateOnly.FromDateTime(row.Date),
+                row.Posts,
+                row.SyncedPosts,
+                row.SyncedPosts > 0 ? row.Likes : null,
+                row.SyncedPosts > 0 ? row.Comments : null))
+            .ToList();
+
+        var topRows = await schedules
+            .Select(schedule => new
+            {
+                schedule.Id,
+                schedule.ContentItemId,
+                schedule.Platform,
+                schedule.PostUrl,
+                PostedAt = schedule.PostedAt!.Value,
+                schedule.LikeCount,
+                schedule.CommentCount,
+                Total = schedule.LikeCount.HasValue && schedule.CommentCount.HasValue
+                    ? (long?)schedule.LikeCount.Value + schedule.CommentCount.Value
+                    : null,
+            })
+            .OrderByDescending(row => row.Total.HasValue)
+            .ThenByDescending(row => row.Total)
+            .ThenByDescending(row => row.PostedAt)
+            .ThenBy(row => row.Id)
+            .Take(10)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var topItemIds = topRows.Select(row => row.ContentItemId).Distinct().ToArray();
+        var itemBodies = await db.ContentItems.AsNoTracking()
+            .Where(item => topItemIds.Contains(item.Id) && item.DeletedAt == null)
+            .ToDictionaryAsync(item => item.Id, item => item.Body, ct)
+            .ConfigureAwait(false);
+        var topPosts = topRows
+            .Select(row => new ContentPostPerformanceTopPostDto(
+                row.Id,
+                row.ContentItemId,
+                itemBodies.ContainsKey(row.ContentItemId),
+                row.Platform,
+                CreateContentExcerpt(itemBodies.GetValueOrDefault(row.ContentItemId)),
+                IsTrustedSocialPostUrl(row.PostUrl) ? row.PostUrl : null,
+                row.PostedAt,
+                row.LikeCount,
+                row.CommentCount,
+                row.Total))
+            .ToList();
+
+        return new ContentPostPerformanceResponse(
+            windowDays,
+            from,
+            to,
+            totals,
+            freshness,
+            byPlatform,
+            byTarget,
+            daily,
+            topPosts);
+    }
+
+    private static ContentPostPerformanceTotalsDto CreatePostPerformanceTotals(
+        int posts,
+        int syncedPosts,
+        long? likes,
+        long? comments) =>
+        new(
+            posts,
+            syncedPosts,
+            syncedPosts > 0 ? likes : null,
+            syncedPosts > 0 ? comments : null,
+            CalculateAverageEngagement(syncedPosts, likes, comments));
+
+    private static double? CalculateAverageEngagement(int syncedPosts, long? likes, long? comments) =>
+        syncedPosts > 0
+            ? Math.Round(((likes ?? 0) + (comments ?? 0)) / (double)syncedPosts, 1)
+            : null;
+
+    private static bool IsTrustedSocialPostUrl(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var url)
+        && url.Scheme == Uri.UriSchemeHttps
+        && url.IsDefaultPort
+        && string.IsNullOrEmpty(url.UserInfo)
+        && TrustedSocialPostHosts.Contains(url.Host);
+
+    private static string CreateContentExcerpt(string? body)
+    {
+        var trimmed = body?.Trim();
+        return string.IsNullOrEmpty(trimmed)
+            ? "Không còn nội dung bài viết"
+            : trimmed.Length <= 160
+                ? trimmed
+                : $"{trimmed[..157]}...";
     }
 
     private static async Task<IResult> ScheduleItemAsync(

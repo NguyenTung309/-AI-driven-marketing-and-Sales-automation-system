@@ -17,6 +17,7 @@ import { useAuthStore } from "@/shared/auth/authStore";
 import { useJobWatcher } from "@/features/jobs/useJobWatcher";
 import { TrendSettingsDialog } from "./TrendSettingsDialog";
 import { ContentPublishingPolicyControl } from "./ContentPublishingPolicyControl";
+import { PostPerformancePanel } from "./PostPerformancePanel";
 import { platformClasses } from "@/shared/theme/colors";
 import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
@@ -56,7 +57,7 @@ import {
 } from "@/shared/api/content";
 
 type QueueStatusFilter = "all" | "draft" | "approved" | "scheduled" | "published" | "rejected";
-type ContentWorkspaceTab = "queue" | "calendar" | "metrics";
+type ContentWorkspaceTab = "queue" | "calendar" | "metrics" | "performance";
 type ScheduleMode = "golden" | "specific";
 type NoticeTone = "info" | "success" | "warning" | "error";
 
@@ -1511,7 +1512,7 @@ export default function ContentWorkspacePage() {
   const tabParam = searchParams.get("tab");
   const activeTab: ContentWorkspaceTab = requestedItemId
     ? "queue"
-    : tabParam === "calendar" || tabParam === "metrics"
+    : tabParam === "calendar" || tabParam === "metrics" || tabParam === "performance"
       ? tabParam
       : "queue";
   const [selectedBriefId, setSelectedBriefId] = useState<string | null>(null);
@@ -1528,6 +1529,7 @@ export default function ContentWorkspacePage() {
   const [scheduleTarget, setScheduleTarget] = useState<ScheduleTargetState>(EMPTY_SCHEDULE_TARGET);
   const scheduleDialogSessionCounterRef = useRef(0);
   const activeScheduleDialogSessionRef = useRef<number | null>(null);
+  const [activeScheduleDialogSession, setActiveScheduleDialogSession] = useState<number | null>(null);
   const [overrideItem, setOverrideItem] = useState<ContentItem | null>(null);
   const [overrideReason, setOverrideReason] = useState("");
   const [rejectItem, setRejectItem] = useState<ContentItem | null>(null);
@@ -1667,6 +1669,7 @@ export default function ContentWorkspacePage() {
       queryClient.invalidateQueries({ queryKey: ["content", "queue"] }),
       queryClient.invalidateQueries({ queryKey: ["content", "calendar"] }),
       queryClient.invalidateQueries({ queryKey: ["content", "trends"] }),
+      queryClient.invalidateQueries({ queryKey: ["content", "post-performance"] }),
       invalidateLinkedItem(),
     ]);
   };
@@ -1872,7 +1875,7 @@ export default function ContentWorkspacePage() {
       }));
     },
   });
-  const isActiveScheduleMutation = scheduleMutation.variables?.session === activeScheduleDialogSessionRef.current;
+  const isActiveScheduleMutation = scheduleMutation.variables?.session === activeScheduleDialogSession;
   const isActiveScheduleSaving = isActiveScheduleMutation && scheduleMutation.isPending;
   const activeScheduleError = isActiveScheduleMutation ? scheduleMutation.error : null;
 
@@ -1949,7 +1952,7 @@ export default function ContentWorkspacePage() {
     openContentItem(item.id);
   }
 
-  function selectCalendarTab(tab: ContentWorkspaceTab) {
+  function selectContentTab(tab: ContentWorkspaceTab) {
     const next = new URLSearchParams(searchParams);
     next.set("tab", tab);
     if (tab !== "queue") next.delete("itemId");
@@ -1970,6 +1973,7 @@ export default function ContentWorkspacePage() {
   function closeScheduleDialog(expectedSession = activeScheduleDialogSessionRef.current) {
     if (expectedSession === null || activeScheduleDialogSessionRef.current !== expectedSession) return;
     activeScheduleDialogSessionRef.current = null;
+    setActiveScheduleDialogSession(null);
     scheduleMutation.reset();
     setScheduleItem(null);
     resetScheduleDialogInputs();
@@ -1987,6 +1991,7 @@ export default function ContentWorkspacePage() {
     const session = scheduleDialogSessionCounterRef.current + 1;
     scheduleDialogSessionCounterRef.current = session;
     activeScheduleDialogSessionRef.current = session;
+    setActiveScheduleDialogSession(session);
     scheduleMutation.reset();
     resetScheduleDialogInputs();
     setScheduleTarget({
@@ -2128,7 +2133,7 @@ export default function ContentWorkspacePage() {
               role="tab"
               aria-selected={activeTab === "queue"}
               aria-controls="content-queue-panel"
-              onClick={() => selectCalendarTab("queue")}
+              onClick={() => selectContentTab("queue")}
               className={`border-b-2 px-4 py-3 text-body-md font-semibold ${activeTab === "queue" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"}`}
             >
               Hàng đợi duyệt bài
@@ -2139,7 +2144,7 @@ export default function ContentWorkspacePage() {
               role="tab"
               aria-selected={activeTab === "calendar"}
               aria-controls="content-calendar-panel"
-              onClick={() => selectCalendarTab("calendar")}
+              onClick={() => selectContentTab("calendar")}
               className={`border-b-2 px-4 py-3 text-body-md font-semibold ${activeTab === "calendar" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"}`}
             >
               Lịch xuất bản
@@ -2150,10 +2155,21 @@ export default function ContentWorkspacePage() {
               role="tab"
               aria-selected={activeTab === "metrics"}
               aria-controls="content-metrics-panel"
-              onClick={() => selectCalendarTab("metrics")}
+              onClick={() => selectContentTab("metrics")}
               className={`border-b-2 px-4 py-3 text-body-md font-semibold ${activeTab === "metrics" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"}`}
             >
               Chỉ số chuỗi AI
+            </button>
+            <button
+              id="content-performance-tab"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "performance"}
+              aria-controls="content-performance-panel"
+              onClick={() => selectContentTab("performance")}
+              className={`border-b-2 px-4 py-3 text-body-md font-semibold ${activeTab === "performance" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"}`}
+            >
+              Hiệu quả bài đăng
             </button>
           </nav>
 
@@ -2243,6 +2259,13 @@ export default function ContentWorkspacePage() {
             <div id="content-metrics-panel" role="tabpanel" aria-labelledby="content-metrics-tab">
               <ChainMetricsPanel />
             </div>
+          ) : activeTab === "performance" ? (
+            <div id="content-performance-panel" role="tabpanel" aria-labelledby="content-performance-tab">
+              <PostPerformancePanel
+                onOpenCalendar={() => selectContentTab("calendar")}
+                onOpenItem={openContentItem}
+              />
+            </div>
           ) : (
             <div id="content-calendar-panel" role="tabpanel" aria-labelledby="content-calendar-tab">
               <CalendarPanel
@@ -2259,104 +2282,6 @@ export default function ContentWorkspacePage() {
           )}
         </div>
       </section>
-
-      {overrideItem ? (
-        <Modal
-          open
-          onClose={() => {
-            if (!approveMutation.isPending) {
-              setOverrideItem(null);
-              setOverrideReason("");
-            }
-          }}
-          title="Duyệt phát hành (override)"
-          maxWidthClass="max-w-lg"
-          footer={
-            <>
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={approveMutation.isPending}
-                onClick={() => {
-                  setOverrideItem(null);
-                  setOverrideReason("");
-                }}
-              >
-                Hủy
-              </Button>
-              <Button
-                type="button"
-                disabled={approveMutation.isPending || overrideReason.trim().length < 3}
-                onClick={() => approveMutation.mutate({ item: overrideItem, reason: overrideReason })}
-              >
-                {approveMutation.isPending ? "Đang duyệt..." : "Xác nhận override"}
-              </Button>
-            </>
-          }
-        >
-          <p className="text-body-sm text-on-surface-variant">
-            Agent review chưa đạt (non-pass/error). Cần lý do override để duyệt phát hành revision {itemRevision(overrideItem)}.
-          </p>
-          {overrideItem.agentReview?.reason ? (
-            <Alert tone="warning">Lý do agent: {overrideItem.agentReview.reason}</Alert>
-          ) : null}
-          <label className="block">
-            <span className="mb-1 block text-label-caps uppercase text-secondary">Lý do override</span>
-            <textarea
-              className="min-h-[120px] w-full resize-y rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
-              value={overrideReason}
-              onChange={(event) => setOverrideReason(event.target.value)}
-              placeholder="Ví dụ: đã kiểm tra brand/legal, chấp nhận rủi ro..."
-            />
-          </label>
-          {approveMutation.isError ? <Alert tone="error">{errorMessage(approveMutation.error)}</Alert> : null}
-        </Modal>
-      ) : null}
-
-      {rejectItem ? (
-        <Modal
-          open
-          onClose={() => {
-            if (!rejectMutation.isPending) {
-              setRejectItem(null);
-            }
-          }}
-          title="Từ chối phát hành"
-          maxWidthClass="max-w-lg"
-          footer={
-            <>
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={rejectMutation.isPending}
-                onClick={() => setRejectItem(null)}
-              >
-                Hủy
-              </Button>
-              <Button
-                type="button"
-                disabled={rejectMutation.isPending || rejectReason.trim().length < 3}
-                onClick={() => rejectMutation.mutate({ item: rejectItem, reason: rejectReason })}
-              >
-                {rejectMutation.isPending ? "Đang từ chối..." : "Xác nhận từ chối"}
-              </Button>
-            </>
-          }
-        >
-          <p className="text-body-sm text-on-surface-variant">
-            Từ chối phát hành sẽ hủy lịch đang chờ cho revision hiện tại.
-          </p>
-          <label className="block">
-            <span className="mb-1 block text-label-caps uppercase text-secondary">Lý do từ chối</span>
-            <textarea
-              className="min-h-[120px] w-full resize-y rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
-              value={rejectReason}
-              onChange={(event) => setRejectReason(event.target.value)}
-            />
-          </label>
-          {rejectMutation.isError ? <Alert tone="error">{errorMessage(rejectMutation.error)}</Alert> : null}
-        </Modal>
-      ) : null}
 
       {overrideItem ? (
         <Modal

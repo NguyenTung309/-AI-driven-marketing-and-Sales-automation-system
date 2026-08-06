@@ -39,6 +39,9 @@ jobs:
       - name: Build
         run: dotnet build Clawbot.sln --no-restore --configuration Release
 
+      - name: Test
+        run: dotnet test Clawbot.sln --no-build --configuration Release
+
       - name: Frontend Install
         working-directory: src/frontend/clawbot-web
         run: npm ci
@@ -63,7 +66,7 @@ jobs:
           trap 'kill "$preview_pid"' EXIT
           for attempt in {1..60}; do
             if curl --fail --silent http://127.0.0.1:15876/login > /dev/null; then
-              npm run test:e2e:platform && npm run test:e2e:instagram
+              npm run test:e2e:platform && npm run test:e2e:instagram && npm run test:e2e:post-performance
               exit $?
             fi
             sleep 1

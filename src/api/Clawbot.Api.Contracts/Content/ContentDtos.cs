@@ -132,6 +132,65 @@ public sealed record ContentChainMetricsResponse(
     int ReviewTotal,
     double ReviewApproveRate);
 
+public sealed record ContentPostPerformanceTotalsDto(
+    int Posts,
+    int SyncedPosts,
+    long? Likes,
+    long? Comments,
+    double? AvgEngagementPerPost);
+
+public sealed record ContentPostPerformanceFreshnessDto(
+    int SyncedPosts,
+    int UnsyncedPosts,
+    DateTimeOffset? OldestEngagementAttemptAt);
+
+public sealed record ContentPostPerformancePlatformDto(
+    string Platform,
+    int Posts,
+    int SyncedPosts,
+    long? Likes,
+    long? Comments,
+    double? AvgEngagementPerPost);
+
+public sealed record ContentPostPerformanceTargetDto(
+    Guid? MetaAssetId,
+    string TargetName,
+    int Posts,
+    int SyncedPosts,
+    long? Likes,
+    long? Comments,
+    double? AvgEngagementPerPost);
+
+public sealed record ContentPostPerformanceDailyDto(
+    DateOnly Date,
+    int Posts,
+    int SyncedPosts,
+    long? Likes,
+    long? Comments);
+
+public sealed record ContentPostPerformanceTopPostDto(
+    Guid ScheduleId,
+    Guid ContentItemId,
+    bool IsContentAvailable,
+    string Platform,
+    string Excerpt,
+    string? PostUrl,
+    DateTimeOffset PostedAt,
+    int? Likes,
+    int? Comments,
+    long? Total);
+
+public sealed record ContentPostPerformanceResponse(
+    int WindowDays,
+    DateTimeOffset From,
+    DateTimeOffset To,
+    ContentPostPerformanceTotalsDto Totals,
+    ContentPostPerformanceFreshnessDto Freshness,
+    IReadOnlyList<ContentPostPerformancePlatformDto> ByPlatform,
+    IReadOnlyList<ContentPostPerformanceTargetDto> ByTarget,
+    IReadOnlyList<ContentPostPerformanceDailyDto> Daily,
+    IReadOnlyList<ContentPostPerformanceTopPostDto> TopPosts);
+
 public sealed record ContentQueueCursorPage(
     IReadOnlyList<ContentItemDto> Items,
     string? NextCursor,

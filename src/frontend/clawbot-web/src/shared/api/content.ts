@@ -497,3 +497,83 @@ export async function getContentChainMetrics(days = 7): Promise<ContentChainMetr
   const res = await apiClient.get<ContentChainMetrics>("/api/content/chain-metrics", { params: { days } });
   return res.data;
 }
+
+export type PostPerformancePlatform = "facebook" | "instagram";
+
+export interface PostPerformanceParams {
+  readonly days?: number;
+  readonly platform?: PostPerformancePlatform;
+}
+
+export interface PostPerformanceTotals {
+  readonly posts: number;
+  readonly syncedPosts: number;
+  readonly likes: number | null;
+  readonly comments: number | null;
+  readonly avgEngagementPerPost: number | null;
+}
+
+export interface PostPerformanceFreshness {
+  readonly syncedPosts: number;
+  readonly unsyncedPosts: number;
+  readonly oldestEngagementAttemptAt: string | null;
+}
+
+export interface PostPerformancePlatformRow {
+  readonly platform: PostPerformancePlatform;
+  readonly posts: number;
+  readonly syncedPosts: number;
+  readonly likes: number | null;
+  readonly comments: number | null;
+  readonly avgEngagementPerPost: number | null;
+}
+
+export interface PostPerformanceTargetRow {
+  readonly metaAssetId: string | null;
+  readonly targetName: string;
+  readonly posts: number;
+  readonly syncedPosts: number;
+  readonly likes: number | null;
+  readonly comments: number | null;
+  readonly avgEngagementPerPost: number | null;
+}
+
+export interface PostPerformanceDailyPoint {
+  readonly date: string;
+  readonly posts: number;
+  readonly syncedPosts: number;
+  readonly likes: number | null;
+  readonly comments: number | null;
+}
+
+export interface PostPerformanceTopPost {
+  readonly scheduleId: string;
+  readonly contentItemId: string;
+  readonly isContentAvailable: boolean;
+  readonly platform: PostPerformancePlatform;
+  readonly excerpt: string;
+  readonly postUrl: string | null;
+  readonly postedAt: string;
+  readonly likes: number | null;
+  readonly comments: number | null;
+  readonly total: number | null;
+}
+
+export interface PostPerformanceResponse {
+  readonly windowDays: number;
+  readonly from: string;
+  readonly to: string;
+  readonly totals: PostPerformanceTotals;
+  readonly freshness: PostPerformanceFreshness;
+  readonly byPlatform: readonly PostPerformancePlatformRow[];
+  readonly byTarget: readonly PostPerformanceTargetRow[];
+  readonly daily: readonly PostPerformanceDailyPoint[];
+  readonly topPosts: readonly PostPerformanceTopPost[];
+}
+
+export async function getPostPerformance(params: PostPerformanceParams = {}): Promise<PostPerformanceResponse> {
+  const res = await apiClient.get<PostPerformanceResponse>("/api/content/post-performance", {
+    params: cleanParams(params),
+  });
+  return res.data;
+}
