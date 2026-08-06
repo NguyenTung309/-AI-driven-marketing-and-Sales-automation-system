@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
-import { NAV_ITEMS, NAV_SYSTEM, type NavItem } from "./nav";
+import { useVisibleNav } from "@/shared/auth/access";
+import { type NavItem } from "./nav";
 
 export interface SidebarProps {
   readonly className?: string;
@@ -16,6 +17,7 @@ function itemClass(isActive: boolean): string {
 
 // Fixed 260px Học Bá-Red sidebar (Level: structural anchor, no elevation).
 export function Sidebar({ className = "" }: SidebarProps) {
+  const { items, system } = useVisibleNav();
   return (
     <aside
       className={`bg-primary text-on-primary fixed left-0 top-0 hidden h-full w-[260px] flex-col md:flex z-20 shadow-xl ${className}`}
@@ -26,16 +28,18 @@ export function Sidebar({ className = "" }: SidebarProps) {
       </div>
 
       <nav className="flex-1 mt-stack-md flex flex-col overflow-y-auto">
-        {NAV_ITEMS.map((item: NavItem) => (
+        {items.map((item: NavItem) => (
           <NavLink key={item.to} to={item.to} end className={({ isActive }) => itemClass(isActive)}>
             <span aria-hidden="true" className="material-symbols-outlined">{item.icon}</span>
             <span className="font-medium">{item.label}</span>
           </NavLink>
         ))}
-        <NavLink to={NAV_SYSTEM.to} className={({ isActive }) => `mt-auto ${itemClass(isActive)}`}>
-          <span aria-hidden="true" className="material-symbols-outlined">{NAV_SYSTEM.icon}</span>
-          <span>{NAV_SYSTEM.label}</span>
-        </NavLink>
+        {system && (
+          <NavLink to={system.to} className={({ isActive }) => `mt-auto ${itemClass(isActive)}`}>
+            <span aria-hidden="true" className="material-symbols-outlined">{system.icon}</span>
+            <span>{system.label}</span>
+          </NavLink>
+        )}
       </nav>
 
       <div className="px-6 py-4 border-t border-white/10">

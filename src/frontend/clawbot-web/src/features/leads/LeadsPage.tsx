@@ -26,7 +26,6 @@ import {
 import { useAuthStore } from "@/shared/auth/authStore";
 import { toUserFriendlyError } from "@/shared/utils/userText";
 
-type OwnerFilter = "all" | "assigned" | "unassigned";
 type DrawerTab = "timeline" | "context" | "revenue";
 
 const STAGES: readonly { value: LeadStage; label: string; tone: StatusTone; icon: string }[] = [
@@ -715,7 +714,6 @@ export default function LeadsPage() {
   const [search, setSearch] = useState("");
   const [source, setSource] = useState("all");
   const [stage, setStage] = useState("all");
-  const [owner, setOwner] = useState<OwnerFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(routeLeadId ?? null);
   const [notice, setNotice] = useState<{ readonly tone: "success" | "error"; readonly message: string } | null>(null);
 
@@ -731,7 +729,7 @@ export default function LeadsPage() {
 
   const debouncedSearch = useDebounce(search, 300);
   const leadsList = useInfiniteList<LeadListItem, LeadListResponse>({
-    queryKey: ["leads", "list", stage, debouncedSearch, source, owner],
+    queryKey: ["leads", "list", stage, debouncedSearch, source],
     initialPageParam: 1,
     queryFn: (pageParam) =>
       listLeads({
@@ -740,7 +738,6 @@ export default function LeadsPage() {
         stage: stage === "all" ? undefined : stage,
         q: debouncedSearch.trim() || undefined,
         source: source === "all" ? undefined : source,
-        owner: owner === "all" ? undefined : owner,
       }),
   });
   const leadsQuery = leadsList.query;
@@ -767,7 +764,7 @@ export default function LeadsPage() {
 
   const leads = leadsList.items.length ? leadsList.items : EMPTY_LEADS;
   const leadsTotal = leadsList.total ?? leads.length;
-  // All filters (stage/q/source/owner) are server-side; list is already filtered.
+  // All filters (stage/q/source) are server-side; list is already filtered.
   const filteredLeads = leads;
   const selectedLead = useMemo(() => leads.find((lead) => lead.id === selectedId) ?? null, [leads, selectedId]);
   // Fixed catalog so dropdown is not truncated by loaded pages; merge extras + keep selection.
@@ -910,7 +907,7 @@ export default function LeadsPage() {
 
       <Card className="mb-gutter p-0">
         <div className="border-b border-outline p-card-padding">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(220px,1.4fr)_repeat(3,minmax(150px,1fr))]">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(220px,1.4fr)_repeat(2,minmax(150px,1fr))]">
             <label className="block">
               <span className="text-label-sm font-semibold text-on-surface-variant">Tìm kiếm Lead</span>
               <div className="mt-2 flex items-center gap-2 rounded border border-outline bg-white px-3 py-2 focus-within:border-primary">
@@ -936,18 +933,6 @@ export default function LeadsPage() {
                     {sourceLabel(option)}
                   </option>
                 ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="text-label-sm font-semibold text-on-surface-variant">Agent phụ trách</span>
-              <select
-                className="mt-2 w-full rounded border border-outline bg-white px-3 py-2 text-body-md text-secondary focus:border-primary focus:outline-none"
-                onChange={(event) => setOwner(event.target.value as OwnerFilter)}
-                value={owner}
-              >
-                <option value="all">Tất cả</option>
-                <option value="assigned">Đã phân công</option>
-                <option value="unassigned">Chưa phân công</option>
               </select>
             </label>
             <label className="block">

@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
+import { canUseFeature } from "@/shared/auth/access";
+import { useRole } from "@/shared/auth/authStore";
 import { Alert, Button, Card, Modal, StatusPill, type StatusTone } from "@/shared/ui";
 import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
@@ -556,11 +558,21 @@ function ExportDialog({
 }
 
 export default function AnalyticsReportsPage() {
+  const role = useRole();
+  const canSeeAgentTab = canUseFeature(role, "analytics.tab.agent");
   const [rangePreset, setRangePreset] = useState<RangePreset>("7d");
   const [tab, setTab] = useState<ReportTab>("overview");
   const [platform, setPlatform] = useState("all");
   const [exportOpen, setExportOpen] = useState(false);
   const range = useMemo(() => buildRange(rangePreset), [rangePreset]);
+
+  const visibleTabs: ReadonlyArray<readonly [ReportTab, string]> = [
+    ["overview", "Báo cáo Hội thoại"],
+    ...(canSeeAgentTab ? ([["agent", "Hiệu suất Agent"]] as const) : []),
+    ["lead", "Chuyển đổi Lead"],
+  ];
+  // Không bao giờ render một tab đã bị ẩn (ví dụ role về sau khi state đã trỏ vào "agent").
+  const safeTab: ReportTab = visibleTabs.some(([value]) => value === tab) ? tab : "overview";
 
   const omnichannelQuery = useQuery({
     queryKey: ["analytics-report", "omnichannel", range],
@@ -699,17 +711,13 @@ export default function AnalyticsReportsPage() {
       ) : null}
 
       <div className="mb-gutter flex flex-wrap border-b border-outline">
-        {[
-          ["overview", "Báo cáo Hội thoại"],
-          ["agent", "Hiệu suất Agent"],
-          ["lead", "Chuyển đổi Lead"],
-        ].map(([value, label]) => (
+        {visibleTabs.map(([value, label]) => (
           <button
             key={value}
             type="button"
-            onClick={() => setTab(value as ReportTab)}
+            onClick={() => setTab(value)}
             className={`border-b-2 px-4 py-3 text-label-caps uppercase ${
-              tab === value ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"
+              safeTab === value ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"
             }`}
           >
             {label}
@@ -717,7 +725,7 @@ export default function AnalyticsReportsPage() {
         ))}
       </div>
 
-      {tab === "overview" ? (
+      {safeTab === "overview" ? (
         <div className="space-y-gutter">
           <section className="grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
             {metrics.map((metric) => <MetricCard key={metric.label} {...metric} />)}
@@ -730,7 +738,7 @@ export default function AnalyticsReportsPage() {
         </div>
       ) : null}
 
-      {tab === "agent" ? (
+      {safeTab === "agent" ? (
         <div className="space-y-gutter">
           <section className="grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard
@@ -751,7 +759,7 @@ export default function AnalyticsReportsPage() {
         </div>
       ) : null}
 
-      {tab === "lead" ? (
+      {safeTab === "lead" ? (
         <div className="space-y-gutter">
           <section className="grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard icon="person_add" label="Lead" value={formatNumber(agg.leads)} meta={deltaText(deltaFor(deltas, "leads"))} tone={deltaTone(deltaFor(deltas, "leads"))} />
