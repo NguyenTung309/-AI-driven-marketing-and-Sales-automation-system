@@ -777,7 +777,6 @@ export default function LeadsPage() {
     );
   }, [leads, source]);
   const hotLeads = leads.filter((lead) => normalize(lead.stage) === "hot");
-  const unassignedLeads = leads.filter((lead) => !lead.ownerUserId);
   const avgScore = leads.length ? Math.round(leads.reduce((sum, lead) => sum + lead.score, 0) / leads.length) : 0;
   const forecastTotal = forecastQuery.data?.forecast.reduce((sum, point) => sum + point.predicted_leads, 0) ?? 0;
 
@@ -878,7 +877,7 @@ export default function LeadsPage() {
         </div>
       ) : null}
 
-      <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-4">
+      <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-3">
         <Card>
           <p className="text-label-caps uppercase text-on-surface-variant">Tổng lead</p>
           <p className="mt-2 text-telemetry-data text-secondary">{leadsTotal.toLocaleString("vi-VN")}</p>
@@ -888,11 +887,6 @@ export default function LeadsPage() {
           <p className="text-label-caps uppercase text-on-surface-variant">Lead nóng</p>
           <p className="mt-2 text-telemetry-data text-primary">{hotLeads.length.toLocaleString("vi-VN")}</p>
           <p className="mt-1 text-label-sm text-on-surface-variant">Nhóm nóng cần xử lý trước</p>
-        </Card>
-        <Card>
-          <p className="text-label-caps uppercase text-on-surface-variant">Chưa phân công</p>
-          <p className="mt-2 text-telemetry-data text-secondary">{unassignedLeads.length.toLocaleString("vi-VN")}</p>
-          <p className="mt-1 text-label-sm text-on-surface-variant">Có thể gán sale tự động</p>
         </Card>
         <Card>
           <p className="text-label-caps uppercase text-on-surface-variant">Dự báo 7 ngày</p>
