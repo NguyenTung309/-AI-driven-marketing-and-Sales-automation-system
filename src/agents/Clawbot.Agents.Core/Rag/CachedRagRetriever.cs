@@ -65,15 +65,17 @@ public sealed partial class CachedRagRetriever(
     {
         var queryHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Query)))[..16];
         var embeddingConfigKey = await ResolveEmbeddingConfigKeyAsync(request.TenantId, ct).ConfigureAwait(false);
+        var moduleCodes = request.EffectiveModuleCodes;
         var activeVersionKey = "no-active-resolver";
         if (activeVersionResolvers.FirstOrDefault() is { } activeResolver)
         {
-            var ids = await activeResolver.ResolveActiveVersionIdsAsync(request.TenantId, request.KbModuleCode, ct).ConfigureAwait(false);
+            var ids = await activeResolver.ResolveActiveVersionIdsAsync(request.TenantId, moduleCodes, ct).ConfigureAwait(false);
             activeVersionKey = ids.Count == 0
                 ? "no-active-kb"
                 : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|', ids.Order(StringComparer.Ordinal)))))[..16];
         }
-        return $"rag:{request.TenantId}:{request.KbModuleCode ?? "*"}:top{request.TopK}:{embeddingConfigKey}:{activeVersionKey}:{queryHash}";
+        var moduleKey = moduleCodes.Count == 0 ? "*" : string.Join('+', moduleCodes.Order(StringComparer.Ordinal));
+        return $"rag:{request.TenantId}:{moduleKey}:top{request.TopK}:{embeddingConfigKey}:{activeVersionKey}:{queryHash}";
     }
 
     private async Task<string> ResolveEmbeddingConfigKeyAsync(Guid tenantId, CancellationToken ct)

@@ -134,8 +134,11 @@ public static class DependencyInjection
             o.Address = new Uri(chatAgentUrl);
         });
         services.AddScoped<Messaging.IChatAutoReplyGateway, Messaging.GrpcChatAutoReplyGateway>();
-        // Trả lời tin khách treo khi AI (vừa) bật lại — dùng chung cho toggle tay + sweep AiAutoReplyResumeJob.
+        // Trả lời tin khách treo khi AI (vừa) bật lại — dùng chung cho toggle tay + sweep AiAutoReplyResumeJob
+        // + debouncer gom tin (consumer chỉ đặt đồng hồ, hết cửa sổ resumer trả lời cả khối một lần).
         services.AddScoped<Messaging.IAiAutoReplyResumer, Messaging.AiAutoReplyResumer>();
+        services.Configure<Messaging.AiAutoReplyOptions>(cfg.GetSection(Messaging.AiAutoReplyOptions.SectionName));
+        services.AddSingleton<Messaging.IAiReplyDebouncer, Messaging.AiReplyDebouncer>();
 
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IIntentClassifier, KeywordIntentClassifier>();
