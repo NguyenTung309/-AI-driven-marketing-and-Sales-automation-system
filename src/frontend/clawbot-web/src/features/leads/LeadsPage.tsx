@@ -716,12 +716,9 @@ export default function LeadsPage() {
   const [source, setSource] = useState("all");
   const [stage, setStage] = useState("all");
   const [owner, setOwner] = useState<OwnerFilter>("all");
-  const [selectedId, setSelectedId] = useState<string | null>(routeLeadId ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const activeSelectedId = routeLeadId ?? selectedId;
   const [notice, setNotice] = useState<{ readonly tone: "success" | "error"; readonly message: string } | null>(null);
-
-  useEffect(() => {
-    if (routeLeadId) setSelectedId(routeLeadId);
-  }, [routeLeadId]);
 
   useEffect(() => {
     if (!notice) return;
@@ -750,26 +747,26 @@ export default function LeadsPage() {
     staleTime: 60_000,
   });
   const detailQuery = useQuery({
-    queryKey: ["leads", selectedId, "detail"],
-    queryFn: () => getLead(selectedId ?? ""),
-    enabled: Boolean(selectedId),
+    queryKey: ["leads", activeSelectedId, "detail"],
+    queryFn: () => getLead(activeSelectedId ?? ""),
+    enabled: Boolean(activeSelectedId),
   });
   const contextQuery = useQuery({
-    queryKey: ["leads", selectedId, "context"],
-    queryFn: () => getLeadContext(selectedId ?? ""),
-    enabled: Boolean(selectedId),
+    queryKey: ["leads", activeSelectedId, "context"],
+    queryFn: () => getLeadContext(activeSelectedId ?? ""),
+    enabled: Boolean(activeSelectedId),
   });
   const revenuesQuery = useQuery({
-    queryKey: ["leads", selectedId, "revenues"],
-    queryFn: () => listLeadRevenues(selectedId ?? ""),
-    enabled: Boolean(selectedId),
+    queryKey: ["leads", activeSelectedId, "revenues"],
+    queryFn: () => listLeadRevenues(activeSelectedId ?? ""),
+    enabled: Boolean(activeSelectedId),
   });
 
   const leads = leadsList.items.length ? leadsList.items : EMPTY_LEADS;
   const leadsTotal = leadsList.total ?? leads.length;
   // All filters (stage/q/source/owner) are server-side; list is already filtered.
   const filteredLeads = leads;
-  const selectedLead = useMemo(() => leads.find((lead) => lead.id === selectedId) ?? null, [leads, selectedId]);
+  const selectedLead = useMemo(() => leads.find((lead) => lead.id === activeSelectedId) ?? null, [leads, activeSelectedId]);
   // Fixed catalog so dropdown is not truncated by loaded pages; merge extras + keep selection.
   const sourceOptions = useMemo(() => {
     const known = ["zalo", "facebook", "website"];
@@ -790,7 +787,7 @@ export default function LeadsPage() {
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["leads", "list"] }),
-        queryClient.invalidateQueries({ queryKey: ["leads", selectedId] }),
+        queryClient.invalidateQueries({ queryKey: ["leads", activeSelectedId] }),
       ]);
       setNotice({ tone: "success", message: "Đã ghi nhận hoạt động." });
     },
@@ -818,8 +815,8 @@ export default function LeadsPage() {
     onSuccess: async (res) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["leads", "list"] }),
-        queryClient.invalidateQueries({ queryKey: ["leads", selectedId] }),
-        queryClient.invalidateQueries({ queryKey: ["leads", selectedId, "revenues"] }),
+        queryClient.invalidateQueries({ queryKey: ["leads", activeSelectedId] }),
+        queryClient.invalidateQueries({ queryKey: ["leads", activeSelectedId, "revenues"] }),
       ]);
       const label =
         normalize(res.stage) === "customer"
@@ -843,7 +840,7 @@ export default function LeadsPage() {
       readonly amount?: number | null;
     }) => decideLeadRevenue(revenueId, { action, amount: amount ?? null }),
     onSuccess: async (_row, vars) => {
-      await queryClient.invalidateQueries({ queryKey: ["leads", selectedId, "revenues"] });
+      await queryClient.invalidateQueries({ queryKey: ["leads", activeSelectedId, "revenues"] });
       setNotice({
         tone: "success",
         message: vars.action === "approve" ? "Đã duyệt doanh thu vào KPI." : "Đã từ chối đề xuất doanh thu.",
@@ -977,7 +974,7 @@ export default function LeadsPage() {
             <LeadTable
               leads={filteredLeads}
               onSelect={(lead) => setSelectedId(lead.id)}
-              selectedId={selectedId}
+              selectedId={activeSelectedId}
             />
             <div className="flex flex-col gap-3 border-t border-outline px-4 py-3 text-label-sm text-on-surface-variant sm:flex-row sm:items-center sm:justify-between">
               <span>
