@@ -29,6 +29,11 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Configuration.AddJsonFile(
+    $"appsettings.{builder.Environment.EnvironmentName}.Local.json",
+    optional: true,
+    reloadOnChange: true);
+
 builder.Host.UseSerilog((ctx, lc) => lc
     .ReadFrom.Configuration(ctx.Configuration)
     .WriteTo.Console(formatProvider: CultureInfo.InvariantCulture)
@@ -134,6 +139,8 @@ builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jo
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.LeadRevenueEstimateJobHandler>();
 // Relay notifications published on Redis by AgentService (run failed / pending approval) into NotificationHub.
 builder.Services.AddHostedService<Clawbot.Api.Hubs.RedisNotificationRelay>();
+// Relay inbox events (message/typing/conversation) published on Redis by AgentService into InboxHub.
+builder.Services.AddHostedService<Clawbot.Api.Hubs.RedisInboxEventRelay>();
 // B5: cost summary cho điểm phê duyệt — cùng ledger với cost guard của orchestrator.
 builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Ops.ILlmCostTracker, Clawbot.Infrastructure.Agents.DbLlmCostTracker>();
 builder.Services.AddScoped<SignalRContentNotifier>();

@@ -21,7 +21,10 @@ public sealed record ChatAgentRequest(
     // Prompt custom cua tenant (config.SystemPrompt). Rong -> dung DefaultSystemPrompt. Luon boc guardrail.
     string? CustomSystemPrompt = null,
     // ai-self-learning-memory Lop 2: top-k facts AI nho ve khach (da redact), caller load tu contact_memories.
-    IReadOnlyList<string>? ContactFacts = null);
+    IReadOnlyList<string>? ContactFacts = null,
+    // Danh sach module KB agent duoc lien ket (KbModulesJson tu cau hinh) — gioi han pham vi retrieval.
+    // Rong/null -> fallback KbModuleCode don; ca hai rong -> retrieve moi module deployed.
+    IReadOnlyList<string>? KbModuleCodes = null);
 
 public sealed record ChatAgentReply(
     string Text,
@@ -146,7 +149,7 @@ public sealed class ChatAgent(
         var langResult = await _language.DetectAsync(redacted.RedactedText, ct).ConfigureAwait(false);
 
         var chunks = await _rag.RetrieveAsync(
-            new RagRequest(request.TenantId, request.KbModuleCode, redacted.RedactedText, TopK: 4),
+            new RagRequest(request.TenantId, request.KbModuleCode, redacted.RedactedText, TopK: 4, request.KbModuleCodes),
             ct).ConfigureAwait(false);
 
         var redactedHistory = await RedactHistoryAsync(request.History, ct).ConfigureAwait(false);
@@ -244,7 +247,7 @@ public sealed class ChatAgent(
         var intentResult = await _intent.ClassifyAsync(redacted.RedactedText, locale: null, ct).ConfigureAwait(false);
         var langResult = await _language.DetectAsync(redacted.RedactedText, ct).ConfigureAwait(false);
         var chunks = await _rag.RetrieveAsync(
-            new RagRequest(request.TenantId, request.KbModuleCode, redacted.RedactedText, TopK: 4),
+            new RagRequest(request.TenantId, request.KbModuleCode, redacted.RedactedText, TopK: 4, request.KbModuleCodes),
             ct).ConfigureAwait(false);
 
         var redactedHistory = await RedactHistoryAsync(request.History, ct).ConfigureAwait(false);

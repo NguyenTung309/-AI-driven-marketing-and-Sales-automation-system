@@ -122,6 +122,14 @@ export interface InboxMessageStatusEvent {
   readonly inboxId?: string | null;
 }
 
+export interface InboxTypingEvent {
+  readonly conversationId: string;
+  readonly isTyping: boolean;
+  readonly source: string;
+  readonly assignedTo?: string | null;
+  readonly inboxId?: string | null;
+}
+
 export interface InboxMessageEvent {
   readonly conversationId: string;
   readonly messageId: string;

@@ -21,8 +21,9 @@ public sealed partial class QdrantRagRetriever(
             : await embedder.EmbedAsync(request.Query, ct).ConfigureAwait(false);
         var collection = ConfiguredEmbeddingProvider.CollectionName(embeddingConfig);
 
+        var moduleCodes = request.EffectiveModuleCodes;
         var activeVersionIds = activeVersionResolvers.FirstOrDefault() is { } activeResolver
-            ? await activeResolver.ResolveActiveVersionIdsAsync(request.TenantId, request.KbModuleCode, ct).ConfigureAwait(false)
+            ? await activeResolver.ResolveActiveVersionIdsAsync(request.TenantId, moduleCodes, ct).ConfigureAwait(false)
             : null;
         if (activeVersionIds is not null && activeVersionIds.Count == 0) return Array.Empty<RagChunk>();
 
@@ -31,8 +32,8 @@ public sealed partial class QdrantRagRetriever(
         {
             new("tenant_id", [tenantTag]),
         };
-        if (!string.IsNullOrEmpty(request.KbModuleCode))
-            filters.Add(new VectorMetadataFilter("module_code", [request.KbModuleCode]));
+        if (moduleCodes.Count > 0)
+            filters.Add(new VectorMetadataFilter("module_code", moduleCodes.ToArray()));
         if (activeVersionIds is not null)
             filters.Add(new VectorMetadataFilter("kb_version_id", activeVersionIds.ToArray()));
 
@@ -45,16 +46,17 @@ public sealed partial class QdrantRagRetriever(
             if (float.IsNaN(array[k]) || float.IsInfinity(array[k])) { hasNaN = true; break; }
             sumSq += array[k] * array[k];
         }
-        LogRetrieve(logger, collection, queryVec.Length, activeVersionIds?.Count ?? -1, hits.Count, hasNaN, Math.Sqrt(sumSq), request.TenantId, request.KbModuleCode ?? "");
+        LogRetrieve(logger, collection, queryVec.Length, activeVersionIds?.Count ?? -1, hits.Count, hasNaN, Math.Sqrt(sumSq), request.TenantId, string.Join(",", moduleCodes));
         if (hits.Count == 0)
         {
             var probe = await store.SearchAsync(collection, queryVec, request.TopK, null, ct).ConfigureAwait(false);
             LogRetrieveProbe(logger, collection, probe.Count);
         }
+        var moduleCodeSet = moduleCodes.Count > 0 ? moduleCodes.ToHashSet(StringComparer.Ordinal) : null;
         var filtered = hits
             .Where(h => h.Metadata.TryGetValue("tenant_id", out var t) && string.Equals(t, tenantTag, StringComparison.Ordinal))
-            .Where(h => string.IsNullOrEmpty(request.KbModuleCode)
-                || (h.Metadata.TryGetValue("module_code", out var m) && string.Equals(m, request.KbModuleCode, StringComparison.Ordinal)))
+            .Where(h => moduleCodeSet is null
+                || (h.Metadata.TryGetValue("module_code", out var m) && moduleCodeSet.Contains(m)))
             .Where(h => activeVersionIds is null
                 || (h.Metadata.TryGetValue("kb_version_id", out var v) && activeVersionIds.Contains(v)))
             .Take(request.TopK)
