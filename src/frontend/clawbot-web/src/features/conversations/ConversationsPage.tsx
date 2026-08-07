@@ -6,7 +6,6 @@ import { AxiosError } from "axios";
 import { AppShell } from "@/shared/layout/AppShell";
 import {
   Alert,
-  Button,
   Card,
   InfiniteScrollSentinel,
   Input,
@@ -18,14 +17,12 @@ import { platformClasses } from "@/shared/theme/colors";
 import { getMe } from "@/shared/api/auth";
 import {
   approveConversationDraft,
-  escalateConversation,
   getConversation,
   listConversations,
   listChannels,
   regenerateAiReply,
   rejectConversationDraft,
   retryConversationMessage,
-  resolveConversation,
   sendConversationMessage,
   setConversationAi,
   type ConversationCursorPage,
@@ -685,7 +682,11 @@ function ChatPanel({
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) onSubmit();
+              // Enter = gửi (trừ khi đang gõ IME); Shift+Enter = xuống dòng.
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                onSubmit();
+              }
             }}
             rows={1}
             className="max-h-32 min-h-[36px] flex-1 resize-none bg-transparent py-1.5 text-body-md text-on-surface outline-none"
@@ -708,20 +709,14 @@ function ChatPanel({
 
 interface ContextPanelProps {
   readonly conversation: ConversationDetail | undefined;
-  readonly onEscalate: () => void;
-  readonly onResolve: () => void;
   readonly onUseSaleAssistDraft: (value: string) => void;
   readonly onNotify: (message: string, tone?: NoticeTone) => void;
-  readonly busy: boolean;
 }
 
 function ContextPanel({
   conversation,
-  onEscalate,
-  onResolve,
   onUseSaleAssistDraft,
   onNotify,
-  busy,
   onClose,
 }: ContextPanelProps & { readonly onClose?: () => void }) {
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
@@ -782,20 +777,6 @@ function ContextPanel({
             <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-tertiary">schedule</span>
             <span>{formatRelative(conversation?.lastMessageAt ?? null)}</span>
           </div>
-        </div>
-      </Card>
-
-      <Card>
-        <h3 className="mb-4 text-label-caps uppercase text-secondary">Điều phối hội thoại</h3>
-        <div className="space-y-2">
-          <Button type="button" className="w-full" variant="outline" onClick={onEscalate} disabled={!conversation || busy}>
-            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">warning</span>
-            Cần người hỗ trợ
-          </Button>
-          <Button type="button" className="w-full" variant="ghost" onClick={onResolve} disabled={!conversation || busy}>
-            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">task_alt</span>
-            Đánh dấu đã xử lý
-          </Button>
         </div>
       </Card>
 
@@ -922,20 +903,6 @@ export default function ConversationsPage() {
     },
   });
 
-  const escalateMutation = useMutation({
-    mutationFn: () => escalateConversation(activeConversationId ?? "", selectedConversation?.rowVersion),
-    onSuccess: () => {
-      void invalidateActive();
-    },
-  });
-
-  const resolveMutation = useMutation({
-    mutationFn: () => resolveConversation(activeConversationId ?? "", selectedConversation?.rowVersion),
-    onSuccess: () => {
-      void invalidateActive();
-    },
-  });
-
   const aiToggleMutation = useMutation({
     mutationFn: (enabled: boolean) => setConversationAi(activeConversationId ?? "", enabled),
     onSuccess: (_, enabled) => {
@@ -1028,8 +995,7 @@ export default function ConversationsPage() {
     },
   });
 
-  const actionBusy = escalateMutation.isPending || resolveMutation.isPending;
-  const actionError = sendMutation.error ?? escalateMutation.error ?? resolveMutation.error;
+  const actionError = sendMutation.error;
 
   const selectedConversation = detailQuery.data;
   const openCount = conversationItems.filter((item) => item.status === "open").length;
@@ -1202,13 +1168,6 @@ export default function ConversationsPage() {
         <div className="hidden min-h-0 2xl:block">
           <ContextPanel
             conversation={selectedConversation}
-            busy={actionBusy}
-            onEscalate={() => {
-              if (activeConversationId) escalateMutation.mutate();
-            }}
-            onResolve={() => {
-              if (activeConversationId) resolveMutation.mutate();
-            }}
             onUseSaleAssistDraft={(value) => setDraft(value)}
             onNotify={showNotice}
           />
@@ -1227,14 +1186,7 @@ export default function ConversationsPage() {
           <div className="absolute inset-y-0 right-0 flex w-[min(100vw-2rem,360px)] flex-col border-l border-outline bg-surface p-3 shadow-2xl">
             <ContextPanel
               conversation={selectedConversation}
-              busy={actionBusy}
               onClose={() => setContextOpen(false)}
-              onEscalate={() => {
-                if (activeConversationId) escalateMutation.mutate();
-              }}
-              onResolve={() => {
-                if (activeConversationId) resolveMutation.mutate();
-              }}
               onUseSaleAssistDraft={(value) => {
                 setDraft(value);
                 setContextOpen(false);

@@ -5,6 +5,7 @@ export interface OmniChannelRow {
   readonly leads: number;
   readonly dms: number;
   readonly replies: number;
+  readonly repliedDms: number;
   readonly conversions: number;
   readonly avgResponseTimeSec: number | null;
   readonly adSpend: number | null;

@@ -6,7 +6,6 @@ import {
   ContentWorkspacePage,
   ConversationsPage,
   AgentRunDetailPage,
-  DashboardPage,
   DocumentsPage,
   ForgotPasswordPage,
   KnowledgeBasePage,
@@ -38,7 +37,7 @@ export const router = createBrowserRouter([
     path: "/",
     element: (
       <RequireAuth>
-        <DashboardPage />
+        <AnalyticsReportsPage />
       </RequireAuth>
     ),
   },
@@ -93,10 +92,11 @@ export const router = createBrowserRouter([
     ),
   },
   {
+    // Trang /analytics cũ đã đổi tên thành "Tổng quan" và chuyển lên "/" — giữ redirect cho link cũ.
     path: "/analytics",
     element: (
       <RequireAuth>
-        <AnalyticsReportsPage />
+        <Navigate replace to="/" />
       </RequireAuth>
     ),
   },

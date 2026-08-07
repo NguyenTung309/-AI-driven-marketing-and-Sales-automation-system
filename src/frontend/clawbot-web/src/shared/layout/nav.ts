@@ -10,7 +10,6 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { icon: "all_inbox", label: "Hội thoại đa kênh", to: "/conversations" },
   { icon: "campaign", label: "Quản lý nội dung", to: "/content" },
   { icon: "description", label: "Thư viện tài liệu", to: "/documents" },
-  { icon: "monitoring", label: "Báo cáo thống kê", to: "/analytics" },
   { icon: "notifications", label: "Trung tâm thông báo", to: "/notifications" },
   { icon: "smart_toy", label: "Agents", to: "/agents" },
   { icon: "tune", label: "Cấu hình LLM", to: "/llm-providers" },

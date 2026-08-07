@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
+import { canUseFeature } from "@/shared/auth/access";
+import { useRole } from "@/shared/auth/authStore";
 import { Alert, Button, Card, Modal, StatusPill, type StatusTone } from "@/shared/ui";
 import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
@@ -33,6 +35,7 @@ interface AggregateMetrics {
   readonly leads: number;
   readonly dms: number;
   readonly replies: number;
+  readonly repliedDms: number;
   readonly conversions: number;
   readonly adSpend: number;
   readonly revenue: number;
@@ -138,6 +141,7 @@ function aggregate(rows: readonly OmniChannelRow[]): AggregateMetrics {
     leads: rows.reduce((sum, row) => sum + row.leads, 0),
     dms: rows.reduce((sum, row) => sum + row.dms, 0),
     replies: rows.reduce((sum, row) => sum + row.replies, 0),
+    repliedDms: rows.reduce((sum, row) => sum + row.repliedDms, 0),
     conversions: rows.reduce((sum, row) => sum + row.conversions, 0),
     adSpend: rows.reduce((sum, row) => sum + (row.adSpend ?? 0), 0),
     revenue: rows.reduce((sum, row) => sum + (row.revenue ?? 0), 0),
@@ -250,7 +254,7 @@ function ChannelKpiGrid({ rows }: { readonly rows: readonly OmniChannelRow[] }) 
                 </div>
                 <div className="flex justify-between gap-2">
                   <dt className="text-on-surface-variant">Phản hồi</dt>
-                  <dd className="font-semibold text-secondary">{formatPct(rate(row?.replies ?? 0, row?.dms ?? 0))}</dd>
+                  <dd className="font-semibold text-secondary">{formatPct(rate(row?.repliedDms ?? 0, row?.dms ?? 0))}</dd>
                 </div>
                 <div className="flex justify-between gap-2">
                   <dt className="text-on-surface-variant">Chi phí/lead</dt>
@@ -556,11 +560,21 @@ function ExportDialog({
 }
 
 export default function AnalyticsReportsPage() {
+  const role = useRole();
+  const canSeeAgentTab = canUseFeature(role, "analytics.tab.agent");
   const [rangePreset, setRangePreset] = useState<RangePreset>("7d");
   const [tab, setTab] = useState<ReportTab>("overview");
   const [platform, setPlatform] = useState("all");
   const [exportOpen, setExportOpen] = useState(false);
   const range = useMemo(() => buildRange(rangePreset), [rangePreset]);
+
+  const visibleTabs: ReadonlyArray<readonly [ReportTab, string]> = [
+    ["overview", "Báo cáo Hội thoại"],
+    ...(canSeeAgentTab ? ([["agent", "Hiệu suất Agent"]] as const) : []),
+    ["lead", "Chuyển đổi Lead"],
+  ];
+  // Không bao giờ render một tab đã bị ẩn (ví dụ role về sau khi state đã trỏ vào "agent").
+  const safeTab: ReportTab = visibleTabs.some(([value]) => value === tab) ? tab : "overview";
 
   const omnichannelQuery = useQuery({
     queryKey: ["analytics-report", "omnichannel", range],
@@ -609,7 +623,10 @@ export default function AnalyticsReportsPage() {
   const costs = Array.isArray(costsQuery.data?.items) ? costsQuery.data.items : EMPTY_COSTS;
   const anomalies = Array.isArray(anomaliesQuery.data) ? anomaliesQuery.data : EMPTY_ANOMALIES;
   const forecast = Array.isArray(forecastQuery.data) ? forecastQuery.data : EMPTY_FORECAST;
-  const agg = aggregate(rows);
+  // aggregate() phai dung visibleRows (da loc bo dong "platform=all" tong hop do backend tra ve), khong
+  // dung `rows` tho — dong "all" da bang tong cac dong platform that nen cong ca hai se dem trung x2.
+  const agg = aggregate(visibleRows);
+  const automationRate = rate(agg.repliedDms, agg.dms);
   const replyRate = rate(agg.replies, agg.dms);
   const conversionRate = rate(agg.conversions, agg.leads);
   const apiError = omnichannelQuery.error ?? deltaQuery.error ?? funnelQuery.error ?? agentsQuery.error ?? costsQuery.error;
@@ -629,9 +646,9 @@ export default function AnalyticsReportsPage() {
     {
       icon: "smart_toy",
       label: "Tỉ lệ tự động hóa",
-      value: formatPct(replyRate),
-      meta: deltaText(deltaFor(deltas, "replies")),
-      tone: deltaTone(deltaFor(deltas, "replies")),
+      value: formatPct(automationRate),
+      meta: deltaText(deltaFor(deltas, "repliedDms")),
+      tone: deltaTone(deltaFor(deltas, "repliedDms")),
     },
     {
       icon: "timer",
@@ -647,21 +664,14 @@ export default function AnalyticsReportsPage() {
       meta: deltaText(deltaFor(deltas, "adSpend")),
       tone: deltaTone(deltaFor(deltas, "adSpend"), false),
     },
-    {
-      icon: "account_balance_wallet",
-      label: "Doanh thu",
-      value: formatCurrency(agg.revenue),
-      meta: deltaText(deltaFor(deltas, "revenue")),
-      tone: deltaTone(deltaFor(deltas, "revenue"), true),
-    },
   ];
 
   return (
-    <AppShell title="Báo cáo thống kê">
+    <AppShell title="Tổng quan">
       <section className="mb-gutter rounded-lg border border-primary/20 bg-primary/5 p-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <h1 className="text-headline-md text-secondary">Báo cáo thống kê</h1>
+            <h1 className="text-headline-md text-secondary">Tổng quan</h1>
             <p className="mt-1 text-body-md text-on-surface-variant">Theo dõi hiệu suất và tương tác của AI Agent trên Facebook, Zalo và Instagram.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -699,17 +709,13 @@ export default function AnalyticsReportsPage() {
       ) : null}
 
       <div className="mb-gutter flex flex-wrap border-b border-outline">
-        {[
-          ["overview", "Báo cáo Hội thoại"],
-          ["agent", "Hiệu suất Agent"],
-          ["lead", "Chuyển đổi Lead"],
-        ].map(([value, label]) => (
+        {visibleTabs.map(([value, label]) => (
           <button
             key={value}
             type="button"
-            onClick={() => setTab(value as ReportTab)}
+            onClick={() => setTab(value)}
             className={`border-b-2 px-4 py-3 text-label-caps uppercase ${
-              tab === value ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"
+              safeTab === value ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"
             }`}
           >
             {label}
@@ -717,7 +723,7 @@ export default function AnalyticsReportsPage() {
         ))}
       </div>
 
-      {tab === "overview" ? (
+      {safeTab === "overview" ? (
         <div className="space-y-gutter">
           <section className="grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
             {metrics.map((metric) => <MetricCard key={metric.label} {...metric} />)}
@@ -730,7 +736,7 @@ export default function AnalyticsReportsPage() {
         </div>
       ) : null}
 
-      {tab === "agent" ? (
+      {safeTab === "agent" ? (
         <div className="space-y-gutter">
           <section className="grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard
@@ -751,7 +757,7 @@ export default function AnalyticsReportsPage() {
         </div>
       ) : null}
 
-      {tab === "lead" ? (
+      {safeTab === "lead" ? (
         <div className="space-y-gutter">
           <section className="grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard icon="person_add" label="Lead" value={formatNumber(agg.leads)} meta={deltaText(deltaFor(deltas, "leads"))} tone={deltaTone(deltaFor(deltas, "leads"))} />
