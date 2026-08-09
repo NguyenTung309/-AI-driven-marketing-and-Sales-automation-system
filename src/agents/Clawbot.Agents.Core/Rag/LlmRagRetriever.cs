@@ -44,7 +44,7 @@ public sealed partial class LlmRagRetriever(
         ArgumentNullException.ThrowIfNull(request);
         try
         {
-            var contents = await _contentReader.GetActiveContentAsync(request.TenantId, request.KbModuleCode, ct).ConfigureAwait(false);
+            var contents = await _contentReader.GetActiveContentAsync(request.TenantId, request.EffectiveModuleCodes, ct).ConfigureAwait(false);
             if (contents.Count == 0)
                 return Array.Empty<RagChunk>();
 

@@ -53,6 +53,8 @@ export interface SaleAssistHotLead {
   readonly eligible: boolean;
   readonly suggestion: string;
   readonly reason: string;
+  // true = backend đang sinh gợi ý qua background job — panel poll lại cho đến khi xong.
+  readonly pending: boolean;
 }
 
 export interface SaleAssistUpsellSuggestionsResponse {

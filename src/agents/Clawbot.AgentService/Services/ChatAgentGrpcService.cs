@@ -82,9 +82,9 @@ public sealed partial class ChatAgentGrpcService(
                 .Select((text, idx) => new CoreChat.ChatTurn(idx % 2 == 0 ? "user" : "assistant", text))
                 .ToList();
 
-            // Prompt custom cua tenant tu cau hinh agent "chat-agent" (o "Huong dan tra loi").
-            // Rong -> ChatAgent dung DefaultSystemPrompt; luon boc guardrail o ChatAgent.
-            var customPrompt = await LoadChatSystemPromptAsync(tenantId, ct).ConfigureAwait(false);
+            // Prompt custom + danh sach module KB lien ket tu cau hinh agent "chat-agent".
+            // Prompt rong -> ChatAgent dung DefaultSystemPrompt; luon boc guardrail o ChatAgent.
+            var (customPrompt, kbModuleCodes) = await LoadChatAgentSettingsAsync(tenantId, ct).ConfigureAwait(false);
 
             var contactFacts = await LoadContactFactsAsync(tenantId, conversation?.ContactId, ct).ConfigureAwait(false);
 
@@ -98,7 +98,8 @@ public sealed partial class ChatAgentGrpcService(
                                    SourcePlatform: sourcePlatform,
                                    MatchedScenarioTemplate: matchedScenarioTemplate,
                                    CustomSystemPrompt: customPrompt,
-                                   ContactFacts: contactFacts),
+                                   ContactFacts: contactFacts,
+                                   KbModuleCodes: kbModuleCodes),
                                ct).ConfigureAwait(false))
             {
                 if (chunk.Final)
@@ -333,21 +334,40 @@ public sealed partial class ChatAgentGrpcService(
     private const int MaxSkillPromptChars = 8000;
 
     // Prompt custom = config.SystemPrompt (ConfigJson.systemPrompt) + noi dung cac Tep ky nang da gan.
-    private async Task<string?> LoadChatSystemPromptAsync(Guid tenantId, CancellationToken ct)
+    // KbModuleCodes = KbModulesJson (checkbox "Kho tri thuc lien ket") — gioi han pham vi RAG retrieval.
+    private async Task<(string? CustomPrompt, IReadOnlyList<string>? KbModuleCodes)> LoadChatAgentSettingsAsync(Guid tenantId, CancellationToken ct)
     {
         var agent = await _db.AgentConfigs
             .IgnoreQueryFilters()
             .AsNoTracking()
             .Where(a => a.TenantId == tenantId && a.Code == "chat-agent" && a.DeletedAt == null)
-            .Select(a => new { a.ConfigJson, a.SkillFilesJson })
+            .Select(a => new { a.ConfigJson, a.SkillFilesJson, a.KbModulesJson })
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-        if (agent is null) return null;
+        if (agent is null) return (null, null);
 
         var custom = ExtractSystemPrompt(agent.ConfigJson);
         var skills = await LoadSkillContentAsync(tenantId, agent.SkillFilesJson, ct).ConfigureAwait(false);
+        var kbModuleCodes = DeserializeKbModuleCodes(agent.KbModulesJson);
 
-        if (string.IsNullOrWhiteSpace(skills)) return custom;
-        return string.IsNullOrWhiteSpace(custom) ? skills : $"{custom}\n\n{skills}";
+        if (string.IsNullOrWhiteSpace(skills)) return (custom, kbModuleCodes);
+        return (string.IsNullOrWhiteSpace(custom) ? skills : $"{custom}\n\n{skills}", kbModuleCodes);
+    }
+
+    // JSON hong/rong -> null (= khong gioi han module, giu hanh vi cu thay vi chan het retrieval).
+    private static string[]? DeserializeKbModuleCodes(string? kbModulesJson)
+    {
+        if (string.IsNullOrWhiteSpace(kbModulesJson)) return null;
+        try
+        {
+            var codes = System.Text.Json.JsonSerializer.Deserialize<string[]>(kbModulesJson);
+            if (codes is null) return null;
+            var cleaned = codes.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim()).ToArray();
+            return cleaned.Length > 0 ? cleaned : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     // ai-self-learning-memory Lop 2: top-10 facts active ve khach (moi nhat truoc, confidence >= 0.6).

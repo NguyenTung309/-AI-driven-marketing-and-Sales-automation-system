@@ -307,17 +307,17 @@ export default function ProfilePage() {
     },
   });
 
-  const roleBadge = profile?.roles?.[0] ?? me?.roles?.[0] ?? "Quản trị viên hệ thống";
+  const roleBadge = profile?.roles?.[0] ?? me?.role ?? "Quản trị viên hệ thống";
   const perms = me?.permissions ?? [];
   const avatarLabel = initials(profile);
   const avatarUrl = profile?.avatarUrl ?? null;
   const showAvatar = Boolean(avatarUrl && failedAvatarUrl !== avatarUrl);
   const displayName = profile?.displayName || profileForm.displayName || "Tài khoản Học Bá";
-  const activeTenant = profile?.tenantSlug ?? me?.tenantSlug;
+  const activeTenant = profile?.tenantSlug ?? me?.tenant_slug;
   const loginHistory = loginHistoryQuery.data?.items ?? [];
   const infoError = profileQuery.error ?? saveProfileMutation.error ?? uploadAvatarMutation.error;
 
-  const roleCount = profile?.roles?.length ?? me?.roles?.length ?? 0;
+  const roleCount = profile?.roles?.length ?? (me?.role ? 1 : 0);
   const canSave = profileForm.displayName.trim().length > 0 && !saveProfileMutation.isPending;
 
   return (

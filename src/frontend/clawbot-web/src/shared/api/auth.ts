@@ -1,10 +1,12 @@
 import { apiClient } from "./client";
 
+// Wire format is snake_case (MeJsonOptions: PropertyNamingPolicy = null) and role is singular.
 export interface MeResponse {
   readonly sub: string | null;
-  readonly tenantId: string | null;
-  readonly tenantSlug: string | null;
-  readonly roles: readonly string[];
+  readonly tenant_id: string | null;
+  readonly tenant_slug: string | null;
+  readonly role_id: string | null;
+  readonly role: string | null;
   readonly permissions: readonly string[];
 }
 
