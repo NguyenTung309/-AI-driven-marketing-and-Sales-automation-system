@@ -48,11 +48,13 @@ export async function getRealtimeAccessToken(): Promise<string> {
   return useAuthStore.getState().accessToken ?? (await refreshAccessToken()) ?? "";
 }
 
-// SPEC-11: fetch the user's permissions (for UI gating) after a token is in RAM.
+// SPEC-11: fetch the user's permissions + role (for UI gating) after a token is in RAM.
 export async function loadPermissions(): Promise<void> {
   try {
     const res = await apiClient.get("/auth/me");
     useAuthStore.getState().setPermissions((res.data.permissions as string[]) ?? []);
+    // Wire is snake_case with a singular role name (e.g. "Admin").
+    useAuthStore.getState().setRole((res.data.role as string | null) ?? null);
   } catch {
     // Non-fatal: UI gating degrades to hidden; backend still enforces.
   }

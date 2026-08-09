@@ -551,6 +551,18 @@ public sealed class QuickReplyTemplateConfiguration : IEntityTypeConfiguration<Q
     }
 }
 
+public sealed class UpsellSuggestionCacheConfiguration : IEntityTypeConfiguration<UpsellSuggestionCache>
+{
+    public void Configure(EntityTypeBuilder<UpsellSuggestionCache> builder)
+    {
+        builder.ToTable("sale_assist_upsell_suggestions");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Suggestion).HasMaxLength(1000).IsRequired();
+        builder.Property(x => x.Reason).HasMaxLength(400).IsRequired();
+        builder.HasIndex(x => new { x.TenantId, x.ConversationId }).IsUnique();
+    }
+}
+
 public sealed class DocumentTemplateConfiguration : IEntityTypeConfiguration<DocumentTemplate>
 {
     public void Configure(EntityTypeBuilder<DocumentTemplate> builder)

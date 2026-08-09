@@ -177,7 +177,6 @@ builder.Services.AddSingleton<Clawbot.Agents.Core.Skills.Nlp.IToxicityFilter, Cl
 builder.Services.AddScoped<ContentImagePromptService>();
 builder.Services.AddScoped<OutboundMessageSafetyService>();
 builder.Services.AddScoped<FailedMessageRetryService>();
-builder.Services.AddScoped<ISaleAssistUpsellClient, GrpcSaleAssistUpsellClient>();
 builder.Services.AddScoped<SaleAssistUpsellSuggestionService>();
 builder.Services.AddScoped<SaleAssistDraftFeedbackService>();
 builder.Services.AddScoped<DocumentDeliveryService>();
