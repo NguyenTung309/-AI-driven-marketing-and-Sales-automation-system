@@ -1,0 +1,94 @@
+P-ID	Page Name	Route	Component	Roles	Level
+P-00	Login	/login	LoginPage	Public	DEEP
+P-00a	Forgot Password	/forgot-password	ForgotPasswordPage	Public	DEEP
+P-01	Dashboard	/	DashboardPage	All	PRIMARY
+P-01a	Omnichannel Trends	(zone C bar chart in P-01)	ChannelChart	All	SUB
+P-01b	Funnel Overview	(zone C panel in P-01)	FunnelPanel	All	SUB
+P-01c	Lead 7-day Forecast	(zone C chart in P-01)	ForecastChart	All	SUB
+P-01d	Agent Status	(zone C cards in P-01)	AgentStatus	All	SUB
+P-02	Leads	/leads	LeadsPage	All (read); Admin/SalesLead/Sale (write)	PRIMARY
+P-02a	Lead Pipeline View	(table in P-02)	LeadTable	All	PRIMARY under section
+P-02b	Lead Detail Drawer	/leads/:leadId	LeadDetailDrawer	All	DEEP - from P-02a
+P-02b1	Timeline Tab	(drawer tab in P-02b)	Timeline section	All	SUB
+P-02b2	Context Panel	(drawer tab in P-02b)	Context section	All	SUB
+P-02b3	Revenue Tab	(drawer tab in P-02b)	Revenue section	All	SUB
+P-03	Conversations	/conversations	ConversationsPage	All (read); Admin/SalesLead/Sale (write)	PRIMARY
+P-03a	Conversation List	(left panel in P-03)	ConversationRow	All	PRIMARY under section
+P-03b	Chat Pane	/conversations/:conversationId	ChatPane	All	DEEP - from P-03a
+P-03b1	Sale Assist Panel	(side panel in P-03b)	SaleAssistPanel	Admin/SalesLead/Sale	SUB
+P-03b2	Contact Memory Panel	(side panel in P-03b)	ContactMemoryPanel	All	SUB
+P-03c	Conversation Deep Link	/conversations/:conversationId	ConversationsPage (deep-link)	All	DEEP - from notification
+P-04	Content Workspace	/content	ContentWorkspacePage	Admin (full); Marketer (r+w+approve); All (read)	PRIMARY
+P-04a	Content Queue	(tab in P-04)	Queue section	Admin/Marketer (write); All (read)	PRIMARY under section
+P-04b	Content Calendar	(tab in P-04)	Calendar grid	Admin/Marketer (write); All (read)	SUB
+P-04c	Chain Metrics	(tab in P-04)	Metrics section	All	SUB
+P-04d	Publishing Policy Control	(toggle in P-04)	ContentPublishingPolicyControl	Admin	SUB
+P-05	Documents	/documents	DocumentsPage	Admin/SalesLead/Marketer/Sale (write); All (read)	PRIMARY
+P-05a	Template Management	(left panel in P-05)	Template list cards	Admin/SalesLead/Marketer/Sale	PRIMARY under section
+P-05b	Template Preview / Edit	(right panel in P-05)	TemplateFieldsEditor	Admin/SalesLead/Marketer/Sale	DEEP - from P-05a
+P-05c	Generate Document Kit	(button in P-05)	generateDocumentKit API	Admin/SalesLead/Marketer/Sale	DEEP - from P-05a
+P-05d	Generated Documents List	(right panel in P-05)	listGeneratedDocuments	All	PRIMARY under section
+P-06	Analytics Reports	/analytics	AnalyticsReportsPage	All	PRIMARY
+P-06a	Overview Tab	(tab in P-06)	AggregateMetrics + Channel breakdown	All	PRIMARY under section
+P-06b	Agent Performance Tab	(tab in P-06)	AgentPerformance cards + cost table	All	SUB
+P-06c	Lead Analytics Tab	(tab in P-06)	ForecastChart + Anomaly table	All	SUB
+P-06d	Anomaly Detection	(within P-06c)	Anomaly detection section	All	SUB
+P-06e	Export CSV/PDF	(button in P-06a)	downloadAnalyticsExport	All	DEEP - from P-06a
+P-07	Knowledge Base	/kb	KnowledgeBasePage	All (read); Admin/SalesLead/Marketer/QA (write)	PRIMARY
+P-07a	Module List	(left rail in P-07)	ModuleRail	All	PRIMARY under section
+P-07b	Module Detail / Editor	(center panel in P-07)	EditorWorkspace (markdown)	Admin/SalesLead/Marketer/QA	DEEP - from P-07a
+P-07b1	Version List	(right rail in P-07b)	VersionRail	Admin/SalesLead/Marketer/QA	SUB
+P-07b2	Version Diff	(drawer in P-07b1)	DiffDrawer	Admin/SalesLead/Marketer/QA	DEEP - from P-07b1
+P-07b3	Deploy / Rollback	(buttons in P-07b1)	deployKbVersion / rollbackKbVersion	Admin/SalesLead/Marketer/QA	DEEP - from P-07b1
+P-07c	Test Cases	(within module in P-07b)	Test case CRUD	Admin/SalesLead/Marketer/QA	SUB - within module
+P-07d	Auto-classify Modal	(dialog in P-07a)	KbAutoClassifyModal	Admin/SalesLead/Marketer/QA	DEEP - from P-07a
+P-07e	KB Suggestions Panel	(tab in P-07)	KbSuggestionsPanel	Admin/SalesLead/Marketer/QA	SUB
+P-07f	Accuracy Dashboard	(right panel in P-07)	AccuracyPanel	All	SUB
+P-08	Notifications	/notifications	NotificationsPage	All	PRIMARY
+P-08a	All Notifications Tab	(tab in P-08)	All notifications list	All	PRIMARY under section
+P-08b	Unread Tab	(tab in P-08)	Unread filter	All	SUB
+P-08c	System Tab	(tab in P-08)	System notifications	All	SUB
+P-08d	Lead Tab	(tab in P-08)	Lead notifications	All	SUB
+P-09	Agents	/agents	AgentDashboardPage	Admin/SalesLead/Marketer	PRIMARY
+P-09a	Orchestration	(tab in P-09)	OrchestrationPanel + TaskDagCanvas	Admin/SalesLead/Marketer	PRIMARY under section
+P-09a1	Create Run / Plan	(dialog in P-09a)	PlanSuggestionsDialog	Admin/SalesLead/Marketer	DEEP - from P-09a
+P-09a2	Approve Run	(button in P-09a1)	approve endpoint	Admin/SalesLead	DEEP - from P-09a1
+P-09b	Agent Team	(tab in P-09)	AgentListItem grid	Admin/SalesLead/Marketer	SUB
+P-09b1	Agent Config Drawer	(slide-in in P-09b)	AgentConfigDrawer (prompt/model/tools)	Admin	DEEP - from P-09b
+P-09b2	Create Sub-Agent	(dialog in P-09b)	CreateSubAgentDialog	Admin	DEEP - from P-09b
+P-09c	Logs	(tab in P-09)	Cost breakdown + trace logs	Admin/SalesLead/Marketer	SUB
+P-09d	Publishing Policy Control	(toggle in P-09)	ContentPublishingPolicyControl	Admin	SUB - component, not a route
+P-09e	Agent Runs List	/agents/runs	AgentRunsPage	Admin/SalesLead/Marketer	DEEP - from P-09a
+P-09f	Agent Run Detail	/agents/runs/:sessionId	AgentRunDetailPage	Admin/SalesLead/Marketer	DEEP - from P-09e
+P-09g	Schedules Card	(card in P-09a)	SchedulesCard	Admin/SalesLead/Marketer	DEEP - from P-09a
+P-10	LLM Providers	/llm-providers	LlmProvidersPage	Admin	PRIMARY
+P-10a	LLM Config Table	(top section in P-10)	LLM config DataTable	Admin	PRIMARY under section
+P-10b	Embedding Config Table	(bottom section in P-10)	Embedding config DataTable	Admin	SUB
+P-10c	Test / Rotate Key	(action buttons in P-10a)	testLlmConfig / rotateLlmKey	Admin	DEEP - from P-10a
+P-11	System / Admin Console	/system	AdminConsolePage	Admin	PRIMARY
+P-11a	Users Tab	(tab in P-11)	AdminUsersTab	Admin	PRIMARY under section
+P-11a1	Create/Edit User	(dialog in P-11a)	AdminUserModal	Admin	DEEP - from P-11a
+P-11a2	Reset Password	(dialog in P-11a)	resetAdminUserPassword	Admin	DEEP - from P-11a
+P-11b	Roles & Permissions	(tab in P-11)	AdminRolesTab	Admin	SUB
+P-11b1	Create/Edit Role	(dialog in P-11b)	AdminRoleModal	Admin	DEEP - from P-11b
+P-11b2	Permission Matrix	(panel within P-11b)	Permission checkbox grid	Admin	SUB - within P-11b
+P-11c	API Keys	(tab in P-11)	AdminKeysTab	Admin	SUB
+P-11c1	Create Key	(dialog in P-11c)	AdminKeyModal	Admin	DEEP - from P-11c
+P-11d	Integrations	(tab in P-11)	AdminIntegrationsTab	Admin	SUB
+P-11d1	Branding	(form section in P-11d)	Branding form fields	Admin	SUB - within P-11d
+P-11d2	Pancake Config	(form section in P-11d)	Pancake form + webhook URL	Admin	SUB - within P-11d
+P-11d3	Meta Integration	(section in P-11d)	Meta OAuth flow	Admin	SUB - within P-11d
+P-11d4	Social Channels	(section in P-11d)	AdminSocialChannelsSection	Admin	SUB - within P-11d
+P-11e	Automated Jobs	(tab in P-11)	AdminJobsTab	Admin	SUB
+P-11f	System Errors / Logs	(tab in P-11)	AdminSystemLogsTab	Admin	SUB
+P-11g	Audit Log	(tab in P-11)	AdminAuditTab	Admin	SUB
+P-12	Task Logs	/logs	TaskLogsPage	All	PRIMARY
+P-12a	Run List	(table in P-12)	Task run InfiniteDataTable	All	PRIMARY under section
+P-12b	Run Detail / Traces	(expand row in P-12a)	TaskRunTrace + TaskRunAudit	All	DEEP - from P-12a
+P-13	Profile	/profile	ProfilePage	All	PRIMARY - via topbar dropdown
+P-13a	Basic Info Tab	(tab in P-13)	displayName / phone / dob / avatar	All	PRIMARY under section
+P-13b	Permissions Tab	(tab in P-13)	Permission list (read-only)	All	SUB
+P-13c	Security / Login History	(tab in P-13)	LoginHistoryItem DataTable	All	SUB
+P-13c1	Change Password	(dialog in P-13c)	ChangePasswordDialog	All	DEEP - from P-13c
+P-13c2	Two-Factor Setup	(dialog in P-13c)	TwoFactorSetupDialog	All	DEEP - from P-13c
+P-13d	Notification Settings	(card in P-13)	NotificationSettingsCard	All	SUB
