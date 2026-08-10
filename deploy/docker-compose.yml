@@ -130,6 +130,7 @@
       - Vector__Qdrant__Host=qdrant
       # Shared cryptographic settings. Development defaults only; override both outside local use.
       - Jwt__SigningKey=${JWT_SIGNING_KEY:?JWT_SIGNING_KEY is required}
+      - AgentServiceAuthentication__SigningKey=${AGENT_SERVICE_AUTH_SIGNING_KEY:?AGENT_SERVICE_AUTH_SIGNING_KEY is required}
       - Encryption__Base64Key=${ENCRYPTION_BASE64_KEY:?ENCRYPTION_BASE64_KEY is required}
       # Pancake tokens - doc tu file .env (cung thu muc)
       - PANCAKE_ACCESS_TOKEN=${PANCAKE_ACCESS_TOKEN:-}
@@ -143,8 +144,6 @@
       - Meta__Graph__RedirectUri=${Meta__Graph__RedirectUri:-}
       - Meta__Graph__FrontendReturnUrl=${Meta__Graph__FrontendReturnUrl:-}
       - Meta__Graph__ApiVersion=${Meta__Graph__ApiVersion:-v25.0}
-      - Ads__Meta__Enabled=${Ads__Meta__Enabled:-false}
-      - Ads__Meta__WebhookSecret=${Ads__Meta__WebhookSecret:-}
     depends_on:
       sqlserver:
         condition: service_healthy

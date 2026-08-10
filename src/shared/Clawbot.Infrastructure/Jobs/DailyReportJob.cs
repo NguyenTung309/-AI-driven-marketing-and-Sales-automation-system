@@ -31,7 +31,6 @@ public sealed partial class DailyReportJob(
                 k.Replies,
                 k.Conversions,
                 k.AvgResponseTimeSec,
-                k.AdSpend,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -44,7 +43,7 @@ public sealed partial class DailyReportJob(
                 Type: "daily_report",
                 Title: $"Báo cáo ngày {metricDate:dd/MM/yyyy}",
                 Severity: "info",
-                Body: BuildBody(row.Leads, row.Dms, row.Replies, row.Conversions, row.AvgResponseTimeSec, row.AdSpend),
+                Body: BuildBody(row.Leads, row.Dms, row.Replies, row.Conversions, row.AvgResponseTimeSec),
                 Link: "/analytics"), ct).ConfigureAwait(false);
         }
 
@@ -56,18 +55,14 @@ public sealed partial class DailyReportJob(
         int dms,
         int replies,
         int conversions,
-        decimal? avgResponseTimeSec,
-        decimal? adSpend)
+        decimal? avgResponseTimeSec)
     {
         var avg = avgResponseTimeSec is null
             ? "n/a"
             : $"{avgResponseTimeSec.Value.ToString("0.#", CultureInfo.InvariantCulture)}s";
-        var spend = adSpend is null
-            ? "n/a"
-            : adSpend.Value.ToString("#,0", CultureInfo.InvariantCulture);
 
         return $"{leads} lead, {dms} hội thoại, {replies} phản hồi, {conversions} chuyển đổi. " +
-            $"Thời gian phản hồi TB {avg}. Chi tiêu quảng cáo {spend}.";
+            $"Thời gian phản hồi TB {avg}.";
     }
 
     [LoggerMessage(EventId = 5004, Level = LogLevel.Information,

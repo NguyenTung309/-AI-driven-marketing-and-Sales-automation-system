@@ -31,6 +31,7 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
     public const string PublishingPolicyHumanRequired = "human_required";
     public const string ReviewReasonReviewerIndependence = "reviewer_independence";
     public const string ReviewReasonReviewerUnavailable = "reviewer_unavailable";
+    public const string ReviewReasonAttemptLimitReached = "content_review_attempt_limit_reached";
     public const string HumanApprovalReasonAgentNonPass = "agent_non_pass";
     public const string HumanApprovalReasonTenantPolicy = "tenant_policy";
     public const string HumanApprovalReasonMigrationCutover = "migration_cutover";
@@ -56,6 +57,12 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
     // cho L1/L2. NULL = bài tạo bằng single-shot (hoặc chain tắt) => repurpose chạy full chuỗi từ body.
     public string? ChainPlanJson { get; private set; }
     public string? ChainOutlineJson { get; private set; }
+    // Phiên/kế hoạch orchestration tạo item này; null cho nội dung tạo ngoài orchestration.
+    public Guid? OrchestrationSessionId { get; private set; }
+    public int? OrchestrationPlanGeneration { get; private set; }
+    // Bản nháp được người dùng sửa hoặc chủ động review lại không còn bị một replan tự động hủy.
+    public DateTimeOffset? OrchestrationOwnershipClaimedAt { get; private set; }
+    public Guid? OrchestrationOwnershipClaimedBy { get; private set; }
 
     public int ContentRevision { get; private set; } = 1;
     public string AgentReviewStatus { get; private set; } = ReviewStatusPending;
@@ -95,8 +102,20 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
         Guid? briefId = null,
         Guid? createdByAgentId = null,
         string? chainPlanJson = null,
-        string? chainOutlineJson = null) =>
-        new()
+        string? chainOutlineJson = null,
+        Guid? orchestrationSessionId = null,
+        int? orchestrationPlanGeneration = null)
+    {
+        if (orchestrationSessionId == Guid.Empty)
+            throw new ArgumentException("orchestration_session_id_required", nameof(orchestrationSessionId));
+        if (orchestrationSessionId.HasValue != orchestrationPlanGeneration.HasValue)
+            throw new ArgumentException("orchestration_provenance_incomplete");
+        if (orchestrationPlanGeneration is < 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(orchestrationPlanGeneration),
+                "orchestration_plan_generation_required");
+
+        return new ContentItem
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
@@ -107,9 +126,12 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
             CreatedByAgentId = createdByAgentId,
             ChainPlanJson = chainPlanJson,
             ChainOutlineJson = chainOutlineJson,
+            OrchestrationSessionId = orchestrationSessionId,
+            OrchestrationPlanGeneration = orchestrationPlanGeneration,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         };
+    }
 
     public void BeginAgentReview(int expectedRevision, DateTimeOffset at)
     {
@@ -136,6 +158,27 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
         ClearPublishingApproval();
         RejectedReason = null;
         Status = "draft";
+        UpdatedAt = at;
+    }
+
+    // A stopped orchestration session must not consume an item-level review attempt while the task lease is deferred.
+    public void DeferAgentReviewForOrchestrationStop(int expectedRevision, DateTimeOffset at)
+    {
+        EnsureCurrentRevision(expectedRevision);
+        EnsureNotPublishedOrDeleted();
+        if (AgentReviewStatus != ReviewStatusRunning)
+            throw new InvalidOperationException("content_review_not_running");
+
+        AgentReviewStatus = ReviewStatusPending;
+        AgentReviewedRevision = null;
+        ReviewedByAgentId = null;
+        AgentReviewStartedAt = null;
+        AgentReviewedAt = null;
+        AgentReviewReason = null;
+        ImageReviewStatus = ImageReviewStatusPending;
+        ReviewedImageCount = 0;
+        if (AgentReviewAttemptCount > 0)
+            AgentReviewAttemptCount--;
         UpdatedAt = at;
     }
 
@@ -206,6 +249,85 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
         ReviewedImageCount = 0;
         if (HumanApprovalRequirementReason != HumanApprovalReasonMigrationCutover)
             HumanApprovalRequirementReason = HumanApprovalReasonAgentNonPass;
+        UpdatedAt = at;
+    }
+
+    // Trạng thái quy trình suy ra từ các cột (không lưu). Đặt ở domain vì cả Api (DTO) lẫn AgentService
+    // (tool content.list cho reviewer-agent) đều cần cùng một định nghĩa — lệch nhau là agent review nhầm bài.
+    public string ResolveWorkflowState()
+    {
+        if (Status == "published")
+            return "published";
+        if (Status == "rejected")
+            return "rejected";
+        if (Status == "scheduled")
+            return "scheduled";
+        if (Status == "approved")
+            return "approved_awaiting_schedule";
+        if (AgentReviewStatus == ReviewStatusRunning)
+            return "agent_review_running";
+        if (AgentReviewedRevision != ContentRevision || AgentReviewStatus is ReviewStatusPending)
+            return "awaiting_agent_review";
+        if (AgentReviewStatus == ReviewStatusFailed)
+            return "review_failed";
+        if (AgentReviewStatus is ReviewStatusRejected or ReviewStatusNeedsHuman)
+            return "agent_review_non_pass";
+
+        return "awaiting_human_approval";
+    }
+
+    // Hàng đợi review bền đã cạn lượt cho revision này (worker chết giữa chừng, lease hết hạn liên tục, hoặc
+    // BeginAgentReview bị chặn vì đủ MaxAgentReviewAttempts). Trước đây chỉ task bị terminalize còn item giữ
+    // nguyên pending => UI kẹt "Chờ Agent review" vĩnh viễn. Đẩy về needs_human: fail-closed (không bao giờ tự
+    // duyệt) nhưng bài rơi vào hàng chờ người thay vì biến mất khỏi mọi hàng đợi.
+    public void MarkAgentReviewExhausted(int expectedRevision, DateTimeOffset at)
+    {
+        EnsureCurrentRevision(expectedRevision);
+        EnsureNotPublishedOrDeleted();
+        // Đã có kết quả review cho đúng revision này thì thôi — tránh ghi đè verdict thật bằng needs_human.
+        if (AgentReviewedRevision == expectedRevision && IsCompletedReviewStatus(AgentReviewStatus))
+            return;
+
+        AgentReviewStatus = ReviewStatusNeedsHuman;
+        AgentReviewedRevision = expectedRevision;
+        ReviewedByAgentId = null;
+        AgentReviewedAt = at;
+        AgentReviewReason = ReviewReasonAttemptLimitReached;
+        ImageReviewStatus = ImageReviewStatusFailed;
+        ReviewedImageCount = 0;
+        if (HumanApprovalRequirementReason != HumanApprovalReasonMigrationCutover)
+            HumanApprovalRequirementReason = HumanApprovalReasonAgentNonPass;
+        UpdatedAt = at;
+    }
+
+    // Người vận hành bấm "Thử agent review lại" sau khi chu kỳ review đã kết thúc (cạn lượt / failed / needs_human):
+    // mở lại đúng một chu kỳ mới cho revision hiện tại. Không tạo revision mới (body không đổi) và không tự duyệt —
+    // chỉ đưa item về pending để ContentReviewDispatchWorker nhận lại. Hành động này đã sau cổng quyền content:write.
+    public void ReopenAgentReview(DateTimeOffset at)
+    {
+        EnsureNotPublishedOrDeleted();
+        EnsureNoActivePublishAttempt();
+        if (Status == "rejected")
+            throw new InvalidOperationException("content_final_rejection_requires_new_revision");
+        if (Status != "draft")
+            throw new InvalidOperationException("content_review_retry_not_draft");
+        if (AgentReviewStatus == ReviewStatusRunning)
+            throw new InvalidOperationException("content_review_running");
+
+        AgentReviewStatus = ReviewStatusPending;
+        AgentReviewedRevision = null;
+        ReviewedByAgentId = null;
+        AgentReviewStartedAt = null;
+        AgentReviewedAt = null;
+        AgentReviewReason = null;
+        ImageReviewStatus = ImageReviewStatusPending;
+        ReviewedImageCount = 0;
+        AgentReviewAttemptCount = 0;
+        PublishingPolicyApplied = null;
+        PublishingPolicyVersionApplied = null;
+        HumanApprovalRequirementReason = null;
+        ClearPublishingApproval();
+        Status = "draft";
         UpdatedAt = at;
     }
 
@@ -305,6 +427,58 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
         Status = "rejected";
         RejectedReason = normalizedReason;
         HumanApprovalRequirementReason = null;
+        UpdatedAt = at;
+    }
+
+    // Một phiên orchestration đã bị thay thế hoặc thất bại không được để lại draft mồ côi. Chỉ nội dung
+    // do đúng phiên tạo, còn draft và chưa vào delivery mới được terminalize tự động.
+    public void RejectForOrchestrationFailure(
+        Guid orchestrationSessionId,
+        int orchestrationPlanGeneration,
+        DateTimeOffset at)
+    {
+        if (orchestrationSessionId == Guid.Empty)
+            throw new ArgumentException("orchestration_session_id_required", nameof(orchestrationSessionId));
+        if (orchestrationPlanGeneration < 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(orchestrationPlanGeneration),
+                "orchestration_plan_generation_required");
+        if (OrchestrationSessionId != orchestrationSessionId
+            || OrchestrationPlanGeneration != orchestrationPlanGeneration)
+        {
+            throw new InvalidOperationException("content_orchestration_provenance_mismatch");
+        }
+        if (OrchestrationOwnershipClaimedAt is not null)
+            throw new InvalidOperationException("content_orchestration_ownership_claimed");
+
+        EnsureNotPublishedOrDeleted();
+        EnsureNoActivePublishAttempt();
+        if (Status is not ("draft" or "approved" or "scheduled"))
+            throw new InvalidOperationException("content_orchestration_rejection_not_actionable");
+
+        ClearPublishingApproval();
+        Status = "rejected";
+        RejectedReason = "orchestration_plan_failed";
+        HumanApprovalRequirementReason = null;
+        UpdatedAt = at;
+    }
+
+    // Người dùng tiếp quản nội dung từ orchestration trước khi sửa hoặc yêu cầu review lại.
+    // Provenance vẫn giữ để audit, nhưng replan không được hủy công việc đã do người chủ động tiếp quản.
+    public void ClaimOrchestrationOwnershipForHuman(Guid? userId, DateTimeOffset at)
+    {
+        EnsureNotPublishedOrDeleted();
+        EnsureNoActivePublishAttempt();
+        if (OrchestrationSessionId is null || OrchestrationOwnershipClaimedAt is not null)
+            return;
+
+        OrchestrationOwnershipClaimedAt = at;
+        OrchestrationOwnershipClaimedBy = userId;
+        if (Status == "scheduled")
+        {
+            ClearPublishingApproval();
+            Status = "draft";
+        }
         UpdatedAt = at;
     }
 
@@ -493,6 +667,7 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
 
     public void SoftDelete(DateTimeOffset at)
     {
+        EnsureNoActivePublishAttempt();
         DeletedAt = at;
         UpdatedAt = at;
     }

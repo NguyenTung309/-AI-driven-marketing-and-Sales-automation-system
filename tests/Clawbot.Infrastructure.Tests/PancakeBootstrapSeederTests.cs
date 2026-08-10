@@ -158,6 +158,7 @@ public sealed class PancakeBootstrapSeederTests
                     support_name TEXT NULL,
                     widget_greeting TEXT NULL,
                     require_orchestration_approval INTEGER NOT NULL,
+                    orchestrator_failure_policy TEXT NOT NULL DEFAULT 'pause',
                     require_content_review INTEGER NOT NULL,
                     content_publishing_approval_policy TEXT NOT NULL,
                     content_publishing_policy_version INTEGER NOT NULL,

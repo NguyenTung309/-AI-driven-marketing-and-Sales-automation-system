@@ -48,15 +48,6 @@ function formatNumber(value: number): string {
   return value.toLocaleString("vi-VN");
 }
 
-function formatCurrency(value: number | null): string {
-  if (value == null) return "—";
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
 function formatPct(value: number | null | undefined): string {
   if (value == null) return "—";
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
@@ -82,9 +73,7 @@ function metricLabel(metric: string): string {
   if (metric === "dms") return "Hội thoại";
   if (metric === "replies") return "Phản hồi";
   if (metric === "conversions") return "Chuyển đổi";
-  if (metric === "adSpend") return "Chi phí quảng cáo";
   if (metric === "avgResponseTimeSec") return "Phản hồi trung bình";
-  if (metric === "cpl") return "Chi phí/lead";
   return metric;
 }
 
@@ -110,7 +99,6 @@ function realtimeTone(state: ReturnType<typeof useNotificationsRealtime>): Statu
 function aggregate(rows: readonly OmniChannelRow[]) {
   const sum = (select: (row: OmniChannelRow) => number) => rows.reduce((total, row) => total + select(row), 0);
   const avgResponses = rows.map((row) => row.avgResponseTimeSec).filter((value): value is number => value != null);
-  const adSpend = rows.reduce((total, row) => total + (row.adSpend ?? 0), 0);
   const leads = sum((row) => row.leads);
   return {
     leads,
@@ -118,8 +106,6 @@ function aggregate(rows: readonly OmniChannelRow[]) {
     replies: sum((row) => row.replies),
     conversions: sum((row) => row.conversions),
     avgResponse: avgResponses.length ? avgResponses.reduce((total, value) => total + value, 0) / avgResponses.length : null,
-    adSpend,
-    cpl: leads > 0 && adSpend > 0 ? adSpend / leads : null,
   };
 }
 
@@ -185,7 +171,6 @@ function ChannelChart({ rows }: { readonly rows: readonly OmniChannelRow[] }) {
         <div key={row.platform} className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-3">
           <div>
             <p className="truncate text-body-md font-semibold text-on-surface">{platformLabel(row.platform)}</p>
-            <p className="font-mono text-mono-status text-on-surface-variant">{formatCurrency(row.cpl)} / lead</p>
           </div>
           <div className="space-y-1.5">
             {[
@@ -443,8 +428,8 @@ export default function DashboardPage() {
     refetchInterval: 120_000,
   });
   const anomaliesQuery = useQuery({
-    queryKey: ["analytics", "anomalies", "cpl"],
-    queryFn: () => getAnomalies({ metric: "cpl", platform: "all", zThreshold: 3, lookbackDays: 14 }),
+    queryKey: ["analytics", "anomalies", "leads"],
+    queryFn: () => getAnomalies({ metric: "leads", platform: "all", zThreshold: 3, lookbackDays: 14 }),
     refetchInterval: 60_000,
   });
 
@@ -454,7 +439,6 @@ export default function DashboardPage() {
   const anomalies = Array.isArray(anomaliesQuery.data) ? anomaliesQuery.data : EMPTY_ANOMALIES;
   const forecast = Array.isArray(forecastQuery.data) ? forecastQuery.data : EMPTY_FORECAST;
   const cards = metricCards(rows, deltas);
-  const agg = aggregate(rows);
   const apiError = omnichannelQuery.isError || deltaQuery.isError || funnelQuery.isError;
 
   return (
@@ -505,7 +489,7 @@ export default function DashboardPage() {
               <p className="text-body-md text-on-surface-variant">
                 {omnichannelQuery.isLoading
                   ? "Đang tải dữ liệu đa kênh..."
-                  : `Kỳ ${range.from} → ${range.to}, tổng chi phí ${formatCurrency(agg.adSpend)}.`}
+                  : `Kỳ ${range.from} → ${range.to}, ${rows.length} kênh có hoạt động.`}
               </p>
             </div>
             <StatusPill tone="neutral">{rows.length} kênh</StatusPill>

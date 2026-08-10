@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using Clawbot.Agents.Core.Skills.Ops;
 using Clawbot.Domain.Analytics;
 using Clawbot.Infrastructure.Persistence;
@@ -12,8 +13,7 @@ public sealed record ReportSnapshotRow(
     int Dms,
     int Replies,
     int Conversions,
-    double AvgResponseTimeSec,
-    double AdSpend);
+    double AvgResponseTimeSec);
 
 /// <summary>
 /// Core report logic shared by <see cref="ReportAgentGrpcService"/> and the orchestration
@@ -25,6 +25,8 @@ public sealed class ReportAgentRunner(
     IAnomalyDetector anomalyDetector,
     IForecaster forecaster)
 {
+    private static readonly JsonSerializerOptions ArtifactJsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly AppDbContext _db = db;
     private readonly IAnomalyDetector _anomalyDetector = anomalyDetector;
     private readonly IForecaster _forecaster = forecaster;
@@ -42,8 +44,7 @@ public sealed class ReportAgentRunner(
                 k.Dms,
                 k.Replies,
                 k.Conversions,
-                (double)(k.AvgResponseTimeSec ?? 0m),
-                (double)(k.AdSpend ?? 0m)))
+                (double)(k.AvgResponseTimeSec ?? 0m)))
             .ToListAsync(ct).ConfigureAwait(false);
 
         return rows;
@@ -66,8 +67,49 @@ public sealed class ReportAgentRunner(
         return await _forecaster.ForecastAsync(series, horizon, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Chốt kết quả một lần chạy thành artifact bất biến và trả id để dựng link mở lại.
+    /// camelCase bắt buộc: payload này đi thẳng xuống frontend, PascalCase sẽ khiến bảng rỗng.
+    /// </summary>
+    public async Task<Guid> SaveArtifactAsync(
+        Guid tenantId,
+        string kind,
+        string title,
+        string platform,
+        string? metric,
+        DateOnly fromDate,
+        DateOnly toDate,
+        ReportArtifactPayload payload,
+        CancellationToken ct)
+    {
+        var artifact = ReportArtifact.Create(
+            tenantId,
+            kind,
+            title,
+            platform,
+            metric,
+            fromDate,
+            toDate,
+            JsonSerializer.Serialize(payload, ArtifactJsonOptions),
+            DateTimeOffset.UtcNow);
+
+        _db.ReportArtifacts.Add(artifact);
+        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return artifact.Id;
+    }
+
     public static string FormatDate(DateTimeOffset at) =>
         at.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    public static string FormatDate(DateOnly date) =>
+        date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Hôm nay theo giờ VN. KpiAggregator gom dữ liệu theo mốc UTC+7 nên mọi chỗ suy ra "hôm nay"
+    /// phải dùng chung mốc này — lấy ngày UTC sẽ lệch một ngày trong khoảng 00:00-07:00 giờ VN.
+    /// </summary>
+    public static DateOnly Today() =>
+        DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(AnalyticsOffset).DateTime);
 
     private async Task<IReadOnlyList<(DateTimeOffset At, double Value)>> LoadSeriesAsync(
         Guid tenantId, string platform, string metric, int lookbackDays, CancellationToken ct)
@@ -92,22 +134,69 @@ public sealed class ReportAgentRunner(
             .ToList();
     }
 
-    private static DateOnly ParseDate(string date)
+    /// <summary>Metric hợp lệ duy nhất — dùng chung cho JSON Schema của tool và thông báo lỗi.</summary>
+    public static readonly IReadOnlyList<string> SupportedMetrics =
+    [
+        "leads", "dms", "replies", "conversions", "avg_response_time_sec",
+    ];
+
+    /// <summary>Mốc giờ dùng để gom KPI — phải khớp KpiAggregator.AnalyticsOffset.</summary>
+    private static readonly TimeSpan AnalyticsOffset = TimeSpan.FromHours(7);
+
+    private static readonly string[] AcceptedDateFormats =
+        ["yyyy-MM-dd", "yyyy/MM/dd", "dd/MM/yyyy", "d/M/yyyy", "dd-MM-yyyy"];
+
+    // Ngày do LLM sinh ra nên lệch định dạng là chuyện thường: nhận thêm vài dạng phổ biến và từ khoá
+    // tương đối thay vì bắt đúng một dạng rồi đốt một bước ReAct cho lỗi format.
+    // KHÔNG dùng DateOnly.TryParse trần: "01/08/2026" sẽ thành 8 tháng 1 theo MM/dd của InvariantCulture,
+    // tức trả sai ngày trong im lặng — tệ hơn hẳn báo lỗi.
+    public static DateOnly ParseDate(string date)
     {
-        if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
-            throw new ArgumentException("date must use YYYY-MM-DD.");
-        return parsed;
+        var raw = (date ?? string.Empty).Trim();
+        if (raw.Length == 0)
+            return Today();
+
+        switch (raw.ToLowerInvariant())
+        {
+            case "today" or "hôm nay" or "hom nay":
+                return Today();
+            case "yesterday" or "hôm qua" or "hom qua":
+                return Today().AddDays(-1);
+            default:
+                break;
+        }
+
+        if (DateOnly.TryParseExact(raw, AcceptedDateFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+            return parsed;
+
+        throw new ArgumentException(string.Create(
+            CultureInfo.InvariantCulture,
+            $"date '{date}' is not a valid date. Use YYYY-MM-DD (e.g. {FormatDate(Today())}), or 'today'/'yesterday'."));
     }
 
+    // Lỗi phải tự mô tả: ReAct loop chỉ có 5 bước nên "metric is not supported." đốt sạch ngân sách vì
+    // model phải đoán mù. Liệt kê thẳng danh sách hợp lệ để nó sửa trong đúng một bước.
     private static string NormalizeMetric(string metric)
     {
-        var normalized = (metric ?? string.Empty).Trim().ToLowerInvariant();
-        return normalized switch
+        var normalized = (metric ?? string.Empty).Trim().ToLowerInvariant().Replace(' ', '_');
+        normalized = normalized switch
         {
-            "leads" or "dms" or "replies" or "conversions" or "avg_response_time_sec" or "ad_spend" or "cpl" or "revenue" => normalized,
-            "response_time" => "avg_response_time_sec",
-            _ => throw new ArgumentException("metric is not supported."),
+            "response_time" or "avg_response_time" or "response_time_sec" => "avg_response_time_sec",
+            "messages" or "dm" or "inbox" => "dms",
+            "lead" or "leads_count" or "new_leads" => "leads",
+            "conversion" or "orders" => "conversions",
+            "reply" => "replies",
+            _ => normalized,
         };
+
+        if (!SupportedMetrics.Contains(normalized, StringComparer.Ordinal))
+        {
+            throw new ArgumentException(string.Create(
+                CultureInfo.InvariantCulture,
+                $"metric '{metric}' is not supported. Supported metrics: {string.Join(", ", SupportedMetrics)}."));
+        }
+
+        return normalized;
     }
 
     private static double? MetricValue(KpiDaily row, string metric) =>
@@ -118,9 +207,6 @@ public sealed class ReportAgentRunner(
             "replies" => row.Replies,
             "conversions" => row.Conversions,
             "avg_response_time_sec" => row.AvgResponseTimeSec.HasValue ? (double)row.AvgResponseTimeSec.Value : null,
-            "ad_spend" => row.AdSpend.HasValue ? (double)row.AdSpend.Value : null,
-            "cpl" => row.AdSpend.HasValue && row.Leads > 0 ? (double)(row.AdSpend.Value / row.Leads) : null,
-            "revenue" => row.Revenue.HasValue ? (double)row.Revenue.Value : null,
             _ => null,
         };
 }

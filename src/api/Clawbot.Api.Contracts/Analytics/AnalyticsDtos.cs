@@ -7,10 +7,7 @@ public sealed record KpiDailyDto(
     int Dms,
     int Replies,
     int Conversions,
-    decimal? AvgResponseTimeSec,
-    decimal? AdSpend,
-    decimal? Cpl,
-    decimal? Revenue = null);
+    decimal? AvgResponseTimeSec);
 
 public sealed record OmniChannelRowDto(
     string Platform,
@@ -18,10 +15,7 @@ public sealed record OmniChannelRowDto(
     int Dms,
     int Replies,
     int Conversions,
-    decimal? AvgResponseTimeSec,
-    decimal? AdSpend,
-    decimal? Cpl,
-    decimal? Revenue = null);
+    decimal? AvgResponseTimeSec);
 
 public sealed record OmniChannelResponse(
     DateOnly From,

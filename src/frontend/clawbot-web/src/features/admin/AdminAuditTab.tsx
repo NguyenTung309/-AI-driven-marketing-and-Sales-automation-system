@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Card, Button } from "@/shared/ui";
+import { Card, Button, StructuredData } from "@/shared/ui";
+import { formatScalar } from "@/shared/utils/structuredText";
 import { formatDateTime } from "./adminHelpers";
 import { EmptyState } from "./adminUi";
 import type { AuditLog } from "@/shared/api/admin";
@@ -111,7 +112,8 @@ function parseDiff(diffJson: string | null): DiffEntry[] {
 
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) return "—";
-  if (typeof value === "string") return value;
+  // Chuỗi từ diff_json hay còn nguyên escape \uXXXX của .NET; formatScalar giải mã và chuẩn hóa ngày/số.
+  if (typeof value !== "object") return formatScalar(value);
   try {
     return JSON.stringify(value);
   } catch {
@@ -267,9 +269,9 @@ export function AdminAuditTab({
                   </tbody>
                 </table>
               ) : (
-                <pre className="overflow-auto rounded-md bg-surface-container-low p-3 text-mono-status text-secondary">
-                  {selected.diffJson}
-                </pre>
+                <div className="rounded-md bg-surface-container-low p-3">
+                  <StructuredData maxHeightClass="max-h-[320px]" value={selected.diffJson} />
+                </div>
               )}
             </div>
           </div>

@@ -136,20 +136,41 @@ public sealed record OrchestrationPlanTask(
     string? Output,
     string? Error,
     // Planner sinh system prompt rieng cho sub-agent tuy task (tuy chon). Null -> agent dung prompt mac dinh.
-    string? RoleInstruction = null);
+    string? RoleInstruction = null)
+{
+    // System.Text.Json gán null khi LLM bỏ hẳn một property record positional, dù property đó non-nullable.
+    // Chuẩn hóa ngay ở biên JSON để validator và wave scheduler luôn nhận collection an toàn.
+    public OrchestrationPlanTask Normalize() => this with
+    {
+        Id = Id ?? string.Empty,
+        Agent = Agent ?? string.Empty,
+        Description = Description ?? string.Empty,
+        Input = Input ?? new Dictionary<string, string>(),
+        DependsOn = DependsOn ?? Array.Empty<string>(),
+        Status = Status ?? string.Empty,
+    };
+}
 
 public sealed record OrchestrationPlanDocument(
     [property: JsonConverter(typeof(TolerantVersionConverter))] int Version,
     IReadOnlyList<OrchestrationPlanTask> Tasks)
 {
+    public OrchestrationPlanDocument Normalize() => this with
+    {
+        Tasks = (Tasks ?? Array.Empty<OrchestrationPlanTask>())
+            .Where(task => task is not null)
+            .Select(task => task.Normalize())
+            .ToArray(),
+    };
+
     public OrchestrationPlanDocument WithTaskStatus(string taskId, string status, string? output, string? error) =>
         this with
         {
-            Tasks = Tasks
+            Tasks = (Tasks ?? Array.Empty<OrchestrationPlanTask>())
                 .Select(task => task.Id == taskId
                     ? task with { Status = status, Output = output, Error = error }
                     : task)
-                .ToArray()
+                .ToArray(),
         };
 }
 

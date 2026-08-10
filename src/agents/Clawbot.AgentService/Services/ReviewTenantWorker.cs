@@ -31,7 +31,7 @@ public sealed class ReviewTenantWorker(
             throw new ArgumentException("tenant_id_required", nameof(tenantId));
 
         var settings = options.Value;
-        var now = clock.UtcNow;
+        var now = await GetLeaseTransitionTimeAsync(cancellationToken);
         var candidates = await LoadCandidatesAsync(
             tenantId,
             now,
@@ -42,10 +42,12 @@ public sealed class ReviewTenantWorker(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            var candidateNow = await GetLeaseTransitionTimeAsync(cancellationToken);
             var leased = await TryLeaseCandidateAsync(
+                tenantId,
                 candidate,
                 settings,
-                now,
+                candidateNow,
                 cancellationToken);
             if (leased is null)
                 continue;
@@ -142,6 +144,7 @@ public sealed class ReviewTenantWorker(
     }
 
     private async Task<LeasedWork?> TryLeaseCandidateAsync(
+        Guid tenantId,
         CandidateTask candidate,
         ContentReviewWorkerOptions settings,
         DateTimeOffset now,
@@ -150,9 +153,9 @@ public sealed class ReviewTenantWorker(
         if (candidate.AttemptCount >= settings.MaxAttempts)
         {
             await TerminalizeExhaustedAsync(
-                candidate.Id,
+                tenantId,
+                candidate,
                 settings.MaxAttempts,
-                now,
                 cancellationToken);
             return null;
         }
@@ -223,25 +226,73 @@ public sealed class ReviewTenantWorker(
     }
 
     private async Task TerminalizeExhaustedAsync(
-        Guid taskId,
+        Guid tenantId,
+        CandidateTask candidate,
         int maxAttempts,
-        DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        var task = await db.ContentReviewTasks
-            .IgnoreQueryFilters()
-            .SingleOrDefaultAsync(row => row.Id == taskId, cancellationToken);
-        if (task is null)
-            return;
-
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            task.FailExhausted(maxAttempts, now);
+            var now = await GetLeaseTransitionTimeAsync(cancellationToken);
+            var task = await db.ContentReviewTasks
+                .IgnoreQueryFilters()
+                .SingleOrDefaultAsync(
+                    row => row.Id == candidate.Id && row.TenantId == tenantId,
+                    cancellationToken);
+            if (task is null
+                || !task.RowVersion.SequenceEqual(candidate.RowVersion)
+                || task.Status != candidate.Status
+                || task.AttemptCount < maxAttempts
+                || (task.Status == ContentReviewTask.StatusLeased
+                    && (task.LeaseExpiresAt is null || task.LeaseExpiresAt > now)))
+            {
+                return;
+            }
+
+            var item = await db.ContentItems
+                .IgnoreQueryFilters()
+                .SingleOrDefaultAsync(
+                    row => row.Id == task.ContentItemId && row.TenantId == tenantId,
+                    cancellationToken);
+            if (item is null || item.DeletedAt is not null || item.ContentRevision != task.ContentRevision)
+            {
+                task.CancelStale(now);
+                await db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return;
+            }
+
+            var reviewEligibility = await OrchestrationSessionGenerationFence.ResolveReviewEligibilityAsync(
+                    db,
+                    item,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (reviewEligibility == OrchestrationItemReviewEligibility.Deferred)
+            {
+                task.DeferExhaustedForOrchestrationStop(now.AddMinutes(1), now);
+                if (item.AgentReviewStatus == ContentItem.ReviewStatusRunning)
+                {
+                    item.DeferAgentReviewForOrchestrationStop(task.ContentRevision, now);
+                }
+            }
+            else if (reviewEligibility == OrchestrationItemReviewEligibility.Reject)
+            {
+                RejectOrchestrationItemWhenActionable(item, now);
+                task.CancelForOrchestrationFailure(now);
+            }
+            else
+            {
+                task.FailExhausted(maxAttempts, now);
+                item.MarkAgentReviewExhausted(task.ContentRevision, now);
+            }
+
             await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         catch (InvalidOperationException)
         {
-            // Another owner still holds an active lease, or the row already terminalized.
+            // Another owner still holds an active lease, or the item has a newer terminal verdict.
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -260,39 +311,78 @@ public sealed class ReviewTenantWorker(
         ContentReviewWorkerOptions settings,
         CancellationToken cancellationToken)
     {
-        var now = clock.UtcNow;
-        var task = await db.ContentReviewTasks
-            .IgnoreQueryFilters()
-            .SingleOrDefaultAsync(
-                row => row.Id == taskId && row.TenantId == tenantId,
-                cancellationToken);
-        if (task is null)
-            return;
-
+        var now = await GetLeaseTransitionTimeAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            if (task.AttemptCount >= settings.MaxAttempts)
+            var task = await db.ContentReviewTasks
+                .IgnoreQueryFilters()
+                .SingleOrDefaultAsync(
+                    row => row.Id == taskId && row.TenantId == tenantId,
+                    cancellationToken);
+            if (task is null
+                || task.Status != ContentReviewTask.StatusLeased
+                || task.LeaseToken != leaseToken
+                || task.LeaseExpiresAt is null
+                || task.LeaseExpiresAt <= now)
             {
-                task.Fail(
-                    leaseToken,
-                    "content_review_attempt_limit_reached",
-                    now);
+                return;
+            }
+
+            var item = await db.ContentItems
+                .IgnoreQueryFilters()
+                .SingleOrDefaultAsync(
+                    row => row.Id == task.ContentItemId && row.TenantId == tenantId,
+                    cancellationToken);
+            if (item is null || item.DeletedAt is not null || item.ContentRevision != task.ContentRevision)
+            {
+                task.CancelStale(now);
             }
             else
             {
-                var delay = ComputeBackoff(task.AttemptCount, settings);
-                task.ReleaseForRetry(
-                    leaseToken,
-                    now.Add(delay),
-                    "reviewer_error",
-                    now);
+                var reviewEligibility = await OrchestrationSessionGenerationFence.ResolveReviewEligibilityAsync(
+                        db,
+                        item,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (reviewEligibility == OrchestrationItemReviewEligibility.Deferred)
+                {
+                    task.DeferForOrchestrationStop(leaseToken, now.AddMinutes(1), now);
+                    if (item.AgentReviewStatus == ContentItem.ReviewStatusRunning)
+                    {
+                        item.DeferAgentReviewForOrchestrationStop(task.ContentRevision, now);
+                    }
+                }
+                else if (reviewEligibility == OrchestrationItemReviewEligibility.Reject)
+                {
+                    RejectOrchestrationItemWhenActionable(item, now);
+                    task.CancelForOrchestrationFailure(now);
+                }
+                else if (task.AttemptCount >= settings.MaxAttempts)
+                {
+                    task.Fail(
+                        leaseToken,
+                        ContentItem.ReviewReasonAttemptLimitReached,
+                        now);
+                    item.MarkAgentReviewExhausted(task.ContentRevision, now);
+                }
+                else
+                {
+                    var delay = ComputeBackoff(task.AttemptCount, settings);
+                    task.ReleaseForRetry(
+                        leaseToken,
+                        now.Add(delay),
+                        "reviewer_error",
+                        now);
+                }
             }
 
             await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         catch (InvalidOperationException)
         {
-            // Lease already reclaimed/completed; nothing durable to do.
+            // Lease already reclaimed/completed, or the item has a newer terminal verdict.
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -303,6 +393,27 @@ public sealed class ReviewTenantWorker(
             db.ChangeTracker.Clear();
         }
     }
+
+    private static void RejectOrchestrationItemWhenActionable(
+        ContentItem item,
+        DateTimeOffset at)
+    {
+        if (item.Status is not ("draft" or "approved" or "scheduled"))
+            return;
+
+        item.RejectForOrchestrationFailure(
+            item.OrchestrationSessionId!.Value,
+            item.OrchestrationPlanGeneration!.Value,
+            at);
+    }
+
+    private async Task<DateTimeOffset> GetLeaseTransitionTimeAsync(
+        CancellationToken cancellationToken) =>
+        db.Database.IsSqlServer()
+            ? await db.Database
+                .SqlQuery<DateTimeOffset>($"SELECT SYSDATETIMEOFFSET() AS [Value]")
+                .SingleAsync(cancellationToken)
+            : clock.UtcNow;
 
     private static TimeSpan ComputeBackoff(
         int attemptCount,

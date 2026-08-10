@@ -33,7 +33,7 @@ import { useJobWatcher } from "@/features/jobs/useJobWatcher";
 import { useJobRun } from "@/features/jobs/useJobRun";
 import { getJob, listJobs, type BackgroundJob } from "@/shared/api/jobs";
 import { listLlmConfigs, type LlmConfig } from "@/shared/api/llmConfigs";
-import { getTenantOrchestration, setTenantOrchestration } from "@/shared/api/admin";
+import { getTenantOrchestration, setTenantOrchestration, type OrchestratorFailurePolicy } from "@/shared/api/admin";
 import {
   disableAgent,
   enableAgent,
@@ -70,6 +70,25 @@ const AGENT_DASHBOARD_TABS: readonly {
   { key: "doi-ngu", icon: "smart_toy", label: "Đội ngũ agent" },
   { key: "nhat-ky", icon: "receipt_long", label: "Nhật ký & chi phí" },
 ];
+
+// Cách xử lý khi một bước điều phối lỗi. "replan" là đường cũ và tốn nhất: orchestrator gọi LLM lập kế hoạch
+// mới rồi chạy lại từ đầu, kể cả những bước đã xong.
+const FAILURE_POLICY_OPTIONS: readonly {
+  readonly key: OrchestratorFailurePolicy;
+  readonly icon: string;
+  readonly label: string;
+  readonly hint: string;
+}[] = [
+  { key: "pause", icon: "pause_circle", label: "Dừng chờ người sửa", hint: "Khuyên dùng — giữ nguyên các bước đã xong, bạn sửa kết quả bước lỗi rồi chạy tiếp. Không tốn thêm chi phí AI." },
+  { key: "replan", icon: "autorenew", label: "AI lập lại kế hoạch", hint: "AI tự nghĩ kế hoạch mới và chạy lại từ đầu. Tốn thêm một lượt lập kế hoạch cộng chi phí chạy lại mọi bước." },
+  { key: "fail", icon: "stop_circle", label: "Dừng hẳn phiên", hint: "Đánh hỏng cả phiên ngay khi có bước lỗi. Dùng khi kết quả nửa vời không có giá trị." },
+];
+
+const FAILURE_POLICY_NOTICE: Readonly<Record<OrchestratorFailurePolicy, string>> = {
+  pause: "Bước lỗi sẽ dừng phiên chờ bạn sửa — các bước đã xong được giữ nguyên. Riêng phiên chạy theo lịch không có người trực nên sẽ để AI lập lại kế hoạch một lượt, hỏng tiếp thì dừng hẳn.",
+  replan: "Bước lỗi sẽ để AI lập lại kế hoạch và chạy lại từ đầu (tốn thêm chi phí).",
+  fail: "Bước lỗi sẽ làm hỏng cả phiên ngay lập tức.",
+};
 
 interface AgentSettingsForm {
   readonly displayName: string;
@@ -169,7 +188,6 @@ function agentTypeLabel(type: string): string {
   if (value === "content") return "Nội dung";
   if (value === "lead") return "Chấm điểm lead";
   if (value === "docs") return "Tài liệu";
-  if (value === "ads") return "Quảng cáo";
   if (value === "report") return "Báo cáo";
   if (value === "research") return "Nghiên cứu";
   if (value === "chat") return "Trò chuyện";
@@ -479,6 +497,18 @@ export default function AgentDashboardPage() {
     onError: (error) =>
       setNotice({ tone: "error", message: `Đổi chế độ duyệt thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
   });
+  // Một bước điều phối lỗi thì làm gì. Mặc định "pause": dừng tại chỗ chờ người sửa output rồi chạy tiếp —
+  // rẻ hơn hẳn "replan" (orchestrator gọi LLM lập kế hoạch mới và chạy lại cả những bước đã xong).
+  const failurePolicy = approvalQuery.data?.orchestratorFailurePolicy ?? "pause";
+  const failurePolicyMutation = useMutation({
+    mutationFn: (policy: OrchestratorFailurePolicy) => setTenantOrchestration({ orchestratorFailurePolicy: policy }),
+    onSuccess: async (res) => {
+      setNotice({ tone: "success", message: FAILURE_POLICY_NOTICE[res.orchestratorFailurePolicy] });
+      await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
+    },
+    onError: (error) =>
+      setNotice({ tone: "error", message: `Đổi cách xử lý bước lỗi thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
+  });
   // Review-gate P3: chat/KB flags only. Content publishing policy lives on canonical content endpoint.
   // ai-self-learning-memory: requireKbHumanReview (bật = tắt AI tự duyệt tri thức).
   const requireChatReplyApproval = approvalQuery.data?.requireChatReplyApproval ?? false;
@@ -544,7 +574,7 @@ export default function AgentDashboardPage() {
     onError: (error) =>
       setNotice({ tone: "error", message: `Đặt ngưỡng cảnh báo thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
   });
-  // Lead lifecycle: im lặng N ngày → lost; AI revenue auto-approve.
+  // Lead lifecycle: im lặng N ngày → lost.
   const leadLostAfterDays = approvalQuery.data?.leadLostAfterDays ?? 60;
   const [leadLostDraft, setLeadLostDraft] = useState<string>("");
   const leadLostMutation = useMutation({
@@ -562,21 +592,6 @@ export default function AgentDashboardPage() {
     },
     onError: (error) =>
       setNotice({ tone: "error", message: `Đặt ngưỡng mất khách thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
-  });
-  const autoApproveLeadRevenue = approvalQuery.data?.autoApproveLeadRevenue ?? false;
-  const autoApproveRevenueMutation = useMutation({
-    mutationFn: (next: boolean) => setTenantOrchestration({ autoApproveLeadRevenue: next }),
-    onSuccess: async (res) => {
-      setNotice({
-        tone: res.autoApproveLeadRevenue ? "info" : "success",
-        message: res.autoApproveLeadRevenue
-          ? "AI ước tính doanh thu sẽ tự duyệt khi evidence có số tiền khớp (decided_by = hệ thống)."
-          : "AI ước tính doanh thu chờ sale duyệt trước khi vào KPI.",
-      });
-      await queryClient.invalidateQueries({ queryKey: ["tenant", "orchestration"] });
-    },
-    onError: (error) =>
-      setNotice({ tone: "error", message: `Đổi tự duyệt doanh thu thất bại: ${error instanceof Error ? error.message : "lỗi không xác định"}` }),
   });
   // "Tự động xây dựng kế hoạch": orchestrator quét hệ thống -> dialog checklist -> tạo schedules đã chọn.
   const [planSuggestions, setPlanSuggestions] = useState<OrchestrationPlanSuggestionsResponse | null>(null);
@@ -633,7 +648,6 @@ export default function AgentDashboardPage() {
           goalTemplate: plan.goal,
           cadence: plan.cadence,
           timezoneId: "Asia/Ho_Chi_Minh",
-          requiresApproval: requireApproval,
         });
       }
       return selected.length;
@@ -1526,6 +1540,47 @@ export default function AgentDashboardPage() {
             onToggle={() => approvalMutation.mutate(!requireApproval)}
           />
           <div className="border-b border-outline-variant px-1 py-4">
+            <div className="flex items-start gap-3">
+              <span aria-hidden="true" className="material-symbols-outlined mt-0.5 text-[20px] text-on-surface-variant">alt_route</span>
+              <div className="flex-1">
+                <p className="text-body-md font-semibold text-on-surface">Khi một bước điều phối lỗi</p>
+                <p className="mt-1 text-body-sm text-on-surface-variant">
+                  Áp dụng cho mọi phiên điều phối của tổ chức. Đang áp dụng:{" "}
+                  <span className="font-semibold text-secondary">
+                    {FAILURE_POLICY_OPTIONS.find((option) => option.key === failurePolicy)?.label ?? failurePolicy}
+                  </span>
+                  .
+                </p>
+                <div className="mt-2 flex flex-col gap-2">
+                  {FAILURE_POLICY_OPTIONS.map((option) => (
+                    <button
+                      className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${
+                        failurePolicy === option.key
+                          ? "border-primary bg-primary/5"
+                          : "border-outline-variant hover:border-outline"
+                      }`}
+                      disabled={failurePolicyMutation.isPending || approvalQuery.isLoading}
+                      key={option.key}
+                      onClick={() => failurePolicyMutation.mutate(option.key)}
+                      type="button"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`material-symbols-outlined text-[20px] ${failurePolicy === option.key ? "text-primary" : "text-on-surface-variant"}`}
+                      >
+                        {option.icon}
+                      </span>
+                      <span className="flex-1">
+                        <span className="block text-body-sm font-semibold text-on-surface">{option.label}</span>
+                        <span className="mt-0.5 block text-label-sm text-on-surface-variant">{option.hint}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="border-b border-outline-variant px-1 py-4">
             <ContentPublishingPolicyControl compact />
           </div>
           <ApprovalToggleRow
@@ -1615,17 +1670,6 @@ export default function AgentDashboardPage() {
               />
             </div>
           </div>
-          <ApprovalToggleRow
-            icon="payments"
-            title="Tự động duyệt doanh thu AI ước tính"
-            description="Bật: khi lead thành khách hàng mà sale chưa nhập số tiền, AI đọc hội thoại ước tính và duyệt luôn vào KPI (chỉ khi evidence khớp số tiền). Tắt (mặc định): AI chỉ đề xuất, sale phải duyệt/sửa số."
-            enabled={autoApproveLeadRevenue}
-            enabledLabel="BẬT"
-            disabledLabel="Tắt (sale duyệt)"
-            tone="warning"
-            disabled={autoApproveRevenueMutation.isPending || !settingsReady}
-            onToggle={() => autoApproveRevenueMutation.mutate(!autoApproveLeadRevenue)}
-          />
         </div>
       </Modal>
 

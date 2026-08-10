@@ -55,7 +55,8 @@ public sealed record ContentItemDto(
     bool CanReject = false,
     bool CanRetryReview = false,
     bool CanSchedule = false,
-    bool CanPublish = false);
+    bool CanPublish = false,
+    string? ScheduleBlockedReason = null);
 
 public sealed record ContentPublishingPolicyDto(
     bool AgentReviewRequired,
@@ -257,7 +258,9 @@ public sealed record TrendDto(
     IReadOnlyList<string> ContentIdeas,
     string WeekOf = "");
 
-public sealed record TrendScanResponse(IReadOnlyList<TrendDto> Trends);
+public sealed record RawTrendDto(string Topic, string Source, string Metric, double SourceScore, IReadOnlyList<string> ContentIdeas);
+
+public sealed record TrendScanResponse(IReadOnlyList<TrendDto> Trends, IReadOnlyList<RawTrendDto>? RawTrends = null);
 
 public sealed record TrendSourceSettingDto(bool Enabled, bool HasApiKey, string? Url);
 

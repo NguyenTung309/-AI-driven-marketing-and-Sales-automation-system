@@ -8,7 +8,10 @@ using Clawbot.SharedKernel.Time;
 namespace Clawbot.Agents.Core.Orchestrator;
 
 // SPEC-16 P0-3: ambient run context the worker needs to emit a heartbeat trace mid-LLM-call.
-public readonly record struct WorkerRunContext(Guid TenantId, Guid SessionId);
+public readonly record struct WorkerRunContext(
+    Guid TenantId,
+    Guid SessionId,
+    int PlanGeneration);
 
 // Worker for data-defined sub-agents. When the definition declares allowed tools, it runs a provider-agnostic
 // ReAct loop over IClaudeChatClient.CompleteAsync (the interface has no native tool param): the model emits a
@@ -25,7 +28,8 @@ internal sealed class GenericLlmAgentWorker(
     IAutonomousRunSink? runSink = null,
     IClock? clock = null,
     WorkerRunContext? runContext = null,
-    bool dryRun = false) : IAgent
+    bool dryRun = false,
+    IReadOnlySet<string>? executionPermissions = null) : IAgent
 {
     private const int RagTopK = 5;
     // ponytail: fixed iteration cap for V1; tunable via options when a real workload needs more (SPEC-16 open item).
@@ -81,7 +85,16 @@ internal sealed class GenericLlmAgentWorker(
         var system = BuildReActSystemPrompt(chunks, allowedTools, task.RoleInstruction);
         var history = new List<ChatTurn>();
         var userMessage = BuildUserMessage(task);
-        var ctx = new ToolContext(TenantId(task), task.Id, definition.Id, definition.Code, requireHighRiskApproval, dryRun);
+        var ctx = new ToolContext(
+            TenantId(task),
+            task.Id,
+            definition.Id,
+            definition.Code,
+            requireHighRiskApproval,
+            dryRun,
+            CanPublishContent: executionPermissions?.Contains("content:publish") == true,
+            SessionId: runContext?.SessionId,
+            OrchestrationPlanGeneration: runContext?.PlanGeneration);
         // Successful tool result payloads (JSON). Folded into the final Output so structured IDs (content_id,
         // schedule_id, post_url) thread to dependent agents via the orchestrator's upstream_results — the ReAct
         // final answer is free LLM text and can't be relied on to echo them, which broke the content pipeline.
@@ -146,6 +159,14 @@ internal sealed class GenericLlmAgentWorker(
                 hasToolAttempt = true;
                 unresolvedToolError = "tool_permission_denied";
                 observation = $"Tool '{tool.Name}' is high-risk and requires human approval before execution. Do not retry it; finish with a note that approval is needed.";
+                await EmitToolTraceAsync(task, "tool_blocked", observation, ct).ConfigureAwait(false);
+            }
+            else if (!string.IsNullOrWhiteSpace(tool.RequiredPermission)
+                && (executionPermissions is null || !executionPermissions.Contains(tool.RequiredPermission)))
+            {
+                hasToolAttempt = true;
+                unresolvedToolError = "tool_permission_denied";
+                observation = $"Tool '{tool.Name}' requires the execution principal's '{tool.RequiredPermission}' permission. Do not retry it; finish with a note that permission is required.";
                 await EmitToolTraceAsync(task, "tool_blocked", observation, ct).ConfigureAwait(false);
             }
             else

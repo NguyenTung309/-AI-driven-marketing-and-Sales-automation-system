@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
 import {
@@ -15,7 +15,6 @@ import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
   createDocumentTemplate,
   deleteDocumentTemplate,
-  documentDownloadUrl,
   generateDocument,
   generateDocumentKit,
   listDocumentTemplates,
@@ -26,6 +25,7 @@ import {
   type GeneratedDocument,
   type TemplateField,
 } from "@/shared/api/documents";
+import { useGeneratedDocumentUrl, useOpenGeneratedDocument } from "./useGeneratedDocumentFile";
 import { DocumentFieldsForm } from "./DocumentFieldsForm";
 import { DocumentPreview } from "./DocumentPreview";
 import { TemplateFieldsEditor } from "./TemplateFieldsEditor";
@@ -441,16 +441,26 @@ function GeneratePanel({
   );
 }
 
+// Tên file lúc lưu về máy: lấy từ fileUrl (đã là "<template>-<timestamp>-<guid>.pdf"), fallback theo id.
+function downloadFileName(doc: GeneratedDocument): string {
+  const fromUrl = (doc.fileUrl ?? "").split("?")[0].split("/").filter(Boolean).pop();
+  return fromUrl && fromUrl.toLowerCase().endsWith(".pdf") ? fromUrl : `tai-lieu-${doc.id}.pdf`;
+}
+
 function GeneratedList({
   documents,
   templatesById,
   selectedId,
   onSelect,
+  onOpenFile,
+  openPendingId,
 }: {
   readonly documents: readonly GeneratedDocument[];
   readonly templatesById: ReadonlyMap<string, DocumentTemplate>;
   readonly selectedId: string | null;
   readonly onSelect: (document: GeneratedDocument) => void;
+  readonly onOpenFile: (document: GeneratedDocument) => Promise<void>;
+  readonly openPendingId: string | null;
 }) {
   if (!documents.length) {
     return (
@@ -495,14 +505,15 @@ function GeneratedList({
                     <Button type="button" size="sm" variant="outline" onClick={() => onSelect(doc)}>
                       Xem trước
                     </Button>
-                    <a
-                      className="inline-flex items-center justify-center rounded border border-outline px-3 py-1.5 text-mono-status font-medium text-on-surface hover:bg-surface-variant"
-                      href={doc.fileUrl || documentDownloadUrl(doc.id)}
-                      target="_blank"
-                      rel="noreferrer"
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={openPendingId === doc.id}
+                      onClick={() => void onOpenFile(doc)}
                     >
-                      Mở file
-                    </a>
+                      {openPendingId === doc.id ? "Đang tải…" : "Mở file"}
+                    </Button>
                   </div>
                 </td>
               </tr>
@@ -519,12 +530,19 @@ function PreviewPanel({
   body,
   document,
   onMode,
+  onOpenFile,
+  openPendingId,
 }: {
   readonly mode: PreviewMode;
   readonly body: string;
   readonly document: GeneratedDocument | null;
   readonly onMode: (mode: PreviewMode) => void;
+  readonly onOpenFile: (document: GeneratedDocument) => Promise<void>;
+  readonly openPendingId: string | null;
 }) {
+  // Chỉ tải PDF khi thực sự đang xem tab "File đã tạo".
+  const fileState = useGeneratedDocumentUrl(mode === "document" ? (document?.id ?? null) : null);
+
   return (
     <Card className="p-0">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline p-card-padding">
@@ -551,15 +569,28 @@ function PreviewPanel({
         <div className="p-card-padding">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <StatusPill tone={docTone(document)}>{docStatusLabel(document)}</StatusPill>
-            <a className="text-label-sm font-bold text-primary hover:underline" href={document.fileUrl} target="_blank" rel="noreferrer">
-              Mở tài liệu
-            </a>
+            <button
+              type="button"
+              className="text-label-sm font-bold text-primary hover:underline disabled:opacity-60"
+              disabled={openPendingId === document.id}
+              onClick={() => void onOpenFile(document)}
+            >
+              {openPendingId === document.id ? "Đang tải…" : "Mở tài liệu"}
+            </button>
           </div>
-          <iframe
-            className="h-[560px] w-full rounded-lg border border-outline bg-white"
-            src={document.fileUrl}
-            title="Xem trước tài liệu đã tạo"
-          />
+          {fileState.error ? (
+            <Alert tone="error">{fileState.error}</Alert>
+          ) : fileState.url ? (
+            <iframe
+              className="h-[560px] w-full rounded-lg border border-outline bg-white"
+              src={fileState.url}
+              title="Xem trước tài liệu đã tạo"
+            />
+          ) : (
+            <div className="flex h-[560px] w-full items-center justify-center rounded-lg border border-outline bg-white text-body-md text-on-surface-variant">
+              {fileState.isLoading ? "Đang tải file PDF…" : "Chưa có file để hiển thị."}
+            </div>
+          )}
         </div>
       ) : (
         <div className="p-card-padding">
@@ -616,6 +647,11 @@ export default function DocumentsPage() {
     [templates],
   );
   const selectedDocument = documents.find((doc) => doc.id === selectedDocId) ?? documents[0] ?? null;
+  const documentFile = useOpenGeneratedDocument();
+  const openFile = useCallback(
+    (doc: GeneratedDocument) => documentFile.open(doc.id, downloadFileName(doc)),
+    [documentFile],
+  );
   const generateTemplate = templates.find((template) => template.code === generateTemplateCode) ?? null;
   const formFields = useMemo(() => formFieldsFor(generateTemplate), [generateTemplate]);
   const metrics = metricCards(templates, documents);
@@ -823,7 +859,14 @@ export default function DocumentsPage() {
 
         <div className="space-y-gutter">
           <div className="grid grid-cols-1 gap-gutter 2xl:grid-cols-[minmax(0,1fr)_380px]">
-            <PreviewPanel mode={previewMode} body={previewBody} document={selectedDocument} onMode={setPreviewMode} />
+            <PreviewPanel
+              mode={previewMode}
+              body={previewBody}
+              document={selectedDocument}
+              onMode={setPreviewMode}
+              onOpenFile={openFile}
+              openPendingId={documentFile.pendingId}
+            />
             <GeneratePanel
               templates={templates}
               templateCode={generateTemplateCode}
@@ -862,6 +905,11 @@ export default function DocumentsPage() {
               </div>
             ) : (
               <>
+                {documentFile.error ? (
+                  <div className="px-card-padding pt-card-padding">
+                    <Alert tone="error">{documentFile.error}</Alert>
+                  </div>
+                ) : null}
                 <GeneratedList
                   documents={documents}
                   templatesById={templatesById}
@@ -870,6 +918,8 @@ export default function DocumentsPage() {
                     setSelectedDocId(doc.id);
                     setPreviewMode("document");
                   }}
+                  onOpenFile={openFile}
+                  openPendingId={documentFile.pendingId}
                 />
                 <InfiniteScrollSentinel
                   hasNextPage={generatedList.hasNextPage}

@@ -14,9 +14,15 @@ IF COL_LENGTH(N'dbo.agent_sessions', N'requires_approval') IS NULL ALTER TABLE d
 IF COL_LENGTH(N'dbo.agent_sessions', N'replan_count') IS NULL ALTER TABLE dbo.agent_sessions ADD replan_count INT NOT NULL CONSTRAINT DF_agent_sessions_replan_count DEFAULT 0;
 IF COL_LENGTH(N'dbo.agent_sessions', N'row_version') IS NULL ALTER TABLE dbo.agent_sessions ADD row_version ROWVERSION;
 IF COL_LENGTH(N'dbo.agent_sessions', N'archived_at') IS NULL ALTER TABLE dbo.agent_sessions ADD archived_at DATETIMEOFFSET NULL;
+IF COL_LENGTH(N'dbo.agent_sessions', N'pending_terminal_generation') IS NULL ALTER TABLE dbo.agent_sessions ADD pending_terminal_generation INT NULL;
+IF COL_LENGTH(N'dbo.agent_sessions', N'pending_terminal_requested_at') IS NULL ALTER TABLE dbo.agent_sessions ADD pending_terminal_requested_at DATETIMEOFFSET NULL;
+IF COL_LENGTH(N'dbo.agent_sessions', N'pending_terminal_reason') IS NULL ALTER TABLE dbo.agent_sessions ADD pending_terminal_reason NVARCHAR(1024) NULL;
 IF COL_LENGTH(N'dbo.tenants', N'require_orchestration_approval') IS NULL ALTER TABLE dbo.tenants ADD require_orchestration_approval BIT NOT NULL CONSTRAINT DF_tenants_require_orchestration_approval DEFAULT 0;
 IF COL_LENGTH(N'dbo.processed_messages', N'tenant_id') IS NULL ALTER TABLE dbo.processed_messages ADD tenant_id UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_processed_messages_tenant_id DEFAULT '00000000-0000-0000-0000-000000000000';
-IF COL_LENGTH(N'dbo.pancake_configs', N'channel') IS NOT NULL BEGIN DECLARE @pcuq nvarchar(200);
+IF COL_LENGTH(N'dbo.pancake_configs', N'channel') IS NOT NULL BEGIN
+IF EXISTS (SELECT tenant_id FROM dbo.pancake_configs GROUP BY tenant_id HAVING COUNT(*) > 1)
+    THROW 51000, 'Cannot consolidate pancake_configs while a tenant has multiple channel-specific rows.', 1;
+DECLARE @pcuq nvarchar(200);
 SELECT @pcuq = name FROM sys.key_constraints WHERE parent_object_id = OBJECT_ID(N'dbo.pancake_configs') AND type = 'UQ';
 IF @pcuq IS NOT NULL EXEC(N'ALTER TABLE pancake_configs DROP CONSTRAINT ' + @pcuq);
 DECLARE @pcdf nvarchar(200);
@@ -38,6 +44,10 @@ IF COL_LENGTH(N'dbo.users', N'pancake_access_token_encrypted') IS NULL ALTER TAB
 IF COL_LENGTH(N'dbo.users', N'pancake_access_token_updated_at') IS NULL ALTER TABLE dbo.users ADD pancake_access_token_updated_at DATETIMEOFFSET NULL;
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agent_sessions_tenant_status_started_at' AND object_id = OBJECT_ID(N'dbo.agent_sessions')) EXEC(N'CREATE INDEX IX_agent_sessions_tenant_status_started_at ON agent_sessions (tenant_id, status, started_at);');
 IF COL_LENGTH(N'dbo.agent_sessions', N'archived_at') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agent_sessions_tenant_archived_started_at' AND object_id = OBJECT_ID(N'dbo.agent_sessions')) EXEC(N'CREATE INDEX IX_agent_sessions_tenant_archived_started_at ON agent_sessions (tenant_id, archived_at, started_at);');
+IF COL_LENGTH(N'dbo.agent_sessions', N'pending_terminal_requested_at') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agent_sessions_status_pending_terminal_requested_at' AND object_id = OBJECT_ID(N'dbo.agent_sessions')) EXEC(N'CREATE INDEX IX_agent_sessions_status_pending_terminal_requested_at ON agent_sessions (status, pending_terminal_requested_at) WHERE pending_terminal_requested_at IS NOT NULL;');
+IF COL_LENGTH(N'dbo.agent_schedules', N'initiator_user_id') IS NULL ALTER TABLE dbo.agent_schedules ADD initiator_user_id UNIQUEIDENTIFIER NULL;
+IF COL_LENGTH(N'dbo.agent_schedule_runs', N'initiator_user_id') IS NULL ALTER TABLE dbo.agent_schedule_runs ADD initiator_user_id UNIQUEIDENTIFIER NULL;
+IF COL_LENGTH(N'dbo.agent_schedules', N'initiator_user_id') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agent_schedules_tenant_initiator_user' AND object_id = OBJECT_ID(N'dbo.agent_schedules')) EXEC(N'CREATE INDEX IX_agent_schedules_tenant_initiator_user ON agent_schedules (tenant_id, initiator_user_id) WHERE initiator_user_id IS NOT NULL;');
 IF COL_LENGTH(N'dbo.agent_schedules', N'trigger_type') IS NULL ALTER TABLE dbo.agent_schedules ADD trigger_type NVARCHAR(16) NOT NULL CONSTRAINT DF_agent_schedules_trigger_type DEFAULT N'cadence';
 IF COL_LENGTH(N'dbo.agent_schedules', N'event_key') IS NULL ALTER TABLE dbo.agent_schedules ADD event_key NVARCHAR(64) NULL;
 IF COL_LENGTH(N'dbo.tenants', N'monthly_cost_cap_usd') IS NULL ALTER TABLE dbo.tenants ADD monthly_cost_cap_usd DECIMAL(12,2) NULL;

@@ -250,7 +250,7 @@ END;
 
 DECLARE @brief_id UNIQUEIDENTIFIER;
 MERGE content_briefs AS target
-USING (VALUES (N'tiktok', N'Demo: tạo video ngắn giải thích 3 lỗi phát âm tiếng Trung phổ biến cho người mới học.')) AS source (platform, brief)
+USING (VALUES (N'instagram', N'Demo: tạo Reels ngắn giải thích 3 lỗi phát âm tiếng Trung phổ biến cho người mới học.')) AS source (platform, brief)
 ON target.tenant_id = @tenant_id AND target.platform = source.platform AND target.brief = source.brief
 WHEN MATCHED THEN
     UPDATE SET status = N'pending', updated_at = @now
@@ -258,11 +258,11 @@ WHEN NOT MATCHED THEN
     INSERT (id, tenant_id, platform, brief, status, created_by, created_at, updated_at)
     VALUES (NEWID(), @tenant_id, source.platform, source.brief, N'pending', @owner_user_id, @now, @now);
 
-SELECT @brief_id = id FROM content_briefs WHERE tenant_id = @tenant_id AND platform = N'tiktok' AND brief = N'Demo: tạo video ngắn giải thích 3 lỗi phát âm tiếng Trung phổ biến cho người mới học.';
+SELECT @brief_id = id FROM content_briefs WHERE tenant_id = @tenant_id AND platform = N'instagram' AND brief = N'Demo: tạo Reels ngắn giải thích 3 lỗi phát âm tiếng Trung phổ biến cho người mới học.';
 
 MERGE content_items AS target
 USING (VALUES (
-    N'tiktok', N'approved', N'3 lỗi phát âm tiếng Trung người mới hay gặp: nhầm thanh điệu, bật hơi chưa rõ, đọc pinyin theo tiếng Việt. Lưu lại để luyện mỗi ngày nhé!', N'[]'
+    N'instagram', N'approved', N'3 lỗi phát âm tiếng Trung người mới hay gặp: nhầm thanh điệu, bật hơi chưa rõ, đọc pinyin theo tiếng Việt. Lưu lại để luyện mỗi ngày nhé!', N'[]'
 )) AS source (platform, status, body, assets_json)
 ON target.tenant_id = @tenant_id AND target.platform = source.platform AND target.body = source.body AND target.deleted_at IS NULL
 WHEN MATCHED THEN
@@ -272,13 +272,13 @@ WHEN NOT MATCHED THEN
     VALUES (NEWID(), @tenant_id, @brief_id, source.platform, source.status, source.body, source.assets_json, @owner_user_id, @owner_user_id, DATEADD(MINUTE, 50, @base_time), @now, @now);
 
 DECLARE @content_item_id UNIQUEIDENTIFIER = (
-    SELECT TOP 1 id FROM content_items WHERE tenant_id = @tenant_id AND platform = N'tiktok' AND body LIKE N'3 lỗi phát âm tiếng Trung%' AND deleted_at IS NULL
+    SELECT TOP 1 id FROM content_items WHERE tenant_id = @tenant_id AND platform = N'instagram' AND body LIKE N'3 lỗi phát âm tiếng Trung%' AND deleted_at IS NULL
 );
 
 IF @content_item_id IS NOT NULL
 BEGIN
     MERGE content_schedule AS target
-    USING (SELECT @content_item_id AS content_item_id, N'tiktok' AS platform, DATEADD(DAY, 1, @base_time) AS scheduled_at) AS source
+    USING (SELECT @content_item_id AS content_item_id, N'instagram' AS platform, DATEADD(DAY, 1, @base_time) AS scheduled_at) AS source
     ON target.tenant_id = @tenant_id AND target.content_item_id = source.content_item_id AND target.status = N'pending'
     WHEN MATCHED THEN
         UPDATE SET scheduled_at = source.scheduled_at, platform = source.platform, updated_at = @now

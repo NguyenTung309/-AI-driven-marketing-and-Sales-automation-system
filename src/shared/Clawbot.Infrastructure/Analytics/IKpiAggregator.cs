@@ -6,9 +6,7 @@ public sealed record KpiAggregateRow(
     int Dms,
     int Replies,
     int Conversions,
-    decimal? AvgResponseTimeSec,
-    decimal? AdSpend,
-    decimal? Revenue = null);
+    decimal? AvgResponseTimeSec);
 
 public interface IKpiAggregator
 {

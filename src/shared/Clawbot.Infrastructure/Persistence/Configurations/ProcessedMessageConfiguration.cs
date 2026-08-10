@@ -15,6 +15,6 @@ public sealed class ProcessedMessageConfiguration : IEntityTypeConfiguration<Pro
         builder.Property(x => x.ExternalMessageId).HasColumnName("ExternalMessageId").HasMaxLength(255).IsRequired();
         builder.Property(x => x.ConversationExternalId).HasColumnName("ConversationExternalId").HasMaxLength(255).IsRequired();
         builder.Property(x => x.ProcessedAt).HasColumnName("ProcessedAt").IsRequired();
-        builder.HasIndex(x => new { x.Platform, x.ExternalMessageId }).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.Platform, x.ExternalMessageId }).IsUnique();
     }
 }

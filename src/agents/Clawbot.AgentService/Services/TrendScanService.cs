@@ -10,11 +10,6 @@ using CoreResearch = Clawbot.Agents.Core.Research;
 
 namespace Clawbot.AgentService.Services;
 
-public interface ITenantTrendScanner
-{
-    Task<IReadOnlyList<CoreResearch.ScoredTrend>> ScanAndPersistAsync(Guid tenantId, string weekOf, CancellationToken ct = default);
-}
-
 // One place for the full tenant trend scan: resolve per-tenant source settings (encrypted
 // social_credentials row, provider="trends"), scan, and upsert the week's trend briefs.
 // Used by the gRPC WeeklyTrends endpoint (manual scan + Hangfire weekly job) and by
@@ -41,15 +36,16 @@ public sealed class TrendScanService(
         var settings = await LoadSettingsAsync(tenantId, ct).ConfigureAwait(false);
         var keywords = await LoadKeywordsAsync(tenantId, ct).ConfigureAwait(false);
         var geo = string.IsNullOrWhiteSpace(settings?.Geo) ? DefaultGeo : settings!.Geo!.Trim().ToUpperInvariant();
-        var trends = await _agent.ScanAsync(
+        var scan = await _agent.ScanWithRawAsync(
             new CoreResearch.ResearchScanRequest(tenantId, geo, keywords, ToOverrides(settings)),
             ct).ConfigureAwait(false);
 
-        await UpsertTrendBriefsAsync(tenantId, weekOf, trends, ct).ConfigureAwait(false);
+        await UpsertTrendBriefsAsync(tenantId, weekOf, scan.Trends, ct).ConfigureAwait(false);
+        await UpsertRawTrendBriefAsync(tenantId, weekOf, scan.RawTrends, ct).ConfigureAwait(false);
         // C2: đánh thức các lịch event-trigger "khi quét xu hướng xong" (vd. tự soạn content từ trend mới).
         await Clawbot.Infrastructure.Agents.ScheduleEventDispatcher.FireAsync(
             _db, tenantId, Clawbot.SharedKernel.Orchestration.ScheduleEventKeys.TrendsScanned, _clock.UtcNow, ct).ConfigureAwait(false);
-        return trends;
+        return scan.Trends;
     }
 
     private async Task<ContentTrendSettings?> LoadSettingsAsync(Guid tenantId, CancellationToken ct)
@@ -149,6 +145,28 @@ public sealed class TrendScanService(
             _db.ContentBriefs.Add(ContentBrief.Create(tenantId, trend.Source, body, createdBy: null, createdAt: now));
         }
 
+        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task UpsertRawTrendBriefAsync(
+        Guid tenantId,
+        string weekOf,
+        IReadOnlyList<CoreResearch.RawTrend> trends,
+        CancellationToken ct)
+    {
+        var marker = $"[trend-raw:{weekOf}]";
+        var body = $"{marker}\n{JsonSerializer.Serialize(trends, JsonOpts)}";
+        var current = await _db.ContentBriefs.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Brief.StartsWith(marker), ct)
+            .ConfigureAwait(false);
+        var now = _clock.UtcNow;
+        if (current is null)
+            _db.ContentBriefs.Add(ContentBrief.Create(tenantId, "trend-raw", body, createdBy: null, createdAt: now));
+        else
+        {
+            current.Update("trend-raw", body, now);
+            current.MarkStatus("pending", now);
+        }
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 

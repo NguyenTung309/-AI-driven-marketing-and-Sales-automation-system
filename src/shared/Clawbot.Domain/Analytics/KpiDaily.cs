@@ -12,8 +12,6 @@ public sealed class KpiDaily : Entity<Guid>, ITenantOwned
     public int Replies { get; private set; }
     public int Conversions { get; private set; }
     public decimal? AvgResponseTimeSec { get; private set; }
-    public decimal? AdSpend { get; private set; }
-    public decimal? Revenue { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     private KpiDaily() { }
@@ -37,16 +35,12 @@ public sealed class KpiDaily : Entity<Guid>, ITenantOwned
         int dms,
         int replies,
         int conversions,
-        decimal? avgRespSec,
-        decimal? adSpend,
-        decimal? revenue = null)
+        decimal? avgRespSec)
     {
         Leads = leads;
         Dms = dms;
         Replies = replies;
         Conversions = conversions;
         AvgResponseTimeSec = avgRespSec;
-        AdSpend = adSpend;
-        Revenue = revenue;
     }
 }

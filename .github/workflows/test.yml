@@ -82,6 +82,13 @@ jobs:
         shell: pwsh
         run: ./deploy/ci/verify-identity-ddl.ps1
 
+      - name: Production Deployment Contracts
+        shell: bash
+        run: |
+          pwsh -NoProfile -File ./deploy/ci/verify-production-deployment.ps1
+          sh -n deploy/production/*.sh deploy/ci/test-production-deployment.sh
+          sh deploy/ci/test-production-deployment.sh
+
       - name: KB Seed Authoring Smoke Test
         shell: pwsh
         run: ./deploy/seed/generate-kb-seed.ps1 -SmokeTest

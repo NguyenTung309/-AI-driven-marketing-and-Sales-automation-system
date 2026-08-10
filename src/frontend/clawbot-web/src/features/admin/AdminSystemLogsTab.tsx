@@ -7,7 +7,7 @@ import {
   type SystemLogEntry,
   type SystemLogSummary,
 } from "@/shared/api/admin";
-import { Button, Card, StatusPill, type StatusTone } from "@/shared/ui";
+import { Button, Card, StatusPill, StructuredData, type StatusTone } from "@/shared/ui";
 import { formatDateTime } from "./adminHelpers";
 import { EmptyState, MetricTile } from "./adminUi";
 
@@ -362,9 +362,9 @@ export function AdminSystemLogsTab({
                   {detail.properties ? (
                     <div>
                       <p className="mb-1 text-label-sm uppercase text-on-surface-variant">Properties</p>
-                      <pre className="max-h-[200px] overflow-auto rounded-md bg-surface-container-low p-3 text-mono-status text-secondary">
-                        {detail.properties}
-                      </pre>
+                      <div className="rounded-md bg-surface-container-low p-3">
+                        <StructuredData maxHeightClass="max-h-[200px]" value={detail.properties} />
+                      </div>
                     </div>
                   ) : null}
                 </>

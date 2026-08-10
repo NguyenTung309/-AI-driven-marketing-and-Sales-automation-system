@@ -1,6 +1,6 @@
 {
   "name": "Clawbot KPI Dashboard",
-  "description": "M20 omnichannel analytics dashboard for daily KPI, funnel, CPL trend, and cached forecasts.",
+  "description": "M20 omnichannel analytics dashboard for daily KPI, funnel, and cached forecasts.",
   "database": {
     "engine": "sqlserver",
     "suggested_user": "metabase_readonly"
@@ -9,17 +9,12 @@
     {
       "name": "Omnichannel KPI by Platform",
       "type": "table",
-      "query": "SELECT date, platform, leads, dms, replies, conversions, avg_response_time_sec, ad_spend FROM dbo.kpi_daily ORDER BY date DESC, platform;"
+      "query": "SELECT date, platform, leads, dms, replies, conversions, avg_response_time_sec FROM dbo.kpi_daily ORDER BY date DESC, platform;"
     },
     {
       "name": "Funnel Totals",
       "type": "bar",
       "query": "SELECT platform, SUM(leads) AS leads, SUM(dms) AS dms, SUM(replies) AS replies, SUM(conversions) AS conversions FROM dbo.kpi_daily GROUP BY platform ORDER BY platform;"
-    },
-    {
-      "name": "CPL Trend",
-      "type": "line",
-      "query": "SELECT date, platform, CASE WHEN leads > 0 AND ad_spend IS NOT NULL THEN ad_spend / leads END AS cpl FROM dbo.kpi_daily WHERE ad_spend IS NOT NULL ORDER BY date, platform;"
     },
     {
       "name": "7-Day Forecast",

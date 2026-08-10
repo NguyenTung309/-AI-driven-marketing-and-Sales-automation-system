@@ -5,10 +5,7 @@ SET ARITHABORT ON;
 SET XACT_ABORT ON;
 
 IF OBJECT_ID(N'dbo.tenants', N'U') IS NULL
-BEGIN
-    RAISERROR(N'dbo.tenants is missing; cannot repair tenant runtime columns.', 16, 1);
-    RETURN;
-END;
+    THROW 51000, 'dbo.tenants is missing; cannot repair tenant runtime columns.', 1;
 
 BEGIN TRANSACTION;
 

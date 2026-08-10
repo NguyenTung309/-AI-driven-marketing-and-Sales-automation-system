@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -19,7 +19,7 @@ import { TrendSettingsDialog } from "./TrendSettingsDialog";
 import { ContentPublishingPolicyControl } from "./ContentPublishingPolicyControl";
 import { PostPerformancePanel } from "./PostPerformancePanel";
 import { platformClasses } from "@/shared/theme/colors";
-import { toUserFriendlyError } from "@/shared/utils/userText";
+import { contentErrorMessage, toUserFriendlyError } from "@/shared/utils/userText";
 import {
   approveContentItem,
   createContentBrief,
@@ -29,6 +29,7 @@ import {
   generateContentItems,
   getContentCalendar,
   getContentChainMetrics,
+  getContentAssetBlob,
   getContentItem,
   getContentItemHooks,
   getContentPublishTargets,
@@ -53,6 +54,7 @@ import {
   type ContentPublishTargetMode,
   type ContentQueueResponse,
   type ScheduleContentItemPayload,
+  type RawTrend,
   type Trend,
 } from "@/shared/api/content";
 
@@ -372,6 +374,38 @@ function firstImageAsset(value: string): ContentAsset | null {
   return parseAssets(value).find((asset) => asset.url && (!asset.type || asset.type === "image")) ?? null;
 }
 
+function ContentAssetImage({ alt, className, url }: { readonly alt: string; readonly className: string; readonly url: string }) {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const requiresAuthenticatedFetch = url.startsWith("/api/");
+
+  useEffect(() => {
+    if (!requiresAuthenticatedFetch) return undefined;
+
+    let active = true;
+    let nextObjectUrl: string | null = null;
+    void getContentAssetBlob(url)
+      .then((blob) => {
+        if (!active) return;
+        nextObjectUrl = URL.createObjectURL(blob);
+        setObjectUrl(nextObjectUrl);
+        setFailed(false);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+      if (nextObjectUrl) URL.revokeObjectURL(nextObjectUrl);
+    };
+  }, [requiresAuthenticatedFetch, url]);
+
+  const displayUrl = requiresAuthenticatedFetch ? objectUrl : url;
+  if (requiresAuthenticatedFetch && failed) return <div className={`${className} flex items-center justify-center bg-surface text-label-sm text-on-surface-variant`}>Không tải được ảnh.</div>;
+  if (!displayUrl) return <div className={`${className} animate-pulse bg-surface`} aria-label="Đang tải ảnh" />;
+  return <img className={className} src={displayUrl} alt={alt} />;
+}
+
 function groupCalendar(items: readonly ContentCalendarItem[]) {
   const groups = new Map<string, ContentCalendarItem[]>();
   for (const item of items) {
@@ -636,6 +670,7 @@ function TrendLauncherCard({
 function TrendModal({
   open,
   trends,
+  rawTrends,
   loading,
   scanning,
   error,
@@ -649,6 +684,7 @@ function TrendModal({
 }: {
   readonly open: boolean;
   readonly trends: readonly Trend[];
+  readonly rawTrends: readonly RawTrend[];
   readonly loading: boolean;
   readonly scanning: boolean;
   readonly error: unknown;
@@ -724,6 +760,24 @@ function TrendModal({
           Chưa có xu hướng được quét. Bấm Quét để gọi agent nghiên cứu.
         </div>
       )}
+      {rawTrends.length ? (
+        <section className="mt-5">
+          <p className="mb-2 text-label-caps uppercase text-secondary">Tất cả từ khóa đã quét ({rawTrends.length})</p>
+          <div className="max-h-56 overflow-auto rounded border border-outline bg-surface">
+            {rawTrends.map((trend) => (
+              <button
+                className="flex w-full items-center justify-between gap-3 border-b border-outline px-3 py-2 text-left last:border-0 hover:bg-surface-container-low"
+                key={`${trend.source}-${trend.topic}`}
+                onClick={() => onUseIdea(trend.topic)}
+                type="button"
+              >
+                <span className="text-body-sm text-secondary">{trend.topic}</span>
+                <span className="text-label-sm text-on-surface-variant">{trend.source} · {trend.metric}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </Modal>
   );
 }
@@ -792,7 +846,7 @@ function SocialPreview({ item, body, assetsJson }: { readonly item: ContentItem;
       <div className="space-y-3 p-4">
         <p className="whitespace-pre-wrap text-body-md text-on-surface">{body || "Nội dung bản nháp sẽ hiển thị ở đây."}</p>
         {image?.url ? (
-          <img className="max-h-[320px] w-full rounded-lg object-cover" src={image.url} alt={image.fileName || "Ảnh bài viết"} />
+          <ContentAssetImage className="max-h-[320px] w-full rounded-lg object-cover" url={image.url} alt={image.fileName || "Ảnh bài viết"} />
         ) : (
           <div className="flex min-h-[180px] items-center justify-center rounded-lg border border-dashed border-outline bg-surface">
             <div className="text-center">
@@ -933,7 +987,8 @@ function QueueEditor({
     );
   }
 
-  const canSchedule = Boolean(item.canSchedule) || normalize(item.status) === "approved";
+  const canSchedule = Boolean(item.canSchedule);
+  const scheduleBlockedMessage = contentErrorMessage(item.scheduleBlockedReason);
   const canApprove = Boolean(item.canApprove) && canApprovePerm && !bodyDirty;
   const canReject = Boolean(item.canReject ?? item.canApprove) && canApprovePerm;
   const canRetryReview = Boolean(item.canRetryReview) && canWritePerm;
@@ -988,6 +1043,10 @@ function QueueEditor({
           </Alert>
         ) : null}
 
+        {!canSchedule && scheduleBlockedMessage ? (
+          <Alert tone="info">{scheduleBlockedMessage}</Alert>
+        ) : null}
+
         {publishedLocked ? (
           <Alert tone="info">Bài đã đăng không thể sửa. Tạo bản repurpose nếu cần đăng lại trên kênh khác.</Alert>
         ) : null}
@@ -1025,12 +1084,12 @@ function QueueEditor({
           </div>
           {assets.length ? (
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              {assets.map((asset) => (
-                <a key={asset.url} className="group block overflow-hidden rounded border border-outline bg-white" href={asset.url} target="_blank" rel="noreferrer">
-                  <img className="h-28 w-full object-cover transition-transform group-hover:scale-[1.03]" src={asset.url} alt={asset.fileName || "Ảnh bài viết"} />
+              {assets.map((asset) => asset.url ? (
+                <div key={asset.url} className="group overflow-hidden rounded border border-outline bg-white">
+                  <ContentAssetImage className="h-28 w-full object-cover transition-transform group-hover:scale-[1.03]" url={asset.url} alt={asset.fileName || "Ảnh bài viết"} />
                   <span className="block truncate px-2 py-1 text-label-sm text-on-surface-variant">{asset.fileName || asset.url}</span>
-                </a>
-              ))}
+                </div>
+              ) : null)}
             </div>
           ) : (
             <div className="rounded border border-dashed border-outline bg-white p-4 text-body-md text-on-surface-variant">
@@ -1062,7 +1121,7 @@ function QueueEditor({
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">block</span>
             Từ chối phát hành
           </Button>
-          <Button type="button" variant="ghost" onClick={onDelete} disabled={acting || publishedLocked}>
+          <Button type="button" variant="danger" onClick={onDelete} disabled={acting || publishedLocked}>
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">delete</span>
             Xóa
           </Button>
@@ -1451,6 +1510,7 @@ function ScheduleDialog({
             <input
               className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary disabled:opacity-60"
               type="date"
+              min={toInputDate(new Date())}
               value={date}
               disabled={mode === "golden"}
               onChange={(event) => onDate(event.target.value)}
@@ -1619,13 +1679,14 @@ export default function ContentWorkspacePage() {
   const [trendWeek, setTrendWeek] = useState<string>(currentWeek);
   const trendsQuery = useQuery({
     queryKey: ["content", "trends", trendWeek],
-    queryFn: () => getContentTrends(trendWeek === "all" ? undefined : trendWeek),
+    queryFn: () => getContentTrends(trendWeek === "all" ? undefined : trendWeek, true),
     staleTime: 60_000,
   });
 
   const briefs = Array.isArray(briefsQuery.data?.items) ? briefsQuery.data.items : EMPTY_BRIEFS;
   const queueItems = queueList.items.length ? queueList.items : EMPTY_ITEMS;
   const trends = Array.isArray(trendsQuery.data?.trends) ? trendsQuery.data.trends : EMPTY_TRENDS;
+  const rawTrends = Array.isArray(trendsQuery.data?.rawTrends) ? trendsQuery.data.rawTrends : [];
   const linkedItem = linkedItemQuery.data ?? null;
   const displayedQueueItems = linkedItem && !queueItems.some((item) => item.id === linkedItem.id)
     ? [linkedItem, ...queueItems]
@@ -2107,6 +2168,7 @@ export default function ContentWorkspacePage() {
           <TrendModal
             open={trendModalOpen}
             trends={trends}
+            rawTrends={rawTrends}
             loading={trendsQuery.isLoading}
             scanning={scanMutation.isPending}
             error={trendsQuery.error ?? scanMutation.error}
@@ -2409,7 +2471,7 @@ export default function ContentWorkspacePage() {
             ...current,
             confirmInstagramAccount,
           }))}
-          onClose={closeScheduleDialog}
+          onClose={() => closeScheduleDialog()}
           onSubmit={submitScheduleDialog}
         />
       ) : null}

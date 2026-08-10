@@ -1,11 +1,9 @@
-using Clawbot.Agents.Core.Ads;
 using Clawbot.Agents.Core.Lead;
 using Clawbot.Agents.Core.Rag;
 using Clawbot.Agents.Core.Skills;
 using Clawbot.Agents.Core.Skills.Content;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Application.Abstractions;
-using Clawbot.Infrastructure.Ads;
 using Clawbot.Infrastructure.Analytics;
 using Clawbot.Infrastructure.Audit;
 using Clawbot.Infrastructure.Channels;
@@ -239,18 +237,6 @@ public static class DependencyInjection
             .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
         services.AddScoped<ISocialPublisher, RoutingSocialPublisher>();
-
-        // Ads connectors
-        services.Configure<MetaAdsOptions>(cfg.GetSection(MetaAdsOptions.SectionName));
-        services.Configure<TikTokAdsOptions>(cfg.GetSection(TikTokAdsOptions.SectionName));
-        services.AddSingleton<IAdsPlatformThrottle, AdsPlatformThrottle>();
-        services.AddScoped<IAdsPlatformConnector, MetaAdsConnector>();
-        services.AddHttpClient<IAdsPlatformConnector, TikTokAdsConnector>()
-            .AddPolicyHandler(HttpResiliencePolicies.Retry())
-            .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
-            .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
-        services.AddScoped<IAdsConnectorResolver, AdsConnectorResolver>();
-        services.AddScoped<AdsAgent>();
 
         // Vector store: Qdrant is the only supported backend now SQL Server doesn't carry pgvector.
         services.Configure<QdrantOptions>(cfg.GetSection(QdrantOptions.SectionName));

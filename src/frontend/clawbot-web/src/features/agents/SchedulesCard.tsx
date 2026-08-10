@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Input, Modal, StatusPill } from "@/shared/ui";
+import { Alert, Button, Card, ConfirmDialog, Input, Modal, StatusPill } from "@/shared/ui";
 import { useAuthStore } from "@/shared/auth/authStore";
 import {
   activateOrchestrationV2Schedule,
   createOrchestrationV2Schedule,
+  deleteOrchestrationV2Schedule,
   listOrchestrationV2Schedules,
   pauseOrchestrationV2Schedule,
   runOrchestrationV2ScheduleNow,
@@ -40,7 +41,14 @@ const SELECT_CLASS =
   "bg-surface-container-lowest border border-surface-variant rounded px-3 py-2 text-body-md w-full focus:outline-none focus:ring-2 focus:ring-primary/30";
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Đã xảy ra lỗi không xác định.";
+  if (error instanceof Error) {
+    const response = (error as Error & { response?: { data?: { message?: unknown; error?: unknown; detail?: unknown } } }).response;
+    if (typeof response?.data?.message === "string") return response.data.message;
+    if (typeof response?.data?.detail === "string") return response.data.detail;
+    if (typeof response?.data?.error === "string") return response.data.error;
+    return error.message;
+  }
+  return "Đã xảy ra lỗi không xác định.";
 }
 
 // B2: schedules sống ngay trên /agents (trang /orchestration cũ đã gỡ) — tạo lịch giao mục tiêu
@@ -52,15 +60,20 @@ export function SchedulesCard() {
   const canRun = permissions.includes("orchestration:run");
 
   const schedulesQuery = useQuery({ queryKey: ["orchestration", "schedules"], queryFn: listOrchestrationV2Schedules });
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["orchestration", "schedules"] });
+  const invalidateSchedules = () => queryClient.invalidateQueries({ queryKey: ["orchestration", "schedules"] });
+  const invalidateSchedulesAndRuns = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["orchestration", "schedules"] }),
+      queryClient.invalidateQueries({ queryKey: ["orchestration", "runs"] }),
+    ]);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [goalTemplate, setGoalTemplate] = useState("");
   const [cadence, setCadence] = useState<string>("weekly");
-  const [requiresApproval, setRequiresApproval] = useState(true);
   const [triggerType, setTriggerType] = useState<"cadence" | "event">("cadence");
   const [eventKey, setEventKey] = useState<string>(EVENT_OPTIONS[0].value);
+  const [scheduleToDelete, setScheduleToDelete] = useState<OrchestrationV2Schedule | null>(null);
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -69,24 +82,29 @@ export function SchedulesCard() {
         goalTemplate: goalTemplate.trim(),
         cadence,
         timezoneId: "Asia/Ho_Chi_Minh",
-        requiresApproval,
         triggerType,
         eventKey: triggerType === "event" ? eventKey : null,
       }),
     onSuccess: async () => {
-      await invalidate();
+      await invalidateSchedules();
       setCreateOpen(false);
       setName("");
       setGoalTemplate("");
-      setRequiresApproval(true);
     },
   });
-  const pauseMutation = useMutation({ mutationFn: pauseOrchestrationV2Schedule, onSuccess: invalidate });
-  const activateMutation = useMutation({ mutationFn: activateOrchestrationV2Schedule, onSuccess: invalidate });
-  const runNowMutation = useMutation({ mutationFn: runOrchestrationV2ScheduleNow, onSuccess: invalidate });
+  const pauseMutation = useMutation({ mutationFn: pauseOrchestrationV2Schedule, onSuccess: invalidateSchedules });
+  const activateMutation = useMutation({ mutationFn: activateOrchestrationV2Schedule, onSuccess: invalidateSchedules });
+  const runNowMutation = useMutation({ mutationFn: runOrchestrationV2ScheduleNow, onSuccess: invalidateSchedulesAndRuns });
+  const deleteMutation = useMutation({
+    mutationFn: deleteOrchestrationV2Schedule,
+    onSuccess: async () => {
+      await invalidateSchedules();
+      setScheduleToDelete(null);
+    },
+  });
 
-  const busy = createMutation.isPending || pauseMutation.isPending || activateMutation.isPending || runNowMutation.isPending;
-  const error = schedulesQuery.error ?? createMutation.error ?? pauseMutation.error ?? activateMutation.error ?? runNowMutation.error;
+  const busy = createMutation.isPending || pauseMutation.isPending || activateMutation.isPending || runNowMutation.isPending || deleteMutation.isPending;
+  const error = schedulesQuery.error ?? createMutation.error ?? pauseMutation.error ?? activateMutation.error ?? runNowMutation.error ?? deleteMutation.error;
   const schedules = schedulesQuery.data ?? [];
 
   return (
@@ -111,7 +129,7 @@ export function SchedulesCard() {
 
       {error ? <Alert tone="error">{errorMessage(error)}</Alert> : null}
 
-      {schedules.length ? (
+      {schedulesQuery.isError ? null : schedules.length ? (
         <ul className="flex flex-col gap-2">
           {schedules.map((schedule: OrchestrationV2Schedule) => (
             <li className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-outline p-3" key={schedule.id}>
@@ -131,10 +149,15 @@ export function SchedulesCard() {
                 <p className="max-w-[520px] truncate text-label-sm text-on-surface-variant" title={schedule.goalTemplate}>
                   {schedule.goalTemplate}
                 </p>
-                <p className="text-label-sm text-on-surface-variant">
-                  Kế tiếp: {isWaitingForEvent(schedule.nextRunAt) ? "Chờ sự kiện" : new Date(schedule.nextRunAt).toLocaleString("vi-VN")}
-                  {schedule.lastRunAt ? ` · Lần cuối: ${new Date(schedule.lastRunAt).toLocaleString("vi-VN")}` : ""}
-                </p>
+                <div className="flex flex-wrap items-center gap-1 text-label-sm text-on-surface-variant">
+                  <span>Kế tiếp: {isWaitingForEvent(schedule.nextRunAt) ? "Chờ sự kiện" : new Date(schedule.nextRunAt).toLocaleString("vi-VN")}</span>
+                  {schedule.lastRunAt ? <span>· Lần cuối: {new Date(schedule.lastRunAt).toLocaleString("vi-VN")}</span> : null}
+                  {schedule.lastRunStatus === "failed" || schedule.lastRunStatus === "cancelled" ? (
+                    <span title={schedule.lastRunError ?? "Lần chạy gần nhất không hoàn tất."}>
+                      <StatusPill tone="error">Lần cuối: lỗi</StatusPill>
+                    </span>
+                  ) : null}
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Button
@@ -167,6 +190,16 @@ export function SchedulesCard() {
                     Bật lại
                   </Button>
                 )}
+                <Button
+                  className="border-error text-error hover:bg-error/10"
+                  disabled={!canManage || busy}
+                  onClick={() => setScheduleToDelete(schedule)}
+                  size="sm"
+                  title={!canManage ? "Cần quyền orchestration:manage" : undefined}
+                  variant="outline"
+                >
+                  Xóa
+                </Button>
               </div>
             </li>
           ))}
@@ -213,7 +246,7 @@ export function SchedulesCard() {
               className="w-full rounded-lg border border-outline bg-surface-container-lowest p-3 text-body-md text-on-surface focus:border-primary focus:outline-none"
               id="schedule-goal"
               onChange={(event) => setGoalTemplate(event.target.value)}
-              placeholder="vd: Quét xu hướng tuần này, chọn 3 chủ đề và soạn bài Facebook + TikTok cho từng chủ đề."
+              placeholder="vd: Quét xu hướng tuần này, chọn 3 chủ đề và soạn bài Facebook + Instagram cho từng chủ đề."
               rows={4}
               value={goalTemplate}
             />
@@ -231,7 +264,7 @@ export function SchedulesCard() {
               </label>
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="max-w-xs">
             {triggerType === "cadence" ? (
               <div>
                 <label className="mb-1 block text-body-md font-bold text-secondary" htmlFor="schedule-cadence">
@@ -259,18 +292,26 @@ export function SchedulesCard() {
                 </select>
               </div>
             )}
-            <label className="flex items-end gap-2 pb-2 text-body-md text-on-surface">
-              <input checked={requiresApproval} onChange={(event) => setRequiresApproval(event.target.checked)} type="checkbox" />
-              Cần duyệt trước khi chạy
-            </label>
           </div>
           <p className="text-label-sm text-on-surface-variant">
             {triggerType === "cadence"
               ? "Múi giờ Việt Nam (Asia/Ho_Chi_Minh). Lịch chạy lần đầu ngay sau khi tạo, sau đó lặp theo chu kỳ."
-              : "Lịch sẽ ngủ và chỉ chạy mỗi khi hệ thống phát sự kiện đã chọn (vd. sau mỗi lần quét xu hướng). Mặc định nên giữ \"Cần duyệt\"."}
+              : "Lịch sẽ ngủ và tự chạy mỗi khi hệ thống phát sự kiện đã chọn (vd. sau mỗi lần quét xu hướng)."}
           </p>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        confirmLabel="Xóa lịch"
+        message={scheduleToDelete ? `Xóa lịch tự động “${scheduleToDelete.name}”? Lịch sử các lần chạy vẫn được giữ lại.` : ""}
+        onCancel={() => setScheduleToDelete(null)}
+        onConfirm={() => {
+          if (scheduleToDelete) deleteMutation.mutate(scheduleToDelete.id);
+        }}
+        open={scheduleToDelete !== null}
+        pending={deleteMutation.isPending}
+        title="Xóa lịch tự động"
+      />
     </Card>
   );
 }

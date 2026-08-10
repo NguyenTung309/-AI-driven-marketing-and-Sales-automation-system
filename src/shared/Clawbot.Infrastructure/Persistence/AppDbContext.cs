@@ -1,6 +1,5 @@
 using System.Reflection;
 using Clawbot.Application.Abstractions;
-using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
 using Clawbot.Domain.Analytics;
 using Clawbot.Domain.Channels;
@@ -64,7 +63,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     // Leads
     public DbSet<Lead> Leads => Set<Lead>();
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
-    public DbSet<LeadRevenue> LeadRevenues => Set<LeadRevenue>();
     public DbSet<LeadScoringRule> LeadScoringRules => Set<LeadScoringRule>();
     public DbSet<DripSequence> DripSequences => Set<DripSequence>();
     public DbSet<DripSequenceStep> DripSequenceSteps => Set<DripSequenceStep>();
@@ -119,16 +117,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<MetaAsset> MetaAssets => Set<MetaAsset>();
     public DbSet<MetaOAuthState> MetaOAuthStates => Set<MetaOAuthState>();
 
-    // Ads
-    public DbSet<AdsCampaign> AdsCampaigns => Set<AdsCampaign>();
-    public DbSet<AdsRule> AdsRules => Set<AdsRule>();
-    public DbSet<AdsAction> AdsActions => Set<AdsAction>();
-    public DbSet<AdsCreative> AdsCreatives => Set<AdsCreative>();
-    public DbSet<AdsMetricsDaily> AdsMetricsDailies => Set<AdsMetricsDaily>();
 
     // Analytics
     public DbSet<KpiDaily> KpiDailies => Set<KpiDaily>();
     public DbSet<KpiForecast> KpiForecasts => Set<KpiForecast>();
+    public DbSet<ReportArtifact> ReportArtifacts => Set<ReportArtifact>();
 
     // Experiments / A-B testing
     public DbSet<Experiment> Experiments => Set<Experiment>();

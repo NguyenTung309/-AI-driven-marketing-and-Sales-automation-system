@@ -133,8 +133,6 @@ export type LeadStageAction = "customer" | "lost" | "reopen";
 export interface UpdateLeadStagePayload {
   readonly stage: LeadStageAction;
   readonly reason?: string | null;
-  readonly amount?: number | null;
-  readonly currency?: string | null;
 }
 
 export interface LeadStageResponse {
@@ -142,50 +140,8 @@ export interface LeadStageResponse {
   readonly stage: LeadStage;
 }
 
-export type LeadRevenueSource = "manual" | "ai" | string;
-export type LeadRevenueStatus = "pending" | "approved" | "rejected" | string;
-
-export interface LeadRevenue {
-  readonly id: string;
-  readonly leadId: string;
-  readonly amount: number;
-  readonly currency: string;
-  readonly source: LeadRevenueSource;
-  readonly status: LeadRevenueStatus;
-  readonly evidence: string | null;
-  readonly proposedBy: string | null;
-  readonly decidedBy: string | null;
-  readonly createdAt: string;
-  readonly decidedAt: string | null;
-}
-
-export interface CreateLeadRevenuePayload {
-  readonly amount: number;
-  readonly currency?: string | null;
-}
-
-export interface DecideLeadRevenuePayload {
-  readonly action: "approve" | "reject";
-  readonly amount?: number | null;
-}
-
 export async function updateLeadStage(id: string, payload: UpdateLeadStagePayload): Promise<LeadStageResponse> {
   const res = await apiClient.put<LeadStageResponse>(`/api/leads/${id}/stage`, payload);
-  return res.data;
-}
-
-export async function listLeadRevenues(leadId: string): Promise<readonly LeadRevenue[]> {
-  const res = await apiClient.get<readonly LeadRevenue[]>(`/api/leads/${leadId}/revenues`);
-  return res.data;
-}
-
-export async function createLeadRevenue(leadId: string, payload: CreateLeadRevenuePayload): Promise<LeadRevenue> {
-  const res = await apiClient.post<LeadRevenue>(`/api/leads/${leadId}/revenues`, payload);
-  return res.data;
-}
-
-export async function decideLeadRevenue(revenueId: string, payload: DecideLeadRevenuePayload): Promise<LeadRevenue> {
-  const res = await apiClient.put<LeadRevenue>(`/api/leads/revenues/${revenueId}`, payload);
   return res.data;
 }
 

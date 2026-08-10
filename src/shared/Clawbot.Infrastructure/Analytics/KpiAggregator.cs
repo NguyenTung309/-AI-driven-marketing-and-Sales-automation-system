@@ -117,50 +117,6 @@ public sealed class KpiAggregator(AppDbContext db) : IKpiAggregator
             }
         }
 
-        var adSpend = await _db.AdsCampaigns.IgnoreQueryFilters()
-            .Join(
-                _db.AdsMetricsDailies.IgnoreQueryFilters().Where(m => m.TenantId == tenantId && m.MetricDate == metricDate),
-                c => c.Id,
-                m => m.CampaignId,
-                (c, m) => new { c.TenantId, c.Platform, m.Spend })
-            .Where(x => x.TenantId == tenantId && x.Spend != null)
-            .ToListAsync(ct).ConfigureAwait(false);
-
-        foreach (var spend in adSpend
-            .GroupBy(x => x.Platform, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new { Platform = g.Key, Spend = g.Sum(x => x.Spend) }))
-        {
-            var row = PlatformRow(spend.Platform);
-            row.AdSpend = (row.AdSpend ?? 0m) + spend.Spend;
-            aggregate.AdSpend = (aggregate.AdSpend ?? 0m) + spend.Spend;
-        }
-
-        // Doanh thu approved theo ngày decided_at (không phải created_at) — join lead để lấy source_platform.
-        var revenueQuery = _db.LeadRevenues.IgnoreQueryFilters()
-            .Where(r => r.TenantId == tenantId
-                && r.Status == LeadRevenue.StatusApproved
-                && r.DecidedAt != null);
-        if (!useClientDateFiltering)
-            revenueQuery = revenueQuery.Where(r => r.DecidedAt >= dayStart && r.DecidedAt < dayEnd);
-
-        var revenueRows = await revenueQuery
-            .Join(
-                _db.Leads.IgnoreQueryFilters().Where(l => l.TenantId == tenantId),
-                r => r.LeadId,
-                l => l.Id,
-                (r, l) => new { r.Amount, r.DecidedAt, Platform = l.SourcePlatform })
-            .ToListAsync(ct).ConfigureAwait(false);
-
-        foreach (var rev in revenueRows
-            .Where(r => !useClientDateFiltering || (r.DecidedAt >= dayStart && r.DecidedAt < dayEnd))
-            .GroupBy(r => string.IsNullOrWhiteSpace(r.Platform) ? "unknown" : r.Platform!, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new { Platform = g.Key, Amount = g.Sum(x => x.Amount) }))
-        {
-            var row = PlatformRow(rev.Platform);
-            row.Revenue = (row.Revenue ?? 0m) + rev.Amount;
-            aggregate.Revenue = (aggregate.Revenue ?? 0m) + rev.Amount;
-        }
-
         return rows.Values
             .OrderBy(r => SupportedPlatformIndex(r.Platform))
             .ThenBy(r => r.Platform, StringComparer.OrdinalIgnoreCase)
@@ -183,8 +139,6 @@ public sealed class KpiAggregator(AppDbContext db) : IKpiAggregator
         public int Replies { get; set; }
         public int Conversions { get; set; }
         public List<decimal> ResponseSeconds { get; } = [];
-        public decimal? AdSpend { get; set; }
-        public decimal? Revenue { get; set; }
 
         public KpiAggregateRow ToImmutable() =>
             new(
@@ -193,8 +147,6 @@ public sealed class KpiAggregator(AppDbContext db) : IKpiAggregator
                 Dms,
                 Replies,
                 Conversions,
-                ResponseSeconds.Count == 0 ? null : Math.Round(ResponseSeconds.Average(), 2),
-                AdSpend,
-                Revenue);
+                ResponseSeconds.Count == 0 ? null : Math.Round(ResponseSeconds.Average(), 2));
     }
 }

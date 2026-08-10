@@ -114,6 +114,10 @@ export async function getKbVersion(moduleId: string, versionId: string): Promise
   return response.data;
 }
 
+export async function deleteKbVersion(moduleId: string, versionId: string): Promise<void> {
+  await apiClient.delete(`/api/kb/modules/${moduleId}/versions/${versionId}`);
+}
+
 export async function createKbVersion(moduleId: string, contentMd: string): Promise<KbVersion> {
   const response = await apiClient.post<KbVersion>(`/api/kb/modules/${moduleId}/versions`, { contentMd });
   return response.data;

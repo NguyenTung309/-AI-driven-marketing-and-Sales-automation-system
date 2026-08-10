@@ -12,6 +12,7 @@ export const ConversationsPage = lazy(() => import("@/features/conversations/Con
 export const ContentWorkspacePage = lazy(() => import("@/features/content/ContentWorkspacePage"));
 export const DocumentsPage = lazy(() => import("@/features/documents/DocumentsPage"));
 export const AnalyticsReportsPage = lazy(() => import("@/features/analytics/AnalyticsReportsPage"));
+export const ReportDetailPage = lazy(() => import("@/features/reports/ReportDetailPage"));
 export const KnowledgeBasePage = lazy(() => import("@/features/kb/KnowledgeBasePage"));
 export const LeadsPage = lazy(() => import("@/features/leads/LeadsPage"));
 export const TaskLogsPage = lazy(() => import("@/features/logs/TaskLogsPage"));

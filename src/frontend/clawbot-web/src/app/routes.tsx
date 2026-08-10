@@ -18,6 +18,7 @@ import {
   PixelAgentsOfficePage,
   ProfilePage,
   PromptConfigurationPage,
+  ReportDetailPage,
   SupportFaqPage,
   TaskLogsPage,
   TokenManagementPage,
@@ -97,6 +98,15 @@ export const router = createBrowserRouter([
     element: (
       <RequireAuth>
         <AnalyticsReportsPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    // Link do report-agent trả về: /reports/{id} mở lại đúng bảng số liệu đã chốt.
+    path: "/reports/:reportId",
+    element: (
+      <RequireAuth>
+        <ReportDetailPage />
       </RequireAuth>
     ),
   },

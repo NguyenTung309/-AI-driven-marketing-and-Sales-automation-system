@@ -34,8 +34,6 @@ interface AggregateMetrics {
   readonly dms: number;
   readonly replies: number;
   readonly conversions: number;
-  readonly adSpend: number;
-  readonly revenue: number;
   readonly avgResponseTimeSec: number | null;
 }
 
@@ -81,9 +79,6 @@ function metricLabel(metric: string | null | undefined): string {
   if (value === "dms") return "Tin nhắn";
   if (value === "replies") return "Phản hồi";
   if (value === "conversions") return "Chuyển đổi";
-  if (value === "adspend") return "Chi phí quảng cáo";
-  if (value === "revenue") return "Doanh thu";
-  if (value === "cpl") return "Chi phí/lead";
   if (value === "avgresponsetimesec") return "Thời gian phản hồi";
   return metric || "Chỉ số";
 }
@@ -101,14 +96,6 @@ function platformIcon(platform: string): string {
 
 function formatNumber(value: number): string {
   return value.toLocaleString("vi-VN");
-}
-
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
 }
 
 // 4 chữ số thập phân: chi phí một agent/lượt gọi thường dưới $0.005, làm tròn 2 số sẽ hiện $0.00.
@@ -139,8 +126,6 @@ function aggregate(rows: readonly OmniChannelRow[]): AggregateMetrics {
     dms: rows.reduce((sum, row) => sum + row.dms, 0),
     replies: rows.reduce((sum, row) => sum + row.replies, 0),
     conversions: rows.reduce((sum, row) => sum + row.conversions, 0),
-    adSpend: rows.reduce((sum, row) => sum + (row.adSpend ?? 0), 0),
-    revenue: rows.reduce((sum, row) => sum + (row.revenue ?? 0), 0),
     avgResponseTimeSec: responseTimes.length
       ? responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length
       : null,
@@ -251,10 +236,6 @@ function ChannelKpiGrid({ rows }: { readonly rows: readonly OmniChannelRow[] }) 
                 <div className="flex justify-between gap-2">
                   <dt className="text-on-surface-variant">Phản hồi</dt>
                   <dd className="font-semibold text-secondary">{formatPct(rate(row?.replies ?? 0, row?.dms ?? 0))}</dd>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <dt className="text-on-surface-variant">Chi phí/lead</dt>
-                  <dd className="font-semibold text-secondary">{row?.cpl == null ? "—" : formatCurrency(row.cpl)}</dd>
                 </div>
               </dl>
             </article>
@@ -590,7 +571,7 @@ export default function AnalyticsReportsPage() {
   });
   const anomaliesQuery = useQuery({
     queryKey: ["analytics-report", "anomalies", platform],
-    queryFn: () => getAnomalies({ metric: "cpl", platform, lookbackDays: 14, zThreshold: 3 }),
+    queryFn: () => getAnomalies({ metric: "leads", platform, lookbackDays: 14, zThreshold: 3 }),
   });
   const exportMutation = useMutation({
     mutationFn: (format: ExportFormat) => downloadAnalyticsExport({ ...range, format }),
@@ -639,20 +620,6 @@ export default function AnalyticsReportsPage() {
       value: agg.avgResponseTimeSec == null ? "—" : `${agg.avgResponseTimeSec.toFixed(1)} giây`,
       meta: "Trung bình trong kỳ",
       tone: "success" as StatusTone,
-    },
-    {
-      icon: "payments",
-      label: "Chi phí quảng cáo",
-      value: formatCurrency(agg.adSpend),
-      meta: deltaText(deltaFor(deltas, "adSpend")),
-      tone: deltaTone(deltaFor(deltas, "adSpend"), false),
-    },
-    {
-      icon: "account_balance_wallet",
-      label: "Doanh thu",
-      value: formatCurrency(agg.revenue),
-      meta: deltaText(deltaFor(deltas, "revenue")),
-      tone: deltaTone(deltaFor(deltas, "revenue"), true),
     },
   ];
 
@@ -756,7 +723,6 @@ export default function AnalyticsReportsPage() {
           <section className="grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard icon="person_add" label="Lead" value={formatNumber(agg.leads)} meta={deltaText(deltaFor(deltas, "leads"))} tone={deltaTone(deltaFor(deltas, "leads"))} />
             <MetricCard icon="moving" label="Chuyển đổi" value={formatNumber(agg.conversions)} meta={formatPct(conversionRate)} tone="success" />
-            <MetricCard icon="paid" label="Chi phí/lead trung bình" value={agg.leads ? formatCurrency(agg.adSpend / agg.leads) : "—"} meta="chi phí / lead" tone="warning" />
             <MetricCard icon="forum" label="Tỷ lệ phản hồi" value={formatPct(replyRate)} meta="phản hồi / tin nhắn" tone="success" />
           </section>
           <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1fr)_380px]">

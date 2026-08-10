@@ -6,6 +6,7 @@ using Clawbot.Api.Auth;
 using Clawbot.Api.Background;
 using Clawbot.Api.Endpoints;
 using Clawbot.Api.Hubs;
+using Clawbot.Api.Health;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.Application;
@@ -24,6 +25,7 @@ using Hangfire;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 
@@ -50,6 +52,14 @@ builder.Services.AddClawbotRag(builder.Configuration);
 builder.Services.AddClawbotJobs(builder.Configuration);
 builder.Services.AddClawbotTelemetry(builder.Configuration, "clawbot-api");
 builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient();
+builder.Services.AddHealthChecks()
+    .AddCheck<SqlServerHealthCheck>("sqlserver", tags: ["ready"])
+    .AddCheck<RedisHealthCheck>("redis", tags: ["ready"])
+    .AddCheck<RabbitMqHealthCheck>("rabbitmq", tags: ["ready"])
+    .AddCheck<AgentServiceHealthCheck>("agentservice", tags: ["ready"])
+    .AddTypeActivatedCheck<HttpEndpointHealthCheck>("qdrant", HealthStatus.Unhealthy, ["ready"], "Qdrant:HealthUrl")
+    .AddTypeActivatedCheck<HttpEndpointHealthCheck>("minio", HealthStatus.Unhealthy, ["ready"], "Docs:Storage:Minio:HealthUrl");
 
 // jwt options - SigningKey/Issuer/Audience come from config (secret); the timing is forced
 // from AuthPolicy via PostConfigure so appsettings cannot drift it (SPEC-11).
@@ -60,8 +70,28 @@ builder.Services.PostConfigure<JwtOptions>(o =>
     o.ClockSkewSeconds = AuthPolicy.ClockSkewSeconds;
 });
 builder.Services.AddSingleton<JwtTokenIssuer>();
-
 var jwt = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
+if (string.IsNullOrWhiteSpace(jwt.SigningKey)
+    || Encoding.UTF8.GetByteCount(jwt.SigningKey) < AgentServiceAuthenticationOptions.MinimumSigningKeyBytes)
+{
+    throw new InvalidOperationException("jwt_signing_key_invalid");
+}
+
+var agentServiceAuthentication = builder.Configuration
+    .GetSection(AgentServiceAuthenticationOptions.SectionName)
+    .Get<AgentServiceAuthenticationOptions>() ?? new AgentServiceAuthenticationOptions();
+AgentServiceAuthenticationOptions.GetSigningKeyBytes(agentServiceAuthentication.SigningKey);
+AgentServiceAuthenticationOptions.EnsureDistinctFromPublicJwtKey(
+    agentServiceAuthentication.SigningKey,
+    jwt.SigningKey);
+if (agentServiceAuthentication.TokenLifetimeMinutes is < 1 or > 5)
+    throw new InvalidOperationException("agent_service_auth_token_lifetime_invalid");
+builder.Services.Configure<AgentServiceAuthenticationOptions>(
+    builder.Configuration.GetSection(AgentServiceAuthenticationOptions.SectionName));
+builder.Services.AddSingleton<AgentServiceTokenIssuer>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddTransient<OrchestratorServiceAuthInterceptor>();
+
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
@@ -122,8 +152,6 @@ builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jo
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentTrendScanJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentImagePromptJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.ContentRegenerateHookJobHandler>();
-builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.AdsEvaluateJobHandler>();
-builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.AdsLookalikeJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.KbClassifyUploadJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.OrchestrationPlanSuggestionsJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.SaleAssistDraftJobHandler>();
@@ -131,7 +159,6 @@ builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jo
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.SaleAssistUpsellJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.AgentSandboxJobHandler>();
 builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.LeadCreateWithSkillsJobHandler>();
-builder.Services.AddScoped<Clawbot.SharedKernel.Jobs.IJobHandler, Clawbot.Api.Jobs.LeadRevenueEstimateJobHandler>();
 // Relay notifications published on Redis by AgentService (run failed / pending approval) into NotificationHub.
 builder.Services.AddHostedService<Clawbot.Api.Hubs.RedisNotificationRelay>();
 // B5: cost summary cho điểm phê duyệt — cùng ledger với cost guard của orchestrator.
@@ -180,15 +207,25 @@ builder.Services.AddScoped<TenantBrandingService>();
 // Review-gate P1: tenant RequireContentReview flag — dùng bởi content endpoints + ContentPublishJob (Hangfire host này)
 builder.Services.AddScoped<Clawbot.SharedKernel.Content.IContentReviewPolicyResolver, Clawbot.Infrastructure.Agents.EfContentReviewPolicyResolver>();
 
-var agentServiceUrl = builder.Configuration["AgentService:Url"] ?? "http://localhost:15875";
+var agentServiceUrl = new Uri(
+    builder.Configuration["AgentService:Url"] ?? "http://localhost:15875");
+var agentServiceTls = builder.Configuration
+    .GetSection(AgentServiceTlsOptions.SectionName)
+    .Get<AgentServiceTlsOptions>() ?? new AgentServiceTlsOptions();
+AgentServiceTransportSecurity.ValidateConfiguration(
+    agentServiceUrl,
+    agentServiceTls,
+    builder.Environment.IsDevelopment(),
+    builder.Environment.IsProduction());
+var agentServiceGrpcHandlerFactory = new AgentServiceGrpcHandlerFactory(agentServiceTls);
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.SaleAssist.SaleAssistAgent.SaleAssistAgentClient>(o =>
 {
-    o.Address = new Uri(agentServiceUrl);
-});
+    o.Address = agentServiceUrl;
+}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create());
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Docs.DocsAgent.DocsAgentClient>(o =>
 {
-    o.Address = new Uri(agentServiceUrl);
-});
+    o.Address = agentServiceUrl;
+}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create());
 
 // SPEC-12: Demo mode services
 var demoOpts = builder.Configuration.GetSection(DemoOptions.Section).Get<DemoOptions>() ?? new DemoOptions();
@@ -209,28 +246,25 @@ if (demoOpts.Mode)
 // gRPC agent clients (shared by demo and production modes)
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Content.ContentAgent.ContentAgentClient>(o =>
 {
-    o.Address = new Uri(agentServiceUrl);
-});
+    o.Address = agentServiceUrl;
+}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create());
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Research.ResearchAgent.ResearchAgentClient>(o =>
 {
-    o.Address = new Uri(agentServiceUrl);
-});
-builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Ads.AdsAgent.AdsAgentClient>(o =>
-{
-    o.Address = new Uri(agentServiceUrl);
-});
+    o.Address = agentServiceUrl;
+}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create());
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Lead.LeadAgent.LeadAgentClient>(o =>
 {
-    o.Address = new Uri(agentServiceUrl);
-});
+    o.Address = agentServiceUrl;
+}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create());
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Report.ReportAgent.ReportAgentClient>(o =>
 {
-    o.Address = new Uri(agentServiceUrl);
-});
+    o.Address = agentServiceUrl;
+}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create());
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Orchestrator.Orchestrator.OrchestratorClient>(o =>
 {
-    o.Address = new Uri(agentServiceUrl);
-});
+    o.Address = agentServiceUrl;
+})
+    .ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<OrchestratorServiceAuthInterceptor>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -299,6 +333,9 @@ app.UseSerilogRequestLogging(options =>
 {
     options.GetLevel = (httpContext, elapsed, ex) =>
     {
+        // Khách tự hủy request không phải lỗi phía server — xem GlobalExceptionHandler (trả 499).
+        if (httpContext.RequestAborted.IsCancellationRequested)
+            return Serilog.Events.LogEventLevel.Information;
         if (ex is not null || httpContext.Response.StatusCode >= 500)
             return Serilog.Events.LogEventLevel.Error;
         if (httpContext.Response.StatusCode >= 400)
@@ -363,8 +400,8 @@ app.MapInboxNotes();
 app.MapInboxLabels();
 app.MapSaleAssist();
 app.MapContent();
-app.MapAds();
 app.MapAnalytics();
+app.MapReports();
 app.MapExperiments();
 app.MapTokens();
 app.MapLogs();
@@ -412,6 +449,7 @@ GlobalJobFilters.Filters.Add(new Clawbot.Infrastructure.Jobs.JobFailureNotificat
 HangfireModule.ScheduleClawbotJobs(app.Services);
 
 await RbacSeeder.SeedAsync(app.Services).ConfigureAwait(false);
+await InitialAdminBootstrapper.EnsureAsync(app.Services, builder.Configuration).ConfigureAwait(false);
 
 // One-off: re-encrypt legacy plaintext inbox tokens (rows written before encrypt-at-write)
 await Clawbot.Infrastructure.Channels.Pancake.InboxTokenEncryptionMigrator.EncryptLegacyTokensAsync(app.Services).ConfigureAwait(false);

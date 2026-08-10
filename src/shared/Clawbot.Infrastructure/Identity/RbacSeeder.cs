@@ -49,8 +49,6 @@ public static partial class RbacSeeder
         // Marketer may approve/reject; only Admin may retry/reconcile publish attempts.
         ("content:approve", [Admin, Marketer]),
         ("content:publish", [Admin]),
-        ("ads:read", [Admin, Marketer, QA, Viewer]),
-        ("ads:write", [Admin, Marketer]),
         ("analytics:read", All),
         ("kb:read", All),
         ("kb:write", [Admin, SalesLead, Marketer, QA]),
@@ -86,7 +84,6 @@ public static partial class RbacSeeder
         ("research-agent", "Agent-Research", "research"),
         ("docs-agent", "Agent-Docs", "docs"),
         ("report-agent", "Agent-Report", "report"),
-        ("ads-agent", "Agent-Ads", "ads"),
         // Review-gate Phase 0: reviewer needs an AgentConfig row so it auto-binds to the tenant's LLM
         // config here (like every other agent) — AgentDefinitionCatalog hides unbound agents, which made
         // the reviewer invisible in prod (dev worked only via DemoLlmConfigSeeder).
@@ -103,7 +100,6 @@ public static partial class RbacSeeder
             "lead.read", "lead.write",
             "content.read", "content.write", "content.approve",
             "docs.generate",
-            "ads.read", "ads.manage",
             "analytics.read",
             "admin.system", "admin.audit", "system.logs",
         ],
@@ -126,7 +122,6 @@ public static partial class RbacSeeder
         [Marketer] =
         [
             "content.read", "content.write", "content.approve",
-            "ads.read", "ads.manage",
             "analytics.read",
         ],
         [QA] =
@@ -384,7 +379,6 @@ public static partial class RbacSeeder
         "research-agent" => "{\"orchestration\":{\"description\":\"Research markets, competitors, and keyword topics.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"geo\\\":\\\"string\\\",\\\"keywords\\\":\\\"array\\\"}\",\"orchestratable\":true}}",
         "docs-agent" => "{\"orchestration\":{\"description\":\"Render templated documents with tenant branding.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"template_code\\\":\\\"string\\\",\\\"template_body\\\":\\\"string\\\"}\",\"orchestratable\":true}}",
         "report-agent" => "{\"orchestration\":{\"description\":\"Build tenant analytics and performance reports.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"report_type\\\":\\\"string\\\"}\",\"orchestratable\":true}}",
-        "ads-agent" => "{\"orchestration\":{\"description\":\"Apply ad actions, build lookalikes, or remarketing audiences.\",\"inputSchema\":\"{\\\"platform\\\":\\\"string\\\",\\\"operation\\\":\\\"apply|lookalike|remarketing\\\"}\",\"orchestratable\":true}}",
         _ => "{\"orchestration\":{\"description\":\"Run agent task.\",\"inputSchema\":\"{}\",\"orchestratable\":true}}",
     };
 

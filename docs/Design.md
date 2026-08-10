@@ -170,9 +170,6 @@
 ### Competitors — `/api/competitors` (Research-2)
 `GET /sources` (perm `content.read`) · `POST /sources` (perm `content.write`, max 20/tenant, body `{name,url,sourceType?}`) · `PUT\|DELETE /sources/{id}` · `GET /posts?sourceId=&take=` → `[{id,sourceId,url,title,snippet,publishedAt,detectedAt}]`. Quét tự động hàng ngày 06:00 VN (CompetitorScanJob) → notification `competitor` khi có bài mới.
 
-### Ads — `/api/ads`
-`GET\|POST /rules` · `PUT\|DELETE /rules/{id}` · `GET /campaigns` · `PUT /campaigns/{id}/target-cpl` · `GET /actions` · `POST /campaigns/{id}/evaluate` · `POST /lookalike`
-
 ### Channels — `/api/channels/pancake`
 `GET\|PUT\|DELETE /config` · `GET /webhook-url`
 
@@ -180,7 +177,7 @@
 - **`/api/admin/users`** (perm `admin.system`): `GET` list · `POST` create · `PUT /{id}` · `POST /{id}/enable\|disable` · `POST /{id}/reset-password` (tenant-scoped).
 - **`/api/admin/tenant/branding`** (perm `admin.system`): `GET` current tenant brand defaults · `PUT` update `brandName`, `logoUrl`, `primaryColor`, `accentColor`, `supportName`, `widgetGreeting`.
 - **`/api/profile`**: `GET` · `PUT` (displayName/phone/dateOfBirth) · `POST /avatar` (multipart ≤2MB image, IDocumentStorage) · `GET /login-history`.
-- **`/api/notifications`**: `GET` (paged + `?unread=`) · `GET /unread-count` · `POST /{id}/read` · `POST /read-all`. SignalR `NotificationHub` `/hubs/notifications`. Types: `hot_lead`·`idle`·`idle_escalation`·`ads_budget`·`competitor`·`anomaly`·`system`.
+- **`/api/notifications`**: `GET` (paged + `?unread=`) · `GET /unread-count` · `POST /{id}/read` · `POST /read-all`. SignalR `NotificationHub` `/hubs/notifications`. Types: `hot_lead`·`idle`·`idle_escalation`·`competitor`·`anomaly`·`system`.
 - **`/api/agents`** (M25): `GET` list (status/last-run) · `POST /{code}/enable\|disable` · `GET\|PUT /{code}/settings` (model/provider/systemPrompt/skills/KB modules) · `POST /{code}/sandbox` (creates `AgentSession` + `AgentTrace`) · `GET /{code}/traces`.
 - **`/api/tokens`**: `GET /usage` aggregates `ClaudeCostLedger` by agent/model and returns quota burn-down; `PUT /settings` saves per-agent monthly quota, warning percent, router tier, and in-app low-balance alert settings via `AgentConfig.ConfigJson`.
 - **`/api/logs`**: `GET /task-runs` returns paged agent session history + trace/token/audit stats; `GET /task-runs/{sessionId}` returns ordered trace detail + related audit events; `GET /audit` returns tenant-scoped audit log for the `/logs` surface.

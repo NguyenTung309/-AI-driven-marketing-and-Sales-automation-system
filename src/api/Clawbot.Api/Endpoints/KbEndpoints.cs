@@ -42,6 +42,7 @@ public static class KbEndpoints
             .RequireRateLimiting(RateLimitingExtensions.UploadPolicy)
             .DisableAntiforgery();
         modules.MapGet("/{id:guid}/versions/{versionId:guid}", GetVersionDetailAsync).RequirePermission("kb:read");
+        modules.MapDelete("/{id:guid}/versions/{versionId:guid}", DeleteVersionAsync).RequirePermission("kb:write");
         modules.MapPost("/{id:guid}/versions/{versionId:guid}/deploy", DeployVersionAsync).RequirePermission("kb:write");
         modules.MapPost("/{id:guid}/versions/{versionId:guid}/rollback", RollbackToVersionAsync).RequirePermission("kb:write");
         modules.MapGet("/{id:guid}/diff", DiffVersionsAsync).RequirePermission("kb:read");
@@ -527,6 +528,67 @@ public static class KbEndpoints
             select new KbVersionDetailDto(v.Id, v.KbModuleId, v.Version, v.Status, v.ContentMd,
                 v.AccuracyScore, v.DeployedAt, v.CreatedAt)).FirstOrDefaultAsync(ct);
         return version is null ? Results.NotFound() : Results.Ok(version);
+    }
+
+    private static async Task<IResult> DeleteVersionAsync(
+        Guid id,
+        Guid versionId,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        KbDeployService deployService,
+        bool includeRollbackTarget,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var module = await db.KbModules
+            .FirstOrDefaultAsync(item => item.Id == id && item.TenantId == tenantId && item.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (module is null) return Results.NotFound();
+
+        var version = await db.KbVersions
+            .FirstOrDefaultAsync(item => item.Id == versionId && item.KbModuleId == id, ct)
+            .ConfigureAwait(false);
+        if (version is null) return Results.NotFound();
+        if (string.Equals(version.Status, "deployed", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Conflict(new
+            {
+                errorCode = "kb.version_deployed_not_deletable",
+                message = "Không xóa được bản đang phát hành.",
+            });
+        }
+
+        var usedByExperiment = await db.ExperimentVariants
+            .AnyAsync(item => item.KbVersionId == versionId, ct)
+            .ConfigureAwait(false);
+        if (usedByExperiment)
+        {
+            return Results.Conflict(new
+            {
+                errorCode = "kb.version_in_experiment",
+                message = "Không xóa được bản đang được dùng trong thí nghiệm.",
+            });
+        }
+
+        var rollbackTargetId = await db.KbVersions
+            .Where(item => item.KbModuleId == id && item.Status == "archived")
+            .OrderByDescending(item => item.Version)
+            .Select(item => (Guid?)item.Id)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (!includeRollbackTarget && rollbackTargetId == version.Id)
+        {
+            return Results.Conflict(new
+            {
+                errorCode = "kb.rollback_target_not_deletable",
+                message = "Không xóa được bản lưu gần nhất để khôi phục. Hãy giữ lại bản này hoặc xác nhận xóa bản khôi phục.",
+            });
+        }
+
+        await deployService.DeleteVectorsAsync(version, tenantId, ct).ConfigureAwait(false);
+        db.KbVersions.Remove(version);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return Results.NoContent();
     }
 
     // Phát hành chạy ngầm qua job platform (KbDeployJobHandler): KB lớn + embedding thật là hàng chục

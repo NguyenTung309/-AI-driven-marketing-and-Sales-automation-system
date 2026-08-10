@@ -2,6 +2,8 @@ param(
     [switch]$Strict,
     [switch]$ReportOnly,
     [switch]$SkipDockerProbe,
+    [switch]$AgentServiceAuthenticationOnly,
+    [string[]]$EnvironmentFile = @(),
     [string]$KbAuthoringPath = "deploy/seed/kb-authoring.json",
     [string]$RequiredManifest = "deploy/seed/kb-authoring.required.json"
 )
@@ -35,6 +37,47 @@ function Get-EnvValue {
     param([Parameter(Mandatory = $true)][string]$Name)
 
     return [Environment]::GetEnvironmentVariable($Name, "Process")
+}
+
+function Import-EnvironmentFiles {
+    param([Parameter(Mandatory = $true)][string[]]$Paths)
+
+    $importedNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($path in $Paths) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Environment file is missing."
+        }
+
+        foreach ($line in [System.IO.File]::ReadLines($path)) {
+            if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith("#")) {
+                continue
+            }
+
+            $separator = $line.IndexOf("=")
+            if ($separator -le 0) {
+                throw "Environment file contains an invalid entry."
+            }
+
+            $name = $line.Substring(0, $separator)
+            if ($name -notmatch "^[A-Za-z_][A-Za-z0-9_]*$" -or -not $importedNames.Add($name)) {
+                throw "Environment file contains an invalid or duplicate entry."
+            }
+
+            $value = $line.Substring($separator + 1)
+            if ($value -match "^(?<quote>[`"'])(?<content>.*)\k<quote>(?:\s+#.*)?$") {
+                $value = $Matches.content
+            }
+            elseif ($value -match "^(.*?)\s+#") {
+                $value = $Matches[1].TrimEnd()
+            }
+
+            [Environment]::SetEnvironmentVariable($name, $value, "Process")
+        }
+    }
+}
+
+if ($EnvironmentFile.Count -gt 0) {
+    Import-EnvironmentFiles -Paths $EnvironmentFile
 }
 
 function Get-EnvMatch {
@@ -152,17 +195,177 @@ function Test-LlmReadiness {
 
 function Test-VendorReadiness {
     # Meta App credentials are tenant-managed in the encrypted admin UI; env values are optional bootstrap fallback.
-    Test-RequiredEnv -Name "TIKTOK_ACCESS_TOKEN" -Purpose "TikTok Business API access token" -Aliases @("Ads__TikTok__AccessToken")
-    Test-RequiredEnv -Name "TIKTOK_ADVERTISER_ID" -Purpose "TikTok advertiser id for ads/lookalike verification" -Aliases @("Ads__TikTok__AdvertiserId")
     Test-RequiredEnv -Name "CONTENT_PUBLISHER_BASE_URL" -Purpose "native or brokered content publisher API base URL" -Aliases @("Content__Publisher__Endpoint")
     Test-RequiredEnv -Name "CONTENT_PUBLISHER_API_KEY" -Purpose "content publisher API key" -Aliases @("Content__Publisher__Token")
 }
 
-Test-DockerReadiness
-Test-KbAuthoringReadiness
-Test-PancakeReadiness
-Test-LlmReadiness
-Test-VendorReadiness
+function Test-AgentServiceAuthenticationReadiness {
+    if ($PSVersionTable.PSEdition -ne "Core" -or $PSVersionTable.PSVersion -lt [Version]"7.2") {
+        Add-Check "PowerShell" "FAIL" "AgentService TLS readiness requires PowerShell 7.2 or later."
+        return
+    }
+
+    Add-Check "PowerShell" "PASS" "PowerShell runtime supports the AgentService TLS readiness checks."
+    Test-RequiredEnv -Name "JWT_SIGNING_KEY" -Purpose "public API JWT signing key"
+    Test-RequiredEnv -Name "AGENT_SERVICE_AUTH_SIGNING_KEY" -Purpose "dedicated API-to-AgentService signing key"
+    Test-RequiredEnv -Name "AGENT_SERVICE_TLS_CERTIFICATE_PATH" -Purpose "AgentService gRPC TLS certificate path"
+    Test-RequiredEnv -Name "AGENT_SERVICE_TLS_CA_CERTIFICATE_PATH" -Purpose "trusted AgentService gRPC CA certificate path"
+    Test-RequiredEnv -Name "AGENT_SERVICE_TLS_CERTIFICATE_PASSWORD" -Purpose "AgentService gRPC TLS certificate password"
+
+    $agentServiceKey = Get-EnvValue "AGENT_SERVICE_AUTH_SIGNING_KEY"
+    if ([string]::IsNullOrWhiteSpace($agentServiceKey)) {
+        return
+    }
+
+    $agentServiceKeyBytes = $null
+    try {
+        $agentServiceKeyBytes = [Convert]::FromBase64String($agentServiceKey.Trim())
+        if ($agentServiceKeyBytes.Length -lt 32) {
+            Add-Check "AGENT_SERVICE_AUTH_SIGNING_KEY_FORMAT" "FAIL" "Dedicated AgentService signing key must decode from Base64 to at least 32 bytes."
+        }
+        else {
+            Add-Check "AGENT_SERVICE_AUTH_SIGNING_KEY_FORMAT" "PASS" "Dedicated AgentService signing key has a valid Base64 length."
+        }
+    }
+    catch {
+        Add-Check "AGENT_SERVICE_AUTH_SIGNING_KEY_FORMAT" "FAIL" "Dedicated AgentService signing key must be Base64 encoded."
+    }
+
+    $publicJwtKey = Get-EnvValue "JWT_SIGNING_KEY"
+    if (-not [string]::IsNullOrWhiteSpace($publicJwtKey)) {
+        $publicJwtKeyBytes = [System.Text.Encoding]::UTF8.GetBytes($publicJwtKey)
+        if ($publicJwtKeyBytes.Length -lt 32) {
+            Add-Check "JWT_SIGNING_KEY_FORMAT" "FAIL" "Public API JWT signing key must contain at least 32 UTF-8 bytes."
+        }
+        else {
+            Add-Check "JWT_SIGNING_KEY_FORMAT" "PASS" "Public API JWT signing key has a valid length."
+        }
+
+        if ($null -ne $agentServiceKeyBytes -and [System.Security.Cryptography.CryptographicOperations]::FixedTimeEquals($agentServiceKeyBytes, $publicJwtKeyBytes)) {
+            Add-Check "AGENT_SERVICE_AUTH_SIGNING_KEY_DISTINCT" "FAIL" "Dedicated AgentService signing key must not reuse the public API JWT signing key material."
+        }
+        else {
+            Add-Check "AGENT_SERVICE_AUTH_SIGNING_KEY_DISTINCT" "PASS" "Dedicated AgentService signing key is distinct from the public API JWT signing key material."
+        }
+    }
+
+    $certificatePath = Get-EnvValue "AGENT_SERVICE_TLS_CERTIFICATE_PATH"
+    $certificatePassword = Get-EnvValue "AGENT_SERVICE_TLS_CERTIFICATE_PASSWORD"
+    $caCertificatePath = Get-EnvValue "AGENT_SERVICE_TLS_CA_CERTIFICATE_PATH"
+    if ([string]::IsNullOrWhiteSpace($certificatePath) -or [string]::IsNullOrWhiteSpace($certificatePassword) -or [string]::IsNullOrWhiteSpace($caCertificatePath)) {
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $certificatePath -PathType Leaf)) {
+        Add-Check "AGENT_SERVICE_TLS_CERTIFICATE" "FAIL" "AgentService gRPC PFX certificate path is not a readable file."
+        return
+    }
+    if (-not (Test-Path -LiteralPath $caCertificatePath -PathType Leaf)) {
+        Add-Check "AGENT_SERVICE_TLS_CA_CERTIFICATE" "FAIL" "AgentService gRPC CA certificate path is not a readable file."
+        return
+    }
+
+    $pfxCertificates = $null
+    $serverCertificate = $null
+    $caCertificate = $null
+    try {
+        $pfxCertificates = [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new()
+        $pfxCertificates.Import(
+            $certificatePath,
+            $certificatePassword,
+            [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
+        $serverCertificates = @($pfxCertificates | Where-Object HasPrivateKey)
+        if ($serverCertificates.Count -ne 1) {
+            Add-Check "AGENT_SERVICE_TLS_PRIVATE_KEY" "FAIL" "AgentService gRPC PFX must contain exactly one certificate with a private key."
+            return
+        }
+
+        $serverCertificate = $serverCertificates[0]
+
+        $privateKey = $null
+        try {
+            $privateKey = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($serverCertificate)
+            if ($null -ne $privateKey) {
+                [void]$privateKey.SignData(
+                    [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32),
+                    [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+                    [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+            }
+            else {
+                $privateKey = [System.Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::GetECDsaPrivateKey($serverCertificate)
+                if ($null -eq $privateKey) {
+                    Add-Check "AGENT_SERVICE_TLS_PRIVATE_KEY" "FAIL" "AgentService gRPC PFX private key is not RSA or ECDSA."
+                    return
+                }
+
+                [void]$privateKey.SignData(
+                    [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32),
+                    [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+            }
+        }
+        finally {
+            if ($null -ne $privateKey) { $privateKey.Dispose() }
+        }
+
+        Add-Check "AGENT_SERVICE_TLS_PRIVATE_KEY" "PASS" "AgentService gRPC PFX private key is available to the deploy identity."
+        $caCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPem(
+            [System.IO.File]::ReadAllText($caCertificatePath))
+        $now = [DateTime]::UtcNow
+        if ($serverCertificate.NotBefore.ToUniversalTime() -gt $now -or $serverCertificate.NotAfter.ToUniversalTime() -le $now) {
+            Add-Check "AGENT_SERVICE_TLS_VALIDITY" "FAIL" "AgentService gRPC certificate is not currently valid."
+            return
+        }
+        if ($serverCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::DnsName, $false) -ine "agentservice") {
+            Add-Check "AGENT_SERVICE_TLS_HOSTNAME" "FAIL" "AgentService gRPC certificate must identify DNS name agentservice."
+            return
+        }
+
+        $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+        try {
+            $chain.ChainPolicy.TrustMode = [System.Security.Cryptography.X509Certificates.X509ChainTrustMode]::CustomRootTrust
+            [void]$chain.ChainPolicy.CustomTrustStore.Add($caCertificate)
+            [void]$chain.ChainPolicy.ApplicationPolicy.Add([System.Security.Cryptography.Oid]::new("1.3.6.1.5.5.7.3.1"))
+            $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+            foreach ($certificate in $pfxCertificates) {
+                if ($certificate.Thumbprint -ne $serverCertificate.Thumbprint -and $certificate.Thumbprint -ne $caCertificate.Thumbprint) {
+                    [void]$chain.ChainPolicy.ExtraStore.Add($certificate)
+                }
+            }
+
+            if (-not $chain.Build($serverCertificate)) {
+                Add-Check "AGENT_SERVICE_TLS_CHAIN" "FAIL" "AgentService gRPC certificate does not validate to the configured CA for TLS server authentication."
+                return
+            }
+        }
+        finally {
+            $chain.Dispose()
+        }
+
+        Add-Check "AGENT_SERVICE_TLS_CERTIFICATE" "PASS" "AgentService gRPC certificate, hostname, CA chain, validity, and server-auth usage are valid."
+    }
+    catch {
+        Add-Check "AGENT_SERVICE_TLS_CERTIFICATE" "FAIL" "AgentService gRPC certificate or CA could not be loaded and validated."
+    }
+    finally {
+        if ($null -ne $pfxCertificates) {
+            foreach ($certificate in $pfxCertificates) { $certificate.Dispose() }
+        }
+
+        if ($null -ne $caCertificate) { $caCertificate.Dispose() }
+    }
+}
+
+if ($AgentServiceAuthenticationOnly) {
+    Test-AgentServiceAuthenticationReadiness
+}
+else {
+    Test-DockerReadiness
+    Test-KbAuthoringReadiness
+    Test-PancakeReadiness
+    Test-LlmReadiness
+    Test-VendorReadiness
+    Test-AgentServiceAuthenticationReadiness
+}
 
 $checks | Sort-Object Status, Name | Format-Table -AutoSize
 
