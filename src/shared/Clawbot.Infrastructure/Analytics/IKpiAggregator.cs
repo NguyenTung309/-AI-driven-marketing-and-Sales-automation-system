@@ -5,6 +5,7 @@ public sealed record KpiAggregateRow(
     int Leads,
     int Dms,
     int Replies,
+    int RepliedDms,
     int Conversions,
     decimal? AvgResponseTimeSec);
 

@@ -21,6 +21,11 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Configuration.AddJsonFile(
+    $"appsettings.{builder.Environment.EnvironmentName}.Local.json",
+    optional: true,
+    reloadOnChange: true);
+
 // Console + file log (logs/agent-*.log): loi runtime (auto-reply 9112, channel send...) phai doc lai duoc
 // sau khi cua so console dong — dong bo cach cau hinh voi Clawbot.Api.
 // SystemLogs sink: Warning+ → dbo.system_logs (admin "Lỗi hệ thống" tab).
@@ -199,7 +204,9 @@ builder.Services.AddSingleton<Clawbot.Agents.Core.Chat.IAgentToggleGate, Clawbot
 // Persist + publish to Redis so the API-side relay pushes realtime through NotificationHub
 // (run failed / pending approval reach the bell + toast without F5).
 builder.Services.AddSingleton<Clawbot.SharedKernel.Notifications.INotificationPublisher, Clawbot.Infrastructure.Notifications.RedisBridgeNotificationPublisher>();
-builder.Services.TryAddSingleton<Clawbot.SharedKernel.Inbox.IInboxNotifier, Clawbot.Infrastructure.Notifications.NoopInboxNotifier>();
+// Inbox events (message/typing/conversation) bridge qua Redis để API relay đẩy vào InboxHub —
+// consumer ChannelInboundMessageReceived là competing consumer, có thể chạy ở host này.
+builder.Services.AddSingleton<Clawbot.SharedKernel.Inbox.IInboxNotifier, Clawbot.Infrastructure.Notifications.RedisBridgeInboxNotifier>();
 builder.Services.AddClawbotRag(builder.Configuration);
 builder.Services.AddClawbotChat(builder.Configuration, builder.Environment);
 builder.Services.AddClawbotContent(builder.Configuration);

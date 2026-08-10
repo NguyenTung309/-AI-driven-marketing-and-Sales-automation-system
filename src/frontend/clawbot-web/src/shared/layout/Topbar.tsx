@@ -6,7 +6,8 @@ import { getUnreadNotificationCount, markNotificationRead, type AppNotification 
 import { listJobs } from "@/shared/api/jobs";
 import { useAuthStore } from "@/shared/auth/authStore";
 import { useNotificationsRealtime } from "@/features/notifications/useNotificationsRealtime";
-import { NAV_ITEMS, NAV_SYSTEM, type NavItem } from "./nav";
+import { useVisibleNav } from "@/shared/auth/access";
+import { type NavItem } from "./nav";
 
 export interface TopbarProps {
   readonly title?: string;
@@ -31,6 +32,7 @@ function MobileNavItem({ item }: { readonly item: NavItem }) {
 export function Topbar({ title }: TopbarProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { items: navItems, system: navSystem } = useVisibleNav();
   const clearAuth = useAuthStore((state) => state.clear);
   const hasAuth = useAuthStore((state) => Boolean(state.accessToken));
   // SPEC-16 P3-5: transient toast for new notifications (auto-dismiss after 5s) so the user sees them on any page.
@@ -111,12 +113,14 @@ export function Topbar({ title }: TopbarProps) {
             <div className="px-3 py-2">
               <p className="text-label-caps text-on-surface-variant">Học Bá AI</p>
             </div>
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <MobileNavItem key={item.to} item={item} />
             ))}
-            <div className="mt-2 border-t border-outline pt-2">
-              <MobileNavItem item={NAV_SYSTEM} />
-            </div>
+            {navSystem && (
+              <div className="mt-2 border-t border-outline pt-2">
+                <MobileNavItem item={navSystem} />
+              </div>
+            )}
           </div>
         </details>
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as signalR from "@microsoft/signalr";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { getRealtimeAccessToken } from "@/shared/api/client";
@@ -11,7 +11,11 @@ import type {
   InboxMessage,
   InboxMessageEvent,
   InboxMessageStatusEvent,
+  InboxTypingEvent,
 } from "@/shared/api/inbox";
+
+// Phòng mất frame typing:false (relay/Redis rớt): gRPC auto-reply deadline 100s + margin.
+const TYPING_EXPIRE_MS = 120_000;
 
 type ConversationListCache =
   | InfiniteData<ConversationCursorPage | ConversationListResponse>
@@ -75,6 +79,23 @@ function toSyntheticMessage(evt: InboxMessageEvent): InboxMessage {
 export function useInboxRealtime(enabled: boolean) {
   const queryClient = useQueryClient();
   const [state, setState] = useState<ConnectionState>("connecting");
+  // Hội thoại đang có AI soạn phản hồi — FE hiện bong bóng "AI đang soạn..." theo set này.
+  const [typingConversationIds, setTypingConversationIds] = useState<ReadonlySet<string>>(() => new Set());
+  const typingTimersRef = useRef<Map<string, number>>(new Map());
+
+  const clearTyping = useCallback((conversationId: string) => {
+    const timer = typingTimersRef.current.get(conversationId);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      typingTimersRef.current.delete(conversationId);
+    }
+    setTypingConversationIds((current) => {
+      if (!current.has(conversationId)) return current;
+      const next = new Set(current);
+      next.delete(conversationId);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (!enabled) return;
@@ -91,7 +112,29 @@ export function useInboxRealtime(enabled: boolean) {
       .withAutomaticReconnect()
       .build();
 
+    connection.on("typing", (evt: InboxTypingEvent) => {
+      if (disposed) return;
+      if (!evt.isTyping) {
+        clearTyping(evt.conversationId);
+        return;
+      }
+      const existing = typingTimersRef.current.get(evt.conversationId);
+      if (existing !== undefined) window.clearTimeout(existing);
+      typingTimersRef.current.set(
+        evt.conversationId,
+        window.setTimeout(() => clearTyping(evt.conversationId), TYPING_EXPIRE_MS),
+      );
+      setTypingConversationIds((current) => {
+        if (current.has(evt.conversationId)) return current;
+        const next = new Set(current);
+        next.add(evt.conversationId);
+        return next;
+      });
+    });
+
     connection.on("message", (evt: InboxMessageEvent) => {
+      // Tin mới về (kể cả tin AI) ⇒ AI đã soạn xong — dự phòng khi frame typing:false thất lạc.
+      clearTyping(evt.conversationId);
       if (evt.isSynthetic) {
         const syntheticMessage = toSyntheticMessage(evt);
         queryClient.setQueryData<ConversationDetail>(["inbox", "conversation", evt.conversationId], (old) => {
@@ -130,6 +173,7 @@ export function useInboxRealtime(enabled: boolean) {
     });
 
     connection.on("conversation", (evt: InboxConversationEvent) => {
+      clearTyping(evt.conversationId);
       void queryClient.invalidateQueries({
         queryKey: ["inbox", "conversation", evt.conversationId],
         exact: true,
@@ -154,11 +198,15 @@ export function useInboxRealtime(enabled: boolean) {
       .then(() => setConnectionState("connected"))
       .catch(() => setConnectionState("error"));
 
+    const timers = typingTimersRef.current;
     return () => {
       disposed = true;
+      for (const timer of timers.values()) window.clearTimeout(timer);
+      timers.clear();
+      setTypingConversationIds(new Set());
       void connection.stop();
     };
-  }, [enabled, queryClient]);
+  }, [enabled, queryClient, clearTyping]);
 
-  return enabled ? state : "disabled";
+  return { state: enabled ? state : ("disabled" as ConnectionState), typingConversationIds };
 }

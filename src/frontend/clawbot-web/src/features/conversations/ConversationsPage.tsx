@@ -6,7 +6,6 @@ import { AxiosError } from "axios";
 import { AppShell } from "@/shared/layout/AppShell";
 import {
   Alert,
-  Button,
   Card,
   InfiniteScrollSentinel,
   Input,
@@ -18,14 +17,12 @@ import { platformClasses } from "@/shared/theme/colors";
 import { getMe } from "@/shared/api/auth";
 import {
   approveConversationDraft,
-  escalateConversation,
   getConversation,
   listConversations,
   listChannels,
   regenerateAiReply,
   rejectConversationDraft,
   retryConversationMessage,
-  resolveConversation,
   sendConversationMessage,
   setConversationAi,
   type ConversationCursorPage,
@@ -456,6 +453,30 @@ interface ChatPanelProps {
   readonly regenerating: boolean;
   readonly onOpenContext?: () => void;
   readonly contextOpen?: boolean;
+  readonly isAiTyping: boolean;
+}
+
+// Bong bóng "AI đang soạn phản hồi" — hiện khi nhận event typing từ InboxHub, tự ẩn khi tin AI về.
+function AiTypingIndicator() {
+  return (
+    <div className="flex items-center gap-2 text-on-surface-variant">
+      <div className="flex size-6 items-center justify-center rounded-full bg-primary-fixed text-primary-container">
+        <span aria-hidden="true" className="material-symbols-outlined text-[14px]">smart_toy</span>
+      </div>
+      <div className="flex items-center gap-2 rounded-lg rounded-tl-sm border border-outline-variant/30 bg-surface-container p-2">
+        <span className="text-label-sm italic text-on-surface-variant">AI đang soạn phản hồi</span>
+        <div className="flex items-center gap-1">
+          {[0, 1, 2].map((item) => (
+            <span
+              className="size-1.5 animate-pulse rounded-full bg-primary-container"
+              key={item}
+              style={{ animationDelay: `${item * 130}ms` }}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ChatPanel({
@@ -478,6 +499,7 @@ function ChatPanel({
   regenerating,
   onOpenContext,
   contextOpen,
+  isAiTyping,
 }: ChatPanelProps) {
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const conversationId = conversation?.id ?? null;
@@ -489,13 +511,14 @@ function ChatPanel({
     if (el) el.scrollTop = el.scrollHeight;
   }, [conversationId]);
 
-  // Tin moi den: chi keo xuong khi dang o gan day, khong giat khi dang doc lich su
+  // Tin moi den (hoac bong bong AI typing hien ra): chi keo xuong khi dang o gan day,
+  // khong giat khi dang doc lich su
   useEffect(() => {
     const el = messagesRef.current;
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 240;
     if (nearBottom) el.scrollTop = el.scrollHeight;
-  }, [messageCount]);
+  }, [messageCount, isAiTyping]);
 
   if (isLoading) {
     return (
@@ -634,6 +657,7 @@ function ChatPanel({
             )
           )
         )}
+        {isAiTyping ? <AiTypingIndicator /> : null}
       </div>
 
       <footer className="shrink-0 border-t border-outline bg-white p-2 sm:p-3">
@@ -658,7 +682,11 @@ function ChatPanel({
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) onSubmit();
+              // Enter = gửi (trừ khi đang gõ IME); Shift+Enter = xuống dòng.
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                onSubmit();
+              }
             }}
             rows={1}
             className="max-h-32 min-h-[36px] flex-1 resize-none bg-transparent py-1.5 text-body-md text-on-surface outline-none"
@@ -681,20 +709,14 @@ function ChatPanel({
 
 interface ContextPanelProps {
   readonly conversation: ConversationDetail | undefined;
-  readonly onEscalate: () => void;
-  readonly onResolve: () => void;
   readonly onUseSaleAssistDraft: (value: string) => void;
   readonly onNotify: (message: string, tone?: NoticeTone) => void;
-  readonly busy: boolean;
 }
 
 function ContextPanel({
   conversation,
-  onEscalate,
-  onResolve,
   onUseSaleAssistDraft,
   onNotify,
-  busy,
   onClose,
 }: ContextPanelProps & { readonly onClose?: () => void }) {
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
@@ -758,20 +780,6 @@ function ContextPanel({
         </div>
       </Card>
 
-      <Card>
-        <h3 className="mb-4 text-label-caps uppercase text-secondary">Điều phối hội thoại</h3>
-        <div className="space-y-2">
-          <Button type="button" className="w-full" variant="outline" onClick={onEscalate} disabled={!conversation || busy}>
-            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">warning</span>
-            Cần người hỗ trợ
-          </Button>
-          <Button type="button" className="w-full" variant="ghost" onClick={onResolve} disabled={!conversation || busy}>
-            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">task_alt</span>
-            Đánh dấu đã xử lý
-          </Button>
-        </div>
-      </Card>
-
       <ContactMemoryPanel
         contactId={conversation?.contactId ?? null}
         onNotify={(message) => onNotify(message)}
@@ -825,7 +833,7 @@ export default function ConversationsPage() {
   const meQuery = useQuery({ queryKey: ["me"], queryFn: getMe });
   const meId = meQuery.data?.sub ?? null;
   // Vẫn mở kết nối realtime để tin nhắn/hội thoại tự cập nhật; chỉ bỏ pill hiển thị trạng thái kết nối.
-  useInboxRealtime(Boolean(meQuery.data));
+  const { typingConversationIds } = useInboxRealtime(Boolean(meQuery.data));
 
   const channelsQuery = useQuery({
     queryKey: ["inbox", "channels"],
@@ -892,20 +900,6 @@ export default function ConversationsPage() {
         return { ...old, lastMessageAt: message.sentAt, messages: [...old.messages, message], aiAutoReplyEnabled: false };
       });
       await invalidateActive(false);
-    },
-  });
-
-  const escalateMutation = useMutation({
-    mutationFn: () => escalateConversation(activeConversationId ?? "", selectedConversation?.rowVersion),
-    onSuccess: () => {
-      void invalidateActive();
-    },
-  });
-
-  const resolveMutation = useMutation({
-    mutationFn: () => resolveConversation(activeConversationId ?? "", selectedConversation?.rowVersion),
-    onSuccess: () => {
-      void invalidateActive();
     },
   });
 
@@ -1001,8 +995,7 @@ export default function ConversationsPage() {
     },
   });
 
-  const actionBusy = escalateMutation.isPending || resolveMutation.isPending;
-  const actionError = sendMutation.error ?? escalateMutation.error ?? resolveMutation.error;
+  const actionError = sendMutation.error;
 
   const selectedConversation = detailQuery.data;
   const openCount = conversationItems.filter((item) => item.status === "open").length;
@@ -1131,6 +1124,7 @@ export default function ConversationsPage() {
           conversation={selectedConversation}
           isLoading={detailQuery.isLoading || (Boolean(activeConversationId) && !selectedListItem && conversationsQuery.isFetching)}
           error={detailQuery.error}
+          isAiTyping={Boolean(activeConversationId && typingConversationIds.has(activeConversationId))}
           draft={draft}
           onDraftChange={setDraft}
           sending={sendMutation.isPending}
@@ -1174,13 +1168,6 @@ export default function ConversationsPage() {
         <div className="hidden min-h-0 2xl:block">
           <ContextPanel
             conversation={selectedConversation}
-            busy={actionBusy}
-            onEscalate={() => {
-              if (activeConversationId) escalateMutation.mutate();
-            }}
-            onResolve={() => {
-              if (activeConversationId) resolveMutation.mutate();
-            }}
             onUseSaleAssistDraft={(value) => setDraft(value)}
             onNotify={showNotice}
           />
@@ -1199,14 +1186,7 @@ export default function ConversationsPage() {
           <div className="absolute inset-y-0 right-0 flex w-[min(100vw-2rem,360px)] flex-col border-l border-outline bg-surface p-3 shadow-2xl">
             <ContextPanel
               conversation={selectedConversation}
-              busy={actionBusy}
               onClose={() => setContextOpen(false)}
-              onEscalate={() => {
-                if (activeConversationId) escalateMutation.mutate();
-              }}
-              onResolve={() => {
-                if (activeConversationId) resolveMutation.mutate();
-              }}
               onUseSaleAssistDraft={(value) => {
                 setDraft(value);
                 setContextOpen(false);

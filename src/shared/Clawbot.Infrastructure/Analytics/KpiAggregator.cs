@@ -80,8 +80,11 @@ public sealed class KpiAggregator(AppDbContext db) : IKpiAggregator
             .AsSplitQuery()
             .ToListAsync(ct).ConfigureAwait(false);
 
-        var dms = conversations
+        var dmsConversations = conversations
             .Where(c => c.CreatedAt >= dayStart && c.CreatedAt < dayEnd)
+            .ToList();
+
+        var dms = dmsConversations
             .GroupBy(c => c.Platform, StringComparer.OrdinalIgnoreCase)
             .Select(g => new { Platform = g.Key, Dms = g.Count() })
             .ToList();
@@ -91,6 +94,21 @@ public sealed class KpiAggregator(AppDbContext db) : IKpiAggregator
             var row = PlatformRow(dm.Platform);
             row.Dms += dm.Dms;
             aggregate.Dms += dm.Dms;
+        }
+
+        // RepliedDms dem theo hoi thoai (chi tinh tren dmsConversations, cung tap voi Dms o tren) de
+        // ti le tu dong hoa = RepliedDms / Dms khong bao gio vuot 100% du 1 hoi thoai co nhieu luot reply.
+        var repliedDms = dmsConversations
+            .Where(c => c.Messages.Any(m => m.Direction == "out" && m.SentAt >= dayStart && m.SentAt < dayEnd))
+            .GroupBy(c => c.Platform, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new { Platform = g.Key, RepliedDms = g.Count() })
+            .ToList();
+
+        foreach (var rd in repliedDms)
+        {
+            var row = PlatformRow(rd.Platform);
+            row.RepliedDms += rd.RepliedDms;
+            aggregate.RepliedDms += rd.RepliedDms;
         }
 
         foreach (var conversation in conversations.Where(c => c.Messages.Any(m => m.SentAt >= dayStart && m.SentAt < dayEnd)))
@@ -137,6 +155,7 @@ public sealed class KpiAggregator(AppDbContext db) : IKpiAggregator
         public int Leads { get; set; }
         public int Dms { get; set; }
         public int Replies { get; set; }
+        public int RepliedDms { get; set; }
         public int Conversions { get; set; }
         public List<decimal> ResponseSeconds { get; } = [];
 
@@ -146,6 +165,7 @@ public sealed class KpiAggregator(AppDbContext db) : IKpiAggregator
                 Leads,
                 Dms,
                 Replies,
+                RepliedDms,
                 Conversions,
                 ResponseSeconds.Count == 0 ? null : Math.Round(ResponseSeconds.Average(), 2));
     }

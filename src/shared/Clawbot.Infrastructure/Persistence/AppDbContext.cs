@@ -95,6 +95,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
     // Sale Assist
     public DbSet<QuickReplyTemplate> QuickReplyTemplates => Set<QuickReplyTemplate>();
+    public DbSet<UpsellSuggestionCache> UpsellSuggestionCaches => Set<UpsellSuggestionCache>();
 
     // Documents
     public DbSet<DocumentTemplate> DocumentTemplates => Set<DocumentTemplate>();

@@ -7,7 +7,6 @@ export const AgentDashboardPage = lazy(() => import("@/features/agents/AgentDash
 export const AgentRunDetailPage = lazy(() => import("@/features/agents/AgentRunDetailPage"));
 export const AgentRunsPage = lazy(() => import("@/features/agents/AgentRunsPage"));
 export const PixelAgentsOfficePage = lazy(() => import("@/features/agents/PixelAgentsOfficePage"));
-export const DashboardPage = lazy(() => import("@/features/dashboard/DashboardPage"));
 export const ConversationsPage = lazy(() => import("@/features/conversations/ConversationsPage"));
 export const ContentWorkspacePage = lazy(() => import("@/features/content/ContentWorkspacePage"));
 export const DocumentsPage = lazy(() => import("@/features/documents/DocumentsPage"));

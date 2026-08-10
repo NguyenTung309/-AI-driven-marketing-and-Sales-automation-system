@@ -7,10 +7,13 @@ export type AuthStatus = "loading" | "authed" | "anon";
 interface AuthState {
   accessToken: string | null;
   permissions: string[];
+  /** Identity role name from GET /auth/me (e.g. "Admin", "SalesLead"); null until loaded. */
+  role: string | null;
   status: AuthStatus;
   /** Set after a successful login / refresh. */
   setAuth: (token: string, permissions?: string[]) => void;
   setPermissions: (permissions: string[]) => void;
+  setRole: (role: string | null) => void;
   setStatus: (status: AuthStatus) => void;
   /** Clear on logout / failed refresh. */
   clear: () => void;
@@ -19,6 +22,7 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set) => ({
   accessToken: null,
   permissions: [],
+  role: null,
   status: "loading",
   setAuth: (accessToken, permissions) =>
     set((s) => ({
@@ -27,18 +31,23 @@ export const useAuthStore = create<AuthState>((set) => ({
       permissions: permissions ?? s.permissions,
     })),
   setPermissions: (permissions) => set({ permissions }),
+  setRole: (role) => set({ role }),
   setStatus: (status) => set({ status }),
-  clear: () => set({ accessToken: null, permissions: [], status: "anon" }),
+  clear: () => set({ accessToken: null, permissions: [], role: null, status: "anon" }),
 }));
 
 /** Permission check for gating UI (backend remains source of truth). */
 export const hasPermission = (code: string) =>
   useAuthStore.getState().permissions.includes(code);
 
+/** Current role name for gating UI (backend remains source of truth). */
+export const useRole = () => useAuthStore((s) => s.role);
+
 // Backward-compatible hook for token/status/permission consumers (e.g. route guards).
 export const useAuth = () => {
   const token = useAuthStore((s) => s.accessToken);
   const status = useAuthStore((s) => s.status);
   const permissions = useAuthStore((s) => s.permissions);
-  return { token, status, permissions };
+  const role = useAuthStore((s) => s.role);
+  return { token, status, permissions, role };
 };

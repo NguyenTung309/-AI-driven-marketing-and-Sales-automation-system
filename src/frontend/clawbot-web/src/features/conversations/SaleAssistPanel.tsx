@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Modal, StatusPill, ToggleSwitch } from "@/shared/ui";
 import { toUserFriendlyError } from "@/shared/utils/userText";
@@ -263,18 +263,28 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
   });
   // 3 việc LLM (upsell / nháp / tóm tắt) chạy ngầm qua job — thấy được ở "Việc đang chạy", huỷ được.
   // Kết quả đổ thẳng vào panel (job không bắn thông báo: sale đang ngồi nhìn màn hình chờ).
+  // Upsell chỉ chạy khi sale bấm nút: mỗi lượt là 1 vòng RAG + 1 lượt Claude, tự chạy theo hội thoại
+  // đang mở nghĩa là đốt token cho cả những hội thoại không ai đọc gợi ý.
+  const [upsellCache, setUpsellCache] = useState<Record<string, SaleAssistUpsellResponse>>({});
   const upsellRun = useJobRun<SaleAssistUpsellResponse>({
     isImmediateResult: isSaleAssistUpsellResult,
+    onResult: (response) => {
+      if (!conversationId || !isUpsell(response)) return;
+      // Nhớ theo hội thoại: click sang hội thoại khác rồi quay lại vẫn thấy kết quả cũ, không chạy lại.
+      setUpsellCache((old) => ({ ...old, [conversationId]: response }));
+    },
   });
-  const upsellStart = upsellRun.start;
-  useEffect(() => {
-    if (!conversationId) return;
-    void upsellStart(() => getSaleAssistUpsell(conversationId));
-  }, [conversationId, upsellStart]);
+  // Backend chỉ đọc cache DB (không gọi LLM đồng bộ); item pending nghĩa là job đang sinh
+  // gợi ý phía sau — poll 5s cho đến khi hết pending rồi dừng hẳn.
   const upsellSuggestionsQuery = useQuery({
     queryKey: ["sale-assist", "upsell-suggestions"],
     queryFn: getSaleAssistUpsellSuggestions,
-    staleTime: 60_000,
+    staleTime: 300_000,
+    refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      isUpsellSuggestions(query.state.data) && query.state.data.hot_leads.some((lead) => lead.pending)
+        ? 5_000
+        : false,
   });
 
   const draftRun = useJobRun<SaleAssistDraftResponse>({
@@ -333,7 +343,7 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
   const dialogError = createMutation.error ?? updateMutation.error;
   const activeError = draftRun.error ?? summaryRun.error ?? upsellRun.error ?? quickRepliesQuery.error;
   const summary = isDailySummary(dailySummaryQuery.data) ? dailySummaryQuery.data : null;
-  const upsell = isUpsell(upsellRun.data) ? upsellRun.data : null;
+  const upsell = conversationId ? upsellCache[conversationId] ?? null : null;
   const upsellSuggestions = isUpsellSuggestions(upsellSuggestionsQuery.data) ? upsellSuggestionsQuery.data : null;
 
   function submitQuickReply(form: QuickReplyFormState) {
@@ -431,11 +441,23 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">summarize</span>
             {summaryRun.running ? "Đang tóm tắt..." : "Tóm tắt"}
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="sm:col-span-2"
+            onClick={() => {
+              if (conversationId) void upsellRun.start(() => getSaleAssistUpsell(conversationId));
+            }}
+            disabled={!conversationId || upsellRun.running}
+          >
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">trending_up</span>
+            {upsellRun.running ? "Đang xem..." : upsell ? "Xem lại gợi ý bán thêm" : "Xem gợi ý bán thêm"}
+          </Button>
         </div>
 
         {!conversationId ? (
           <div className="mt-4 rounded-lg border border-dashed border-outline bg-surface p-4 text-body-md text-on-surface-variant">
-            Chọn một hội thoại để tạo nháp và kiểm tra upsell.
+            Chọn một hội thoại để tạo nháp, tóm tắt và xem gợi ý bán thêm.
           </div>
         ) : null}
 
@@ -558,7 +580,11 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
             <p className="mt-2 text-label-sm text-on-surface-variant">{upsell.reason}</p>
           </div>
         ) : (
-          <p className="text-body-md text-on-surface-variant">Chọn hội thoại để xem gợi ý upsell.</p>
+          <p className="text-body-md text-on-surface-variant">
+            {conversationId
+              ? "Bấm \"Xem gợi ý bán thêm\" ở trên để chạy gợi ý cho hội thoại này."
+              : "Chọn hội thoại để xem gợi ý upsell."}
+          </p>
         )}
 
         {upsellSuggestions?.hot_leads.length ? (
@@ -571,7 +597,9 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
                   <StatusPill tone={scoreTone(lead.score)}>{lead.score}</StatusPill>
                 </div>
                 <p className="mt-1 text-label-sm text-on-surface-variant">{formatRelative(lead.lastActivityAt)}</p>
-                {lead.eligible ? (
+                {lead.pending ? (
+                  <p className="mt-2 text-label-sm italic text-on-surface-variant">Đang sinh gợi ý…</p>
+                ) : lead.eligible ? (
                   <p className="mt-2 text-label-sm font-semibold text-on-surface">{lead.suggestion}</p>
                 ) : (
                   <p className="mt-2 text-label-sm text-on-surface-variant">{lead.reason}</p>

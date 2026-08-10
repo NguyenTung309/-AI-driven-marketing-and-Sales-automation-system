@@ -24,7 +24,8 @@ public sealed record SaleAssistHotLeadDto(
     SaleAssistHotLeadContactDto? Contact,
     bool Eligible,
     string Suggestion,
-    string Reason);
+    string Reason,
+    bool Pending);
 
 public sealed record SaleAssistHotLeadContactDto(string? Name, string? Phone);
 

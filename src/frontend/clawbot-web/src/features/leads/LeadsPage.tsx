@@ -634,7 +634,7 @@ export default function LeadsPage() {
 
   const leads = leadsList.items.length ? leadsList.items : EMPTY_LEADS;
   const leadsTotal = leadsList.total ?? leads.length;
-  // All filters (stage/q/source/owner) are server-side; list is already filtered.
+  // All filters (stage/q/source) are server-side; list is already filtered.
   const filteredLeads = leads;
   const selectedLead = useMemo(() => leads.find((lead) => lead.id === activeSelectedId) ?? null, [leads, activeSelectedId]);
   // Fixed catalog so dropdown is not truncated by loaded pages; merge extras + keep selection.
@@ -647,7 +647,6 @@ export default function LeadsPage() {
     );
   }, [leads, source]);
   const hotLeads = leads.filter((lead) => normalize(lead.stage) === "hot");
-  const unassignedLeads = leads.filter((lead) => !lead.ownerUserId);
   const avgScore = leads.length ? Math.round(leads.reduce((sum, lead) => sum + lead.score, 0) / leads.length) : 0;
   const forecastTotal = forecastQuery.data?.forecast.reduce((sum, point) => sum + point.predicted_leads, 0) ?? 0;
 
@@ -719,7 +718,7 @@ export default function LeadsPage() {
         </div>
       ) : null}
 
-      <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-4">
+      <section className="mb-gutter grid grid-cols-1 gap-gutter md:grid-cols-3">
         <Card>
           <p className="text-label-caps uppercase text-on-surface-variant">Tổng lead</p>
           <p className="mt-2 text-telemetry-data text-secondary">{leadsTotal.toLocaleString("vi-VN")}</p>
@@ -729,11 +728,6 @@ export default function LeadsPage() {
           <p className="text-label-caps uppercase text-on-surface-variant">Lead nóng</p>
           <p className="mt-2 text-telemetry-data text-primary">{hotLeads.length.toLocaleString("vi-VN")}</p>
           <p className="mt-1 text-label-sm text-on-surface-variant">Nhóm nóng cần xử lý trước</p>
-        </Card>
-        <Card>
-          <p className="text-label-caps uppercase text-on-surface-variant">Chưa phân công</p>
-          <p className="mt-2 text-telemetry-data text-secondary">{unassignedLeads.length.toLocaleString("vi-VN")}</p>
-          <p className="mt-1 text-label-sm text-on-surface-variant">Có thể gán sale tự động</p>
         </Card>
         <Card>
           <p className="text-label-caps uppercase text-on-surface-variant">Dự báo 7 ngày</p>
@@ -748,7 +742,7 @@ export default function LeadsPage() {
 
       <Card className="mb-gutter p-0">
         <div className="border-b border-outline p-card-padding">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(220px,1.4fr)_repeat(3,minmax(150px,1fr))]">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(220px,1.4fr)_repeat(2,minmax(150px,1fr))]">
             <label className="block">
               <span className="text-label-sm font-semibold text-on-surface-variant">Tìm kiếm Lead</span>
               <div className="mt-2 flex items-center gap-2 rounded border border-outline bg-white px-3 py-2 focus-within:border-primary">

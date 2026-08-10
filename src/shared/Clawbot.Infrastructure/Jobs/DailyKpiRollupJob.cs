@@ -71,6 +71,7 @@ public sealed partial class DailyKpiRollupJob(
                         row.Leads,
                         row.Dms,
                         row.Replies,
+                        row.RepliedDms,
                         row.Conversions,
                         row.AvgResponseTimeSec);
                 }

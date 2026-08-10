@@ -108,13 +108,29 @@ public static class LeadsEndpoints
                     (c.Email != null && EF.Functions.Like(c.Email, pattern)))));
         }
 
+        // "Phụ trách" hiển thị người thật theo thứ tự: sale được gán lead -> sale được gán hội thoại
+        // gần nhất của contact -> thành viên quản lý kênh (inbox) mà khách nhắn vào. Lead chưa Assign
+        // vẫn thấy đúng người đang thực tế chăm khách thay vì "Chưa phân công".
         var ordered = query
             .OrderByDescending(l => l.Score)
             .ThenByDescending(l => l.LastActivityAt ?? l.CreatedAt)
             .Select(l => new LeadDto(l.Id, l.ContactId, l.OwnerUserId, l.Score, l.Stage, l.SourcePlatform, l.LastActivityAt, l.CreatedAt,
                 db.Contacts.Where(c => c.Id == l.ContactId).Select(c => c.DisplayName).FirstOrDefault(),
                 db.Contacts.Where(c => c.Id == l.ContactId).Select(c => c.Phone).FirstOrDefault(),
-                db.Users.Where(u => u.Id == l.OwnerUserId).Select(u => u.DisplayName).FirstOrDefault()));
+                db.Users.Where(u => u.Id == l.OwnerUserId).Select(u => u.DisplayName).FirstOrDefault()
+                ?? db.Conversations
+                    .Where(c => c.ContactId == l.ContactId && c.DeletedAt == null && c.AssignedTo != null)
+                    .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
+                    .Select(c => db.Users.Where(u => u.Id == c.AssignedTo).Select(u => u.DisplayName).FirstOrDefault())
+                    .FirstOrDefault()
+                ?? db.Conversations
+                    .Where(c => c.ContactId == l.ContactId && c.DeletedAt == null && c.InboxId != null)
+                    .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
+                    .Select(c => db.InboxMembers
+                        .Where(m => m.InboxId == c.InboxId)
+                        .Select(m => db.Users.Where(u => u.Id == m.AgentId).Select(u => u.DisplayName).FirstOrDefault())
+                        .FirstOrDefault())
+                    .FirstOrDefault()));
 
         var result = await ordered.ToPagedResultAsync(req.Page, req.PageSize, ct: ct).ConfigureAwait(false);
         return Results.Ok(result);
@@ -160,6 +176,20 @@ public static class LeadsEndpoints
                 .Where(u => u.Id == lead.OwnerUserId)
                 .Select(u => u.DisplayName)
                 .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        // Fallback nhu ListAsync: sale duoc gan hoi thoai gan nhat -> thanh vien quan ly kenh khach nhan vao.
+        ownerName ??= await db.Conversations.AsNoTracking()
+            .Where(c => c.ContactId == lead.ContactId && c.DeletedAt == null && c.AssignedTo != null)
+            .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
+            .Select(c => db.Users.Where(u => u.Id == c.AssignedTo).Select(u => u.DisplayName).FirstOrDefault())
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        ownerName ??= await db.Conversations.AsNoTracking()
+            .Where(c => c.ContactId == lead.ContactId && c.DeletedAt == null && c.InboxId != null)
+            .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
+            .Select(c => db.InboxMembers
+                .Where(m => m.InboxId == c.InboxId)
+                .Select(m => db.Users.Where(u => u.Id == m.AgentId).Select(u => u.DisplayName).FirstOrDefault())
+                .FirstOrDefault())
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
         return Results.Ok(new LeadDto(lead.Id, lead.ContactId, lead.OwnerUserId, lead.Score, lead.Stage, lead.SourcePlatform, lead.LastActivityAt, lead.CreatedAt,
             contact?.DisplayName, contact?.Phone, ownerName));
     }

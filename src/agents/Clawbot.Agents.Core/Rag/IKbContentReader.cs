@@ -5,5 +5,6 @@ public sealed record KbActiveContent(string KbVersionId, string ModuleCode, stri
 
 public interface IKbContentReader
 {
-    Task<IReadOnlyList<KbActiveContent>> GetActiveContentAsync(Guid tenantId, string? kbModuleCode, CancellationToken ct = default);
+    // moduleCodes rỗng/null = mọi module deployed của tenant.
+    Task<IReadOnlyList<KbActiveContent>> GetActiveContentAsync(Guid tenantId, IReadOnlyCollection<string>? moduleCodes, CancellationToken ct = default);
 }

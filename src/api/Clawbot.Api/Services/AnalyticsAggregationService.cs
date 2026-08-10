@@ -55,6 +55,7 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
             BuildDelta("leads", current.Sum(r => r.Leads), previous.Sum(r => r.Leads)),
             BuildDelta("dms", current.Sum(r => r.Dms), previous.Sum(r => r.Dms)),
             BuildDelta("replies", current.Sum(r => r.Replies), previous.Sum(r => r.Replies)),
+            BuildDelta("repliedDms", current.Sum(r => r.RepliedDms), previous.Sum(r => r.RepliedDms)),
             BuildDelta("conversions", current.Sum(r => r.Conversions), previous.Sum(r => r.Conversions)),
             BuildDelta("avgResponseTimeSec", AverageNullable(current.Select(r => r.AvgResponseTimeSec)) ?? 0m, AverageNullable(previous.Select(r => r.AvgResponseTimeSec)) ?? 0m),
         };
@@ -191,6 +192,7 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
                 k.Leads,
                 k.Dms,
                 k.Replies,
+                k.RepliedDms,
                 k.Conversions,
                 k.AvgResponseTimeSec))
             .ToListAsync(ct).ConfigureAwait(false);
@@ -209,6 +211,7 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
                     g.Sum(r => r.Leads),
                     g.Sum(r => r.Dms),
                     g.Sum(r => r.Replies),
+                    g.Sum(r => r.RepliedDms),
                     g.Sum(r => r.Conversions),
                     AverageNullable(g.Select(r => r.AvgResponseTimeSec)));
             })

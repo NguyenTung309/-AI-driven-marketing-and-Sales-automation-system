@@ -53,7 +53,7 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
 
         var conv = await db.Conversations.AsNoTracking()
             .Where(c => c.Id == conversationId && c.TenantId == tenantId)
-            .Select(c => new { c.ContactId })
+            .Select(c => new { c.ContactId, LastMessageAt = c.LastMessageAt ?? c.CreatedAt })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -87,7 +87,22 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
                 LeadScore: lead?.Score ?? 0));
         }
 
-        return await LaunchAsync(jobs, http, SaleAssistUpsellJobHandler.JobType, "Gợi ý upsell", conversationId, ct)
+        // Cache còn tươi (hội thoại chưa có tin nhắn mới từ lần sinh trước) -> trả ngay, không tốn job/LLM.
+        var cached = await db.UpsellSuggestionCaches.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.ConversationId == conversationId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (cached is not null && cached.SourceLastMessageAt >= conv.LastMessageAt)
+        {
+            return Results.Ok(new SaleAssistUpsellResponse(
+                cached.Eligible, cached.Suggestion, cached.Reason, cached.LeadScore));
+        }
+
+        // Khoá idempotency theo hội thoại (giống draft): panel có thể gọi lại khi sale bấm nhiều lần
+        // hoặc khi React remount — 1 hội thoại chỉ dùng đúng job đang chạy, không đẻ job trùng.
+        // Key này cũng dùng chung với danh sách "Lead tiềm năng khác" (SaleAssistUpsellSuggestionService).
+        return await LaunchAsync(jobs, http, SaleAssistUpsellJobHandler.JobType, "Gợi ý upsell", conversationId, ct,
+            idempotencyKey: $"saleassist.upsell:{conversationId}")
             .ConfigureAwait(false);
     }
 

@@ -8,7 +8,7 @@ namespace Clawbot.Infrastructure.Agents;
 // retriever chạy trong scope gRPC/job không có HTTP tenant context (hangfire-job-scope-has-no-tenant).
 public sealed class KbContentReader(AppDbContext db) : IKbContentReader
 {
-    public async Task<IReadOnlyList<KbActiveContent>> GetActiveContentAsync(Guid tenantId, string? kbModuleCode, CancellationToken ct = default)
+    public async Task<IReadOnlyList<KbActiveContent>> GetActiveContentAsync(Guid tenantId, IReadOnlyCollection<string>? moduleCodes, CancellationToken ct = default)
     {
         var query =
             from version in db.KbVersions.IgnoreQueryFilters().AsNoTracking()
@@ -18,8 +18,8 @@ public sealed class KbContentReader(AppDbContext db) : IKbContentReader
                 && version.Status == "deployed"
             select new { version.Id, module.Code, version.ContentMd };
 
-        if (!string.IsNullOrWhiteSpace(kbModuleCode))
-            query = query.Where(row => row.Code == kbModuleCode);
+        if (moduleCodes is { Count: > 0 })
+            query = query.Where(row => moduleCodes.Contains(row.Code));
 
         var rows = await query.ToListAsync(ct).ConfigureAwait(false);
         // ToString() ngoài SQL: CONVERT của SQL Server trả GUID UPPERCASE, lệch với id lowercase ở Qdrant/trace.

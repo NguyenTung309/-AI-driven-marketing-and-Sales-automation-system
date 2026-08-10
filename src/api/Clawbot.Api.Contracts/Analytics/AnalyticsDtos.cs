@@ -6,6 +6,7 @@ public sealed record KpiDailyDto(
     int Leads,
     int Dms,
     int Replies,
+    int RepliedDms,
     int Conversions,
     decimal? AvgResponseTimeSec);
 
@@ -14,6 +15,7 @@ public sealed record OmniChannelRowDto(
     int Leads,
     int Dms,
     int Replies,
+    int RepliedDms,
     int Conversions,
     decimal? AvgResponseTimeSec);
 
