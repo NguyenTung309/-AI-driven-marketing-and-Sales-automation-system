@@ -13,7 +13,6 @@ public static class DefaultAgentRegistry
         ("research", nameof(ResearchAgentGrpcService)),
         ("docs", nameof(DocsAgentGrpcService)),
         ("report", nameof(ReportAgentGrpcService)),
-        ("ads", nameof(AdsAgentGrpcService)),
     ];
 
     public static AgentRegistry Create() =>

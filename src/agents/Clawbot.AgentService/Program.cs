@@ -1,5 +1,4 @@
 using Clawbot.Agents.Core;
-using Clawbot.Agents.Core.Ads;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Content;
 using Clawbot.Agents.Core.Docs;
@@ -14,6 +13,9 @@ using Clawbot.Application;
 using Clawbot.Infrastructure;
 using Clawbot.Infrastructure.Documents;
 using Clawbot.Infrastructure.Observability;
+using Clawbot.SharedKernel.Security;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Serilog;
 
@@ -33,6 +35,40 @@ builder.Host.UseSerilog((ctx, lc) => lc
     .WriteTo.SystemLogs(ctx.Configuration.GetConnectionString("SqlServer"), "agent-service"));
 
 builder.Services.AddGrpc(o => o.Interceptors.Add<LlmConfigGrpcInterceptor>());
+var agentServiceAuthentication = builder.Configuration
+    .GetSection(AgentServiceAuthenticationOptions.SectionName)
+    .Get<AgentServiceAuthenticationOptions>() ?? new AgentServiceAuthenticationOptions();
+var agentServiceSigningKey = AgentServiceAuthenticationOptions.GetSigningKeyBytes(
+    agentServiceAuthentication.SigningKey);
+AgentServiceAuthenticationOptions.EnsureGrpcTransportSecurity(
+    builder.Configuration["Kestrel:Endpoints:Grpc:Url"],
+    builder.Configuration["Kestrel:Endpoints:Grpc:Certificate:Path"],
+    builder.Environment.IsDevelopment());
+if (agentServiceAuthentication.TokenLifetimeMinutes is < 1 or > 5)
+    throw new InvalidOperationException("agent_service_auth_token_lifetime_invalid");
+builder.Services.Configure<AgentServiceAuthenticationOptions>(
+    builder.Configuration.GetSection(AgentServiceAuthenticationOptions.SectionName));
+builder.Services.AddAuthentication()
+    .AddJwtBearer("AgentService", options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = AgentServiceAuthenticationOptions.Issuer,
+            ValidAudience = AgentServiceAuthenticationOptions.Audience,
+            IssuerSigningKey = new SymmetricSecurityKey(
+                agentServiceSigningKey),
+            ClockSkew = TimeSpan.FromSeconds(15),
+        };
+    });
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy("orchestrator-service", policy => policy
+        .AddAuthenticationSchemes("AgentService")
+        .RequireAuthenticatedUser()
+        .RequireClaim("client_id", AgentServiceAuthenticationOptions.ClientId));
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddClawbotTelemetry(builder.Configuration, "clawbot-agent");
@@ -48,8 +84,15 @@ builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IAgentDefinitionCata
 builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IA2AMailbox, Clawbot.Infrastructure.Agents.EfA2AMailbox>();
 builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IAutonomousPlanner, Clawbot.AgentService.Services.AutonomousPlanner>();
 builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IAutonomousRunSink, Clawbot.AgentService.Services.AutonomousRunSink>();
+builder.Services.AddScoped<Clawbot.AgentService.Services.OrchestratorCallerAuthorizer>();
+builder.Services.AddScoped<Clawbot.AgentService.Services.IOrchestratorCallerAuthorizer>(sp =>
+    sp.GetRequiredService<Clawbot.AgentService.Services.OrchestratorCallerAuthorizer>());
+builder.Services.AddScoped<Clawbot.AgentService.Services.IOrchestratorPermissionResolver>(sp =>
+    sp.GetRequiredService<Clawbot.AgentService.Services.OrchestratorCallerAuthorizer>());
 // SPEC-16 P4-4: tenant high-risk approval toggle resolver (reads Tenant.RequireOrchestrationApproval).
 builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IOrchestrationApprovalResolver, Clawbot.Infrastructure.Agents.EfOrchestrationApprovalResolver>();
+// Chính sách khi task lỗi (Tenant.OrchestratorFailurePolicy): mặc định dừng chờ người thay vì auto-replan.
+builder.Services.AddScoped<Clawbot.Agents.Core.Orchestrator.IOrchestrationFailurePolicyResolver, Clawbot.Infrastructure.Agents.EfOrchestrationFailurePolicyResolver>();
 // Review-gate P1: tenant RequireContentReview flag — dùng bởi content.schedule/content.publish tools + Review RPC.
 builder.Services.AddScoped<Clawbot.SharedKernel.Content.IContentReviewPolicyResolver, Clawbot.Infrastructure.Agents.EfContentReviewPolicyResolver>();
 // Review-gate P3 manual-mode: tenant RequireChatReplyApproval — ChatAgentGrpcService hold-all khi bật.
@@ -63,6 +106,8 @@ builder.Services.AddSingleton(autonomousOptions);
 // Explicit IAgentTool registrations (content persist/approve — AgentService-layer, need AppDbContext) override
 // adapter-wrapped tools of the same name, so the content tool persists drafts instead of returning text only.
 builder.Services.AddScoped<IAgentTool, ContentGenerateTool>();
+// content.list: bước tra cứu read-only reviewer-agent cần trước khi gọi content.review (vốn đòi content_id cụ thể).
+builder.Services.AddScoped<IAgentTool, ContentListTool>();
 builder.Services.AddScoped<IAgentTool, ContentApproveTool>();
 builder.Services.AddScoped<IAgentTool, ContentScheduleTool>();
 builder.Services.AddScoped<IAgentTool, ContentPublishTool>();
@@ -72,7 +117,7 @@ builder.Services.AddHttpClient(WebSearchTool.HttpClientName, client => client.Ti
 builder.Services.AddScoped<ToolRegistry>(sp => ToolRegistryFactory.Build(
     sp.GetRequiredService<IEnumerable<IAgent>>(),
     sp.GetRequiredService<IEnumerable<IAgentTool>>()));
-builder.Services.AddScoped<AutonomousOrchestrator>(sp => new AutonomousOrchestrator(
+builder.Services.AddScoped<IAutonomousOrchestrator>(sp => new AutonomousOrchestrator(
     sp.GetRequiredService<Clawbot.Agents.Core.Orchestrator.IAutonomousPlanner>(),
     sp.GetRequiredService<Clawbot.Agents.Core.Orchestrator.IAgentDefinitionCatalog>(),
     sp.GetRequiredService<AgentRegistry>(),
@@ -85,12 +130,16 @@ builder.Services.AddScoped<AutonomousOrchestrator>(sp => new AutonomousOrchestra
     sp.GetRequiredService<Clawbot.SharedKernel.Time.IClock>(),
     sp.GetRequiredService<AutonomousOrchestratorOptions>(),
     sp.GetRequiredService<ToolRegistry>(),
-    sp.GetRequiredService<Clawbot.Agents.Core.Orchestrator.IOrchestrationApprovalResolver>()));
+    sp.GetRequiredService<Clawbot.Agents.Core.Orchestrator.IOrchestrationApprovalResolver>(),
+    sp.GetRequiredService<Clawbot.Agents.Core.Orchestrator.IOrchestrationFailurePolicyResolver>()));
 // Tenant trend scan (settings-aware, persists briefs): used by the gRPC research endpoint and by
 // "[trend-scan]" schedules, which bypass the LLM orchestrator entirely.
 builder.Services.AddScoped<Clawbot.AgentService.Services.ITenantTrendScanner, Clawbot.AgentService.Services.TrendScanService>();
+builder.Services.AddScoped<Clawbot.AgentService.Services.IAgentScheduleLeaseProvider,
+    Clawbot.AgentService.Services.AgentScheduleLeaseProvider>();
 builder.Services.AddScoped<Clawbot.AgentService.Services.AgentScheduleRunner>();
 builder.Services.AddHostedService<Clawbot.AgentService.Services.AgentScheduleWorker>();
+builder.Services.AddHostedService<Clawbot.AgentService.Services.OrchestrationTerminalIntentWorker>();
 builder.Services.Configure<Clawbot.AgentService.Services.ContentReviewWorkerOptions>(
     builder.Configuration.GetSection(Clawbot.AgentService.Services.ContentReviewWorkerOptions.SectionName));
 builder.Services.AddSingleton<Clawbot.Agents.Core.Content.ILlmVisionCapabilityResolver,
@@ -131,7 +180,6 @@ builder.Services.AddScoped<IAgent, ChatAgentAdapter>();
 builder.Services.AddScoped<IAgent, ContentAgentAdapter>();
 builder.Services.AddScoped<IAgent, ResearchAgentAdapter>();
 builder.Services.AddScoped<IAgent, DocsAgentAdapter>();
-builder.Services.AddScoped<IAgent, AdsAgentAdapter>();
 builder.Services.AddScoped<IAgent, SaleAssistAgentAdapter>();
 builder.Services.AddScoped<LeadAgentRunner>();
 builder.Services.AddScoped<ReportAgentRunner>();
@@ -172,16 +220,19 @@ if (!string.IsNullOrWhiteSpace(builder.Configuration["Docs:Storage:Minio:Endpoin
 
 var app = builder.Build();
 
-app.MapGrpcService<OrchestratorGrpcService>();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapGrpcService<OrchestratorGrpcService>().RequireAuthorization("orchestrator-service");
 app.MapGrpcService<ChatAgentGrpcService>();
 app.MapGrpcService<ContentAgentGrpcService>();
 app.MapGrpcService<LeadAgentGrpcService>();
 app.MapGrpcService<SaleAssistAgentGrpcService>();
 app.MapGrpcService<DocsAgentGrpcService>();
-app.MapGrpcService<AdsAgentGrpcService>();
 app.MapGrpcService<ReportAgentGrpcService>();
 app.MapGrpcService<ResearchAgentGrpcService>();
 app.MapGet("/", () => "ClawBot Agent Service — use a gRPC client to call services.");
+app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
+app.MapGet("/health/ready", () => Results.Ok(new { status = "ready" }));
 
 // SPEC-16 Module M-1: bootstrap the Pancake page token from env vars into the encrypted inbox credential store,
 // so the live token never lives in appsettings.json. Best-effort (never crashes startup); no-op when env absent.

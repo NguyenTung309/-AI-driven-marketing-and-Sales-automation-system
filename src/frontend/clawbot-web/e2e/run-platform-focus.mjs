@@ -24,12 +24,12 @@ const adminPermissions = [
 
 function analyticsRows() {
   return [
-    { platform: "all", leads: 1000, dms: 1000, replies: 900, conversions: 800, avgResponseTimeSec: 1, adSpend: 1000, cpl: 1, revenue: 2000 },
-    { platform: "facebook", leads: 10, dms: 20, replies: 15, conversions: 5, avgResponseTimeSec: 2, adSpend: 100, cpl: 10, revenue: 200 },
-    { platform: "zalo", leads: 20, dms: 40, replies: 30, conversions: 10, avgResponseTimeSec: 3, adSpend: 200, cpl: 10, revenue: 400 },
-    { platform: "instagram", leads: 30, dms: 60, replies: 45, conversions: 15, avgResponseTimeSec: 4, adSpend: 300, cpl: 10, revenue: 600 },
-    { platform: "tiktok", leads: 900, dms: 900, replies: 800, conversions: 700, avgResponseTimeSec: 5, adSpend: 900, cpl: 1, revenue: 1800 },
-    { platform: "youtube", leads: 800, dms: 800, replies: 700, conversions: 600, avgResponseTimeSec: 6, adSpend: 800, cpl: 1, revenue: 1600 },
+    { platform: "all", leads: 1000, dms: 1000, replies: 900, conversions: 800, avgResponseTimeSec: 1 },
+    { platform: "facebook", leads: 10, dms: 20, replies: 15, conversions: 5, avgResponseTimeSec: 2 },
+    { platform: "zalo", leads: 20, dms: 40, replies: 30, conversions: 10, avgResponseTimeSec: 3 },
+    { platform: "instagram", leads: 30, dms: 60, replies: 45, conversions: 15, avgResponseTimeSec: 4 },
+    { platform: "tiktok", leads: 900, dms: 900, replies: 800, conversions: 700, avgResponseTimeSec: 5 },
+    { platform: "youtube", leads: 800, dms: 800, replies: 700, conversions: 600, avgResponseTimeSec: 6 },
   ];
 }
 

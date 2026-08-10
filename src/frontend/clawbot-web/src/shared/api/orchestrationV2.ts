@@ -30,24 +30,34 @@ export interface OrchestrationV2Schedule {
   /** "cadence" (mặc định) hoặc "event" — lịch sự kiện ngủ tới khi hệ thống phát event tương ứng. */
   readonly triggerType?: string;
   readonly eventKey?: string | null;
+  readonly lastRunStatus?: string | null;
+  readonly lastRunError?: string | null;
 }
 
 export interface OrchestrationV2RunNowResponse {
   readonly status: string;
+  readonly sessionId: string | null;
   readonly nextRunAt: string;
+  readonly lastRunAt: string;
 }
 
 export type OrchestrationV2Status =
   | "draft"
   | "pending_approval"
   | "running"
+  | "pause_requested"
   | "paused"
+  | "cancelling"
+  | "failing"
   | "completed"
   | "failed"
   | "cancelled"
   | string;
 
 export type OrchestrationV2ControlAction = "pause" | "resume" | "cancel";
+
+/** Can thiệp thủ công vào một task khi phiên đang tạm dừng — không gọi planner nên không tốn LLM. */
+export type OrchestrationV2TaskAction = "edit_output" | "retry" | "skip";
 
 export interface OrchestrationV2RunSummary {
   readonly sessionId: string;
@@ -149,7 +159,6 @@ export async function createOrchestrationV2Schedule(payload: {
   readonly goalTemplate: string;
   readonly cadence: string;
   readonly timezoneId: string;
-  readonly requiresApproval: boolean;
   readonly triggerType?: string;
   readonly eventKey?: string | null;
 }): Promise<OrchestrationV2Schedule> {
@@ -160,6 +169,10 @@ export async function createOrchestrationV2Schedule(payload: {
 export async function runOrchestrationV2ScheduleNow(id: string): Promise<OrchestrationV2RunNowResponse> {
   const res = await apiClient.post<OrchestrationV2RunNowResponse>(`/api/orchestration/v2/schedules/${encodeURIComponent(id)}/run-now`);
   return res.data;
+}
+
+export async function deleteOrchestrationV2Schedule(id: string): Promise<void> {
+  await apiClient.delete(`/api/orchestration/v2/schedules/${encodeURIComponent(id)}`);
 }
 
 // `mine` filters to the current user's runs; `archived` switches to the archived list.
@@ -234,6 +247,28 @@ export async function updateOrchestrationV2Plan(sessionId: string, planJson: str
   const res = await apiClient.put<OrchestrationV2Plan>(
     `/api/orchestration/v2/runs/${encodeURIComponent(sessionId)}/plan`,
     { planJson, etag },
+  );
+  return res.data;
+}
+
+/**
+ * Can thiệp một bước của phiên đang tạm dừng. Server tự sửa plan (redact + validate) nên FE không
+ * phải tự vá JSON. `rerunDownstream` đặt lại các bước phía sau về chờ chạy — bắt buộc khi chúng đã
+ * chạy với kết quả cũ, nếu không output vừa sửa sẽ không đi tới đâu.
+ */
+export async function interveneOrchestrationV2Task(
+  sessionId: string,
+  taskId: string,
+  payload: {
+    readonly action: OrchestrationV2TaskAction;
+    readonly output?: string;
+    readonly rerunDownstream: boolean;
+    readonly etag: string;
+  },
+): Promise<OrchestrationV2Plan> {
+  const res = await apiClient.post<OrchestrationV2Plan>(
+    `/api/orchestration/v2/runs/${encodeURIComponent(sessionId)}/tasks/${encodeURIComponent(taskId)}/intervene`,
+    payload,
   );
   return res.data;
 }

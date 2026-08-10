@@ -49,8 +49,15 @@ public sealed partial class ContactMemoryExtractionJob(
         if (due.Count == 0) return;
 
         var processed = 0;
+        // Tenant chưa có LLM config thì mọi hội thoại của nó đều hỏng y hệt nhau và watermark không
+        // bao giờ tiến — mỗi nhịp quét lại đẻ ra một cảnh báo kèm stack cho cùng một hội thoại,
+        // nhấn chìm lỗi thật trong log. Bỏ qua cả tenant trong lượt này; cấu hình xong là lượt sau
+        // tự chạy lại (vẫn không set watermark nên không mất dữ liệu).
+        var unconfiguredTenants = new HashSet<Guid>();
         foreach (var conversation in due)
         {
+            if (unconfiguredTenants.Contains(conversation.TenantId)) continue;
+
             try
             {
                 await ExtractForConversationAsync(conversation.TenantId, conversation.Id, conversation.ContactId, now, ct)
@@ -66,6 +73,11 @@ public sealed partial class ContactMemoryExtractionJob(
                     Body: "Trích từ hội thoại đã kết thúc — xem trong hồ sơ khách.",
                     Link: "/inbox",
                     GroupKey: "contact.memory.learned"), ct).ConfigureAwait(false);
+            }
+            catch (Clawbot.Agents.Core.Chat.LlmConfigNotConfiguredException)
+            {
+                unconfiguredTenants.Add(conversation.TenantId);
+                LogTenantLlmNotConfigured(logger, conversation.TenantId);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -150,6 +162,12 @@ public sealed partial class ContactMemoryExtractionJob(
 
     private async Task<string> RedactAsync(string text, CancellationToken ct) =>
         (await pii.RedactAsync(text, ct).ConfigureAwait(false)).RedactedText;
+
+    [LoggerMessage(
+        EventId = 12303,
+        Level = LogLevel.Information,
+        Message = "ContactMemoryExtraction skipped tenant {TenantId}: no active LLM config bound")]
+    private static partial void LogTenantLlmNotConfigured(ILogger logger, Guid tenantId);
 
     [LoggerMessage(EventId = 12301, Level = LogLevel.Warning, Message = "ContactMemoryExtraction failed for conversation {ConversationId}")]
     private static partial void LogConversationFailed(ILogger logger, Exception ex, Guid conversationId);

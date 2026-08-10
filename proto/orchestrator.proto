@@ -22,6 +22,11 @@ service Orchestrator {
   rpc UpdatePlan (UpdatePlanRequest) returns (SessionResponse);
   rpc Approve (SessionRef) returns (SessionResponse);
   rpc Control (ControlRequest) returns (SessionResponse);
+  // Human-in-the-loop recovery on a paused run: edit a task's output, retry it, or skip it and
+  // continue downstream — no planner call, so a single failed task no longer costs a full re-plan.
+  rpc InterveneTask (InterveneTaskRequest) returns (SessionResponse);
+  // Starts a persisted automatic schedule immediately without moving its cadence window to now.
+  rpc RunSchedule (RunScheduleRequest) returns (RunScheduleResponse);
 }
 
 message PlanRequest {
@@ -93,6 +98,31 @@ message ControlRequest {
   string session_id = 2;
   string action = 3; // pause | resume | cancel
   string expected_etag = 4;
+}
+
+message InterveneTaskRequest {
+  string tenant_id = 1;
+  string session_id = 2;
+  string task_id = 3;
+  string action = 4;         // edit_output | retry | skip
+  string output = 5;         // edit_output: the corrected output handed to dependents
+  bool rerun_downstream = 6; // reset already-finished dependents so the edit actually propagates
+  string expected_etag = 7;
+  string user_id = 8;        // audit + execution principal for the edited plan
+}
+
+message RunScheduleRequest {
+  string tenant_id = 1;
+  string schedule_id = 2;
+  string user_id = 3;
+}
+
+message RunScheduleResponse {
+  // started | skipped_overlap | not_found
+  string status = 1;
+  string session_id = 2;
+  google.protobuf.Timestamp next_run_at = 3;
+  google.protobuf.Timestamp last_run_at = 4;
 }
 
 message SessionResponse {

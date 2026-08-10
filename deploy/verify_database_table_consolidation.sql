@@ -175,6 +175,49 @@ DECLARE @conversation_notes_contract BIT = CASE WHEN
     )
     AND EXISTS (
         SELECT 1 FROM sys.indexes i
+        WHERE i.object_id = OBJECT_ID(N'dbo.conversations')
+          AND i.name = N'UX_conversations_tenant_id'
+          AND i.is_disabled = 0
+          AND i.is_unique = 1
+          AND i.has_filter = 0
+          AND (SELECT COUNT(*) FROM sys.index_columns ic WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.key_ordinal > 0) = 2
+          AND EXISTS (
+              SELECT 1 FROM sys.index_columns ic
+              INNER JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+              WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.key_ordinal = 1 AND c.name = N'tenant_id'
+          )
+          AND EXISTS (
+              SELECT 1 FROM sys.index_columns ic
+              INNER JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+              WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.key_ordinal = 2 AND c.name = N'id'
+          )
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM sys.foreign_keys fk
+        WHERE fk.parent_object_id = OBJECT_ID(N'dbo.conversation_notes')
+          AND fk.referenced_object_id = OBJECT_ID(N'dbo.conversations')
+          AND fk.is_disabled = 0 AND fk.is_not_trusted = 0 AND fk.delete_referential_action = 0
+          AND (SELECT COUNT(*) FROM sys.foreign_key_columns x WHERE x.constraint_object_id = fk.object_id) = 2
+          AND EXISTS (
+              SELECT 1
+              FROM sys.foreign_key_columns x
+              INNER JOIN sys.columns parent_column ON parent_column.object_id = x.parent_object_id AND parent_column.column_id = x.parent_column_id
+              INNER JOIN sys.columns referenced_column ON referenced_column.object_id = x.referenced_object_id AND referenced_column.column_id = x.referenced_column_id
+              WHERE x.constraint_object_id = fk.object_id
+                AND parent_column.name = N'tenant_id' AND referenced_column.name = N'tenant_id'
+          )
+          AND EXISTS (
+              SELECT 1
+              FROM sys.foreign_key_columns x
+              INNER JOIN sys.columns parent_column ON parent_column.object_id = x.parent_object_id AND parent_column.column_id = x.parent_column_id
+              INNER JOIN sys.columns referenced_column ON referenced_column.object_id = x.referenced_object_id AND referenced_column.column_id = x.referenced_column_id
+              WHERE x.constraint_object_id = fk.object_id
+                AND parent_column.name = N'conversation_id' AND referenced_column.name = N'id'
+          )
+    )
+    AND EXISTS (
+        SELECT 1 FROM sys.indexes i
         WHERE i.object_id = OBJECT_ID(N'dbo.conversation_notes')
           AND i.name = N'ix_notes_conv'
           AND i.is_disabled = 0

@@ -23,12 +23,27 @@ public sealed partial class DailyKpiRollupJob(
     private readonly IClock _clock = clock;
     private readonly ILogger<DailyKpiRollupJob> _logger = logger;
 
+    /// <summary>Chốt sổ ngày hôm trước — chạy sau nửa đêm giờ VN để gom cả dữ liệu về muộn.</summary>
     [AutomaticRetry(Attempts = 3, DelaysInSeconds = [3600, 3600, 3600])]
     [DisableConcurrentExecution(timeoutInSeconds: 600)]
-    public async Task RunAsync(CancellationToken ct = default)
-    {
-        var metricDate = DateOnly.FromDateTime(_clock.UtcNow.ToOffset(AnalyticsOffset).DateTime).AddDays(-1);
+    public Task RunAsync(CancellationToken ct = default) =>
+        RollupAsync(Today().AddDays(-1), ct);
 
+    /// <summary>
+    /// Gom KPI của chính ngày hôm nay. Rollup là upsert theo (tenant, date, platform) nên chạy lại mỗi
+    /// giờ vẫn ra đúng số; thiếu nó thì snapshot "hôm nay" luôn rỗng cho tới tận sáng hôm sau.
+    /// Không retry: lượt chạy giờ kế tiếp đã là lần thử lại rồi.
+    /// </summary>
+    [AutomaticRetry(Attempts = 0)]
+    [DisableConcurrentExecution(timeoutInSeconds: 600)]
+    public Task RunIntradayAsync(CancellationToken ct = default) =>
+        RollupAsync(Today(), ct);
+
+    private DateOnly Today() =>
+        DateOnly.FromDateTime(_clock.UtcNow.ToOffset(AnalyticsOffset).DateTime);
+
+    private async Task RollupAsync(DateOnly metricDate, CancellationToken ct)
+    {
         var tenants = await _db.Tenants.IgnoreQueryFilters()
             .Select(t => t.Id)
             .ToListAsync(ct).ConfigureAwait(false);
@@ -58,9 +73,7 @@ public sealed partial class DailyKpiRollupJob(
                         row.Replies,
                         row.RepliedDms,
                         row.Conversions,
-                        row.AvgResponseTimeSec,
-                        row.AdSpend,
-                        row.Revenue);
+                        row.AvgResponseTimeSec);
                 }
 
                 await _db.SaveChangesAsync(ct).ConfigureAwait(false);

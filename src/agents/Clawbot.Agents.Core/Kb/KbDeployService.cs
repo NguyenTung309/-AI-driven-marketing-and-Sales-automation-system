@@ -112,6 +112,20 @@ public sealed partial class KbDeployService(
         }
     }
 
+    public async Task DeleteVectorsAsync(KbVersion version, Guid tenantId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        if (string.IsNullOrWhiteSpace(version.Embedding)) return;
+
+        var chunks = ChunkContent(version.ContentMd);
+        if (chunks.Count == 0) return;
+
+        var config = await ResolveConfigAsync(tenantId, ct).ConfigureAwait(false);
+        var collection = ConfiguredEmbeddingProvider.CollectionName(config);
+        var pointIds = Enumerable.Range(0, chunks.Count).Select(index => ChunkPointId(version.Id, index));
+        await store.DeleteAsync(collection, pointIds, ct).ConfigureAwait(false);
+    }
+
     internal static string ChunkPointId(Guid versionId, int chunkIndex)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes($"{versionId:N}:{chunkIndex}"));

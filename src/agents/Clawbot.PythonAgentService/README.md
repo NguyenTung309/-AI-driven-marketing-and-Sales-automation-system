@@ -22,7 +22,6 @@ It exists to prove the proto contracts stay Python-compatible, in case a future 
 - `LeadAgent`
 - `SaleAssistAgent`
 - `DocsAgent`
-- `AdsAgent`
 - `ReportAgent`
 - `ResearchAgent`
 

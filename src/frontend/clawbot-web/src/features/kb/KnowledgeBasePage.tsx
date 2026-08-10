@@ -11,6 +11,7 @@ import {
   archiveKbModule,
   createKbModule,
   createKbVersion,
+  deleteKbVersion,
   deployKbVersion,
   generateKbTestCases,
   getKbAccuracy,
@@ -178,6 +179,23 @@ export default function KnowledgeBasePage() {
       ]);
     },
   });
+
+  const deleteVersionMutation = useMutation({
+    mutationFn: (versionId: string) => deleteKbVersion(selectedModule?.id ?? "", versionId),
+    onSuccess: async (_, versionId) => {
+      if (selectedVersionId === versionId) setSelectedVersionId(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["kb", selectedModule?.id, "versions"] }),
+        queryClient.invalidateQueries({ queryKey: ["kb", "modules"] }),
+      ]);
+    },
+  });
+
+  const deleteVersion = (version: KbVersion) => {
+    if (normalize(version.status) === "deployed") return;
+    if (!window.confirm(`Xóa Bản ${version.version}? Thao tác này không thể hoàn tác.`)) return;
+    deleteVersionMutation.mutate(version.id);
+  };
 
   // Phát hành/re-embed chạy ngầm: job tự thông báo khi xong; nút giữ trạng thái "Đang phát hành"
   // tới khi job kết thúc, xong thì làm mới danh sách phiên bản.
@@ -351,6 +369,7 @@ export default function KnowledgeBasePage() {
           accuracy={selectedAccuracy}
           loading={versionsQuery.isLoading}
           module={selectedModule}
+          onDelete={deleteVersion}
           onSelect={setSelectedVersionId}
           selectedId={selectedVersion?.id ?? null}
           versions={versions}

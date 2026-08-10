@@ -11,6 +11,7 @@ using Clawbot.Api.Jobs;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.Domain.Content;
+using Clawbot.Domain.Security;
 using Clawbot.Infrastructure.Content.Publishing;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Persistence;
@@ -21,6 +22,7 @@ using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Grpc.Core;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace Clawbot.Api.Endpoints;
@@ -30,12 +32,21 @@ public static class ContentEndpoints
     private const int MaxAssetsPerContentItem = 10;
     private const int MaxAssetUrlChars = 2048;
     private const long MaxAssetUploadBytes = 5 * 1024 * 1024;
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> AllowedAssetContentTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         "image/gif",
         "image/jpeg",
         "image/png",
         "image/webp",
+    };
+    private static readonly HashSet<string> TrustedSocialPostHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "facebook.com",
+        "www.facebook.com",
+        "m.facebook.com",
+        "instagram.com",
+        "www.instagram.com",
     };
 
     public static IEndpointRouteBuilder MapContent(this IEndpointRouteBuilder app)
@@ -57,6 +68,7 @@ public static class ContentEndpoints
         grp.MapGet("/queue", QueueAsync).RequirePermission("content:read");
         grp.MapGet("/items", QueueAsync).RequirePermission("content:read");
         grp.MapGet("/items/{id:guid}", GetItemAsync).RequirePermission("content:read");
+        grp.MapGet("/items/{id:guid}/assets/{assetId:guid}", GetItemAssetAsync).RequirePermission("content:read");
         grp.MapPut("/items/{id:guid}", UpdateItemAsync).RequirePermission("content:write");
         grp.MapPost("/items/{id:guid}/assets", UploadItemAssetAsync)
             .RequirePermission("content:write")
@@ -77,6 +89,7 @@ public static class ContentEndpoints
         grp.MapPost("/items/{id:guid}/regenerate-hook", RegenerateHookAsync).RequirePermission("content:write");
         // P5 §6: dashboard vận hành chuỗi sinh nội dung (fallback rate, gate fail/step, token/độ trễ, review approve).
         grp.MapGet("/chain-metrics", ChainMetricsAsync).RequirePermission("content:read");
+        grp.MapGet("/post-performance", PostPerformanceAsync).RequirePermission("content:read");
         grp.MapGet("/calendar", CalendarAsync).RequirePermission("content:read");
         grp.MapGet("/publish-targets", PublishTargetsAsync).RequirePermission("content:read");
         grp.MapDelete("/schedule/{id:guid}", DeleteScheduleAsync).RequirePermission("content:write");
@@ -355,6 +368,7 @@ public static class ContentEndpoints
         {
             var revisionBefore = item.ContentRevision;
             var now = clock.UtcNow;
+            item.ClaimOrchestrationOwnershipForHuman(CurrentUserId(http), now);
             item.UpdateBody(body.Body, now);
             if (body.AssetsJson is not null)
             {
@@ -399,8 +413,6 @@ public static class ContentEndpoints
             return Error(http, StatusCodes.Status400BadRequest, "content.asset_missing", "Thiếu file ảnh.");
         if (file.Length > MaxAssetUploadBytes)
             return Error(http, StatusCodes.Status400BadRequest, "content.asset_too_large", "Ảnh tối đa 5MB.");
-        if (!AllowedAssetContentTypes.Contains(file.ContentType ?? string.Empty))
-            return Error(http, StatusCodes.Status400BadRequest, "content.asset_invalid_type", "Chỉ chấp nhận PNG, JPG, WebP hoặc GIF.");
 
         var item = await db.ContentItems.FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct)
             .ConfigureAwait(false);
@@ -421,8 +433,9 @@ public static class ContentEndpoints
         using var ms = new MemoryStream();
         await file.CopyToAsync(ms, ct).ConfigureAwait(false);
         var bytes = ms.ToArray();
-        if (!LooksLikeAllowedImage(bytes, file.ContentType))
-            return Error(http, StatusCodes.Status400BadRequest, "content.asset_invalid_type", "File không khớp định dạng ảnh.");
+        var contentType = ResolveAssetContentType(bytes, file.ContentType);
+        if (contentType is null)
+            return Error(http, StatusCodes.Status400BadRequest, "content.asset_invalid_type", "Chỉ chấp nhận PNG, JPG, WebP hoặc GIF hợp lệ.");
 
         var now = clock.UtcNow;
         var existing = await db.ContentAssets
@@ -437,6 +450,7 @@ public static class ContentEndpoints
             tenantId,
             item.Id,
             file.FileName,
+            ResolveAssetExtension(contentType),
             ContentAssetLifecycle.NextSortOrder(existing),
             now);
         db.ContentAssets.Add(asset);
@@ -446,7 +460,8 @@ public static class ContentEndpoints
         try
         {
             // Storage key is the authority; local backend flattens path segments safely.
-            url = await storage.SaveAsync(bytes, asset.StorageKey, file.ContentType, ct).ConfigureAwait(false);
+            _ = await storage.SaveAsync(bytes, asset.StorageKey, contentType, ct).ConfigureAwait(false);
+            url = ItemAssetUrl(item.Id, asset.Id);
         }
         catch (Exception)
         {
@@ -461,16 +476,17 @@ public static class ContentEndpoints
             asset.MarkReady(
                 ContentAssetLifecycle.ComputeSha256(bytes),
                 bytes.LongLength,
-                file.ContentType ?? "application/octet-stream",
+                contentType,
                 readyAt);
 
             var readyAssets = existing
                 .Where(a => a.Status == ContentAsset.StatusReady)
                 .Append(asset)
                 .ToList();
-            var displayUrls = BuildDisplayUrlMap(item.AssetsJson, readyAssets, asset.Id, url);
+            var displayUrls = BuildDisplayUrlMap(item.Id, item.AssetsJson, readyAssets, asset.Id, url);
             var assetsJson = ContentAssetLifecycle.BuildDerivedAssetsJson(readyAssets, displayUrls);
             var revisionBefore = item.ContentRevision;
+            item.ClaimOrchestrationOwnershipForHuman(CurrentUserId(http), readyAt);
             item.ReviseAssets(assetsJson, readyAt);
             if (item.ContentRevision != revisionBefore)
                 await CancelStaleScheduleIntentsAsync(db, item.Id, revisionBefore, readyAt, ct).ConfigureAwait(false);
@@ -490,11 +506,45 @@ public static class ContentEndpoints
         }
     }
 
+    private static async Task<IResult> GetItemAssetAsync(
+        Guid id,
+        Guid assetId,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IDocumentStorage storage,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var asset = await db.ContentAssets
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == assetId
+                && item.ContentItemId == id
+                && item.TenantId == tenantId
+                && item.Status == ContentAsset.StatusReady, ct)
+            .ConfigureAwait(false);
+        if (asset is null) return Results.NotFound();
+
+        try
+        {
+            var bytes = await storage.ReadAsync(asset.StorageKey, ct).ConfigureAwait(false);
+            if (asset.Sha256 is { Length: > 0 } hash)
+                http.Response.Headers.ETag = $"\"{Convert.ToHexString(hash)}\"";
+            http.Response.Headers.CacheControl = "private, max-age=86400";
+            return Results.File(bytes, asset.ContentType ?? "application/octet-stream");
+        }
+        catch (FileNotFoundException)
+        {
+            return Results.NotFound();
+        }
+    }
+
     private static async Task<IResult> DeleteItemAssetAsync(
         Guid id,
         Guid assetId,
         AppDbContext db,
         ITenantAccessor tenants,
+        IDocumentStorage storage,
         IClock clock,
         HttpContext http,
         CancellationToken ct)
@@ -510,32 +560,41 @@ public static class ContentEndpoints
                 a => a.Id == assetId && a.TenantId == tenantId && a.ContentItemId == item.Id,
                 ct)
             .ConfigureAwait(false);
-        if (asset is null || asset.Status is ContentAsset.StatusDeleted or ContentAsset.StatusDeletePending)
+        if (asset is null || asset.Status == ContentAsset.StatusDeleted)
             return Error(http, StatusCodes.Status404NotFound, "content.asset_not_found", "Asset not found.");
 
-        var now = clock.UtcNow;
-        asset.MarkDeletePending("asset_removed", now);
+        if (asset.Status != ContentAsset.StatusDeletePending)
+        {
+            var deleteRequestedAt = clock.UtcNow;
+            asset.MarkDeletePending("asset_removed", deleteRequestedAt);
 
-        var readyAssets = await db.ContentAssets
-            .Where(a => a.TenantId == tenantId
-                && a.ContentItemId == item.Id
-                && a.Status == ContentAsset.StatusReady
-                && a.Id != asset.Id)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-        var displayUrls = BuildDisplayUrlMap(item.AssetsJson, readyAssets, Guid.Empty, string.Empty);
-        var assetsJson = ContentAssetLifecycle.BuildDerivedAssetsJson(readyAssets, displayUrls);
-        item.ReviseAssets(assetsJson, now);
-        db.ContentReviewTasks.Add(ContentAssetLifecycle.CreateQuietPeriodReviewTask(
-            tenantId,
-            item.Id,
-            item.ContentRevision,
-            now));
+            var readyAssets = await db.ContentAssets
+                .Where(a => a.TenantId == tenantId
+                    && a.ContentItemId == item.Id
+                    && a.Status == ContentAsset.StatusReady
+                    && a.Id != asset.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            var displayUrls = BuildDisplayUrlMap(item.Id, item.AssetsJson, readyAssets, Guid.Empty, string.Empty);
+            var assetsJson = ContentAssetLifecycle.BuildDerivedAssetsJson(readyAssets, displayUrls);
+            item.ClaimOrchestrationOwnershipForHuman(CurrentUserId(http), deleteRequestedAt);
+            item.ReviseAssets(assetsJson, deleteRequestedAt);
+            db.ContentReviewTasks.Add(ContentAssetLifecycle.CreateQuietPeriodReviewTask(
+                tenantId,
+                item.Id,
+                item.ContentRevision,
+                deleteRequestedAt));
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+
+        await storage.DeleteAsync(asset.StorageKey, ct).ConfigureAwait(false);
+        asset.MarkDeleted(clock.UtcNow);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.NoContent();
     }
 
     private static Dictionary<Guid, string> BuildDisplayUrlMap(
+        Guid contentItemId,
         string existingAssetsJson,
         List<ContentAsset> readyAssets,
         Guid newAssetId,
@@ -581,6 +640,8 @@ public static class ContentEndpoints
         if (newAssetId != Guid.Empty && !string.IsNullOrWhiteSpace(newUrl))
             map[newAssetId] = newUrl;
 
+        foreach (var asset in readyAssets)
+            map[asset.Id] = ItemAssetUrl(contentItemId, asset.Id);
         return map;
     }
 
@@ -792,16 +853,31 @@ public static class ContentEndpoints
         RegenerateHookApiRequest? body,
         AppDbContext db,
         IJobLauncher jobs,
+        IClock clock,
         HttpContext http,
         CancellationToken ct)
     {
         if (body is null || body.HookIndex < 0)
             return Error(http, StatusCodes.Status400BadRequest, "content.hook_index_invalid", "hookIndex required.");
 
-        var exists = await db.ContentItems.AsNoTracking()
-            .AnyAsync(i => i.Id == id && i.DeletedAt == null, ct).ConfigureAwait(false);
-        if (!exists)
+        var item = await db.ContentItems
+            .FirstOrDefaultAsync(i => i.Id == id && i.DeletedAt == null, ct).ConfigureAwait(false);
+        if (item is null)
             return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
+
+        item.ClaimOrchestrationOwnershipForHuman(CurrentUserId(http), clock.UtcNow);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Error(
+                http,
+                StatusCodes.Status409Conflict,
+                "content.item_conflict",
+                "Content changed concurrently. Refresh and try again.");
+        }
 
         var jobId = await jobs.LaunchAsync(
             ContentRegenerateHookJobHandler.JobType,
@@ -823,13 +899,13 @@ public static class ContentEndpoints
     private static async Task<IResult> ChainMetricsAsync(
         AppDbContext db,
         ITenantAccessor tenants,
-        [FromQuery] int days,
+        [FromQuery] int? days,
         IClock clock,
         HttpContext http,
         CancellationToken ct)
     {
         _ = tenants.Require();
-        var windowDays = days is < 1 or > 90 ? 7 : days;
+        var windowDays = days is null or < 1 or > 90 ? 7 : days.Value;
         var since = clock.UtcNow.AddDays(-windowDays);
 
         var rows = await db.ContentGenerationTraces.AsNoTracking()
@@ -892,6 +968,260 @@ public static class ContentEndpoints
         values.Sort();
         var rank = (int)Math.Ceiling(0.95 * values.Count) - 1;
         return values[Math.Clamp(rank, 0, values.Count - 1)];
+    }
+
+    private static async Task<IResult> PostPerformanceAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        [FromQuery] int? days,
+        [FromQuery] string? platform,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        _ = tenants.Require();
+        var normalizedPlatform = string.IsNullOrWhiteSpace(platform)
+            ? null
+            : platform.Trim().ToLowerInvariant();
+        if (normalizedPlatform is not null and not ("facebook" or "instagram"))
+        {
+            return Error(
+                http,
+                StatusCodes.Status400BadRequest,
+                "content.post_performance_platform_invalid",
+                "platform must be facebook or instagram.");
+        }
+
+        var windowDays = NormalizePostPerformanceWindowDays(days);
+        var response = await BuildPostPerformanceAsync(
+            db,
+            clock.UtcNow,
+            windowDays,
+            normalizedPlatform,
+            ct).ConfigureAwait(false);
+        return Results.Ok(response);
+    }
+
+    internal static int NormalizePostPerformanceWindowDays(int? days) =>
+        days is >= 1 and <= 90 ? days.Value : 30;
+
+    internal static async Task<ContentPostPerformanceResponse> BuildPostPerformanceAsync(
+        AppDbContext db,
+        DateTimeOffset to,
+        int windowDays,
+        string? platform,
+        CancellationToken ct)
+    {
+        var from = to.AddDays(-windowDays);
+        var schedules = db.ContentSchedules.AsNoTracking()
+            .Where(schedule => schedule.Status == ContentSchedule.StatusPosted
+                && schedule.PostedAt.HasValue
+                && schedule.PostedAt >= from
+                && schedule.PostedAt < to
+                && (schedule.Platform == "facebook" || schedule.Platform == "instagram"));
+        if (platform is not null)
+            schedules = schedules.Where(schedule => schedule.Platform == platform);
+
+        var aggregate = await schedules
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Posts = group.Count(),
+                SyncedPosts = group.Count(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue),
+                Likes = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.LikeCount),
+                Comments = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.CommentCount),
+                OldestEngagementAttemptAt = group.Where(schedule => schedule.EngagementSyncedAt.HasValue)
+                    .Min(schedule => schedule.EngagementSyncedAt),
+            })
+            .SingleOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        var totals = aggregate is null
+            ? CreatePostPerformanceTotals(0, 0, null, null)
+            : CreatePostPerformanceTotals(
+                aggregate.Posts,
+                aggregate.SyncedPosts,
+                aggregate.Likes,
+                aggregate.Comments);
+        var freshness = new ContentPostPerformanceFreshnessDto(
+            totals.SyncedPosts,
+            totals.Posts - totals.SyncedPosts,
+            aggregate?.OldestEngagementAttemptAt);
+
+        var platformRows = await schedules
+            .GroupBy(schedule => schedule.Platform)
+            .Select(group => new
+            {
+                Platform = group.Key,
+                Posts = group.Count(),
+                SyncedPosts = group.Count(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue),
+                Likes = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.LikeCount),
+                Comments = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.CommentCount),
+            })
+            .OrderBy(row => row.Platform)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var byPlatform = platformRows
+            .Select(row => new ContentPostPerformancePlatformDto(
+                row.Platform,
+                row.Posts,
+                row.SyncedPosts,
+                row.SyncedPosts > 0 ? row.Likes : null,
+                row.SyncedPosts > 0 ? row.Comments : null,
+                CalculateAverageEngagement(row.SyncedPosts, row.Likes, row.Comments)))
+            .ToList();
+
+        var targetRows = await schedules
+            .GroupBy(schedule => schedule.MetaAssetId)
+            .Select(group => new
+            {
+                MetaAssetId = group.Key,
+                Posts = group.Count(),
+                SyncedPosts = group.Count(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue),
+                Likes = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.LikeCount),
+                Comments = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.CommentCount),
+            })
+            .OrderByDescending(row => row.Posts)
+            .ThenBy(row => row.MetaAssetId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var assetIds = targetRows
+            .Where(row => row.MetaAssetId.HasValue)
+            .Select(row => row.MetaAssetId!.Value)
+            .ToArray();
+        var assetNames = await db.MetaAssets.AsNoTracking()
+            .Where(asset => assetIds.Contains(asset.Id))
+            .ToDictionaryAsync(asset => asset.Id, asset => asset.Name, ct)
+            .ConfigureAwait(false);
+        var byTarget = targetRows
+            .Select(row => new ContentPostPerformanceTargetDto(
+                row.MetaAssetId,
+                row.MetaAssetId is null
+                    ? "Không xác định Page"
+                    : assetNames.TryGetValue(row.MetaAssetId.Value, out var name)
+                        ? name
+                        : row.MetaAssetId.Value.ToString(),
+                row.Posts,
+                row.SyncedPosts,
+                row.SyncedPosts > 0 ? row.Likes : null,
+                row.SyncedPosts > 0 ? row.Comments : null,
+                CalculateAverageEngagement(row.SyncedPosts, row.Likes, row.Comments)))
+            .ToList();
+
+        var dailyRows = await schedules
+            .GroupBy(schedule => schedule.PostedAt!.Value.Date)
+            .Select(group => new
+            {
+                Date = group.Key,
+                Posts = group.Count(),
+                SyncedPosts = group.Count(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue),
+                Likes = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.LikeCount),
+                Comments = group.Where(schedule => schedule.LikeCount.HasValue && schedule.CommentCount.HasValue)
+                    .Sum(schedule => (long?)schedule.CommentCount),
+            })
+            .OrderBy(row => row.Date)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var daily = dailyRows
+            .Select(row => new ContentPostPerformanceDailyDto(
+                DateOnly.FromDateTime(row.Date),
+                row.Posts,
+                row.SyncedPosts,
+                row.SyncedPosts > 0 ? row.Likes : null,
+                row.SyncedPosts > 0 ? row.Comments : null))
+            .ToList();
+
+        var topRows = await schedules
+            .Select(schedule => new
+            {
+                schedule.Id,
+                schedule.ContentItemId,
+                schedule.Platform,
+                schedule.PostUrl,
+                PostedAt = schedule.PostedAt!.Value,
+                schedule.LikeCount,
+                schedule.CommentCount,
+                Total = schedule.LikeCount.HasValue && schedule.CommentCount.HasValue
+                    ? (long?)schedule.LikeCount.Value + schedule.CommentCount.Value
+                    : null,
+            })
+            .OrderByDescending(row => row.Total.HasValue)
+            .ThenByDescending(row => row.Total)
+            .ThenByDescending(row => row.PostedAt)
+            .ThenBy(row => row.Id)
+            .Take(10)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var topItemIds = topRows.Select(row => row.ContentItemId).Distinct().ToArray();
+        var itemBodies = await db.ContentItems.AsNoTracking()
+            .Where(item => topItemIds.Contains(item.Id) && item.DeletedAt == null)
+            .ToDictionaryAsync(item => item.Id, item => item.Body, ct)
+            .ConfigureAwait(false);
+        var topPosts = topRows
+            .Select(row => new ContentPostPerformanceTopPostDto(
+                row.Id,
+                row.ContentItemId,
+                itemBodies.ContainsKey(row.ContentItemId),
+                row.Platform,
+                CreateContentExcerpt(itemBodies.GetValueOrDefault(row.ContentItemId)),
+                IsTrustedSocialPostUrl(row.PostUrl) ? row.PostUrl : null,
+                row.PostedAt,
+                row.LikeCount,
+                row.CommentCount,
+                row.Total))
+            .ToList();
+
+        return new ContentPostPerformanceResponse(
+            windowDays,
+            from,
+            to,
+            totals,
+            freshness,
+            byPlatform,
+            byTarget,
+            daily,
+            topPosts);
+    }
+
+    private static ContentPostPerformanceTotalsDto CreatePostPerformanceTotals(
+        int posts,
+        int syncedPosts,
+        long? likes,
+        long? comments) =>
+        new(
+            posts,
+            syncedPosts,
+            syncedPosts > 0 ? likes : null,
+            syncedPosts > 0 ? comments : null,
+            CalculateAverageEngagement(syncedPosts, likes, comments));
+
+    private static double? CalculateAverageEngagement(int syncedPosts, long? likes, long? comments) =>
+        syncedPosts > 0
+            ? Math.Round(((likes ?? 0) + (comments ?? 0)) / (double)syncedPosts, 1)
+            : null;
+
+    private static bool IsTrustedSocialPostUrl(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var url)
+        && url.Scheme == Uri.UriSchemeHttps
+        && url.IsDefaultPort
+        && string.IsNullOrEmpty(url.UserInfo)
+        && TrustedSocialPostHosts.Contains(url.Host);
+
+    private static string CreateContentExcerpt(string? body)
+    {
+        var trimmed = body?.Trim();
+        return string.IsNullOrEmpty(trimmed)
+            ? "Không còn nội dung bài viết"
+            : trimmed.Length <= 160
+                ? trimmed
+                : $"{trimmed[..157]}...";
     }
 
     private static async Task<IResult> ScheduleItemAsync(
@@ -1035,14 +1365,21 @@ public static class ContentEndpoints
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
             return Results.Created($"/api/content/schedule/{schedule.Id}", ToDto(schedule));
         }
-        catch (InvalidOperationException exception) when (exception.Message is "content_current_revision_not_schedulable"
-            or "content_approval_context_missing")
+        catch (InvalidOperationException exception) when (exception.Message == "content_current_revision_not_schedulable")
         {
             return Error(
                 http,
                 StatusCodes.Status400BadRequest,
                 "content.item_not_schedulable",
                 "Only content with a completed Agent review and publishing approval for the current revision can be scheduled.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message == "content_approval_context_missing")
+        {
+            return Error(
+                http,
+                StatusCodes.Status400BadRequest,
+                "content.approval_context_missing",
+                "Current content revision is missing publishing approval context.");
         }
         catch (InvalidOperationException exception) when (exception.Message == "content_schedule_canceled_by_user")
         {
@@ -1171,7 +1508,7 @@ public static class ContentEndpoints
         return Results.NoContent();
     }
 
-    // Phase 4.5: enqueue durable agent review for the current revision — never runs LLM inline.
+    // Phase 4.5: retry the durable review task for the current revision — never runs LLM inline.
     private static async Task<IResult> RetryAgentReviewAsync(
         Guid id,
         RetryAgentReviewRequest body,
@@ -1197,60 +1534,168 @@ public static class ContentEndpoints
             return Error(http, StatusCodes.Status404NotFound, "content.item_not_found", "Content item not found.");
         if (item.ContentRevision != body.ExpectedRevision)
             return Error(http, StatusCodes.Status409Conflict, "content.revision_changed", "Content revision changed.");
-        if (string.Equals(item.Status, "published", StringComparison.OrdinalIgnoreCase)
-            || item.ActivePublishAttemptId is not null)
+        if (item.Status != "draft")
         {
             return Error(
                 http,
                 StatusCodes.Status409Conflict,
-                item.ActivePublishAttemptId is not null
-                    ? "content_publish_attempt_active"
-                    : "content_published_item_immutable",
-                "Published or actively-claimed content cannot retry agent review.");
+                "content.review_retry_not_draft",
+                "Only draft content can re-enter agent review.");
         }
-
-        if (item.AgentReviewAttemptCount >= ContentItem.MaxAgentReviewAttempts)
+        if (item.ActivePublishAttemptId is not null)
         {
             return Error(
                 http,
-                StatusCodes.Status429TooManyRequests,
-                "content.review_attempt_limit_reached",
-                "Agent review attempt limit reached for this revision.");
+                StatusCodes.Status409Conflict,
+                "content_publish_attempt_active",
+                "Actively-claimed content cannot retry agent review.");
+        }
+        if (item.AgentReviewStatus == ContentItem.ReviewStatusRunning)
+        {
+            return Error(
+                http,
+                StatusCodes.Status409Conflict,
+                "content.review_in_progress",
+                "Agent review is already running for this item.");
         }
 
         var now = clock.UtcNow;
-        var activeTask = await db.ContentReviewTasks
-            .Where(t => t.ContentItemId == item.Id
-                && t.ContentRevision == item.ContentRevision
-                && (t.Status == ContentReviewTask.StatusPending
-                    || t.Status == ContentReviewTask.StatusLeased))
-            .OrderByDescending(t => t.CreatedAt)
-            .FirstOrDefaultAsync(ct)
+        var task = await db.ContentReviewTasks
+            .Where(candidate => candidate.TenantId == tenantId
+                && candidate.ContentItemId == item.Id
+                && candidate.ContentRevision == item.ContentRevision)
+            .SingleOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        // Cooldown: if a pending task is not yet due, surface 429 instead of spawning duplicates.
-        if (activeTask is not null
-            && activeTask.Status == ContentReviewTask.StatusPending
-            && activeTask.NextAttemptAt > now)
+        if (task?.Status == ContentReviewTask.StatusPending)
+        {
+            if (task.NextAttemptAt > now)
+            {
+                return Error(
+                    http,
+                    StatusCodes.Status429TooManyRequests,
+                    "content.review_retry_cooldown",
+                    "Agent review retry is cooling down for this item.");
+            }
+
+            item.ClaimOrchestrationOwnershipForHuman(CurrentUserId(http), now);
+            try
+            {
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Error(
+                    http,
+                    StatusCodes.Status409Conflict,
+                    "content.review_retry_conflict",
+                    "Content review changed concurrently. Refresh and try again.");
+            }
+
+            return Results.Ok(ToDto(item));
+        }
+
+        if (task?.Status == ContentReviewTask.StatusLeased)
         {
             return Error(
                 http,
-                StatusCodes.Status429TooManyRequests,
-                "content.review_retry_cooldown",
-                "Agent review retry is cooling down for this item.");
+                StatusCodes.Status409Conflict,
+                "content.review_in_progress",
+                "Agent review is already running for this item.");
         }
 
-        if (activeTask is null)
+        try
         {
-            db.ContentReviewTasks.Add(ContentAssetLifecycle.CreateQuietPeriodReviewTask(
-                tenantId,
-                item.Id,
-                item.ContentRevision,
-                now));
-        }
+            item.ClaimOrchestrationOwnershipForHuman(CurrentUserId(http), now);
+            item.ReopenAgentReview(now);
+            if (task is null)
+            {
+                // Legacy repair path only: normal revisions always have their one durable task already.
+                db.ContentReviewTasks.Add(ContentAssetLifecycle.CreateQuietPeriodReviewTask(
+                    tenantId,
+                    item.Id,
+                    item.ContentRevision,
+                    now));
+            }
+            else
+            {
+                var previousStatus = task.Status;
+                var previousErrorCode = task.LastErrorCode;
+                var previousAttemptCount = task.AttemptCount;
+                var previousReviewCycle = task.ReviewCycle;
+                task.ReopenForManualRetry(now);
+                db.AuditLogs.Add(AuditLog.CreateBusinessEvent(
+                    tenantId,
+                    CurrentUserId(http),
+                    "content.agent_review.manual_retry",
+                    "content_item",
+                    item.Id,
+                    now,
+                    $"content-review:{task.Id:N}:manual-retry:{task.ReviewCycle}",
+                    task.ReviewCycle,
+                    JsonSerializer.Serialize(
+                        new
+                        {
+                            reviewTaskId = task.Id,
+                            expectedRevision = task.ContentRevision,
+                            previousStatus,
+                            previousErrorCode,
+                            previousAttemptCount,
+                            previousReviewCycle,
+                            reviewCycle = task.ReviewCycle,
+                        },
+                        WebJsonOptions)));
+            }
 
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return Results.Ok(ToDto(item));
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return Results.Ok(ToDto(item));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Error(
+                http,
+                StatusCodes.Status409Conflict,
+                exception.Message,
+                "Content item cannot re-enter agent review.");
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Error(
+                http,
+                StatusCodes.Status409Conflict,
+                "content.review_retry_conflict",
+                "Content review changed concurrently. Refresh and try again.");
+        }
+        catch (DbUpdateException exception) when (IsReviewTaskUniqueViolation(exception))
+        {
+            // Two manual retries can race only for legacy data without a task. Treat the collision as
+            // idempotent success only after proving the other request established the expected state.
+            db.ChangeTracker.Clear();
+            var refreshed = await db.ContentItems.IgnoreQueryFilters().AsNoTracking()
+                .FirstOrDefaultAsync(candidate => candidate.Id == id
+                    && candidate.TenantId == tenantId
+                    && candidate.DeletedAt == null, ct)
+                .ConfigureAwait(false);
+            var refreshedTask = refreshed is null
+                ? null
+                : await db.ContentReviewTasks.IgnoreQueryFilters().AsNoTracking()
+                    .SingleOrDefaultAsync(candidate => candidate.TenantId == tenantId
+                        && candidate.ContentItemId == refreshed.Id
+                        && candidate.ContentRevision == refreshed.ContentRevision, ct)
+                    .ConfigureAwait(false);
+            if (refreshed is null
+                || refreshed.ContentRevision != body.ExpectedRevision
+                || refreshed.Status != "draft"
+                || refreshed.AgentReviewStatus != ContentItem.ReviewStatusPending
+                || (refreshed.OrchestrationSessionId is not null
+                    && refreshed.OrchestrationOwnershipClaimedAt is null)
+                || refreshedTask?.Status is not (ContentReviewTask.StatusPending or ContentReviewTask.StatusLeased))
+            {
+                throw;
+            }
+
+            return Results.Ok(ToDto(refreshed));
+        }
     }
 
     // Phase 4.6: reset durable schedule state only — Hangfire ContentPublishJob transmits later.
@@ -1407,16 +1852,18 @@ public static class ContentEndpoints
         AppDbContext db,
         ITenantAccessor tenants,
         [FromQuery] string? week,
+        [FromQuery] bool? includeRaw,
         HttpContext http,
         CancellationToken ct)
     {
-        _ = tenants.Require();
+        var tenantId = tenants.Require().TenantId;
+        var normalizedWeek = string.Empty;
         var query = db.ContentBriefs.AsNoTracking()
             .Where(b => b.Brief.StartsWith("[trend:"));
 
         if (!string.IsNullOrWhiteSpace(week))
         {
-            if (!ContentTrendBriefFormatter.TryNormalizeWeekOf(week, out var normalizedWeek))
+            if (!ContentTrendBriefFormatter.TryNormalizeWeekOf(week, out normalizedWeek))
                 return Error(http, StatusCodes.Status400BadRequest, "content.week_invalid", "week must use ISO format yyyy-Www.");
 
             var prefix = $"[trend:{normalizedWeek}]";
@@ -1433,7 +1880,20 @@ public static class ContentEndpoints
             .Select(t => t!)
             .ToList();
 
-        return Results.Ok(new TrendScanResponse(trends));
+        IReadOnlyList<RawTrendDto>? rawTrends = null;
+        if (includeRaw == true)
+        {
+            var rawPrefix = string.IsNullOrWhiteSpace(week) ? "[trend-raw:" : $"[trend-raw:{normalizedWeek}]";
+            var rawBriefs = await db.ContentBriefs.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.Brief.StartsWith(rawPrefix))
+                .OrderByDescending(item => item.UpdatedAt)
+                .Select(item => item.Brief)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            rawTrends = ParseRawTrends(rawBriefs);
+        }
+
+        return Results.Ok(new TrendScanResponse(trends, rawTrends));
     }
 
     private static async Task<IResult> ScanTrendsAsync(
@@ -1552,6 +2012,7 @@ public static class ContentEndpoints
                 or ContentItem.ReviewStatusRejected
                 or ContentItem.ReviewStatusNeedsHuman
                 or ContentItem.ReviewStatusFailed;
+        var scheduleBlockedReason = ScheduleBlockedReason(item);
 
         return new ContentItemDto(
             item.Id,
@@ -1577,13 +2038,24 @@ public static class ContentEndpoints
                 && item.Status is "draft" or "approved"
                 && item.DeletedAt is null
                 && item.ActivePublishAttemptId is null,
+            // Cạn lượt không còn ẩn nút: retry giờ mở lại một chu kỳ mới (ReopenAgentReview) thay vì trả 429.
             CanRetryReview: item.Status is not "published" and not "rejected"
                 && item.DeletedAt is null
                 && item.ActivePublishAttemptId is null
-                && item.AgentReviewAttemptCount < ContentItem.MaxAgentReviewAttempts
                 && item.AgentReviewStatus is not ContentItem.ReviewStatusRunning,
-            CanSchedule: item.CanScheduleCurrentRevision(),
-            CanPublish: item.CanPublishCurrentRevision());
+            CanSchedule: scheduleBlockedReason is null,
+            CanPublish: item.CanPublishCurrentRevision(),
+            ScheduleBlockedReason: scheduleBlockedReason);
+    }
+
+    private static string? ScheduleBlockedReason(ContentItem item)
+    {
+        if (!item.CanScheduleCurrentRevision()) return "content.item_not_schedulable";
+        return string.IsNullOrWhiteSpace(item.ApprovalMode)
+            || item.PublishingPolicyVersionApplied is null
+            || item.ApprovedRevision != item.ContentRevision
+            ? "content.approval_context_missing"
+            : null;
     }
 
     private static string ResolvePublishingApprovalStatus(ContentItem item)
@@ -1604,34 +2076,8 @@ public static class ContentEndpoints
         return "not_ready";
     }
 
-    private static string ResolveWorkflowState(ContentItem item)
-    {
-        if (item.Status == "published")
-            return "published";
-        if (item.Status == "rejected")
-            return "rejected";
-        if (item.Status == "scheduled")
-            return "scheduled";
-        if (item.Status == "approved")
-            return "approved_awaiting_schedule";
-        if (item.AgentReviewStatus == ContentItem.ReviewStatusRunning)
-            return "agent_review_running";
-        if (item.AgentReviewedRevision != item.ContentRevision
-            || item.AgentReviewStatus is ContentItem.ReviewStatusPending)
-        {
-            return "awaiting_agent_review";
-        }
-
-        if (item.AgentReviewStatus == ContentItem.ReviewStatusFailed)
-            return "review_failed";
-        if (item.AgentReviewStatus is ContentItem.ReviewStatusRejected
-            or ContentItem.ReviewStatusNeedsHuman)
-        {
-            return "agent_review_non_pass";
-        }
-
-        return "awaiting_human_approval";
-    }
+    // Định nghĩa nằm ở domain để AgentService (tool content.list) dùng chung đúng một quy tắc.
+    private static string ResolveWorkflowState(ContentItem item) => item.ResolveWorkflowState();
 
     private static async Task CancelStaleScheduleIntentsAsync(
         AppDbContext db,
@@ -1786,6 +2232,34 @@ public static class ContentEndpoints
             ["contentType"] = string.IsNullOrWhiteSpace(contentType) ? null : contentType,
         };
 
+    private static string ItemAssetUrl(Guid itemId, Guid assetId) =>
+        $"/api/content/items/{itemId:D}/assets/{assetId:D}";
+
+    internal static string? ResolveAssetContentType(ReadOnlySpan<byte> bytes, string? suppliedContentType)
+    {
+        var normalized = suppliedContentType?
+            .Split(';', 2, StringSplitOptions.TrimEntries)[0]
+            .Trim()
+            .ToLowerInvariant();
+        normalized = normalized == "image/jpg" ? "image/jpeg" : normalized;
+
+        if (normalized is "image/png" or "image/jpeg" or "image/gif" or "image/webp")
+            return LooksLikeAllowedImage(bytes, normalized) ? normalized : null;
+
+        return string.IsNullOrWhiteSpace(normalized) || normalized == "application/octet-stream"
+            ? DetectImageContentType(bytes)
+            : null;
+    }
+
+    private static string? DetectImageContentType(ReadOnlySpan<byte> bytes)
+    {
+        foreach (var contentType in AllowedAssetContentTypes)
+        {
+            if (LooksLikeAllowedImage(bytes, contentType)) return contentType;
+        }
+        return null;
+    }
+
     internal static bool LooksLikeAllowedImage(ReadOnlySpan<byte> bytes, string? contentType) =>
         contentType?.ToLowerInvariant() switch
         {
@@ -1801,6 +2275,15 @@ public static class ContentEndpoints
                 && bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50,
             _ => false,
         };
+
+    private static string ResolveAssetExtension(string contentType) => contentType switch
+    {
+        "image/gif" => ".gif",
+        "image/jpeg" => ".jpg",
+        "image/png" => ".png",
+        "image/webp" => ".webp",
+        _ => string.Empty,
+    };
 
     private static string ResolveAssetExtension(IFormFile file)
     {
@@ -1820,6 +2303,38 @@ public static class ContentEndpoints
 
     private static TrendDto ToTrendDto(TrendItem trend, string weekOf) =>
         new(trend.Topic, trend.Source, trend.Metric, trend.RelevanceScore, trend.ContentIdeas.ToList(), weekOf);
+
+    private static List<RawTrendDto> ParseRawTrends(IEnumerable<string> briefs) =>
+        briefs
+            .SelectMany(ParseRawTrends)
+            .GroupBy(item => $"{item.Topic}{item.Source}{item.Metric}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(item => item.SourceScore).First())
+            .OrderByDescending(item => item.SourceScore)
+            .ThenBy(item => item.Topic, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static List<RawTrendDto> ParseRawTrends(string? brief)
+    {
+        if (string.IsNullOrWhiteSpace(brief)) return [];
+        var jsonStart = brief.IndexOf('\n');
+        if (jsonStart < 0) return [];
+        try
+        {
+            var raw = JsonSerializer.Deserialize<List<Clawbot.Agents.Core.Research.RawTrend>>(
+                brief[(jsonStart + 1)..],
+                WebJsonOptions);
+            return raw?.Select(item => new RawTrendDto(
+                item.Topic,
+                item.Source,
+                item.Metric,
+                item.SourceScore,
+                item.ContentIdeas.ToList())).ToList() ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
 
     private static TrendDto? ToTrendDto(string brief)
     {
@@ -1850,6 +2365,12 @@ public static class ContentEndpoints
             StatusCode.Unavailable => Error(http, StatusCodes.Status503ServiceUnavailable, "content.agent_unavailable", ex.Status.Detail),
             _ => Error(http, StatusCodes.Status502BadGateway, "content.agent_failed", ex.Status.Detail),
         };
+
+    private static bool IsReviewTaskUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is SqlException { Number: 2601 or 2627 } sqlException
+        && sqlException.Message.Contains(
+            "UX_content_review_tasks_item_revision",
+            StringComparison.Ordinal);
 
     private static IResult Error(HttpContext http, int statusCode, string errorCode, string message) =>
         Results.Json(

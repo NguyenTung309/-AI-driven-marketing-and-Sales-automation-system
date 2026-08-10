@@ -22,6 +22,7 @@ builder.Services.AddReverseProxy()
 
 // 3. Configure GatewayOptions from appsettings.json
 builder.Services.Configure<GatewayOptions>(builder.Configuration.GetSection("Gateway"));
+builder.Services.AddHttpClient("api-health", client => client.Timeout = TimeSpan.FromSeconds(5));
 
 // SPEC-11 D4: Gateway only VERIFIES the JWT (signature + lifetime) and forwards — no DB/Redis,
 // no permission lookup, no X-Permissions. ADR-007 stays intact: JwtBearer is host-level infra
@@ -106,8 +107,26 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// 5. Gateway-local health endpoint (not proxied)
+// 5. Gateway-local health endpoints (not proxied)
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
+app.MapGet("/health/ready", async (IHttpClientFactory clients, IConfiguration configuration, CancellationToken ct) =>
+{
+    var configuredUrl = configuration["Gateway:ApiHealthUrl"] ?? "http://api:15874/health/ready";
+    if (!Uri.TryCreate(configuredUrl, UriKind.Absolute, out var endpoint))
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+
+    try
+    {
+        using var response = await clients.CreateClient("api-health").GetAsync(endpoint, ct).ConfigureAwait(false);
+        return response.IsSuccessStatusCode
+            ? Results.Ok(new { status = "ready" })
+            : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+}).AllowAnonymous();
 
 // 6. Map reverse proxy
 app.MapReverseProxy();

@@ -26,7 +26,9 @@ message PlatformKpi {
   int32 replies = 4;
   int32 conversions = 5;
   double avg_response_time_sec = 6;
-  double ad_spend = 7;
+  // 7 = ad_spend cũ, đã gỡ cùng module Ads. Giữ reserved để không tái dùng tag sai kiểu.
+  reserved 7;
+  reserved "ad_spend";
 }
 
 message ForecastRequest {

@@ -24,7 +24,9 @@ public sealed class InboxHub : Hub
         var permissionResolver = services?.GetRequiredService<IPermissionResolver>();
         var roleIdText = user.FindFirstValue("role_id");
         var permissions = Guid.TryParse(roleIdText, out var roleId) && permissionResolver is not null
-            ? await permissionResolver.GetPermissionsAsync(roleId, Context.ConnectionAborted).ConfigureAwait(false)
+            ? new HashSet<string>(
+                await permissionResolver.GetPermissionsAsync(roleId, Context.ConnectionAborted).ConfigureAwait(false),
+                StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(user.FindAll("perm").Select(c => c.Value), StringComparer.OrdinalIgnoreCase);
         if (!permissions.Contains("conversations:read") && !permissions.Contains("admin:inboxes"))
         {

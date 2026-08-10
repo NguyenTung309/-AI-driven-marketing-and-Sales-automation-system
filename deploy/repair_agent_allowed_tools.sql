@@ -13,38 +13,36 @@ BEGIN
     );
 END
 
-IF EXISTS (SELECT 1 FROM dbo.data_patches WHERE patch_id = N'2026-07-20-agent-allowed-tools-grant')
-    RETURN;
-
+IF NOT EXISTS (SELECT 1 FROM dbo.data_patches WHERE patch_id = N'2026-07-20-agent-allowed-tools-grant')
+BEGIN
 IF OBJECT_ID(N'dbo.agent_definitions', N'U') IS NOT NULL
 BEGIN
     UPDATE dbo.agent_definitions SET allowed_tools_json = N'["chat-agent"]', updated_at = SYSDATETIMEOFFSET()
-    WHERE code = N'chat-agent' AND (allowed_tools_json IS NULL OR allowed_tools_json = N'[]' OR LTRIM(RTRIM(allowed_tools_json)) = N'[]');
+    WHERE code = N'chat-agent' AND (allowed_tools_json IS NULL OR LTRIM(RTRIM(allowed_tools_json)) = N'');
 
     UPDATE dbo.agent_definitions SET allowed_tools_json = N'["sale-assist"]', updated_at = SYSDATETIMEOFFSET()
-    WHERE code = N'sale-assist-agent' AND (allowed_tools_json IS NULL OR allowed_tools_json = N'[]' OR LTRIM(RTRIM(allowed_tools_json)) = N'[]');
+    WHERE code = N'sale-assist-agent' AND (allowed_tools_json IS NULL OR LTRIM(RTRIM(allowed_tools_json)) = N'');
 
     UPDATE dbo.agent_definitions SET allowed_tools_json = N'["lead-agent"]', updated_at = SYSDATETIMEOFFSET()
-    WHERE code = N'lead-agent' AND (allowed_tools_json IS NULL OR allowed_tools_json = N'[]' OR LTRIM(RTRIM(allowed_tools_json)) = N'[]');
+    WHERE code = N'lead-agent' AND (allowed_tools_json IS NULL OR LTRIM(RTRIM(allowed_tools_json)) = N'');
 
     UPDATE dbo.agent_definitions SET allowed_tools_json = N'["research-agent","web.search"]', updated_at = SYSDATETIMEOFFSET()
-    WHERE code = N'research-agent' AND (allowed_tools_json IS NULL OR allowed_tools_json = N'[]' OR LTRIM(RTRIM(allowed_tools_json)) = N'[]');
+    WHERE code = N'research-agent' AND (allowed_tools_json IS NULL OR LTRIM(RTRIM(allowed_tools_json)) = N'');
 
     UPDATE dbo.agent_definitions SET allowed_tools_json = N'["docs-agent"]', updated_at = SYSDATETIMEOFFSET()
-    WHERE code = N'docs-agent' AND (allowed_tools_json IS NULL OR allowed_tools_json = N'[]' OR LTRIM(RTRIM(allowed_tools_json)) = N'[]');
+    WHERE code = N'docs-agent' AND (allowed_tools_json IS NULL OR LTRIM(RTRIM(allowed_tools_json)) = N'');
 
     UPDATE dbo.agent_definitions SET allowed_tools_json = N'["report-agent"]', updated_at = SYSDATETIMEOFFSET()
-    WHERE code = N'report-agent' AND (allowed_tools_json IS NULL OR allowed_tools_json = N'[]' OR LTRIM(RTRIM(allowed_tools_json)) = N'[]');
+    WHERE code = N'report-agent' AND (allowed_tools_json IS NULL OR LTRIM(RTRIM(allowed_tools_json)) = N'');
 
-    UPDATE dbo.agent_definitions SET allowed_tools_json = N'["ads-agent"]', updated_at = SYSDATETIMEOFFSET()
-    WHERE code = N'ads-agent' AND (allowed_tools_json IS NULL OR allowed_tools_json = N'[]' OR LTRIM(RTRIM(allowed_tools_json)) = N'[]');
-
-    -- Persona nudge: lead-agent must list CRM, not invent lists.
+    -- Only populate an absent legacy persona; an existing tenant-specific prompt is administrator-owned configuration.
     UPDATE dbo.agent_definitions
     SET persona_prompt = N'ALWAYS call lead-agent tool. Use operation=list|find_cold (stage, topN) to query CRM — do not invent lists or ask for lead IDs. Also score/create/batch_score.',
         updated_at = SYSDATETIMEOFFSET()
-    WHERE code = N'lead-agent';
+    WHERE code = N'lead-agent'
+      AND (persona_prompt IS NULL OR LTRIM(RTRIM(persona_prompt)) = N'');
 END
 
 INSERT INTO dbo.data_patches (patch_id, applied_at)
 VALUES (N'2026-07-20-agent-allowed-tools-grant', SYSDATETIMEOFFSET());
+END

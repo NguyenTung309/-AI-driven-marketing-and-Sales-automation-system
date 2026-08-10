@@ -16,12 +16,15 @@ namespace Clawbot.AgentService.Services;
 
 public sealed partial class OrchestratorGrpcService(
     SemanticKernelPlanGenerator planGenerator,
-    AutonomousOrchestrator autonomousOrchestrator,
+    IAutonomousOrchestrator autonomousOrchestrator,
     IAgentCatalog catalog,
     IEnumerable<IAgent> adapters,
     ILlmCallScope llmScope,
     IPiiRedactor redactor,
     OrchestratorCostGuard costGuard,
+    AgentScheduleRunner scheduleRunner,
+    IOrchestratorCallerAuthorizer callerAuthorizer,
+    IAutonomousRunSink runSink,
     AppDbContext db,
     IClock clock,
     ILogger<OrchestratorGrpcService> logger,
@@ -30,17 +33,22 @@ public sealed partial class OrchestratorGrpcService(
     private const int MaxConcurrency = 3;
     private const int MaxReplans = 2;
     private const string OrchestratorAgentCode = "orchestrator";
+    // Cùng ngưỡng với OrchestrationPlanValidator.MaxTaskInputChars: output người sửa cũng nằm trong plan JSON.
+    private const int MaxInterveneOutputChars = OrchestrationPlanValidator.MaxTaskInputChars;
 
     private static readonly System.Text.Json.JsonSerializerOptions WebJsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web);
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, CancellationTokenSource> RunningSessions = new();
 
     private readonly SemanticKernelPlanGenerator _planGenerator = planGenerator;
-    private readonly AutonomousOrchestrator _autonomous = autonomousOrchestrator;
+    private readonly IAutonomousOrchestrator _autonomous = autonomousOrchestrator;
     private readonly IAgentCatalog _catalog = catalog;
     private readonly IReadOnlyList<IAgent> _adapters = adapters.ToArray();
     private readonly ILlmCallScope _llmScope = llmScope;
     private readonly IPiiRedactor _redactor = redactor;
     private readonly OrchestratorCostGuard _costGuard = costGuard;
+    private readonly AgentScheduleRunner _scheduleRunner = scheduleRunner;
+    private readonly IOrchestratorCallerAuthorizer _callerAuthorizer = callerAuthorizer;
+    private readonly IAutonomousRunSink _runSink = runSink;
     private readonly AppDbContext _db = db;
     private readonly IClock _clock = clock;
     private readonly ILogger<OrchestratorGrpcService> _logger = logger;
@@ -50,11 +58,18 @@ public sealed partial class OrchestratorGrpcService(
 
     public override async Task<SessionResponse> Submit(SubmitRequest request, ServerCallContext context)
     {
-        var tenantId = ParseTenant(request.TenantId);
         if (string.IsNullOrWhiteSpace(request.Goal))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "goal_required"));
 
         var ct = context.CancellationToken;
+        var caller = await _callerAuthorizer.AuthorizeAsync(
+                context,
+                request.TenantId,
+                request.UserId,
+                "orchestration:run",
+                ct)
+            .ConfigureAwait(false);
+        var tenantId = caller.TenantId;
         var now = _clock.UtcNow;
         var redactedGoal = (await _redactor.RedactAsync(request.Goal, ct).ConfigureAwait(false)).RedactedText;
 
@@ -63,9 +78,8 @@ public sealed partial class OrchestratorGrpcService(
         // the planner call no longer races the HTTP request lifetime. Tie it to the orchestrator AgentConfig
         // so planning traces surface under that agent's "Sự kiện lỗi" tab on the dashboard.
         var orchestratorAgentId = await ResolveOrchestratorAgentIdAsync(tenantId, ct).ConfigureAwait(false);
-        var userId = ParseOptionalGuid(request.UserId);
-        // SPEC-16 P3-3: attribute the session to the initiating user so terminal notifications target them.
-        var session = AgentSession.Start(tenantId, orchestratorAgentId, conversationId: null, redactedGoal, now, userId: userId);
+        // Authenticated service identity and the payload must agree; the payload is never authoritative.
+        var session = AgentSession.Start(tenantId, orchestratorAgentId, conversationId: null, redactedGoal, now, userId: caller.UserId);
         session.AppendTrace(string.Empty, OrchestratorAgentCode, "planning_started", "Đang lập kế hoạch cho mục tiêu.", now);
         if (request.DryRun)
             session.AppendTrace(string.Empty, OrchestratorAgentCode, "dry_run", "Bản chạy thử — công cụ chỉ mô phỏng hành động, không thực thi thật.", now);
@@ -86,10 +100,13 @@ public sealed partial class OrchestratorGrpcService(
                     var service = ActivatorUtilities.CreateInstance<OrchestratorGrpcService>(scope.ServiceProvider);
                     await service.PlanAndRunPersistedAsync(sessionId, goal, dryRun, CancellationToken.None).ConfigureAwait(false);
                 }
+                catch (Exception ex) when (ex is OrchestrationPlanGenerationMismatchException or DbUpdateConcurrencyException)
+                {
+                    LogBackgroundRunFailed(_logger, ex, sessionId);
+                }
                 catch (Exception ex)
                 {
                     LogBackgroundRunFailed(_logger, ex, sessionId);
-                    await MarkBackgroundRunFailedAsync(sessionId, ex, CancellationToken.None).ConfigureAwait(false);
                 }
             }, CancellationToken.None);
             return ToResponse(session);
@@ -98,6 +115,36 @@ public sealed partial class OrchestratorGrpcService(
         // No scope factory (tests / inline host): plan + execute synchronously within the request.
         var (costBlocked, costReason) = await PlanAndExecuteAsync(session, request.Goal, request.DryRun, ct).ConfigureAwait(false);
         return ToResponse(session, costBlocked, costReason);
+    }
+
+    public override async Task<RunScheduleResponse> RunSchedule(RunScheduleRequest request, ServerCallContext context)
+    {
+        var ct = context.CancellationToken;
+        var caller = await _callerAuthorizer.AuthorizeAsync(
+                context,
+                request.TenantId,
+                request.UserId,
+                "orchestration:run",
+                ct)
+            .ConfigureAwait(false);
+        if (!Guid.TryParse(request.ScheduleId, out var scheduleId) || scheduleId == Guid.Empty)
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "schedule_id_required"));
+
+        var result = await _scheduleRunner.RunNowAsync(
+            caller.TenantId,
+            scheduleId,
+            caller.UserId,
+            ct).ConfigureAwait(false);
+        var response = new RunScheduleResponse
+        {
+            Status = result.Status,
+            SessionId = result.SessionId?.ToString("D") ?? string.Empty,
+        };
+        if (result.NextRunAt is { } nextRunAt)
+            response.NextRunAt = Timestamp.FromDateTimeOffset(nextRunAt);
+        if (result.LastRunAt is { } lastRunAt)
+            response.LastRunAt = Timestamp.FromDateTimeOffset(lastRunAt);
+        return response;
     }
 
     private async Task PlanAndRunPersistedAsync(Guid sessionId, string goal, bool dryRun, CancellationToken ct)
@@ -109,35 +156,109 @@ public sealed partial class OrchestratorGrpcService(
         if (session is null)
             return;
 
-        await PlanAndExecuteAsync(session, goal, dryRun, ct).ConfigureAwait(false);
+        try
+        {
+            await PlanAndExecuteAsync(session, goal, dryRun, ct).ConfigureAwait(false);
+        }
+        catch (OrchestrationPlanGenerationMismatchException)
+        {
+            return;
+        }
+        catch (OrchestrationSessionNotRunningException)
+        {
+            return;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogBackgroundRunFailed(_logger, ex, sessionId);
+            await MarkBackgroundRunFailedAsync(
+                session.TenantId,
+                sessionId,
+                session.ReplanCount,
+                ex,
+                ct).ConfigureAwait(false);
+        }
     }
 
     // Generate and execute through V2. The session placeholder already exists, so progress survives F5.
+    private async Task<IReadOnlySet<string>> ResolveExecutionPermissionsAsync(AgentSession session, CancellationToken ct)
+    {
+        if (session.ExecutionUserId is not { } userId)
+            return new HashSet<string>(StringComparer.Ordinal);
+
+        try
+        {
+            return await _callerAuthorizer.ResolvePermissionsAsync(session.TenantId, userId, ct)
+                .ConfigureAwait(false);
+        }
+        catch (RpcException)
+        {
+            // A disabled/deprovisioned initiator must fail closed instead of retaining stale grants.
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+    }
+
     private async Task<(bool CostBlocked, string? CostReason)> PlanAndExecuteAsync(AgentSession session, string goal, bool dryRun, CancellationToken ct)
     {
-        var requireApproval = await _db.Tenants
-            .IgnoreQueryFilters()
-            .Where(t => t.Id == session.TenantId)
-            .Select(t => t.RequireOrchestrationApproval)
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (!RunningSessions.TryAdd(session.Id, runCts))
+            return (false, "run_already_active");
 
-        var existingPlan = OrchestrationPlanJson.TryParse(session.PlanJson);
-        var result = existingPlan?.Tasks is { Count: > 0 } && session.Status == AgentSessionStatuses.Running
-            ? await _autonomous.RunExistingPlanAsync(new AutonomousRunRequest(session.TenantId, session.Id, goal, "manual", RequiresApproval: false, DryRun: dryRun), existingPlan, ct).ConfigureAwait(false)
-            : await _autonomous.RunAsync(new AutonomousRunRequest(session.TenantId, session.Id, goal, "manual", requireApproval, DryRun: dryRun), ct).ConfigureAwait(false);
+        try
+        {
+            var runCt = runCts.Token;
+            var requireApproval = await _db.Tenants
+                .IgnoreQueryFilters()
+                .Where(t => t.Id == session.TenantId)
+                .Select(t => t.RequireOrchestrationApproval)
+                .FirstOrDefaultAsync(runCt).ConfigureAwait(false);
 
-        return (result.Reason == "cost_cap_preflight", result.Reason);
+            var executionPermissions = await ResolveExecutionPermissionsAsync(session, runCt).ConfigureAwait(false);
+            if (session.ExecutionUserId is null || !executionPermissions.Contains("orchestration:run"))
+            {
+                await _runSink.FailAndRejectOrphanedContentAsync(
+                        session.TenantId,
+                        session.Id,
+                        "orchestration_execution_permission_denied",
+                        session.ReplanCount,
+                        _clock.UtcNow,
+                        runCt)
+                    .ConfigureAwait(false);
+                return (false, "orchestration_execution_permission_denied");
+            }
+
+            var existingPlan = OrchestrationPlanJson.TryParse(session.PlanJson);
+            var result = existingPlan?.Tasks is { Count: > 0 } && session.Status == AgentSessionStatuses.Running
+                ? await _autonomous.RunExistingPlanAsync(new AutonomousRunRequest(session.TenantId, session.Id, goal, "manual", RequiresApproval: false, DryRun: dryRun, ExecutionPermissions: executionPermissions), existingPlan, runCt).ConfigureAwait(false)
+                : await _autonomous.RunAsync(new AutonomousRunRequest(session.TenantId, session.Id, goal, "manual", requireApproval, DryRun: dryRun, ExecutionPermissions: executionPermissions), runCt).ConfigureAwait(false);
+
+            return (result.Reason == "cost_cap_preflight", result.Reason);
+        }
+        finally
+        {
+            _ = RunningSessions.TryRemove(new KeyValuePair<Guid, CancellationTokenSource>(session.Id, runCts));
+        }
     }
 
     public override async Task<SessionResponse> GetPlan(SessionRef request, ServerCallContext context)
     {
-        var session = await LoadAsync(request.TenantId, request.SessionId, context.CancellationToken).ConfigureAwait(false);
+        var ct = context.CancellationToken;
+        await _callerAuthorizer.AuthorizeAsync(context, request.TenantId, null, "orchestration:view", ct)
+            .ConfigureAwait(false);
+        var session = await LoadAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false);
         return ToResponse(session);
     }
 
     public override async Task<SessionResponse> UpdatePlan(UpdatePlanRequest request, ServerCallContext context)
     {
         var ct = context.CancellationToken;
+        var caller = await _callerAuthorizer.AuthorizeAsync(
+                context,
+                request.TenantId,
+                null,
+                "orchestration:run",
+                ct)
+            .ConfigureAwait(false);
         var session = await LoadAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false);
         EnsureEtagMatches(session, request.ExpectedEtag);
 
@@ -151,7 +272,7 @@ public sealed partial class OrchestratorGrpcService(
         try
         {
             var redactedPlan = await OrchestrationPlanRedactor.RedactAsync(plan, _redactor, ct).ConfigureAwait(false);
-            session.UpdatePlan(OrchestrationPlanJson.Serialize(redactedPlan));
+            session.UpdatePlan(OrchestrationPlanJson.Serialize(redactedPlan), caller.UserId);
         }
         catch (InvalidOperationException ex)
         {
@@ -165,12 +286,20 @@ public sealed partial class OrchestratorGrpcService(
     public override async Task<SessionResponse> Approve(SessionRef request, ServerCallContext context)
     {
         var ct = context.CancellationToken;
+        var caller = await _callerAuthorizer.AuthorizeAsync(
+                context,
+                request.TenantId,
+                null,
+                "orchestration:approve",
+                ct)
+            .ConfigureAwait(false);
+        RequireExecutionPermission(caller);
         var session = await LoadAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false);
         EnsureEtagMatches(session, request.ExpectedEtag);
 
         try
         {
-            session.Approve();
+            session.Approve(caller.UserId);
         }
         catch (InvalidOperationException ex)
         {
@@ -185,6 +314,13 @@ public sealed partial class OrchestratorGrpcService(
     public override async Task<SessionResponse> Control(ControlRequest request, ServerCallContext context)
     {
         var ct = context.CancellationToken;
+        var caller = await _callerAuthorizer.AuthorizeAsync(
+                context,
+                request.TenantId,
+                null,
+                "orchestration:manage",
+                ct)
+            .ConfigureAwait(false);
         var session = await LoadAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false);
         EnsureEtagMatches(session, request.ExpectedEtag);
 
@@ -193,19 +329,32 @@ public sealed partial class OrchestratorGrpcService(
             switch ((request.Action ?? string.Empty).Trim().ToLowerInvariant())
             {
                 case "pause":
-                    session.Pause();
-                    CancelRunningSession(session.Id);
+                    session.RequestPause();
                     break;
                 case "resume":
-                    session.Resume();
+                    RequireExecutionPermission(caller);
+                    if (RunningSessions.ContainsKey(session.Id))
+                        throw new RpcException(new Status(StatusCode.FailedPrecondition, "pause_in_progress"));
+                    session.Resume(caller.UserId);
                     break;
                 case "cancel":
-                    session.Cancel(_clock.UtcNow);
+                    await _runSink.CancelAsync(
+                        session.TenantId,
+                        session.Id,
+                        session.ReplanCount,
+                        session.RowVersion,
+                        _clock.UtcNow,
+                        ct).ConfigureAwait(false);
+                    await _db.Entry(session).ReloadAsync(ct).ConfigureAwait(false);
                     CancelRunningSession(session.Id);
                     break;
                 default:
                     throw new RpcException(new Status(StatusCode.InvalidArgument, "unknown_action"));
             }
+        }
+        catch (OrchestrationSessionEtagMismatchException)
+        {
+            throw new RpcException(new Status(StatusCode.FailedPrecondition, "etag_mismatch"));
         }
         catch (InvalidOperationException ex)
         {
@@ -216,6 +365,125 @@ public sealed partial class OrchestratorGrpcService(
         if (session.Status == AgentSessionStatuses.Running && string.Equals(request.Action, "resume", StringComparison.OrdinalIgnoreCase))
             await StartExecutionAsync(session.Id, session.Goal ?? string.Empty, ct).ConfigureAwait(false);
         return ToResponse(session);
+    }
+
+    private static void RequireExecutionPermission(OrchestratorCaller caller)
+    {
+        if (!caller.Permissions.Contains("orchestration:run"))
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "execution_permission_denied"));
+    }
+
+    // Can thiệp thủ công vào MỘT task của phiên đang tạm dừng: sửa output, chạy lại, hoặc bỏ qua.
+    // Không gọi planner => không tốn LLM. Đây là đường thay thế cho auto-replan (vốn sinh plan mới
+    // hoàn toàn và chạy lại cả những bước đã xong).
+    public override async Task<SessionResponse> InterveneTask(InterveneTaskRequest request, ServerCallContext context)
+    {
+        var ct = context.CancellationToken;
+        var caller = await _callerAuthorizer.AuthorizeAsync(context, request.TenantId, request.UserId, "orchestration:manage", ct)
+            .ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(request.TaskId))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "task_id_required"));
+
+        var action = (request.Action ?? string.Empty).Trim().ToLowerInvariant();
+        if (action is not ("edit_output" or "retry" or "skip"))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "unknown_action"));
+        if (action == "edit_output" && string.IsNullOrWhiteSpace(request.Output))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "output_required"));
+        if ((request.Output ?? string.Empty).Length > MaxInterveneOutputChars)
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "output_too_large"));
+
+        var session = await LoadAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false);
+        EnsureEtagMatches(session, request.ExpectedEtag);
+
+        // Runner còn sống giữ bản plan trong RAM và sẽ ghi đè bản sửa ở lần PersistPlan kế tiếp.
+        // Cùng lá chắn mà "resume" đang dùng.
+        if (RunningSessions.ContainsKey(session.Id))
+            throw new RpcException(new Status(StatusCode.FailedPrecondition, "run_in_progress"));
+        if (session.Status != AgentSessionStatuses.Paused)
+            throw new RpcException(new Status(StatusCode.FailedPrecondition, "session_not_paused"));
+
+        var plan = OrchestrationPlanJson.TryParse(session.PlanJson)
+            ?? throw new RpcException(new Status(StatusCode.FailedPrecondition, "plan_not_available"));
+        var target = plan.Tasks.FirstOrDefault(t => string.Equals(t.Id, request.TaskId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new RpcException(new Status(StatusCode.NotFound, "task_not_found"));
+
+        // Người dùng có thể dán dữ liệu khách vào ô sửa — redact trước khi ghi, như mọi text dẫn xuất khác.
+        var redactedOutput = action == "edit_output"
+            ? (await _redactor.RedactAsync(request.Output ?? string.Empty, ct).ConfigureAwait(false)).RedactedText
+            : null;
+
+        var next = action switch
+        {
+            "edit_output" => plan.WithTaskStatus(target.Id, "completed", redactedOutput, null),
+            "retry" => plan.WithTaskStatus(target.Id, "pending", null, null),
+            _ => plan.WithTaskStatus(target.Id, "skipped", null, null),
+        };
+
+        // Sửa output của một bước đã xong sẽ vô nghĩa nếu các bước sau đã chạy với kết quả cũ:
+        // chúng không đọc lại upstream. Reset để kết quả mới thực sự chảy xuống.
+        var resetCount = 0;
+        if (request.RerunDownstream)
+            (next, resetCount) = ResetDownstream(next, target.Id);
+
+        var catalogEntries = await _catalog.ListAsync(ct).ConfigureAwait(false);
+        var validation = OrchestrationPlanValidator.Validate(next, catalogEntries);
+        if (!validation.IsValid)
+            throw new RpcException(new Status(StatusCode.InvalidArgument, validation.Error ?? "invalid_plan"));
+
+        var (phase, message) = action switch
+        {
+            "edit_output" => ("task_edited", $"Người dùng đã sửa kết quả bước {target.Id}."),
+            "retry" => ("task_retry", $"Người dùng yêu cầu chạy lại bước {target.Id}."),
+            _ => ("task_skipped", $"Người dùng bỏ qua bước {target.Id}."),
+        };
+        if (resetCount > 0)
+            message += $" Đặt lại {resetCount} bước phía sau để chạy lại.";
+
+        try
+        {
+            session.UpdatePlan(OrchestrationPlanJson.Serialize(next), caller.UserId);
+            session.AppendTrace(target.Id, OrchestratorAgentCode, phase, message, _clock.UtcNow);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new RpcException(new Status(StatusCode.FailedPrecondition, ex.Message));
+        }
+
+        await SaveAsync(ct).ConfigureAwait(false);
+        return ToResponse(session);
+    }
+
+    // Duyệt xuôi đồ thị phụ thuộc: mọi task phụ thuộc (trực tiếp lẫn gián tiếp) vào rootId mà đã chạy
+    // xong/lỗi/bỏ qua đều quay về pending để chạy lại với dữ liệu mới.
+    private static (OrchestrationPlanDocument Plan, int ResetCount) ResetDownstream(OrchestrationPlanDocument plan, string rootId)
+    {
+        var affected = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { rootId };
+        bool grew;
+        do
+        {
+            grew = false;
+            foreach (var task in plan.Tasks)
+            {
+                if (affected.Contains(task.Id)) continue;
+                if (task.DependsOn.Any(affected.Contains) && affected.Add(task.Id))
+                    grew = true;
+            }
+        }
+        while (grew);
+
+        var next = plan;
+        var reset = 0;
+        foreach (var task in plan.Tasks)
+        {
+            if (string.Equals(task.Id, rootId, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!affected.Contains(task.Id)) continue;
+            if (string.IsNullOrWhiteSpace(task.Status) || string.Equals(task.Status, "pending", StringComparison.OrdinalIgnoreCase)) continue;
+
+            next = next.WithTaskStatus(task.Id, "pending", null, null);
+            reset++;
+        }
+
+        return (next, reset);
     }
 
     // --- Execution ---
@@ -244,28 +512,25 @@ public sealed partial class OrchestratorGrpcService(
             catch (Exception ex)
             {
                 LogBackgroundRunFailed(_logger, ex, sessionId);
-                await MarkBackgroundRunFailedAsync(sessionId, ex, CancellationToken.None).ConfigureAwait(false);
             }
         }, CancellationToken.None);
     }
 
-    // Records a user-safe failure trace before failing the session, so an exception escaping the
-    // background task (e.g. planner LLM error) shows a reason in the FE instead of a bare "failed".
-    private async Task MarkBackgroundRunFailedAsync(Guid sessionId, Exception? error, CancellationToken ct)
+    // A background error must not bypass generation-scoped orphan cleanup. The generation captured when this
+    // runner started is passed into the sink, so a stale runner cannot fail a newer durable plan.
+    private async Task MarkBackgroundRunFailedAsync(
+        Guid tenantId,
+        Guid sessionId,
+        int expectedGeneration,
+        Exception? error,
+        CancellationToken ct)
     {
         using var scope = _scopeFactory?.CreateScope();
         if (scope is null)
             return;
 
-        var scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var scopedClock = scope.ServiceProvider.GetRequiredService<IClock>();
-        var session = await scopedDb.AgentSessions
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(s => s.Id == sessionId, ct)
-            .ConfigureAwait(false);
-        if (session is null || session.Status is AgentSessionStatuses.Completed or AgentSessionStatuses.Failed or AgentSessionStatuses.Cancelled)
-            return;
-
+        var sink = scope.ServiceProvider.GetRequiredService<IAutonomousRunSink>();
         var reason = error switch
         {
             PlanGenerationException => error.Message,
@@ -273,9 +538,25 @@ public sealed partial class OrchestratorGrpcService(
             null => "Lỗi không xác định khi lập kế hoạch.",
             _ => $"Lập kế hoạch thất bại: {error.Message}",
         };
-        session.AppendTrace(string.Empty, OrchestratorAgentCode, "planning_failed", reason, scopedClock.UtcNow);
-        session.Fail(scopedClock.UtcNow);
-        await scopedDb.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        try
+        {
+            await sink.FailAndRejectOrphanedContentAsync(
+                tenantId,
+                sessionId,
+                reason,
+                expectedGeneration,
+                scopedClock.UtcNow,
+                ct).ConfigureAwait(false);
+        }
+        catch (OrchestrationPlanGenerationMismatchException)
+        {
+            // A newer plan has become durable; the old runner must not terminalize it.
+        }
+        catch (OrchestrationSessionNotRunningException)
+        {
+            // The user stopped the run; terminal state and content are intentionally preserved.
+        }
     }
 
     private async Task SaveAsync(CancellationToken ct)

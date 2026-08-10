@@ -17,6 +17,12 @@ namespace Clawbot.Api.Endpoints;
 
 public static class DocumentsEndpoints
 {
+    private static readonly Action<ILogger, Guid, string, Exception?> LogMissingStoredDocument =
+        LoggerMessage.Define<Guid, string>(
+            LogLevel.Warning,
+            new EventId(1, nameof(LogMissingStoredDocument)),
+            "Generated document {DocumentId} is missing from storage (key {StorageKey})");
+
     private static readonly byte[] TransparentGif =
         Convert.FromBase64String("R0lGODlhAQABAPAAAP///wAAACH5BAAAAAAALAAAAAABAAEAAAICRAEAOw==");
 
@@ -60,6 +66,9 @@ public static class DocumentsEndpoints
         AppDbContext db,
         ITenantAccessor tenants,
         IClock clock,
+        Clawbot.Agents.Core.Docs.IDocumentStorage storage,
+        Clawbot.Agents.Core.Docs.DocsStorageOptions storageOptions,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         _ = tenants.Require();
@@ -68,9 +77,51 @@ public static class DocumentsEndpoints
         if (doc.IsExpired(clock.UtcNow))
             return Results.Problem(statusCode: StatusCodes.Status410Gone, detail: "Document download link has expired.");
 
+        // FileUrl tuyệt đối (presigned MinIO) thì redirect như cũ. Ngược lại đó là key nội bộ dạng
+        // "/generated-docs/<file>.pdf" — không host nào phục vụ đường dẫn này, redirect rơi vào SPA và
+        // react-router bắn "404 Not Found". Đọc bytes qua IDocumentStorage và stream thẳng, giữ nguyên cổng docs:read.
+        if (Uri.TryCreate(doc.FileUrl, UriKind.Absolute, out var absolute)
+            && (absolute.Scheme == Uri.UriSchemeHttp || absolute.Scheme == Uri.UriSchemeHttps))
+        {
+            doc.MarkOpened(clock.UtcNow);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return Results.Redirect(doc.FileUrl);
+        }
+
+        var storageKey = ResolveStorageKey(doc.FileUrl, storageOptions.PublicBaseUrl);
+        byte[] bytes;
+        try
+        {
+            bytes = await storage.ReadAsync(storageKey, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            LogMissingStoredDocument(
+                loggerFactory.CreateLogger(typeof(DocumentsEndpoints)),
+                doc.Id,
+                storageKey,
+                exception);
+            return Results.Problem(
+                statusCode: StatusCodes.Status404NotFound,
+                detail: "Generated file is no longer available in document storage.");
+        }
+
         doc.MarkOpened(clock.UtcNow);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return Results.Redirect(doc.FileUrl);
+
+        var fileName = Path.GetFileName(storageKey);
+        // inline: iframe xem trước hiển thị luôn thay vì ép tải về.
+        return Results.File(bytes, "application/pdf", fileName, enableRangeProcessing: true);
+    }
+
+    // FileUrl được lưu là PublicBaseUrl + "/" + key. Cắt prefix để lấy lại đúng key lúc save.
+    private static string ResolveStorageKey(string fileUrl, string publicBaseUrl)
+    {
+        var trimmed = (fileUrl ?? string.Empty).Trim();
+        var prefix = (publicBaseUrl ?? string.Empty).TrimEnd('/') + "/";
+        if (prefix.Length > 1 && trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            return trimmed[prefix.Length..];
+        return trimmed.TrimStart('/');
     }
 
     // Sinh tài liệu chạy ngầm — trả jobId ngay, thông báo khi xong (link /documents).

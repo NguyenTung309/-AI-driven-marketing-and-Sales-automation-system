@@ -1,3 +1,4 @@
+using System.Data;
 using Clawbot.Agents.Contracts.Orchestrator;
 using Clawbot.Agents.Core.Orchestrator;
 using Clawbot.Api.Auth;
@@ -10,6 +11,8 @@ using Clawbot.SharedKernel.Jobs;
 using Clawbot.SharedKernel.Multitenancy;
 using Clawbot.SharedKernel.Time;
 using Grpc.Core;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -22,9 +25,27 @@ public sealed record OrchestrationV2ScheduleRequest(string Name, string GoalTemp
 public sealed record OrchestrationV2ControlRequest(string Action, string? Etag = null);
 public sealed record OrchestrationV2UpdatePlanRequest(string PlanJson, string? Etag = null);
 public sealed record OrchestrationV2ApproveRequest(string? Etag = null);
+public sealed record OrchestrationV2InterveneTaskRequest(
+    string Action,
+    string? Output = null,
+    bool RerunDownstream = false,
+    string? Etag = null);
 
 public sealed record OrchestrationV2AgentDto(Guid Id, string Code, string DisplayName, string AgentType, bool IsOrchestratable, int Version, string? KbModuleCode, string AllowedToolsJson = "[]", string InputSchemaJson = "{}", string PersonaPrompt = "", Guid? LlmConfigId = null);
-public sealed record OrchestrationV2ScheduleDto(Guid Id, string Name, string GoalTemplate, string Cadence, string TimezoneId, DateTimeOffset NextRunAt, DateTimeOffset? LastRunAt, bool IsActive, bool RequiresApproval, string TriggerType = "cadence", string? EventKey = null);
+public sealed record OrchestrationV2ScheduleDto(
+    Guid Id,
+    string Name,
+    string GoalTemplate,
+    string Cadence,
+    string TimezoneId,
+    DateTimeOffset NextRunAt,
+    DateTimeOffset? LastRunAt,
+    bool IsActive,
+    bool RequiresApproval,
+    string TriggerType = "cadence",
+    string? EventKey = null,
+    string? LastRunStatus = null,
+    string? LastRunError = null);
 public sealed record OrchestrationV2TraceDto(string TaskId, string AgentName, string Phase, string Message, DateTimeOffset OccurredAt);
 // "Tự động xây dựng kế hoạch": orchestrator quét snapshot hệ thống, đề xuất kế hoạch định kỳ chưa trùng.
 public sealed record OrchestrationPlanSuggestionDto(string Name, string Goal, string Cadence, string Reason);
@@ -84,23 +105,39 @@ public static partial class OrchestrationV2Endpoints
         var group = app.MapGroup("/api/orchestration/v2")
             .RequireAuthorization()
             .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        group.AddEndpointFilter(async (context, next) =>
+        {
+            var bearerResult = await context.HttpContext
+                .AuthenticateAsync(JwtBearerDefaults.AuthenticationScheme)
+                .ConfigureAwait(false);
+            return bearerResult.Succeeded
+                ? await next(context).ConfigureAwait(false)
+                : Results.Forbid();
+        });
 
         group.MapPost("/runs", CreateRunAsync).RequirePermission("orchestration:run");
         group.MapGet("/runs", ListRunsAsync).RequirePermission("orchestration:view");
         group.MapGet("/runs/{id:guid}", GetRunAsync).RequirePermission("orchestration:view");
         group.MapPut("/runs/{id:guid}/plan", UpdateRunPlanAsync).RequirePermission("orchestration:run");
-        group.MapPost("/runs/{id:guid}/approve", ApproveRunAsync).RequirePermission("orchestration:approve");
+        group.MapPost("/runs/{id:guid}/approve", ApproveRunAsync)
+            .RequirePermission("orchestration:approve")
+            .RequirePermission("orchestration:run");
         group.MapPost("/runs/{id:guid}/control", ControlRunAsync).RequirePermission("orchestration:manage");
+        // Can thiệp một bước của phiên đang tạm dừng (sửa kết quả / chạy lại / bỏ qua) — thay cho auto-replan.
+        group.MapPost("/runs/{id:guid}/tasks/{taskId}/intervene", InterveneTaskAsync).RequirePermission("orchestration:manage");
         group.MapPost("/runs/{id:guid}/archive", ArchiveRunAsync).RequirePermission("orchestration:manage");
         group.MapPost("/runs/{id:guid}/unarchive", UnarchiveRunAsync).RequirePermission("orchestration:manage");
         group.MapGet("/cost-summary", CostSummaryAsync).RequirePermission("orchestration:view");
         group.MapGet("/agents", ListAgentsAsync).RequirePermission("orchestration:view");
         group.MapPost("/agents", UpsertAgentAsync).RequirePermission("orchestration:manage");
         group.MapGet("/schedules", ListSchedulesAsync).RequirePermission("orchestration:view");
-        group.MapPost("/schedules", CreateScheduleAsync).RequirePermission("orchestration:manage");
+        group.MapPost("/schedules", CreateScheduleAsync)
+            .RequirePermission("orchestration:manage")
+            .RequirePermission("orchestration:run");
         // "Tự động xây dựng kế hoạch": LLM đọc snapshot hệ thống + kế hoạch hiện có -> đề xuất checklist.
         group.MapPost("/plan-suggestions", SuggestPlansAsync).RequirePermission("orchestration:run");
         group.MapPost("/schedules/{id:guid}/run-now", RunScheduleNowAsync).RequirePermission("orchestration:run");
+        group.MapDelete("/schedules/{id:guid}", DeleteScheduleAsync).RequirePermission("orchestration:manage");
         group.MapPost("/schedules/{id:guid}/pause", PauseScheduleAsync).RequirePermission("orchestration:manage");
         group.MapPost("/schedules/{id:guid}/activate", ActivateScheduleAsync).RequirePermission("orchestration:manage");
         return app;
@@ -334,6 +371,43 @@ public static partial class OrchestrationV2Endpoints
         }
     }
 
+    private static async Task<IResult> InterveneTaskAsync(
+        Guid id,
+        string taskId,
+        OrchestrationV2InterveneTaskRequest body,
+        ITenantAccessor tenants,
+        Orchestrator.OrchestratorClient grpc,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(taskId)) return Results.BadRequest(new { error = "task_id_required" });
+        if (string.IsNullOrWhiteSpace(body.Action)) return Results.BadRequest(new { error = "invalid_action" });
+        var action = body.Action.Trim().ToLowerInvariant();
+        if (action is not ("edit_output" or "retry" or "skip")) return Results.BadRequest(new { error = "invalid_action" });
+
+        var tenant = tenants.Require();
+        var userId = http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        try
+        {
+            var response = await grpc.InterveneTaskAsync(new InterveneTaskRequest
+            {
+                TenantId = tenant.TenantId.ToString("D"),
+                SessionId = id.ToString("D"),
+                TaskId = taskId,
+                Action = action,
+                Output = body.Output ?? string.Empty,
+                RerunDownstream = body.RerunDownstream,
+                ExpectedEtag = body.Etag ?? string.Empty,
+                UserId = userId ?? string.Empty,
+            }, cancellationToken: ct).ConfigureAwait(false);
+            return Results.Ok(ToPlanDto(id, response));
+        }
+        catch (RpcException ex)
+        {
+            return ToGrpcResult(ex);
+        }
+    }
+
     private static async Task<IResult> ArchiveRunAsync(Guid id, AppDbContext db, ITenantAccessor tenants, IClock clock, CancellationToken ct)
     {
         var tenant = tenants.Require();
@@ -464,9 +538,24 @@ public static partial class OrchestrationV2Endpoints
         var schedules = await db.AgentSchedules.IgnoreQueryFilters().AsNoTracking()
             .Where(s => s.TenantId == tenant.TenantId && s.DeletedAt == null)
             .OrderBy(s => s.NextRunAt)
-            .Select(s => ToScheduleDto(s))
             .ToListAsync(ct).ConfigureAwait(false);
-        return Results.Ok(new { items = schedules });
+        var latestRuns = await db.AgentScheduleRuns.IgnoreQueryFilters().AsNoTracking()
+            .Where(r => r.TenantId == tenant.TenantId)
+            .GroupBy(r => r.ScheduleId)
+            .Select(group => group
+                .OrderByDescending(r => r.StartedAt)
+                .ThenByDescending(r => r.Id)
+                .Select(r => new { r.ScheduleId, r.Status, r.Error })
+                .First())
+            .ToListAsync(ct).ConfigureAwait(false);
+        var latestRunBySchedule = latestRuns.ToDictionary(run => run.ScheduleId);
+        var items = schedules.Select(schedule =>
+        {
+            if (latestRunBySchedule.TryGetValue(schedule.Id, out var latestRun) && latestRun is not null)
+                return ToScheduleDto(schedule, latestRun.Status, latestRun.Error);
+            return ToScheduleDto(schedule);
+        }).ToArray();
+        return Results.Ok(new { items });
     }
 
     // "Tự động xây dựng kế hoạch": quét snapshot dữ liệu tenant -> LLM (binding orchestrator) đề xuất
@@ -695,9 +784,16 @@ public static partial class OrchestrationV2Endpoints
             .Split([' ', ',', '.', ':', ';', '-', '_', '/', '(', ')', '"', '\'', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries)
             .Where(t => t.Length > 2), StringComparer.Ordinal);
 
-    private static async Task<IResult> CreateScheduleAsync(OrchestrationV2ScheduleRequest body, AppDbContext db, ITenantAccessor tenants, IClock clock, CancellationToken ct)
+    private static async Task<IResult> CreateScheduleAsync(OrchestrationV2ScheduleRequest body, AppDbContext db, ITenantAccessor tenants, IClock clock, HttpContext http, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(body.Name) || string.IsNullOrWhiteSpace(body.GoalTemplate)) return Results.BadRequest(new { error = "schedule_required_fields" });
+        if (string.IsNullOrWhiteSpace(body.Name)
+            || string.IsNullOrWhiteSpace(body.GoalTemplate)
+            || string.IsNullOrWhiteSpace(body.Cadence)
+            || string.IsNullOrWhiteSpace(body.TimezoneId))
+        {
+            return Results.BadRequest(new { error = "schedule_required_fields" });
+        }
+        if (body.RequiresApproval) return Results.BadRequest(new { error = "schedule_approval_not_supported" });
         if (!IsKnownCadence(body.Cadence)) return Results.BadRequest(new { error = "invalid_cadence" });
         try { _ = TimeZoneInfo.FindSystemTimeZoneById(body.TimezoneId); }
         catch (TimeZoneNotFoundException) { return Results.BadRequest(new { error = "invalid_timezone" }); }
@@ -711,25 +807,94 @@ public static partial class OrchestrationV2Endpoints
             return Results.BadRequest(new { error = "invalid_event_key" });
         }
         var tenant = tenants.Require();
+        var initiatorUserId = CurrentUserId(http);
+        if (initiatorUserId is null)
+            return Results.Unauthorized();
         // Event schedules ngủ tới khi sự kiện kéo NextRunAt về; cadence schedules chạy ngay mốc đầu.
         var nextRunAt = triggerType == "event" ? DateTimeOffset.MaxValue : body.NextRunAt ?? clock.UtcNow;
-        var schedule = AgentSchedule.Create(tenant.TenantId, body.Name, body.GoalTemplate, body.Cadence, null, body.TimezoneId, nextRunAt, body.RequiresApproval, clock.UtcNow, triggerType: triggerType, eventKey: body.EventKey);
+        // Automatic schedules always execute after planning. Tenant high-risk tool approval remains an
+        // independent guardrail in AutonomousOrchestrator; clients cannot create a schedule that waits here.
+        var schedule = AgentSchedule.Create(tenant.TenantId, body.Name, body.GoalTemplate, body.Cadence, null, body.TimezoneId, nextRunAt, requiresApproval: false, createdAt: clock.UtcNow, triggerType: triggerType, eventKey: body.EventKey, initiatorUserId: initiatorUserId);
         db.AgentSchedules.Add(schedule);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return Results.Ok(ToScheduleDto(schedule));
     }
 
-    private static async Task<IResult> RunScheduleNowAsync(Guid id, AppDbContext db, ITenantAccessor tenants, IClock clock, CancellationToken ct)
+    private static async Task<IResult> RunScheduleNowAsync(
+        Guid id,
+        ITenantAccessor tenants,
+        Orchestrator.OrchestratorClient grpc,
+        HttpContext http,
+        CancellationToken ct)
     {
         var tenant = tenants.Require();
-        var schedule = await db.AgentSchedules.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(s => s.Id == id && s.TenantId == tenant.TenantId && s.DeletedAt == null, ct).ConfigureAwait(false);
+        try
+        {
+            var response = await grpc.RunScheduleAsync(new RunScheduleRequest
+            {
+                TenantId = tenant.TenantId.ToString("D"),
+                ScheduleId = id.ToString("D"),
+                UserId = CurrentUserId(http)?.ToString("D") ?? string.Empty,
+            }, cancellationToken: ct).ConfigureAwait(false);
+
+            return response.Status switch
+            {
+                "started" => Results.Accepted(
+                    string.IsNullOrWhiteSpace(response.SessionId) ? null : $"/api/orchestration/v2/runs/{response.SessionId}",
+                    new
+                    {
+                        status = response.Status,
+                        sessionId = string.IsNullOrWhiteSpace(response.SessionId) ? null : response.SessionId,
+                        nextRunAt = response.NextRunAt.ToDateTimeOffset(),
+                        lastRunAt = response.LastRunAt.ToDateTimeOffset(),
+                    }),
+                "skipped_overlap" => Results.Conflict(new
+                {
+                    error = "schedule_run_in_progress",
+                    message = "Lịch đang có phiên chạy chưa xong — chờ phiên đó kết thúc rồi thử lại.",
+                }),
+                "not_found" => Results.NotFound(new { error = "schedule_not_found" }),
+                _ => Results.Problem("unexpected_schedule_run_status", statusCode: StatusCodes.Status502BadGateway),
+            };
+        }
+        catch (RpcException ex)
+        {
+            return ToScheduleRunGrpcResult(ex);
+        }
+    }
+
+    private static async Task<IResult> DeleteScheduleAsync(Guid id, AppDbContext db, ITenantAccessor tenants, IClock clock, CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        await using var transaction = await db.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, ct)
+            .ConfigureAwait(false);
+        var schedule = await db.AgentSchedules
+            .FromSqlInterpolated($"SELECT * FROM dbo.agent_schedules WITH (UPDLOCK, HOLDLOCK) WHERE id = {id} AND tenant_id = {tenant.TenantId} AND deleted_at IS NULL")
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
         if (schedule is null) return Results.NotFound(new { error = "schedule_not_found" });
 
-        var now = clock.UtcNow;
-        schedule.UpdateSchedule(schedule.Name, schedule.GoalTemplate, schedule.Cadence, schedule.CronExpression, schedule.TimezoneId, now, schedule.RequiresApproval, schedule.OverlapPolicy, schedule.MisfirePolicy, schedule.ApprovalPolicyJson, now);
+        var hasActiveRun = await db.AgentScheduleRuns.IgnoreQueryFilters()
+            .AnyAsync(run => run.ScheduleId == schedule.Id
+                && run.TenantId == tenant.TenantId
+                && run.Status == "started"
+                && run.FinishedAt == null, ct)
+            .ConfigureAwait(false);
+        if (hasActiveRun)
+        {
+            return Results.Conflict(new
+            {
+                error = "schedule_run_in_progress",
+                message = "Không thể xóa lịch khi phiên chạy hiện tại chưa hoàn tất.",
+            });
+        }
+
+        schedule.Archive(clock.UtcNow);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return Results.Accepted($"/api/orchestration/v2/schedules/{id}", new { status = "queued", nextRunAt = schedule.NextRunAt });
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+        return Results.Ok(new { id = schedule.Id });
     }
 
     private static async Task<IResult> PauseScheduleAsync(Guid id, AppDbContext db, ITenantAccessor tenants, IClock clock, CancellationToken ct)
@@ -782,8 +947,24 @@ public static partial class OrchestrationV2Endpoints
         return Results.Ok(new { monthToDateUsd = summary.MonthToDateUsd, capUsd = summary.CapUsd });
     }
 
-    private static OrchestrationV2ScheduleDto ToScheduleDto(AgentSchedule s) =>
-        new(s.Id, s.Name, s.GoalTemplate, s.Cadence, s.TimezoneId, s.NextRunAt, s.LastRunAt, s.IsActive, s.RequiresApproval, s.TriggerType, s.EventKey);
+    private static OrchestrationV2ScheduleDto ToScheduleDto(
+        AgentSchedule schedule,
+        string? lastRunStatus = null,
+        string? lastRunError = null) =>
+        new(
+            schedule.Id,
+            schedule.Name,
+            schedule.GoalTemplate,
+            schedule.Cadence,
+            schedule.TimezoneId,
+            schedule.NextRunAt,
+            schedule.LastRunAt,
+            schedule.IsActive,
+            schedule.RequiresApproval,
+            schedule.TriggerType,
+            schedule.EventKey,
+            lastRunStatus,
+            lastRunError);
 
     private static string DisplayAgentLabel(string? agentName)
     {
@@ -805,6 +986,19 @@ public static partial class OrchestrationV2Endpoints
 
     private static IResult Forbidden(HttpContext http) =>
         Results.Json(new { errorCode = "forbidden", message = "Không có quyền", requestId = http.TraceIdentifier }, statusCode: StatusCodes.Status403Forbidden);
+
+    private static IResult ToScheduleRunGrpcResult(RpcException ex) => ex.StatusCode switch
+    {
+        StatusCode.NotFound => Results.NotFound(new { error = "schedule_not_found" }),
+        StatusCode.InvalidArgument => Results.BadRequest(new { error = "invalid_schedule_run_request" }),
+        StatusCode.FailedPrecondition => Results.Conflict(new { error = "schedule_run_precondition_failed" }),
+        StatusCode.Unauthenticated => Results.Unauthorized(),
+        StatusCode.PermissionDenied => Results.Forbid(),
+        StatusCode.ResourceExhausted => Results.Json(new { error = "schedule_run_rate_limited" }, statusCode: StatusCodes.Status429TooManyRequests),
+        StatusCode.Unavailable => Results.Json(new { error = "schedule_service_unavailable" }, statusCode: StatusCodes.Status503ServiceUnavailable),
+        StatusCode.DeadlineExceeded => Results.Json(new { error = "schedule_run_timeout" }, statusCode: StatusCodes.Status504GatewayTimeout),
+        _ => Results.Problem("Không thể bắt đầu chạy lịch.", statusCode: StatusCodes.Status502BadGateway),
+    };
 
     private static IResult ToGrpcResult(RpcException ex) => ex.StatusCode switch
     {

@@ -34,7 +34,6 @@ public sealed class ReportAgentGrpcService(
             Replies = r.Replies,
             Conversions = r.Conversions,
             AvgResponseTimeSec = r.AvgResponseTimeSec,
-            AdSpend = r.AdSpend,
         }));
         return response;
     }

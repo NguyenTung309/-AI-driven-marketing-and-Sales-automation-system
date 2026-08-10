@@ -14,6 +14,7 @@ REM deploy\initialize-local-env.ps1 sinh ra khi con trong. Khai bao rong o day d
 REM cua may khong am tham thay cho gia tri trong .env.
 set "MSSQL_SA_PASSWORD="
 set "JWT_SIGNING_KEY="
+set "AGENT_SERVICE_AUTH_SIGNING_KEY="
 REM ENCRYPTION_BASE64_KEY phai khop Encryption:Base64Key trong appsettings.json (API + AgentService):
 REM service chay ngoai run-all.bat fallback ve appsettings, va du lieu ma hoa bang khoa nay khong
 REM doc duoc bang khoa kia (llm/embedding api key, inbox/pancake token).
@@ -90,6 +91,7 @@ if errorlevel 1 (
 
 call :read_env_value MSSQL_SA_PASSWORD
 call :read_env_value JWT_SIGNING_KEY
+call :read_env_value AGENT_SERVICE_AUTH_SIGNING_KEY
 call :read_env_value ENCRYPTION_BASE64_KEY
 call :read_env_value WEBPUSH_PUBLIC_KEY
 call :read_env_value WEBPUSH_PRIVATE_KEY
@@ -114,6 +116,8 @@ call :read_env_value Ads__Meta__WebhookSecret
 call :require_env_value MSSQL_SA_PASSWORD
 if errorlevel 1 exit /b 1
 call :require_env_value JWT_SIGNING_KEY
+if errorlevel 1 exit /b 1
+call :require_env_value AGENT_SERVICE_AUTH_SIGNING_KEY
 if errorlevel 1 exit /b 1
 call :require_env_value ENCRYPTION_BASE64_KEY
 if errorlevel 1 exit /b 1
@@ -218,6 +222,7 @@ REM Windows phan giai localhost ra ::1 truoc. SqlClient thu IPv6, goi tin bi nuo
 REM nen no cho het Connect Timeout roi moi bo cuoc, keo theo pool het cho va host tu tat.
 set "ConnectionStrings__SqlServer=Server=127.0.0.1,11433;Database=clawbot;User Id=sa;Password=%MSSQL_SA_PASSWORD%;TrustServerCertificate=True;MultipleActiveResultSets=true"
 set "Jwt__SigningKey=%JWT_SIGNING_KEY%"
+set "AgentServiceAuthentication__SigningKey=%AGENT_SERVICE_AUTH_SIGNING_KEY%"
 set "Encryption__Base64Key=%ENCRYPTION_BASE64_KEY%"
 set "WebPush__PublicKey=%WEBPUSH_PUBLIC_KEY%"
 set "WebPush__PrivateKey=%WEBPUSH_PRIVATE_KEY%"
@@ -285,6 +290,7 @@ set "WebPush__PublicKey="
 set "WebPush__PrivateKey="
 set "MSSQL_SA_PASSWORD="
 set "JWT_SIGNING_KEY="
+set "AGENT_SERVICE_AUTH_SIGNING_KEY="
 set "ENCRYPTION_BASE64_KEY="
 set "WEBPUSH_PRIVATE_KEY="
 set "PANCAKE_PAGE_ACCESS_TOKEN="
@@ -344,7 +350,7 @@ echo [DRY-RUN] ClawBot one-click runner
 echo Root: "%ROOT%"
 echo Would copy deploy\.env.example to deploy\.env if missing.
 echo Would run deploy\initialize-local-env.ps1 to fill blank local secrets in deploy\.env, reusing Encryption:Base64Key from src\api\Clawbot.Api\appsettings.json.
-echo Would abort when MSSQL_SA_PASSWORD, JWT_SIGNING_KEY, or ENCRYPTION_BASE64_KEY is still empty.
+echo Would abort when MSSQL_SA_PASSWORD, JWT_SIGNING_KEY, AGENT_SERVICE_AUTH_SIGNING_KEY, or ENCRYPTION_BASE64_KEY is still empty.
 echo Would run: docker compose --env-file deploy\.env -f deploy\docker-compose.yml up -d sqlserver redis rabbitmq qdrant minio postgres metabase searxng
 echo Would stop old app processes listening on ports 15873, 15874, 15875, 15876
 echo Would apply deploy\seed\*.sql for tenant %SEED_TENANT_SLUG% when --seed is passed.
@@ -354,9 +360,9 @@ echo Would apply one-shot data patches from deploy\fix_contact_overwrite.sql, gu
 echo Would run: dotnet restore Clawbot.sln
 echo Would run: dotnet build Clawbot.sln --no-restore
 echo Would run: npm ci in src\frontend\clawbot-web when node_modules is missing
-echo Would start AgentService with ASPNETCORE_URLS=http://localhost:15875, shared Encryption__Base64Key, and optional PANCAKE_* bootstrap variables from deploy\.env.
+echo Would start AgentService with ASPNETCORE_URLS=http://localhost:15875, AgentServiceAuthentication__SigningKey, shared Encryption__Base64Key, and optional PANCAKE_* bootstrap variables from deploy\.env.
 echo Would pass every secret to the service windows through the inherited environment block, not by writing them into %%TEMP%%\clawbot-run-all\*.cmd.
-echo Would start API with ASPNETCORE_URLS=http://localhost:15874, AgentService__Url=http://localhost:15875, and shared Jwt__SigningKey/Encryption__Base64Key.
+echo Would start API with ASPNETCORE_URLS=http://localhost:15874, AgentService__Url=http://localhost:15875, and shared Jwt__SigningKey/AgentServiceAuthentication__SigningKey/Encryption__Base64Key.
 echo Would start Gateway with ASPNETCORE_URLS=http://localhost:15873 and shared Jwt__SigningKey.
 echo Would start frontend with npm run dev at http://localhost:15876
 exit /b 0

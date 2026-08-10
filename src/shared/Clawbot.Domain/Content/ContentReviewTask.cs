@@ -24,6 +24,8 @@ public sealed class ContentReviewTask : Entity<Guid>, ITenantOwned, IAuditExempt
     // đầu (RefineAttemptCount==0) mới kích refine; vòng 2 vẫn reject => needs_human, dừng hẳn. Đếm trên task (bền),
     // KHÔNG trong bộ nhớ tiến trình, để restart/đa host không chạy lại vòng đã dùng.
     public int RefineAttemptCount { get; private set; }
+    // Tăng khi người dùng mở lại task terminal. Một task/revision giữ nguyên nhưng mỗi review cycle có audit identity riêng.
+    public int ReviewCycle { get; private set; } = 1;
     public DateTimeOffset NextAttemptAt { get; private set; }
     public string? LastErrorCode { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -138,6 +140,53 @@ public sealed class ContentReviewTask : Entity<Guid>, ITenantOwned, IAuditExempt
         LastErrorCode = normalizedError;
     }
 
+    // An orchestration pause/cancel must not consume the durable review-attempt budget or repeatedly call the LLM.
+    public void DeferForOrchestrationStop(
+        Guid leaseToken,
+        DateTimeOffset nextAttemptAt,
+        DateTimeOffset at)
+    {
+        EnsureActiveLease(leaseToken, at);
+        if (nextAttemptAt < at)
+            throw new ArgumentOutOfRangeException(nameof(nextAttemptAt), "content_review_task_retry_time_invalid");
+
+        if (AttemptCount > 0)
+            AttemptCount--;
+        Status = StatusPending;
+        LeaseToken = null;
+        ClaimedLeaseToken = null;
+        LeaseExpiresAt = null;
+        NextAttemptAt = nextAttemptAt;
+        LastErrorCode = "orchestration_session_stopped";
+    }
+
+    // An exhausted pending or expired lease cannot be terminalized while its orchestration session is stopped.
+    public void DeferExhaustedForOrchestrationStop(
+        DateTimeOffset nextAttemptAt,
+        DateTimeOffset at)
+    {
+        if (Status is StatusCompleted or StatusFailed or StatusCanceledStale)
+            throw new InvalidOperationException("content_review_task_terminal");
+        if (Status is not (StatusPending or StatusLeased))
+            throw new InvalidOperationException("content_review_task_not_deferrable");
+        if (Status == StatusLeased
+            && (LeaseExpiresAt is null || LeaseExpiresAt > at))
+        {
+            throw new InvalidOperationException("content_review_task_lease_active");
+        }
+        if (nextAttemptAt < at)
+            throw new ArgumentOutOfRangeException(nameof(nextAttemptAt), "content_review_task_retry_time_invalid");
+
+        if (AttemptCount > 0)
+            AttemptCount--;
+        Status = StatusPending;
+        LeaseToken = null;
+        ClaimedLeaseToken = null;
+        LeaseExpiresAt = null;
+        NextAttemptAt = nextAttemptAt;
+        LastErrorCode = "orchestration_session_stopped";
+    }
+
     public void Complete(Guid leaseToken, DateTimeOffset at)
     {
         EnsureActiveLease(leaseToken, at);
@@ -197,6 +246,39 @@ public sealed class ContentReviewTask : Entity<Guid>, ITenantOwned, IAuditExempt
         ClaimedLeaseToken = null;
         LeaseExpiresAt = null;
         LastErrorCode = "stale_content_revision";
+    }
+
+    public void CancelForOrchestrationFailure(DateTimeOffset at)
+    {
+        if (Status is StatusCompleted or StatusFailed or StatusCanceledStale)
+            throw new InvalidOperationException("content_review_task_terminal");
+
+        Status = StatusCanceledStale;
+        CompletedAt = at;
+        LeaseToken = null;
+        ClaimedLeaseToken = null;
+        LeaseExpiresAt = null;
+        LastErrorCode = "orchestration_plan_failed";
+    }
+
+    // Một review task bền cho mỗi revision. Retry thủ công mở lại row terminal này thay vì insert row mới,
+    // giữ invariant DB và tránh duplicate-key 2601/2627 khi revision không đổi.
+    public void ReopenForManualRetry(DateTimeOffset at)
+    {
+        if (Status is not (StatusCompleted or StatusFailed or StatusCanceledStale))
+            throw new InvalidOperationException("content_review_task_not_terminal");
+
+        Status = StatusPending;
+        LeaseToken = null;
+        ClaimedLeaseToken = null;
+        LeaseExpiresAt = null;
+        AttemptCount = 0;
+        ReviewCycle = checked(ReviewCycle + 1);
+        // Refinement is limited per revision, not per manual retry cycle.
+        NextAttemptAt = at;
+        LastErrorCode = null;
+        StartedAt = null;
+        CompletedAt = null;
     }
 
     private void EnsureActiveLease(Guid leaseToken, DateTimeOffset at)

@@ -167,6 +167,9 @@ public interface IDocumentStorage
 
     /// <summary>Đọc lại object đã lưu theo đúng fileName lúc save. Dùng cho job nền đọc file user vừa tải lên.</summary>
     Task<byte[]> ReadAsync(string fileName, CancellationToken ct = default);
+
+    /// <summary>Xóa object đã lưu theo storage key. Không lỗi nếu object không còn tồn tại.</summary>
+    Task DeleteAsync(string fileName, CancellationToken ct = default);
 }
 
 /// <summary>Options for <see cref="LocalDocumentStorage"/>. Bound from config section <c>Docs:Storage</c>.</summary>
@@ -174,9 +177,25 @@ public sealed class DocsStorageOptions
 {
     public const string SectionName = "Docs:Storage";
 
-    public string BaseDirectory { get; set; } = Path.Combine(AppContext.BaseDirectory, "generated-docs");
+    public string BaseDirectory { get; set; } = DefaultBaseDirectory();
 
     public string PublicBaseUrl { get; set; } = "/generated-docs";
+
+    // AgentService ghi PDF, Api phải đọc lại để phục vụ /api/docs/{id}/download — hai tiến trình khác nhau.
+    // Mặc định cũ neo vào AppContext.BaseDirectory (thư mục bin riêng của từng tiến trình) nên Api không bao giờ
+    // thấy file AgentService vừa ghi. Neo vào một thư mục dùng chung theo máy; override qua Docs:Storage:BaseDirectory
+    // (hoặc dùng MinIO khi chạy nhiều máy/container).
+    private static string DefaultBaseDirectory()
+    {
+        var configuredRoot = Environment.GetEnvironmentVariable("CLAWBOT_DATA_DIR");
+        if (!string.IsNullOrWhiteSpace(configuredRoot))
+            return Path.Combine(configuredRoot, "generated-docs");
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localAppData))
+            localAppData = Path.GetTempPath();
+        return Path.Combine(localAppData, "clawbot", "generated-docs");
+    }
 }
 
 /// <summary>Local-disk storage. Writes under BaseDirectory, returns a PublicBaseUrl-rooted URL. MinIO swap deferred.</summary>
@@ -196,13 +215,13 @@ public sealed class LocalDocumentStorage : IDocumentStorage
             throw new ArgumentException("fileName required", nameof(fileName));
 
         _ = contentType;
-        Directory.CreateDirectory(_options.BaseDirectory);
-        var safeName = Path.GetFileName(fileName);
-        var fullPath = Path.Combine(_options.BaseDirectory, safeName);
+        var fullPath = ResolveStoragePath(fileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllBytesAsync(fullPath, content, ct).ConfigureAwait(false);
 
         var baseUrl = _options.PublicBaseUrl.TrimEnd('/');
-        return string.Create(CultureInfo.InvariantCulture, $"{baseUrl}/{safeName}");
+        var normalizedKey = fileName.Replace('\\', '/').TrimStart('/');
+        return string.Create(CultureInfo.InvariantCulture, $"{baseUrl}/{normalizedKey}");
     }
 
     public async Task<byte[]> ReadAsync(string fileName, CancellationToken ct = default)
@@ -210,8 +229,43 @@ public sealed class LocalDocumentStorage : IDocumentStorage
         if (string.IsNullOrWhiteSpace(fileName))
             throw new ArgumentException("fileName required", nameof(fileName));
 
-        // Cùng cách rút gọn tên như SaveAsync để key có dấu "/" vẫn đọc lại đúng file.
-        var fullPath = Path.Combine(_options.BaseDirectory, Path.GetFileName(fileName));
+        var fullPath = ResolveStoragePath(fileName);
+        if (!File.Exists(fullPath))
+        {
+            // Tương thích asset cũ: LocalDocumentStorage từng làm phẳng mọi key về basename.
+            var legacyPath = Path.Combine(Path.GetFullPath(_options.BaseDirectory), Path.GetFileName(fileName));
+            if (!File.Exists(legacyPath)) throw new FileNotFoundException("Stored document was not found.", fileName);
+            fullPath = legacyPath;
+        }
         return await File.ReadAllBytesAsync(fullPath, ct).ConfigureAwait(false);
+    }
+
+    public Task DeleteAsync(string fileName, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(fileName))
+            throw new ArgumentException("fileName required", nameof(fileName));
+
+        var fullPath = ResolveStoragePath(fileName);
+        if (!File.Exists(fullPath))
+        {
+            // Tương thích asset cũ đã bị làm phẳng key. Chỉ thử basename khi key phân cấp không còn.
+            fullPath = Path.Combine(Path.GetFullPath(_options.BaseDirectory), Path.GetFileName(fileName));
+        }
+        if (File.Exists(fullPath)) File.Delete(fullPath);
+        return Task.CompletedTask;
+    }
+
+    private string ResolveStoragePath(string fileName)
+    {
+        var basePath = Path.GetFullPath(_options.BaseDirectory);
+        var normalizedKey = fileName.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+        var fullPath = Path.GetFullPath(Path.Combine(basePath, normalizedKey));
+        var rootWithSeparator = basePath.EndsWith(Path.DirectorySeparatorChar)
+            ? basePath
+            : basePath + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("fileName must remain within document storage.", nameof(fileName));
+        return fullPath;
     }
 }

@@ -1,4 +1,3 @@
-using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
 using Clawbot.Domain.Analytics;
 using Clawbot.Domain.Channels;
@@ -41,6 +40,10 @@ public sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.Property(x => x.SupportName).HasMaxLength(256);
         builder.Property(x => x.WidgetGreeting).HasMaxLength(1024);
         builder.Property(x => x.RequireOrchestrationApproval).HasDefaultValue(false);
+        builder.Property(x => x.OrchestratorFailurePolicy)
+            .HasMaxLength(20)
+            .HasDefaultValue(Tenant.OrchestratorFailurePolicyPause)
+            .IsRequired();
         builder.Property(x => x.RequireContentReview).HasDefaultValue(false);
         builder.Property(x => x.ContentPublishingApprovalPolicy)
             .HasMaxLength(32)
@@ -57,7 +60,6 @@ public sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
             .HasColumnName("lead_lost_after_days")
             .HasDefaultValue(60)
             .ValueGeneratedNever();
-        builder.Property(x => x.AutoApproveLeadRevenue).HasColumnName("auto_approve_lead_revenue").HasDefaultValue(false);
         builder.HasIndex(x => x.Slug).IsUnique();
     }
 }
@@ -201,23 +203,6 @@ public sealed class LeadActivityConfiguration : IEntityTypeConfiguration<LeadAct
         builder.HasKey(x => x.Id);
         builder.Property(x => x.ActivityType).HasMaxLength(64).IsRequired();
         builder.HasIndex(x => new { x.LeadId, x.OccurredAt });
-    }
-}
-
-public sealed class LeadRevenueConfiguration : IEntityTypeConfiguration<LeadRevenue>
-{
-    public void Configure(EntityTypeBuilder<LeadRevenue> builder)
-    {
-        builder.ToTable("lead_revenues");
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Amount).HasPrecision(18, 2);
-        builder.Property(x => x.Currency).HasMaxLength(8).IsRequired();
-        builder.Property(x => x.Source).HasMaxLength(16).IsRequired();
-        builder.Property(x => x.Status).HasMaxLength(16).IsRequired().IsConcurrencyToken();
-        builder.Property(x => x.Evidence).HasMaxLength(1000);
-        builder.HasOne<Lead>().WithMany().HasForeignKey(x => x.LeadId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasIndex(x => new { x.TenantId, x.Status, x.CreatedAt });
-        builder.HasIndex(x => x.LeadId);
     }
 }
 
@@ -442,11 +427,16 @@ public sealed class AgentSessionConfiguration : IEntityTypeConfiguration<AgentSe
         builder.Property(x => x.RequiresApproval).HasDefaultValue(false);
         builder.Property(x => x.ReplanCount).HasDefaultValue(0);
         builder.Property(x => x.UserId).HasColumnName("user_id");
+        builder.Property(x => x.ExecutionUserId).HasColumnName("execution_user_id");
         builder.Property(x => x.ArchivedAt).HasColumnName("archived_at");
+        builder.Property(x => x.PendingTerminalGeneration).HasColumnName("pending_terminal_generation");
+        builder.Property(x => x.PendingTerminalRequestedAt).HasColumnName("pending_terminal_requested_at");
+        builder.Property(x => x.PendingTerminalReason).HasColumnName("pending_terminal_reason").HasMaxLength(1024);
         builder.HasMany(x => x.Traces).WithOne().HasForeignKey(t => t.SessionId).OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(x => new { x.TenantId, x.StartedAt });
         builder.HasIndex(x => new { x.TenantId, x.Status, x.StartedAt });
         builder.HasIndex(x => new { x.TenantId, x.ArchivedAt, x.StartedAt });
+        builder.HasIndex(x => new { x.Status, x.PendingTerminalRequestedAt });
         // SPEC-16 P3-3: index for fetching a user's runs (notification targeting + run list by user).
         builder.HasIndex(x => new { x.TenantId, x.UserId, x.StartedAt });
     }
@@ -509,6 +499,7 @@ public sealed class AgentScheduleConfiguration : IEntityTypeConfiguration<AgentS
     {
         builder.ToTable("agent_schedules");
         builder.HasKey(x => x.Id);
+        builder.Property(x => x.InitiatorUserId).HasColumnName("initiator_user_id");
         builder.Property(x => x.Name).HasMaxLength(128).IsRequired();
         builder.Property(x => x.GoalTemplate).HasColumnType("nvarchar(max)").IsRequired();
         builder.Property(x => x.Cadence).HasMaxLength(16).IsRequired();
@@ -530,10 +521,16 @@ public sealed class AgentScheduleRunConfiguration : IEntityTypeConfiguration<Age
     {
         builder.ToTable("agent_schedule_runs");
         builder.HasKey(x => x.Id);
+        builder.Property(x => x.InitiatorUserId).HasColumnName("initiator_user_id");
         builder.Property(x => x.WindowKey).HasMaxLength(128).IsRequired();
         builder.Property(x => x.Status).HasMaxLength(32).IsRequired();
         builder.Property(x => x.Error).HasMaxLength(1024);
         builder.HasIndex(x => new { x.ScheduleId, x.WindowKey }).IsUnique();
+        // The application pre-check improves UX; this unique filtered index makes overlap=skip
+        // correct across concurrent AgentService instances as well.
+        builder.HasIndex(x => x.ScheduleId)
+            .IsUnique()
+            .HasFilter("[status] = N'started' AND [finished_at] IS NULL");
         builder.HasIndex(x => new { x.TenantId, x.Status, x.StartedAt });
         builder.HasOne<AgentSchedule>().WithMany().HasForeignKey(x => x.ScheduleId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne<AgentSession>().WithMany().HasForeignKey(x => x.SessionId).OnDelete(DeleteBehavior.NoAction);
@@ -629,7 +626,25 @@ public sealed class ContentItemConfiguration : IEntityTypeConfiguration<ContentI
         // Prompt chaining P4: ảnh chụp L1/L2 để repurpose tái dùng (§4.5). NVARCHAR(MAX) — plan+outline có thể dài.
         builder.Property(x => x.ChainPlanJson).HasColumnName("chain_plan_json");
         builder.Property(x => x.ChainOutlineJson).HasColumnName("chain_outline_json");
+        builder.Property(x => x.OrchestrationSessionId).HasColumnName("orchestration_session_id");
+        builder.Property(x => x.OrchestrationPlanGeneration).HasColumnName("orchestration_plan_generation");
+        builder.Property(x => x.OrchestrationOwnershipClaimedAt).HasColumnName("orchestration_ownership_claimed_at");
+        builder.Property(x => x.OrchestrationOwnershipClaimedBy).HasColumnName("orchestration_ownership_claimed_by");
         builder.HasIndex(x => new { x.TenantId, x.Status, x.CreatedAt });
+        builder.HasIndex(x => new
+            {
+                x.TenantId,
+                x.OrchestrationSessionId,
+                x.OrchestrationPlanGeneration,
+                x.Status,
+                x.OrchestrationOwnershipClaimedAt,
+            })
+            .HasDatabaseName("IX_content_items_orchestration_cleanup");
+        builder.HasOne<AgentSession>()
+            .WithMany()
+            .HasForeignKey(x => new { x.TenantId, x.OrchestrationSessionId })
+            .HasPrincipalKey(x => new { x.TenantId, x.Id })
+            .OnDelete(DeleteBehavior.NoAction);
     }
 }
 
@@ -691,6 +706,7 @@ public sealed class ContentReviewTaskConfiguration : IEntityTypeConfiguration<Co
         builder.Property(x => x.LastErrorCode).HasMaxLength(128);
         // Refine P6 (§4.7): số vòng sửa-tự-động đã dùng cho revision này; đúng 1 vòng nên chỉ 0→1.
         builder.Property(x => x.RefineAttemptCount).HasDefaultValue(0);
+        builder.Property(x => x.ReviewCycle).HasDefaultValue(1);
         builder.HasOne<ContentItem>()
             .WithMany()
             .HasForeignKey(x => new { x.TenantId, x.ContentItemId })
@@ -968,66 +984,6 @@ public sealed class MetaOAuthStateConfiguration : IEntityTypeConfiguration<MetaO
     }
 }
 
-public sealed class AdsCampaignConfiguration : IEntityTypeConfiguration<AdsCampaign>
-{
-    public void Configure(EntityTypeBuilder<AdsCampaign> builder)
-    {
-        builder.ToTable("ads_campaigns");
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
-        builder.Property(x => x.ExternalCampaignId).HasMaxLength(128).IsRequired();
-        builder.Property(x => x.Status).HasMaxLength(32);
-        builder.HasIndex(x => new { x.TenantId, x.Platform, x.ExternalCampaignId }).IsUnique();
-    }
-}
-
-public sealed class AdsRuleConfiguration : IEntityTypeConfiguration<AdsRule>
-{
-    public void Configure(EntityTypeBuilder<AdsRule> builder)
-    {
-        builder.ToTable("ads_rules");
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
-        builder.Property(x => x.Metric).HasMaxLength(64).IsRequired();
-        builder.Property(x => x.Comparator).HasMaxLength(8).IsRequired();
-        builder.Property(x => x.Action).HasMaxLength(32).IsRequired();
-        builder.HasIndex(x => new { x.TenantId, x.IsActive });
-    }
-}
-
-public sealed class AdsActionConfiguration : IEntityTypeConfiguration<AdsAction>
-{
-    public void Configure(EntityTypeBuilder<AdsAction> builder)
-    {
-        builder.ToTable("ads_actions");
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.ActionTaken).HasMaxLength(32).IsRequired();
-        builder.HasIndex(x => new { x.CampaignId, x.ExecutedAt });
-    }
-}
-
-public sealed class AdsCreativeConfiguration : IEntityTypeConfiguration<AdsCreative>
-{
-    public void Configure(EntityTypeBuilder<AdsCreative> builder)
-    {
-        builder.ToTable("ads_creatives");
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.ExternalCreativeId).HasMaxLength(128).IsRequired();
-        builder.Property(x => x.Status).HasMaxLength(16).IsRequired();
-        builder.HasIndex(x => new { x.CampaignId, x.Status });
-    }
-}
-
-public sealed class AdsMetricsDailyConfiguration : IEntityTypeConfiguration<AdsMetricsDaily>
-{
-    public void Configure(EntityTypeBuilder<AdsMetricsDaily> builder)
-    {
-        builder.ToTable("ads_metrics_daily");
-        builder.HasKey(x => x.Id);
-        builder.HasIndex(x => new { x.CampaignId, x.MetricDate }).IsUnique();
-    }
-}
-
 public sealed class KpiDailyConfiguration : IEntityTypeConfiguration<KpiDaily>
 {
     public void Configure(EntityTypeBuilder<KpiDaily> builder)
@@ -1035,9 +991,22 @@ public sealed class KpiDailyConfiguration : IEntityTypeConfiguration<KpiDaily>
         builder.ToTable("kpi_daily");
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
-        builder.Property(x => x.AdSpend).HasPrecision(18, 2);
-        builder.Property(x => x.Revenue).HasPrecision(18, 2);
         builder.HasIndex(x => new { x.TenantId, x.Date, x.Platform }).IsUnique();
+    }
+}
+
+public sealed class ReportArtifactConfiguration : IEntityTypeConfiguration<ReportArtifact>
+{
+    public void Configure(EntityTypeBuilder<ReportArtifact> builder)
+    {
+        builder.ToTable("report_artifacts");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Kind).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.Title).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.Platform).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.Metric).HasMaxLength(64);
+        builder.Property(x => x.DataJson).IsRequired();
+        builder.HasIndex(x => new { x.TenantId, x.CreatedAt });
     }
 }
 
@@ -1211,5 +1180,7 @@ public sealed class ConversationNoteConfiguration : IEntityTypeConfiguration<Con
         builder.Property(x => x.Content).IsRequired();
         builder.Property(x => x.Type).HasMaxLength(32).IsRequired();
         builder.Property(x => x.CreatedByDisplayName).HasMaxLength(256);
+        builder.HasIndex(x => new { x.TenantId, x.ConversationId })
+            .HasDatabaseName("IX_conversation_notes_tenant_conversation");
     }
 }

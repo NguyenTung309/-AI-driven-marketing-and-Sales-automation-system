@@ -14,14 +14,17 @@ public static class OrchestrationPlanValidator
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(catalog);
 
-        if (plan.Tasks.Count == 0)
+        var tasks = plan.Tasks ?? Array.Empty<OrchestrationPlanTask>();
+        if (tasks.Count == 0)
             return OrchestrationPlanValidationResult.Invalid("empty_plan");
-        if (plan.Tasks.Count > MaxTaskCount)
-            return OrchestrationPlanValidationResult.Invalid($"too_many_tasks:{plan.Tasks.Count}:{MaxTaskCount}");
+        if (tasks.Count > MaxTaskCount)
+            return OrchestrationPlanValidationResult.Invalid($"too_many_tasks:{tasks.Count}:{MaxTaskCount}");
 
         var taskIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var task in plan.Tasks)
+        foreach (var task in tasks)
         {
+            if (task is null)
+                return OrchestrationPlanValidationResult.Invalid("task_required");
             if (string.IsNullOrWhiteSpace(task.Id))
                 return OrchestrationPlanValidationResult.Invalid("task_id_required");
             if (!taskIds.Add(task.Id))
@@ -33,20 +36,20 @@ public static class OrchestrationPlanValidator
                     $"unknown_agent:{task.Id}:{task.Agent}. Agent hợp lệ: {AllowedCodes(catalog)}");
         }
 
-        foreach (var task in plan.Tasks)
+        foreach (var task in tasks)
         {
-            foreach (var dependency in task.DependsOn)
+            foreach (var dependency in task.DependsOn ?? Array.Empty<string>())
             {
                 if (!taskIds.Contains(dependency))
                     return OrchestrationPlanValidationResult.Invalid($"dangling_dependency:{task.Id}:{dependency}");
             }
         }
 
-        return HasCycle(plan) ? OrchestrationPlanValidationResult.Invalid("cycle_detected") : OrchestrationPlanValidationResult.Valid;
+        return HasCycle(tasks) ? OrchestrationPlanValidationResult.Invalid("cycle_detected") : OrchestrationPlanValidationResult.Valid;
     }
 
-    private static int InputSize(IReadOnlyDictionary<string, string> input) =>
-        input.Sum(pair => pair.Key.Length + (pair.Value?.Length ?? 0));
+    private static int InputSize(IReadOnlyDictionary<string, string>? input) =>
+        input?.Sum(pair => pair.Key.Length + (pair.Value?.Length ?? 0)) ?? 0;
 
     private static string AllowedCodes(IReadOnlyList<AgentCatalogEntry> catalog) =>
         string.Join(", ", catalog.Where(entry => entry.Orchestratable).Select(entry => entry.Code));
@@ -57,20 +60,20 @@ public static class OrchestrationPlanValidator
              string.Equals(entry.ShortName, name, StringComparison.OrdinalIgnoreCase) ||
              string.Equals(entry.AgentType, name, StringComparison.OrdinalIgnoreCase)));
 
-    private static bool HasCycle(OrchestrationPlanDocument plan)
+    private static bool HasCycle(IReadOnlyList<OrchestrationPlanTask> tasks)
     {
-        var byId = plan.Tasks.ToDictionary(task => task.Id, StringComparer.OrdinalIgnoreCase);
+        var byId = tasks.ToDictionary(task => task.Id, StringComparer.OrdinalIgnoreCase);
         var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        return plan.Tasks.Any(task => Visit(task.Id));
+        return tasks.Any(task => Visit(task.Id));
 
         bool Visit(string id)
         {
             if (visited.Contains(id)) return false;
             if (!visiting.Add(id)) return true;
 
-            foreach (var dependency in byId[id].DependsOn)
+            foreach (var dependency in byId[id].DependsOn ?? Array.Empty<string>())
             {
                 if (Visit(dependency)) return true;
             }
