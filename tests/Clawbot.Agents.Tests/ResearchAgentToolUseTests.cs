@@ -208,6 +208,58 @@ public sealed class ResearchAgentToolUseTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task ReActWorker_GrantsPublishCapabilityOnlyToExecutionPrincipal()
+    {
+        ToolContext? observedContext = null;
+        var tool = Substitute.For<IAgentTool>();
+        tool.Name.Returns("content.publish");
+        tool.Description.Returns("Queue publishing.");
+        tool.InputSchemaJson.Returns("{}");
+        tool.RequiredPermission.Returns("content:publish");
+        tool.RiskLevel.Returns(ToolRiskLevel.Low);
+        tool.InvokeAsync(
+                Arg.Any<IReadOnlyDictionary<string, string>>(),
+                Arg.Do<ToolContext>(context => observedContext = context),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(ToolResult.Ok("{}")));
+        var definition = new AgentDefinitionCatalogEntry(
+            Guid.NewGuid(),
+            "publisher-agent",
+            "content",
+            "Publisher",
+            "publisher",
+            "Queue publishing",
+            "{}",
+            true,
+            null,
+            "[\"content.publish\"]");
+        var worker = new GenericLlmAgentWorker(
+            definition,
+            Substitute.For<IRagRetriever>(),
+            CreateChatClient(
+                Reply("{\"tool\":\"content.publish\",\"args\":{}}"),
+                Reply("Đã xếp hàng đăng bài.")),
+            new OrchestratorCostGuard(Substitute.For<ILlmCostTracker>()),
+            Substitute.For<ILlmCallScope>(),
+            new ToolRegistry([tool]),
+            executionPermissions: new HashSet<string>(StringComparer.Ordinal)
+            {
+                "content:publish",
+            });
+
+        var result = await worker.ExecuteAsync(new AgentTask(
+            "task-publish",
+            "publisher-agent",
+            "Queue publishing",
+            new Dictionary<string, string> { ["tenant_id"] = Guid.NewGuid().ToString("D") }),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        observedContext.Should().NotBeNull();
+        observedContext!.CanPublishContent.Should().BeTrue();
+    }
+
     private static IClaudeChatClient CreateChatClient(params ClaudeReply[] replies)
     {
         var chatClient = Substitute.For<IClaudeChatClient>();

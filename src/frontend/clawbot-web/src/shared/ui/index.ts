@@ -15,3 +15,4 @@ export * from "./useInfiniteList";
 export * from "./InfiniteScrollSentinel";
 export * from "./ListToolbar";
 export * from "./InfiniteDataTable";
+export * from "./StructuredData";

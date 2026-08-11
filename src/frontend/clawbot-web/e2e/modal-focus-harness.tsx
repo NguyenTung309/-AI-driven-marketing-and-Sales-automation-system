@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- This E2E-only module must export its mount function. */
 import { useLayoutEffect, useState, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
 import { Modal, type ModalProps } from "../src/shared/ui/Modal";

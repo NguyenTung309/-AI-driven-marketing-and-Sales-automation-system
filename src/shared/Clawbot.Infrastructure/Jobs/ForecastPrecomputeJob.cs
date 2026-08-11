@@ -18,7 +18,7 @@ public sealed partial class ForecastPrecomputeJob(
 {
     private static readonly string[] Platforms =
         ["all", "facebook", "zalo", "instagram", "tiktok", "youtube"];
-    private static readonly string[] Metrics = ["leads", "dms", "replies", "conversions", "cpl", "ad_spend"];
+    private static readonly string[] Metrics = ["leads", "dms", "replies", "conversions"];
 
     private readonly AppDbContext _db = db;
     private readonly ReportAgent.ReportAgentClient _reportAgent = reportAgent;

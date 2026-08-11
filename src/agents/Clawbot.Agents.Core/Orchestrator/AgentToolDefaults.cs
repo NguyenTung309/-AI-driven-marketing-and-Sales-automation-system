@@ -32,15 +32,14 @@ public static class AgentToolDefaults
             ["report-agent"] = ["report-agent"],
             ["report"] = ["report-agent"],
 
-            ["ads-agent"] = ["ads-agent"],
-            ["ads"] = ["ads-agent"],
-
             ["chat-agent"] = ["chat-agent"],
             ["chat"] = ["chat-agent"],
 
             // Phase 4.9: canonical content.review only; no autonomous schedule/publish grants.
-            ["reviewer-agent"] = ["content.review"],
-            ["reviewer"] = ["content.review"],
+            // content.list đi kèm vì content.review đòi content_id cụ thể: thiếu tool tra cứu thì reviewer
+            // chỉ có thể kết luận "cần cung cấp content_id" và task luôn thất bại. content.list là read-only.
+            ["reviewer-agent"] = ["content.list", "content.review"],
+            ["reviewer"] = ["content.list", "content.review"],
 
             ["publisher-agent"] = [],
             ["publisher"] = [],

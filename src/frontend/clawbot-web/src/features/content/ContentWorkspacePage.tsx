@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -17,8 +17,9 @@ import { useAuthStore } from "@/shared/auth/authStore";
 import { useJobWatcher } from "@/features/jobs/useJobWatcher";
 import { TrendSettingsDialog } from "./TrendSettingsDialog";
 import { ContentPublishingPolicyControl } from "./ContentPublishingPolicyControl";
+import { PostPerformancePanel } from "./PostPerformancePanel";
 import { platformClasses } from "@/shared/theme/colors";
-import { toUserFriendlyError } from "@/shared/utils/userText";
+import { contentErrorMessage, toUserFriendlyError } from "@/shared/utils/userText";
 import {
   approveContentItem,
   createContentBrief,
@@ -28,6 +29,7 @@ import {
   generateContentItems,
   getContentCalendar,
   getContentChainMetrics,
+  getContentAssetBlob,
   getContentItem,
   getContentItemHooks,
   getContentPublishTargets,
@@ -52,11 +54,12 @@ import {
   type ContentPublishTargetMode,
   type ContentQueueResponse,
   type ScheduleContentItemPayload,
+  type RawTrend,
   type Trend,
 } from "@/shared/api/content";
 
 type QueueStatusFilter = "all" | "draft" | "approved" | "scheduled" | "published" | "rejected";
-type ContentWorkspaceTab = "queue" | "calendar" | "metrics";
+type ContentWorkspaceTab = "queue" | "calendar" | "metrics" | "performance";
 type ScheduleMode = "golden" | "specific";
 type NoticeTone = "info" | "success" | "warning" | "error";
 
@@ -371,6 +374,38 @@ function firstImageAsset(value: string): ContentAsset | null {
   return parseAssets(value).find((asset) => asset.url && (!asset.type || asset.type === "image")) ?? null;
 }
 
+function ContentAssetImage({ alt, className, url }: { readonly alt: string; readonly className: string; readonly url: string }) {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const requiresAuthenticatedFetch = url.startsWith("/api/");
+
+  useEffect(() => {
+    if (!requiresAuthenticatedFetch) return undefined;
+
+    let active = true;
+    let nextObjectUrl: string | null = null;
+    void getContentAssetBlob(url)
+      .then((blob) => {
+        if (!active) return;
+        nextObjectUrl = URL.createObjectURL(blob);
+        setObjectUrl(nextObjectUrl);
+        setFailed(false);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+      if (nextObjectUrl) URL.revokeObjectURL(nextObjectUrl);
+    };
+  }, [requiresAuthenticatedFetch, url]);
+
+  const displayUrl = requiresAuthenticatedFetch ? objectUrl : url;
+  if (requiresAuthenticatedFetch && failed) return <div className={`${className} flex items-center justify-center bg-surface text-label-sm text-on-surface-variant`}>Không tải được ảnh.</div>;
+  if (!displayUrl) return <div className={`${className} animate-pulse bg-surface`} aria-label="Đang tải ảnh" />;
+  return <img className={className} src={displayUrl} alt={alt} />;
+}
+
 function groupCalendar(items: readonly ContentCalendarItem[]) {
   const groups = new Map<string, ContentCalendarItem[]>();
   for (const item of items) {
@@ -635,6 +670,7 @@ function TrendLauncherCard({
 function TrendModal({
   open,
   trends,
+  rawTrends,
   loading,
   scanning,
   error,
@@ -648,6 +684,7 @@ function TrendModal({
 }: {
   readonly open: boolean;
   readonly trends: readonly Trend[];
+  readonly rawTrends: readonly RawTrend[];
   readonly loading: boolean;
   readonly scanning: boolean;
   readonly error: unknown;
@@ -723,6 +760,24 @@ function TrendModal({
           Chưa có xu hướng được quét. Bấm Quét để gọi agent nghiên cứu.
         </div>
       )}
+      {rawTrends.length ? (
+        <section className="mt-5">
+          <p className="mb-2 text-label-caps uppercase text-secondary">Tất cả từ khóa đã quét ({rawTrends.length})</p>
+          <div className="max-h-56 overflow-auto rounded border border-outline bg-surface">
+            {rawTrends.map((trend) => (
+              <button
+                className="flex w-full items-center justify-between gap-3 border-b border-outline px-3 py-2 text-left last:border-0 hover:bg-surface-container-low"
+                key={`${trend.source}-${trend.topic}`}
+                onClick={() => onUseIdea(trend.topic)}
+                type="button"
+              >
+                <span className="text-body-sm text-secondary">{trend.topic}</span>
+                <span className="text-label-sm text-on-surface-variant">{trend.source} · {trend.metric}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </Modal>
   );
 }
@@ -791,7 +846,7 @@ function SocialPreview({ item, body, assetsJson }: { readonly item: ContentItem;
       <div className="space-y-3 p-4">
         <p className="whitespace-pre-wrap text-body-md text-on-surface">{body || "Nội dung bản nháp sẽ hiển thị ở đây."}</p>
         {image?.url ? (
-          <img className="max-h-[320px] w-full rounded-lg object-cover" src={image.url} alt={image.fileName || "Ảnh bài viết"} />
+          <ContentAssetImage className="max-h-[320px] w-full rounded-lg object-cover" url={image.url} alt={image.fileName || "Ảnh bài viết"} />
         ) : (
           <div className="flex min-h-[180px] items-center justify-center rounded-lg border border-dashed border-outline bg-surface">
             <div className="text-center">
@@ -932,7 +987,8 @@ function QueueEditor({
     );
   }
 
-  const canSchedule = Boolean(item.canSchedule) || normalize(item.status) === "approved";
+  const canSchedule = Boolean(item.canSchedule);
+  const scheduleBlockedMessage = contentErrorMessage(item.scheduleBlockedReason);
   const canApprove = Boolean(item.canApprove) && canApprovePerm && !bodyDirty;
   const canReject = Boolean(item.canReject ?? item.canApprove) && canApprovePerm;
   const canRetryReview = Boolean(item.canRetryReview) && canWritePerm;
@@ -987,6 +1043,10 @@ function QueueEditor({
           </Alert>
         ) : null}
 
+        {!canSchedule && scheduleBlockedMessage ? (
+          <Alert tone="info">{scheduleBlockedMessage}</Alert>
+        ) : null}
+
         {publishedLocked ? (
           <Alert tone="info">Bài đã đăng không thể sửa. Tạo bản repurpose nếu cần đăng lại trên kênh khác.</Alert>
         ) : null}
@@ -1024,12 +1084,12 @@ function QueueEditor({
           </div>
           {assets.length ? (
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              {assets.map((asset) => (
-                <a key={asset.url} className="group block overflow-hidden rounded border border-outline bg-white" href={asset.url} target="_blank" rel="noreferrer">
-                  <img className="h-28 w-full object-cover transition-transform group-hover:scale-[1.03]" src={asset.url} alt={asset.fileName || "Ảnh bài viết"} />
+              {assets.map((asset) => asset.url ? (
+                <div key={asset.url} className="group overflow-hidden rounded border border-outline bg-white">
+                  <ContentAssetImage className="h-28 w-full object-cover transition-transform group-hover:scale-[1.03]" url={asset.url} alt={asset.fileName || "Ảnh bài viết"} />
                   <span className="block truncate px-2 py-1 text-label-sm text-on-surface-variant">{asset.fileName || asset.url}</span>
-                </a>
-              ))}
+                </div>
+              ) : null)}
             </div>
           ) : (
             <div className="rounded border border-dashed border-outline bg-white p-4 text-body-md text-on-surface-variant">
@@ -1061,7 +1121,7 @@ function QueueEditor({
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">block</span>
             Từ chối phát hành
           </Button>
-          <Button type="button" variant="ghost" onClick={onDelete} disabled={acting || publishedLocked}>
+          <Button type="button" variant="danger" onClick={onDelete} disabled={acting || publishedLocked}>
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">delete</span>
             Xóa
           </Button>
@@ -1450,6 +1510,7 @@ function ScheduleDialog({
             <input
               className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary disabled:opacity-60"
               type="date"
+              min={toInputDate(new Date())}
               value={date}
               disabled={mode === "golden"}
               onChange={(event) => onDate(event.target.value)}
@@ -1511,7 +1572,7 @@ export default function ContentWorkspacePage() {
   const tabParam = searchParams.get("tab");
   const activeTab: ContentWorkspaceTab = requestedItemId
     ? "queue"
-    : tabParam === "calendar" || tabParam === "metrics"
+    : tabParam === "calendar" || tabParam === "metrics" || tabParam === "performance"
       ? tabParam
       : "queue";
   const [selectedBriefId, setSelectedBriefId] = useState<string | null>(null);
@@ -1528,6 +1589,7 @@ export default function ContentWorkspacePage() {
   const [scheduleTarget, setScheduleTarget] = useState<ScheduleTargetState>(EMPTY_SCHEDULE_TARGET);
   const scheduleDialogSessionCounterRef = useRef(0);
   const activeScheduleDialogSessionRef = useRef<number | null>(null);
+  const [activeScheduleDialogSession, setActiveScheduleDialogSession] = useState<number | null>(null);
   const [overrideItem, setOverrideItem] = useState<ContentItem | null>(null);
   const [overrideReason, setOverrideReason] = useState("");
   const [rejectItem, setRejectItem] = useState<ContentItem | null>(null);
@@ -1617,13 +1679,14 @@ export default function ContentWorkspacePage() {
   const [trendWeek, setTrendWeek] = useState<string>(currentWeek);
   const trendsQuery = useQuery({
     queryKey: ["content", "trends", trendWeek],
-    queryFn: () => getContentTrends(trendWeek === "all" ? undefined : trendWeek),
+    queryFn: () => getContentTrends(trendWeek === "all" ? undefined : trendWeek, true),
     staleTime: 60_000,
   });
 
   const briefs = Array.isArray(briefsQuery.data?.items) ? briefsQuery.data.items : EMPTY_BRIEFS;
   const queueItems = queueList.items.length ? queueList.items : EMPTY_ITEMS;
   const trends = Array.isArray(trendsQuery.data?.trends) ? trendsQuery.data.trends : EMPTY_TRENDS;
+  const rawTrends = Array.isArray(trendsQuery.data?.rawTrends) ? trendsQuery.data.rawTrends : [];
   const linkedItem = linkedItemQuery.data ?? null;
   const displayedQueueItems = linkedItem && !queueItems.some((item) => item.id === linkedItem.id)
     ? [linkedItem, ...queueItems]
@@ -1667,6 +1730,7 @@ export default function ContentWorkspacePage() {
       queryClient.invalidateQueries({ queryKey: ["content", "queue"] }),
       queryClient.invalidateQueries({ queryKey: ["content", "calendar"] }),
       queryClient.invalidateQueries({ queryKey: ["content", "trends"] }),
+      queryClient.invalidateQueries({ queryKey: ["content", "post-performance"] }),
       invalidateLinkedItem(),
     ]);
   };
@@ -1872,7 +1936,7 @@ export default function ContentWorkspacePage() {
       }));
     },
   });
-  const isActiveScheduleMutation = scheduleMutation.variables?.session === activeScheduleDialogSessionRef.current;
+  const isActiveScheduleMutation = scheduleMutation.variables?.session === activeScheduleDialogSession;
   const isActiveScheduleSaving = isActiveScheduleMutation && scheduleMutation.isPending;
   const activeScheduleError = isActiveScheduleMutation ? scheduleMutation.error : null;
 
@@ -1949,7 +2013,7 @@ export default function ContentWorkspacePage() {
     openContentItem(item.id);
   }
 
-  function selectCalendarTab(tab: ContentWorkspaceTab) {
+  function selectContentTab(tab: ContentWorkspaceTab) {
     const next = new URLSearchParams(searchParams);
     next.set("tab", tab);
     if (tab !== "queue") next.delete("itemId");
@@ -1970,6 +2034,7 @@ export default function ContentWorkspacePage() {
   function closeScheduleDialog(expectedSession = activeScheduleDialogSessionRef.current) {
     if (expectedSession === null || activeScheduleDialogSessionRef.current !== expectedSession) return;
     activeScheduleDialogSessionRef.current = null;
+    setActiveScheduleDialogSession(null);
     scheduleMutation.reset();
     setScheduleItem(null);
     resetScheduleDialogInputs();
@@ -1987,6 +2052,7 @@ export default function ContentWorkspacePage() {
     const session = scheduleDialogSessionCounterRef.current + 1;
     scheduleDialogSessionCounterRef.current = session;
     activeScheduleDialogSessionRef.current = session;
+    setActiveScheduleDialogSession(session);
     scheduleMutation.reset();
     resetScheduleDialogInputs();
     setScheduleTarget({
@@ -2102,6 +2168,7 @@ export default function ContentWorkspacePage() {
           <TrendModal
             open={trendModalOpen}
             trends={trends}
+            rawTrends={rawTrends}
             loading={trendsQuery.isLoading}
             scanning={scanMutation.isPending}
             error={trendsQuery.error ?? scanMutation.error}
@@ -2128,7 +2195,7 @@ export default function ContentWorkspacePage() {
               role="tab"
               aria-selected={activeTab === "queue"}
               aria-controls="content-queue-panel"
-              onClick={() => selectCalendarTab("queue")}
+              onClick={() => selectContentTab("queue")}
               className={`border-b-2 px-4 py-3 text-body-md font-semibold ${activeTab === "queue" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"}`}
             >
               Hàng đợi duyệt bài
@@ -2139,7 +2206,7 @@ export default function ContentWorkspacePage() {
               role="tab"
               aria-selected={activeTab === "calendar"}
               aria-controls="content-calendar-panel"
-              onClick={() => selectCalendarTab("calendar")}
+              onClick={() => selectContentTab("calendar")}
               className={`border-b-2 px-4 py-3 text-body-md font-semibold ${activeTab === "calendar" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"}`}
             >
               Lịch xuất bản
@@ -2150,10 +2217,21 @@ export default function ContentWorkspacePage() {
               role="tab"
               aria-selected={activeTab === "metrics"}
               aria-controls="content-metrics-panel"
-              onClick={() => selectCalendarTab("metrics")}
+              onClick={() => selectContentTab("metrics")}
               className={`border-b-2 px-4 py-3 text-body-md font-semibold ${activeTab === "metrics" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"}`}
             >
               Chỉ số chuỗi AI
+            </button>
+            <button
+              id="content-performance-tab"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "performance"}
+              aria-controls="content-performance-panel"
+              onClick={() => selectContentTab("performance")}
+              className={`border-b-2 px-4 py-3 text-body-md font-semibold ${activeTab === "performance" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"}`}
+            >
+              Hiệu quả bài đăng
             </button>
           </nav>
 
@@ -2243,6 +2321,13 @@ export default function ContentWorkspacePage() {
             <div id="content-metrics-panel" role="tabpanel" aria-labelledby="content-metrics-tab">
               <ChainMetricsPanel />
             </div>
+          ) : activeTab === "performance" ? (
+            <div id="content-performance-panel" role="tabpanel" aria-labelledby="content-performance-tab">
+              <PostPerformancePanel
+                onOpenCalendar={() => selectContentTab("calendar")}
+                onOpenItem={openContentItem}
+              />
+            </div>
           ) : (
             <div id="content-calendar-panel" role="tabpanel" aria-labelledby="content-calendar-tab">
               <CalendarPanel
@@ -2259,104 +2344,6 @@ export default function ContentWorkspacePage() {
           )}
         </div>
       </section>
-
-      {overrideItem ? (
-        <Modal
-          open
-          onClose={() => {
-            if (!approveMutation.isPending) {
-              setOverrideItem(null);
-              setOverrideReason("");
-            }
-          }}
-          title="Duyệt phát hành (override)"
-          maxWidthClass="max-w-lg"
-          footer={
-            <>
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={approveMutation.isPending}
-                onClick={() => {
-                  setOverrideItem(null);
-                  setOverrideReason("");
-                }}
-              >
-                Hủy
-              </Button>
-              <Button
-                type="button"
-                disabled={approveMutation.isPending || overrideReason.trim().length < 3}
-                onClick={() => approveMutation.mutate({ item: overrideItem, reason: overrideReason })}
-              >
-                {approveMutation.isPending ? "Đang duyệt..." : "Xác nhận override"}
-              </Button>
-            </>
-          }
-        >
-          <p className="text-body-sm text-on-surface-variant">
-            Agent review chưa đạt (non-pass/error). Cần lý do override để duyệt phát hành revision {itemRevision(overrideItem)}.
-          </p>
-          {overrideItem.agentReview?.reason ? (
-            <Alert tone="warning">Lý do agent: {overrideItem.agentReview.reason}</Alert>
-          ) : null}
-          <label className="block">
-            <span className="mb-1 block text-label-caps uppercase text-secondary">Lý do override</span>
-            <textarea
-              className="min-h-[120px] w-full resize-y rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
-              value={overrideReason}
-              onChange={(event) => setOverrideReason(event.target.value)}
-              placeholder="Ví dụ: đã kiểm tra brand/legal, chấp nhận rủi ro..."
-            />
-          </label>
-          {approveMutation.isError ? <Alert tone="error">{errorMessage(approveMutation.error)}</Alert> : null}
-        </Modal>
-      ) : null}
-
-      {rejectItem ? (
-        <Modal
-          open
-          onClose={() => {
-            if (!rejectMutation.isPending) {
-              setRejectItem(null);
-            }
-          }}
-          title="Từ chối phát hành"
-          maxWidthClass="max-w-lg"
-          footer={
-            <>
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={rejectMutation.isPending}
-                onClick={() => setRejectItem(null)}
-              >
-                Hủy
-              </Button>
-              <Button
-                type="button"
-                disabled={rejectMutation.isPending || rejectReason.trim().length < 3}
-                onClick={() => rejectMutation.mutate({ item: rejectItem, reason: rejectReason })}
-              >
-                {rejectMutation.isPending ? "Đang từ chối..." : "Xác nhận từ chối"}
-              </Button>
-            </>
-          }
-        >
-          <p className="text-body-sm text-on-surface-variant">
-            Từ chối phát hành sẽ hủy lịch đang chờ cho revision hiện tại.
-          </p>
-          <label className="block">
-            <span className="mb-1 block text-label-caps uppercase text-secondary">Lý do từ chối</span>
-            <textarea
-              className="min-h-[120px] w-full resize-y rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
-              value={rejectReason}
-              onChange={(event) => setRejectReason(event.target.value)}
-            />
-          </label>
-          {rejectMutation.isError ? <Alert tone="error">{errorMessage(rejectMutation.error)}</Alert> : null}
-        </Modal>
-      ) : null}
 
       {overrideItem ? (
         <Modal
@@ -2484,7 +2471,7 @@ export default function ContentWorkspacePage() {
             ...current,
             confirmInstagramAccount,
           }))}
-          onClose={closeScheduleDialog}
+          onClose={() => closeScheduleDialog()}
           onSubmit={submitScheduleDialog}
         />
       ) : null}

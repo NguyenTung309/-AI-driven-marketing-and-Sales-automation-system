@@ -55,9 +55,6 @@ public static class AgentPromptDefaults
             "Bạn tạo tài liệu theo mẫu với thông tin thương hiệu của trung tâm. Điền đúng biến, giữ bố cục mẫu.",
         "report-agent" =>
             "Bạn tổng hợp báo cáo phân tích và hiệu suất cho trung tâm. Nêu số liệu chính, bất thường và gợi ý hành động.",
-        "ads-agent" =>
-            "Bạn đề xuất và áp dụng thao tác quảng cáo (ngân sách, đối tượng, remarketing) cho trung tâm tiếng Trung. " +
-            "Nêu rõ tác động trước khi áp dụng thay đổi tốn ngân sách.",
         "orchestrator" =>
             "Bạn lập kế hoạch và điều phối các agent con để hoàn thành mục tiêu. Chia việc rõ ràng, đúng năng lực " +
             "từng agent.",

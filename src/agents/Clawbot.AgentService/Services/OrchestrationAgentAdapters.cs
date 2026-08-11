@@ -1,6 +1,7 @@
 using System.Globalization;
 using Clawbot.Agents.Core;
 using Clawbot.Agents.Core.Orchestrator;
+using Clawbot.Domain.Analytics;
 using Clawbot.Infrastructure.Leads;
 using Clawbot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -251,42 +252,184 @@ public sealed class ReportOrchestrationAdapter(ReportAgentRunner runner) : Agent
         var operation = (AgentTaskInput.OptionalString(input, "operation") ?? "snapshot").ToLowerInvariant();
         var tenantId = AgentTaskInput.RequiredGuid(input, "tenant_id");
 
+        // platform mặc định "all" (đúng cách LoadSeriesAsync đã chuẩn hóa): bắt buộc nó chỉ khiến ReAct loop
+        // đốt một bước cho lỗi "platform required." trong khi tổng hợp toàn nền tảng mới là mặc định hợp lý.
+        var platform = AgentTaskInput.OptionalString(input, "platform") ?? "all";
+
         if (operation == "anomaly")
         {
+            var metric = AgentTaskInput.RequiredString(input, "metric");
             var points = await _runner.DetectAnomalyAsync(
                 tenantId,
-                AgentTaskInput.RequiredString(input, "platform"),
-                AgentTaskInput.RequiredString(input, "metric"),
+                platform,
+                metric,
                 OptionalDouble(input, "z_threshold") ?? 0d,
                 OptionalInt(input, "lookback_days") ?? 0, ct).ConfigureAwait(false);
-            return Json(points.Select(p => new
+
+            var items = points.Select(p => Row(
+                ("date", ReportAgentRunner.FormatDate(p.At)),
+                ("value", p.Value),
+                ("zScore", p.ZScore),
+                ("isAnomaly", p.IsAnomaly))).ToList();
+
+            var link = await PersistAsync(
+                tenantId,
+                ReportArtifact.KindAnomaly,
+                $"Bất thường {metric} ({platform})",
+                platform,
+                metric,
+                points.Count > 0 ? DateOnly.FromDateTime(points[0].At.Date) : ReportAgentRunner.Today(),
+                points.Count > 0 ? DateOnly.FromDateTime(points[^1].At.Date) : ReportAgentRunner.Today(),
+                new ReportArtifactPayload(
+                    ReportArtifact.KindAnomaly,
+                    [
+                        new ReportColumn("date", "Ngày", "date"),
+                        new ReportColumn("value", "Giá trị", "number"),
+                        new ReportColumn("zScore", "Z-score", "number"),
+                        new ReportColumn("isAnomaly", "Bất thường", "text"),
+                    ],
+                    items,
+                    new ReportChart("date", ["value"])),
+                ct).ConfigureAwait(false);
+
+            return Json(new
             {
-                date = ReportAgentRunner.FormatDate(p.At),
-                value = p.Value,
-                zScore = p.ZScore,
-                isAnomaly = p.IsAnomaly,
-            }));
+                operation = "anomaly",
+                metric,
+                platform,
+                total = items.Count,
+                anomalies = points.Count(p => p.IsAnomaly),
+                items,
+                reportId = link?.Id,
+                reportUrl = link?.Url,
+            });
         }
 
         if (operation == "forecast")
         {
+            var metric = AgentTaskInput.RequiredString(input, "metric");
             var points = await _runner.ForecastAsync(
                 tenantId,
-                AgentTaskInput.RequiredString(input, "platform"),
-                AgentTaskInput.RequiredString(input, "metric"),
+                platform,
+                metric,
                 OptionalInt(input, "horizon_days") ?? 0, ct).ConfigureAwait(false);
-            return Json(points.Select(p => new
+
+            var items = points.Select(p => Row(
+                ("date", ReportAgentRunner.FormatDate(p.At)),
+                ("value", p.Forecast),
+                ("lowerBound", p.LowerBound),
+                ("upperBound", p.UpperBound))).ToList();
+
+            var link = await PersistAsync(
+                tenantId,
+                ReportArtifact.KindForecast,
+                $"Dự báo {metric} ({platform})",
+                platform,
+                metric,
+                points.Count > 0 ? DateOnly.FromDateTime(points[0].At.Date) : ReportAgentRunner.Today(),
+                points.Count > 0 ? DateOnly.FromDateTime(points[^1].At.Date) : ReportAgentRunner.Today(),
+                new ReportArtifactPayload(
+                    ReportArtifact.KindForecast,
+                    [
+                        new ReportColumn("date", "Ngày", "date"),
+                        new ReportColumn("value", "Dự báo", "number"),
+                        new ReportColumn("lowerBound", "Cận dưới", "number"),
+                        new ReportColumn("upperBound", "Cận trên", "number"),
+                    ],
+                    items,
+                    new ReportChart("date", ["value", "lowerBound", "upperBound"])),
+                ct).ConfigureAwait(false);
+
+            return Json(new
             {
-                date = ReportAgentRunner.FormatDate(p.At),
-                value = p.Forecast,
-                lowerBound = p.LowerBound,
-                upperBound = p.UpperBound,
-            }));
+                operation = "forecast",
+                metric,
+                platform,
+                total = items.Count,
+                items,
+                reportId = link?.Id,
+                reportUrl = link?.Url,
+            });
         }
 
-        var rows = await _runner.DailySnapshotAsync(
-            tenantId, AgentTaskInput.RequiredString(input, "date"), ct).ConfigureAwait(false);
-        return Json(rows);
+        // date mặc định hôm nay THEO GIỜ VN: KPI gom theo mốc UTC+7, lấy ngày UTC sẽ trỏ nhầm sang
+        // hôm qua trong khoảng 00:00-07:00 giờ VN và snapshot trả về rỗng.
+        var date = AgentTaskInput.OptionalString(input, "date")
+            ?? ReportAgentRunner.FormatDate(ReportAgentRunner.Today());
+        var rows = await _runner.DailySnapshotAsync(tenantId, date, ct).ConfigureAwait(false);
+        var snapshotDate = ReportAgentRunner.ParseDate(date);
+
+        var snapshotItems = rows.Select(r => Row(
+            ("platform", r.Platform),
+            ("leads", r.Leads),
+            ("dms", r.Dms),
+            ("replies", r.Replies),
+            ("conversions", r.Conversions),
+            ("avgResponseTimeSec", r.AvgResponseTimeSec))).ToList();
+
+        var snapshotLink = await PersistAsync(
+            tenantId,
+            ReportArtifact.KindSnapshot,
+            $"Báo cáo KPI ngày {ReportAgentRunner.FormatDate(snapshotDate)}",
+            platform,
+            metric: null,
+            snapshotDate,
+            snapshotDate,
+            new ReportArtifactPayload(
+                ReportArtifact.KindSnapshot,
+                [
+                    new ReportColumn("platform", "Nền tảng", "text"),
+                    new ReportColumn("leads", "Lead", "number"),
+                    new ReportColumn("dms", "Tin nhắn", "number"),
+                    new ReportColumn("replies", "Phản hồi", "number"),
+                    new ReportColumn("conversions", "Chuyển đổi", "number"),
+                    new ReportColumn("avgResponseTimeSec", "Phản hồi TB (giây)", "number"),
+                ],
+                snapshotItems,
+                new ReportChart("platform", ["leads", "dms", "conversions"])),
+            ct).ConfigureAwait(false);
+
+        // snapshot trả mọi platform của ngày đó nên không lọc theo `platform`.
+        return Json(new
+        {
+            operation = "snapshot",
+            date,
+            total = rows.Count,
+            items = rows,
+            reportId = snapshotLink?.Id,
+            reportUrl = snapshotLink?.Url,
+        });
+    }
+
+    /// <summary>
+    /// Chốt artifact và trả link để LLM dán vào narrative. Không có dòng nào thì không lưu: một link
+    /// dẫn tới bảng rỗng còn tệ hơn không có link, và LLM vẫn thấy total = 0 để nói đúng sự thật.
+    /// </summary>
+    private async Task<(Guid Id, string Url)?> PersistAsync(
+        Guid tenantId,
+        string kind,
+        string title,
+        string platform,
+        string? metric,
+        DateOnly fromDate,
+        DateOnly toDate,
+        ReportArtifactPayload payload,
+        CancellationToken ct)
+    {
+        if (payload.Rows.Count == 0)
+            return null;
+
+        var id = await _runner.SaveArtifactAsync(
+            tenantId, kind, title, platform, metric, fromDate, toDate, payload, ct).ConfigureAwait(false);
+        return (id, string.Create(CultureInfo.InvariantCulture, $"/reports/{id}"));
+    }
+
+    private static Dictionary<string, object?> Row(params (string Key, object? Value)[] cells)
+    {
+        var row = new Dictionary<string, object?>(cells.Length, StringComparer.Ordinal);
+        foreach (var (key, value) in cells)
+            row[key] = value;
+        return row;
     }
 
     private static int? OptionalInt(IReadOnlyDictionary<string, string> input, string key) =>

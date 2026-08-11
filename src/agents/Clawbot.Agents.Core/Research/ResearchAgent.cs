@@ -24,9 +24,14 @@ public interface ITrendRelevanceScorer
         CancellationToken ct = default);
 }
 
+public sealed record ResearchScanResult(
+    IReadOnlyList<ScoredTrend> Trends,
+    IReadOnlyList<RawTrend> RawTrends);
+
 public interface IResearchAgent
 {
     Task<IReadOnlyList<ScoredTrend>> ScanAsync(ResearchScanRequest request, CancellationToken ct = default);
+    Task<ResearchScanResult> ScanWithRawAsync(ResearchScanRequest request, CancellationToken ct = default);
 }
 
 // Heuristic keyword scorer: fallback khi tenant/host chua cau hinh LLM + embedding
@@ -91,7 +96,10 @@ internal sealed class ResearchAgent(
     private readonly IReadOnlyList<ITrendSource> _sources = sources.ToList();
     private readonly ITrendRelevanceScorer _scorer = scorer;
 
-    public async Task<IReadOnlyList<ScoredTrend>> ScanAsync(ResearchScanRequest request, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ScoredTrend>> ScanAsync(ResearchScanRequest request, CancellationToken ct = default) =>
+        (await ScanWithRawAsync(request, ct).ConfigureAwait(false)).Trends;
+
+    public async Task<ResearchScanResult> ScanWithRawAsync(ResearchScanRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         // No Enabled prefilter: per-tenant overrides can enable a source that is off globally
@@ -107,12 +115,18 @@ internal sealed class ResearchAgent(
             .ToList();
 
         var scored = await _scorer.ScoreAsync(request.TenantId, deduped, request.Keywords, ct).ConfigureAwait(false);
-        return scored
+        var filtered = scored
             .Where(t => t.RelevanceScore > 0d)
             .OrderByDescending(t => t.RelevanceScore)
             .ThenBy(t => t.Topic)
             .Take(MaxResults)
             .ToList();
+        var raw = deduped
+            .OrderByDescending(t => t.SourceScore)
+            .ThenBy(t => t.Topic)
+            .Take(200)
+            .ToList();
+        return new ResearchScanResult(filtered, raw);
     }
 
     private static TrendSourceOverride? OverrideFor(string source, TrendOverrides? overrides) =>

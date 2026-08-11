@@ -1,6 +1,7 @@
 using Clawbot.Api.Auth;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Security;
+using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Multitenancy;
 using Microsoft.AspNetCore.Mvc;
@@ -22,7 +23,7 @@ public sealed record TenantOrchestrationSettingsRequest(
     bool? SkipChatReplyReview = null,
     int? IdleAlertMinutes = null,
     int? LeadLostAfterDays = null,
-    bool? AutoApproveLeadRevenue = null,
+    string? OrchestratorFailurePolicy = null,
     bool ClearMonthlyCostCapUsd = false);
 
 public static class AdminEndpoints
@@ -46,7 +47,7 @@ public static class AdminEndpoints
         var tenantId = tenants.Require().TenantId;
         var settings = await db.Tenants
             .Where(t => t.Id == tenantId)
-            .Select(t => new { t.RequireOrchestrationApproval, t.MonthlyCostCapUsd, t.RequireContentReview, t.RequireChatReplyApproval, t.RequireKbHumanReview, t.AiAutoReplyResumeMinutes, t.SkipChatReplyReview, t.IdleAlertMinutes, t.LeadLostAfterDays, t.AutoApproveLeadRevenue })
+            .Select(t => new { t.RequireOrchestrationApproval, t.MonthlyCostCapUsd, t.RequireContentReview, t.RequireChatReplyApproval, t.RequireKbHumanReview, t.AiAutoReplyResumeMinutes, t.SkipChatReplyReview, t.IdleAlertMinutes, t.LeadLostAfterDays, t.OrchestratorFailurePolicy })
             .FirstOrDefaultAsync(ct);
         return Results.Ok(new
         {
@@ -59,7 +60,7 @@ public static class AdminEndpoints
             skipChatReplyReview = settings?.SkipChatReplyReview ?? false,
             idleAlertMinutes = settings?.IdleAlertMinutes ?? 5,
             leadLostAfterDays = settings?.LeadLostAfterDays ?? 60,
-            autoApproveLeadRevenue = settings?.AutoApproveLeadRevenue ?? false,
+            orchestratorFailurePolicy = settings?.OrchestratorFailurePolicy ?? Tenant.OrchestratorFailurePolicyPause,
         });
     }
 
@@ -98,9 +99,19 @@ public static class AdminEndpoints
         if (body.SkipChatReplyReview is { } scr) tenant.SetSkipChatReplyReview(scr);
         if (body.IdleAlertMinutes is { } iam) tenant.SetIdleAlertMinutes(iam);
         if (body.LeadLostAfterDays is { } llad) tenant.SetLeadLostAfterDays(llad);
-        if (body.AutoApproveLeadRevenue is { } aalr) tenant.SetAutoApproveLeadRevenue(aalr);
+        if (!string.IsNullOrWhiteSpace(body.OrchestratorFailurePolicy))
+        {
+            try
+            {
+                tenant.SetOrchestratorFailurePolicy(body.OrchestratorFailurePolicy);
+            }
+            catch (ArgumentException)
+            {
+                return Results.BadRequest(new { error = "orchestrator_failure_policy_invalid" });
+            }
+        }
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new { tenant.RequireOrchestrationApproval, tenant.MonthlyCostCapUsd, tenant.RequireContentReview, tenant.RequireChatReplyApproval, tenant.RequireKbHumanReview, tenant.AiAutoReplyResumeMinutes, tenant.SkipChatReplyReview, tenant.IdleAlertMinutes, tenant.LeadLostAfterDays, tenant.AutoApproveLeadRevenue });
+        return Results.Ok(new { tenant.RequireOrchestrationApproval, tenant.MonthlyCostCapUsd, tenant.RequireContentReview, tenant.RequireChatReplyApproval, tenant.RequireKbHumanReview, tenant.AiAutoReplyResumeMinutes, tenant.SkipChatReplyReview, tenant.IdleAlertMinutes, tenant.LeadLostAfterDays, tenant.OrchestratorFailurePolicy });
     }
 
     private static async Task<IResult> ListAuditLogsAsync(

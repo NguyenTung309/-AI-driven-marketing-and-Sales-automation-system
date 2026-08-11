@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Modal } from "@/shared/ui/Modal";
 import { StatusPill } from "@/shared/ui/StatusPill";
+import { StructuredData } from "@/shared/ui/StructuredData";
 import { taskStatusLabel, taskTone, tasksByDepth } from "./orchestrationStatus";
 import type { OrchestrationV2TaskDto } from "@/shared/api/orchestrationV2";
 
@@ -189,11 +190,14 @@ export function TaskDagCanvas({
             {layout.nodes.map((node) => {
               const running = node.task.status === "running";
               const selected = node.task.id === selectedTaskId;
+              // Bước bỏ qua vẫn thỏa phụ thuộc nhưng không bàn giao gì — vẽ mờ, viền đứt để không nhầm là đã chạy.
+              const skipped = node.task.status === "skipped";
               return (
                 <button
                   className={[
-                    "absolute flex flex-col gap-1 rounded-lg border bg-surface-container-lowest p-2 text-left shadow-sm transition-shadow hover:shadow-md",
-                    running ? "border-primary" : "border-outline",
+                    "absolute flex flex-col gap-1 rounded-lg bg-surface-container-lowest p-2 text-left shadow-sm transition-shadow hover:shadow-md",
+                    skipped ? "border border-dashed border-outline opacity-60" : "border",
+                    running ? "border-primary" : node.task.status === "failed" ? "border-error" : skipped ? "" : "border-outline",
                     selected ? "ring-2 ring-primary ring-offset-1 ring-offset-surface" : "",
                   ].join(" ")}
                   key={node.task.id}
@@ -274,9 +278,9 @@ export function TaskDagCanvas({
             <div>
               <p className="text-body-md font-bold text-secondary">Kết quả chuyền cho agent đích (upstream_results)</p>
               {edgeInfo.from.task.output ? (
-                <pre className="mt-1 max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded border border-outline bg-surface p-3 font-mono text-mono-status text-on-surface">
-                  {edgeInfo.from.task.output}
-                </pre>
+                <div className="mt-1 rounded border border-outline bg-surface p-3">
+                  <StructuredData maxHeightClass="max-h-[40vh]" value={edgeInfo.from.task.output} />
+                </div>
               ) : (
                 <p className="mt-1 text-body-md text-on-surface-variant">
                   Task nguồn chưa hoàn tất — chưa có dữ liệu chuyền. Khi nguồn xong, kết quả sẽ được tiêm vào đầu vào của agent đích.

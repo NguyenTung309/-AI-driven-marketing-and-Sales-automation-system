@@ -64,7 +64,7 @@ public sealed partial class SemanticKernelPlanGenerator(IChatCompletionService c
             OrchestrationPlanDocument? plan = null;
             try
             {
-                plan = JsonSerializer.Deserialize<OrchestrationPlanDocument>(NormalizeJson(json), JsonOptions);
+                plan = JsonSerializer.Deserialize<OrchestrationPlanDocument>(NormalizeJson(json), JsonOptions)?.Normalize();
             }
             catch (JsonException ex)
             {

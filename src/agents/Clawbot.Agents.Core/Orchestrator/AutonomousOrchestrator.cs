@@ -1,5 +1,6 @@
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Rag;
+using Clawbot.Domain.Agents;
 using Clawbot.SharedKernel.Time;
 
 namespace Clawbot.Agents.Core.Orchestrator;
@@ -7,7 +8,7 @@ namespace Clawbot.Agents.Core.Orchestrator;
 // Bounded autonomous coordinator: plan -> delegate (A2A) -> execute -> review/replan -> finalize.
 // Sequential dependency-ordered execution for V2 baseline (ponytail: MaxConcurrency cap reserved
 // for a parallel upgrade). Hard stops: max rounds, per-task cost reservation, cancellation.
-public sealed class AutonomousOrchestrator
+public sealed class AutonomousOrchestrator : IAutonomousOrchestrator
 {
     private readonly IAutonomousPlanner _planner;
     private readonly IAgentDefinitionCatalog _catalog;
@@ -21,6 +22,7 @@ public sealed class AutonomousOrchestrator
     private readonly IClock _clock;
     private readonly ToolRegistry? _toolRegistry;
     private readonly IOrchestrationApprovalResolver? _approvalResolver;
+    private readonly IOrchestrationFailurePolicyResolver? _failurePolicyResolver;
     private readonly AutonomousOrchestratorOptions _options;
     // SPEC-16 P4-4/P4-2: per-run flags set at the start of ExecutePlanAsync.
     private bool _requireHighRiskApproval;
@@ -41,8 +43,10 @@ public sealed class AutonomousOrchestrator
         IClock clock,
         AutonomousOrchestratorOptions? options = null,
         ToolRegistry? toolRegistry = null,
-        IOrchestrationApprovalResolver? approvalResolver = null)
+        IOrchestrationApprovalResolver? approvalResolver = null,
+        IOrchestrationFailurePolicyResolver? failurePolicyResolver = null)
     {
+        _failurePolicyResolver = failurePolicyResolver;
         _planner = planner;
         _catalog = catalog;
         _registry = registry;
@@ -69,8 +73,7 @@ public sealed class AutonomousOrchestrator
             // Surface the reason in the trace — otherwise the FE hangs on "planning_started" with no clue.
             await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "planning_failed",
                 "Chưa có agent điều phối nào (agent_definitions). Seed sub-agent cho tenant trước khi lập kế hoạch.", _clock.UtcNow, ct).ConfigureAwait(false);
-            await _sink.FailAsync(request.TenantId, request.SessionId, "no_agents", _clock.UtcNow, ct).ConfigureAwait(false);
-            return AutonomousRunResult.Failed("no_agents", 0);
+            return await FailWithOrphanCleanupAsync(request, "no_agents", 0, 0, ct).ConfigureAwait(false);
         }
 
         OrchestrationPlanDocument plan;
@@ -84,11 +87,30 @@ public sealed class AutonomousOrchestrator
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "planning_failed", ex.Message, _clock.UtcNow, ct).ConfigureAwait(false);
-            await _sink.FailAsync(request.TenantId, request.SessionId, "plan_failed", _clock.UtcNow, ct).ConfigureAwait(false);
-            return AutonomousRunResult.Failed("plan_failed", 0);
+            return await FailWithOrphanCleanupAsync(request, "plan_failed", 0, 0, ct).ConfigureAwait(false);
         }
 
-        await _sink.PersistPlanAsync(request.TenantId, request.SessionId, plan, request.RequiresApproval, ct).ConfigureAwait(false);
+        if (await _sink.IsStoppedAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false))
+            return AutonomousRunResult.Failed("stopped", 0);
+
+        try
+        {
+            await _sink.PersistPlanAsync(
+                request.TenantId,
+                request.SessionId,
+                plan,
+                expectedGeneration: 0,
+                requiresApproval: request.RequiresApproval,
+                ct: ct).ConfigureAwait(false);
+        }
+        catch (OrchestrationPlanGenerationMismatchException)
+        {
+            return AutonomousRunResult.Failed("superseded", 0);
+        }
+
+        if (await _sink.TryAcknowledgePauseAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false))
+            return AutonomousRunResult.Failed("stopped", 0);
+
         // SPEC-16 P3-7: post a human-readable plan summary trace right after planning so the user can read the DAG,
         // not just a raw JSON plan blob.
         await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "plan_summary",
@@ -97,26 +119,38 @@ public sealed class AutonomousOrchestrator
         if (request.RequiresApproval)
             return AutonomousRunResult.PendingApproval(0);
 
-        return await ExecutePlanAsync(request, plan, entries, ct).ConfigureAwait(false);
+        return await ExecutePlanAsync(request, plan, entries, planGeneration: 0, ct).ConfigureAwait(false);
     }
 
     public async Task<AutonomousRunResult> RunExistingPlanAsync(AutonomousRunRequest request, OrchestrationPlanDocument plan, CancellationToken ct = default)
     {
         var entries = await _catalog.ListAsync(request.TenantId, ct).ConfigureAwait(false);
-        return await ExecutePlanAsync(request, plan, entries, ct).ConfigureAwait(false);
+        var planGeneration = await _sink.GetPlanGenerationAsync(
+            request.TenantId,
+            request.SessionId,
+            ct).ConfigureAwait(false);
+        return await ExecutePlanAsync(request, plan, entries, planGeneration, ct).ConfigureAwait(false);
     }
 
     private async Task<AutonomousRunResult> ExecutePlanAsync(
         AutonomousRunRequest request,
         OrchestrationPlanDocument plan,
         IReadOnlyList<AgentDefinitionCatalogEntry> entries,
+        int planGeneration,
         CancellationToken ct)
     {
-        var preflight = await _costGuard.CanStartAsync(request.TenantId, plan.Tasks.Count * _options.PerTaskEstimateUsd, _clock.UtcNow, ct).ConfigureAwait(false);
+        // Chỉ ước tính cho các task CÒN PHẢI CHẠY. Tính cả task đã xong sẽ chặn nhầm (cost_cap_preflight)
+        // mỗi lần resume một plan dài đã chạy gần hết — đúng lúc người dùng vừa can thiệp xong.
+        var remainingTasks = Math.Max(plan.Tasks.Count(t => IsPending(t.Status)), 1);
+        var preflight = await _costGuard.CanStartAsync(request.TenantId, remainingTasks * _options.PerTaskEstimateUsd, _clock.UtcNow, ct).ConfigureAwait(false);
         if (!preflight.Allowed)
         {
-            await _sink.FailAsync(request.TenantId, request.SessionId, preflight.Reason ?? "cost_cap_preflight", _clock.UtcNow, ct).ConfigureAwait(false);
-            return AutonomousRunResult.Failed(preflight.Reason ?? "cost_cap_preflight", 0);
+            return await FailWithOrphanCleanupAsync(
+                request,
+                preflight.Reason ?? "cost_cap_preflight",
+                0,
+                planGeneration,
+                ct).ConfigureAwait(false);
         }
 
         var byCode = BuildDefinitionLookup(entries);
@@ -125,23 +159,49 @@ public sealed class AutonomousOrchestrator
             && await _approvalResolver.IsRequiredAsync(request.TenantId, ct).ConfigureAwait(false);
         // SPEC-16 P4-2: capture the run's dry-run flag so the worker previews tool actions without side effects.
         _dryRun = request.DryRun;
+        // Chính sách khi task fail, đọc một lần cho cả run.
+        var failurePolicy = OrchestratorFailurePolicies.ForSource(
+            _failurePolicyResolver is null
+                ? OrchestratorFailurePolicies.Normalize(_options.FailurePolicy)
+                : OrchestratorFailurePolicies.Normalize(
+                    await _failurePolicyResolver.ResolveAsync(request.TenantId, ct).ConfigureAwait(false)),
+            request.Source);
 
         // Execution proceeds in waves: each wave runs every currently-ready task. A wave that produces no
         // failures simply advances the DAG and is NOT charged against the replan budget — so a deep but healthy
         // chain (research→content→reviewer→publisher→reporter) completes regardless of its depth. _options.MaxRounds
         // bounds only REPLANS (recovery after a failed task). Previously the wave loop itself was capped at MaxRounds,
         // so any chain deeper than MaxRounds tripped a false max_rounds even with zero failures — the real root cause.
-        var replans = 0;
+        var replans = planGeneration;
         while (true)
         {
             ct.ThrowIfCancellationRequested();
+            if (await _sink.TryAcknowledgePauseAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false))
+                return AutonomousRunResult.Failed("stopped", replans);
 
             var hasFailed = plan.Tasks.Any(t => IsFailed(t.Status));
             var pending = plan.Tasks.Where(t => IsPending(t.Status)).ToArray();
             if (pending.Length == 0 && !hasFailed)
             {
                 await EmitRunSummaryAsync(request, plan, ct).ConfigureAwait(false);
-                await _sink.CompleteAsync(request.TenantId, request.SessionId, _clock.UtcNow, ct).ConfigureAwait(false);
+                try
+                {
+                    await _sink.CompleteAsync(
+                        request.TenantId,
+                        request.SessionId,
+                        planGeneration,
+                        _clock.UtcNow,
+                        ct).ConfigureAwait(false);
+                }
+                catch (OrchestrationPlanGenerationMismatchException)
+                {
+                    return AutonomousRunResult.Failed("superseded", replans);
+                }
+                catch (OrchestrationSessionNotRunningException)
+                {
+                    return AutonomousRunResult.Failed("stopped", replans);
+                }
+
                 return AutonomousRunResult.Completed(replans);
             }
 
@@ -151,10 +211,32 @@ public sealed class AutonomousOrchestrator
                 foreach (var task in ready)
                 {
                     ct.ThrowIfCancellationRequested();
-                    plan = await ExecuteTaskAsync(request, plan, task, byCode, ct).ConfigureAwait(false);
-                    await _sink.PersistPlanAsync(request.TenantId, request.SessionId, plan, ct: ct).ConfigureAwait(false);
-                    if (await _sink.IsStoppedAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false))
+                    plan = await ExecuteTaskAsync(
+                        request,
+                        plan,
+                        task,
+                        byCode,
+                        planGeneration,
+                        ct).ConfigureAwait(false);
+                    try
+                    {
+                        await _sink.PersistPlanAsync(
+                            request.TenantId,
+                            request.SessionId,
+                            plan,
+                            planGeneration,
+                            ct: ct).ConfigureAwait(false);
+                    }
+                    catch (OrchestrationPlanGenerationMismatchException)
+                    {
+                        return AutonomousRunResult.Failed("superseded", replans);
+                    }
+
+                    if (await _sink.TryAcknowledgePauseAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false)
+                        || await _sink.IsStoppedAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false))
+                    {
                         return AutonomousRunResult.Failed("stopped", replans);
+                    }
                 }
 
                 // Healthy wave → advance to the next wave without consuming the replan budget.
@@ -166,23 +248,221 @@ public sealed class AutonomousOrchestrator
             if (failed.Length == 0)
             {
                 // Nothing ready, nothing failed, yet work remains → unsatisfiable dependencies.
-                await _sink.FailAsync(request.TenantId, request.SessionId, "dependency_blocked", _clock.UtcNow, ct).ConfigureAwait(false);
-                return AutonomousRunResult.Failed("dependency_blocked", replans);
+                return await FailWithOrphanCleanupAsync(
+                    request,
+                    "dependency_blocked",
+                    replans,
+                    planGeneration,
+                    ct).ConfigureAwait(false);
+            }
+
+            // Chính sách mặc định: KHÔNG tự replan. Replan sinh plan mới hoàn toàn nên mọi task đã xong
+            // phải chạy lại — một task lỗi nhân chi phí cả run lên. Thay vào đó dừng lại để người dùng
+            // sửa output/chạy lại đúng bước lỗi (không tốn LLM nào), rồi resume.
+            if (failurePolicy is OrchestratorFailurePolicies.Pause)
+            {
+                var blocker = failed[0];
+                // Ghi plan TRƯỚC khi chuyển sang paused: PersistPlanAsync tự bỏ qua khi phiên không còn
+                // Running, đảo thứ tự sẽ mất output/error của chính task vừa lỗi.
+                try
+                {
+                    await _sink.PersistPlanAsync(
+                        request.TenantId,
+                        request.SessionId,
+                        plan,
+                        planGeneration,
+                        ct: ct).ConfigureAwait(false);
+                }
+                catch (OrchestrationPlanGenerationMismatchException)
+                {
+                    return AutonomousRunResult.Failed("superseded", replans);
+                }
+
+                try
+                {
+                    await _sink.PauseForInterventionAsync(
+                        request.TenantId,
+                        request.SessionId,
+                        blocker.Id,
+                        blocker.Error ?? "task_failed",
+                        planGeneration,
+                        _clock.UtcNow,
+                        ct).ConfigureAwait(false);
+                }
+                catch (OrchestrationPlanGenerationMismatchException)
+                {
+                    return AutonomousRunResult.Failed("superseded", replans);
+                }
+                catch (OrchestrationSessionNotRunningException)
+                {
+                    return AutonomousRunResult.Failed("stopped", replans);
+                }
+
+                return AutonomousRunResult.AwaitingIntervention(replans);
+            }
+
+            if (failurePolicy is OrchestratorFailurePolicies.Fail)
+            {
+                return await FailWithOrphanCleanupAsync(
+                    request,
+                    "task_failed",
+                    replans,
+                    planGeneration,
+                    ct).ConfigureAwait(false);
             }
 
             if (replans >= _options.MaxRounds)
             {
-                await _sink.FailAsync(request.TenantId, request.SessionId, "max_rounds", _clock.UtcNow, ct).ConfigureAwait(false);
-                return AutonomousRunResult.Failed("max_rounds", replans);
+                return await FailWithOrphanCleanupAsync(
+                    request,
+                    "max_rounds",
+                    replans,
+                    planGeneration,
+                    ct).ConfigureAwait(false);
             }
 
-            replans++;
             await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "re-planned", $"Re-planning after {failed.Length} failed task(s).", _clock.UtcNow, ct).ConfigureAwait(false);
-            using (_llmScope.Begin(request.TenantId, OrchestratorAgentCode))
+            try
             {
-                plan = await _planner.ReplanAsync(request.TenantId, request.Goal, entries.Select(e => e.ToPlannerEntry()).ToArray(), failed, ct).ConfigureAwait(false);
+                using (_llmScope.Begin(request.TenantId, OrchestratorAgentCode))
+                {
+                    plan = await _planner.ReplanAsync(request.TenantId, request.Goal, entries.Select(e => e.ToPlannerEntry()).ToArray(), failed, ct).ConfigureAwait(false);
+                }
+                planGeneration = await _sink.PersistReplanAndRejectSupersededContentAsync(
+                    request.TenantId,
+                    request.SessionId,
+                    planGeneration,
+                    plan,
+                    _clock.UtcNow,
+                    ct).ConfigureAwait(false);
+                replans = planGeneration;
             }
-            await _sink.PersistPlanAsync(request.TenantId, request.SessionId, plan, ct: ct).ConfigureAwait(false);
+            catch (OrchestrationPlanGenerationMismatchException)
+            {
+                await _sink.TraceAsync(
+                    request.TenantId,
+                    request.SessionId,
+                    string.Empty,
+                    OrchestratorAgentCode,
+                    "superseded",
+                    "Stopped stale orchestration runner after a newer plan became durable.",
+                    _clock.UtcNow,
+                    ct).ConfigureAwait(false);
+                return AutonomousRunResult.Failed("superseded", replans);
+            }
+            catch (OrchestrationSessionNotRunningException)
+            {
+                return AutonomousRunResult.Failed("stopped", replans);
+            }
+            catch (OrchestrationPublicationInProgressException)
+            {
+                await _sink.TraceAsync(
+                    request.TenantId,
+                    request.SessionId,
+                    string.Empty,
+                    OrchestratorAgentCode,
+                    "replan_deferred",
+                    "Đang chờ kết quả đăng bài đã được gửi đi trước khi thay thế kế hoạch.",
+                    _clock.UtcNow,
+                    ct).ConfigureAwait(false);
+                return AutonomousRunResult.Failed("publication_in_progress", replans);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await _sink.TraceAsync(request.TenantId, request.SessionId, string.Empty, OrchestratorAgentCode, "replan_failed", ex.Message, _clock.UtcNow, ct).ConfigureAwait(false);
+                return await FailWithOrphanCleanupAsync(
+                    request,
+                    "replan_failed",
+                    replans,
+                    planGeneration,
+                    ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task<AutonomousRunResult> FailWithOrphanCleanupAsync(
+        AutonomousRunRequest request,
+        string reason,
+        int replans,
+        int expectedGeneration,
+        CancellationToken ct)
+    {
+        try
+        {
+            var rejectedCount = await _sink.FailAndRejectOrphanedContentAsync(
+                request.TenantId,
+                request.SessionId,
+                reason,
+                expectedGeneration,
+                _clock.UtcNow,
+                ct).ConfigureAwait(false);
+            if (rejectedCount > 0)
+            {
+                await _sink.TraceAsync(
+                    request.TenantId,
+                    request.SessionId,
+                    string.Empty,
+                    OrchestratorAgentCode,
+                    "content_rejected_orphan",
+                    $"Rejected {rejectedCount} orphaned draft content item(s) from the failed orchestration generation.",
+                    _clock.UtcNow,
+                    ct).ConfigureAwait(false);
+            }
+
+            return AutonomousRunResult.Failed(reason, replans);
+        }
+        catch (OrchestrationPlanGenerationMismatchException)
+        {
+            return AutonomousRunResult.Failed("superseded", replans);
+        }
+        catch (OrchestrationSessionNotRunningException)
+        {
+            return AutonomousRunResult.Failed("stopped", replans);
+        }
+        catch (OrchestrationPublicationInProgressException)
+        {
+            await _sink.TraceAsync(
+                request.TenantId,
+                request.SessionId,
+                string.Empty,
+                OrchestratorAgentCode,
+                "failure_deferred",
+                "Đang chờ kết quả đăng bài đã được gửi đi trước khi kết thúc phiên orchestration.",
+                _clock.UtcNow,
+                ct).ConfigureAwait(false);
+            return AutonomousRunResult.Failed("publication_in_progress", replans);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await _sink.TraceAsync(
+                request.TenantId,
+                request.SessionId,
+                string.Empty,
+                OrchestratorAgentCode,
+                "content_orphan_rejection_failed",
+                ex.Message,
+                _clock.UtcNow,
+                ct).ConfigureAwait(false);
+            try
+            {
+                await _sink.FailAsync(
+                    request.TenantId,
+                    request.SessionId,
+                    "orphaned_content_rejection_failed",
+                    expectedGeneration,
+                    _clock.UtcNow,
+                    ct).ConfigureAwait(false);
+            }
+            catch (OrchestrationPlanGenerationMismatchException)
+            {
+                return AutonomousRunResult.Failed("superseded", replans);
+            }
+            catch (OrchestrationSessionNotRunningException)
+            {
+                return AutonomousRunResult.Failed("stopped", replans);
+            }
+
+            return AutonomousRunResult.Failed("orphaned_content_rejection_failed", replans);
         }
     }
 
@@ -191,6 +471,7 @@ public sealed class AutonomousOrchestrator
         OrchestrationPlanDocument plan,
         OrchestrationPlanTask task,
         Dictionary<string, AgentDefinitionCatalogEntry> byCode,
+        int planGeneration,
         CancellationToken ct)
     {
         byCode.TryGetValue(task.Agent, out var definition);
@@ -210,7 +491,7 @@ public sealed class AutonomousOrchestrator
         try
         {
             using var _costScope = _llmScope.Begin(request.TenantId, task.Agent, _clock.UtcNow, reservation.ReservationId, request.SessionId);
-            var agent = ResolveAgent(task.Agent, definition, request, task);
+            var agent = ResolveAgent(task.Agent, definition, request, task, planGeneration);
             // EARS[WHEN a delegated task suffers a transient LLM/HTTP failure THE SYSTEM SHALL retry the same task
             // with backoff (up to MaxTransientRetries) without burning a replan round, so a slow completion no longer
             // cascades into max_rounds]
@@ -329,11 +610,17 @@ public sealed class AutonomousOrchestrator
     //   2) AgentToolDefaults by code/shortName/type (orchestrator auto-grants), else
     //   3) text-only (reporter-style).
     // WHEN no definition exists THE SYSTEM SHALL fall back to the static runtime registry adapter.
-    private IAgent ResolveAgent(string name, AgentDefinitionCatalogEntry? definition, AutonomousRunRequest request, OrchestrationPlanTask task)
+    private IAgent ResolveAgent(
+        string name,
+        AgentDefinitionCatalogEntry? definition,
+        AutonomousRunRequest request,
+        OrchestrationPlanTask task,
+        int planGeneration)
     {
         if (definition is not null)
             return new GenericLlmAgentWorker(definition, _ragRetriever, _chatClient, _costGuard, _llmScope, _toolRegistry,
-                _requireHighRiskApproval, _sink, _clock, new WorkerRunContext(request.TenantId, request.SessionId), _dryRun);
+                _requireHighRiskApproval, _sink, _clock, new WorkerRunContext(request.TenantId, request.SessionId, planGeneration), _dryRun,
+                request.ExecutionPermissions);
 
         try { return _registry.Resolve(name); }
         catch (KeyNotFoundException) { throw new InvalidOperationException($"No runtime adapter for agent '{name}'."); }
@@ -359,12 +646,21 @@ public sealed class AutonomousOrchestrator
 
     private static List<OrchestrationPlanTask> ReadyTasks(OrchestrationPlanDocument plan)
     {
-        var done = plan.Tasks.Where(t => string.Equals(t.Status, "completed", StringComparison.OrdinalIgnoreCase))
+        // "skipped" cũng thỏa dependency. Nếu chỉ chấp nhận "completed" thì một bước người dùng chủ động
+        // bỏ qua sẽ khóa vĩnh viễn mọi bước sau và cả run rơi vào dependency_blocked.
+        var done = plan.Tasks.Where(t => IsSatisfied(t.Status))
             .Select(t => t.Id).ToHashSet();
         return plan.Tasks
             .Where(t => IsPending(t.Status) && t.DependsOn.All(d => done.Contains(d)))
             .ToList();
     }
+
+    private static bool IsSatisfied(string? status) =>
+        string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase)
+        || IsSkipped(status);
+
+    internal static bool IsSkipped(string? status) =>
+        string.Equals(status, "skipped", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsPending(string? status) =>
         string.IsNullOrWhiteSpace(status) || string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase);

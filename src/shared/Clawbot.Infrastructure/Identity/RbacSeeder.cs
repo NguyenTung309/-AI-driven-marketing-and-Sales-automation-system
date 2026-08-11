@@ -93,7 +93,6 @@ public static partial class RbacSeeder
         ("research-agent", "Agent-Research", "research"),
         ("docs-agent", "Agent-Docs", "docs"),
         ("report-agent", "Agent-Report", "report"),
-        ("ads-agent", "Agent-Ads", "ads"),
         // Review-gate Phase 0: reviewer needs an AgentConfig row so it auto-binds to the tenant's LLM
         // config here (like every other agent) — AgentDefinitionCatalog hides unbound agents, which made
         // the reviewer invisible in prod (dev worked only via DemoLlmConfigSeeder).
@@ -418,7 +417,6 @@ public static partial class RbacSeeder
         "research-agent" => "{\"orchestration\":{\"description\":\"Research markets, competitors, and keyword topics.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"geo\\\":\\\"string\\\",\\\"keywords\\\":\\\"array\\\"}\",\"orchestratable\":true}}",
         "docs-agent" => "{\"orchestration\":{\"description\":\"Render templated documents with tenant branding.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"template_code\\\":\\\"string\\\",\\\"template_body\\\":\\\"string\\\"}\",\"orchestratable\":true}}",
         "report-agent" => "{\"orchestration\":{\"description\":\"Build tenant analytics and performance reports.\",\"inputSchema\":\"{\\\"tenant_id\\\":\\\"guid\\\",\\\"report_type\\\":\\\"string\\\"}\",\"orchestratable\":true}}",
-        "ads-agent" => "{\"orchestration\":{\"description\":\"Apply ad actions, build lookalikes, or remarketing audiences.\",\"inputSchema\":\"{\\\"platform\\\":\\\"string\\\",\\\"operation\\\":\\\"apply|lookalike|remarketing\\\"}\",\"orchestratable\":true}}",
         _ => "{\"orchestration\":{\"description\":\"Run agent task.\",\"inputSchema\":\"{}\",\"orchestratable\":true}}",
     };
 

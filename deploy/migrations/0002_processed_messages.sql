@@ -10,14 +10,11 @@ BEGIN
         Platform NVARCHAR(50) NOT NULL,
         ExternalMessageId NVARCHAR(255) NOT NULL,
         ConversationExternalId NVARCHAR(255) NOT NULL,
-        ProcessedAt DATETIME2 NOT NULL,
-
-        CONSTRAINT UQ_processed_messages_platform_external
-            UNIQUE (Platform, ExternalMessageId)
+        ProcessedAt DATETIME2 NOT NULL
     );
 
-    CREATE INDEX IX_processed_messages_platform_external
-        ON processed_messages (Platform, ExternalMessageId);
+    CREATE UNIQUE INDEX IX_processed_messages_tenant_platform_external
+        ON processed_messages (tenant_id, Platform, ExternalMessageId);
 
     CREATE INDEX IX_processed_messages_processed_at
         ON processed_messages (ProcessedAt);

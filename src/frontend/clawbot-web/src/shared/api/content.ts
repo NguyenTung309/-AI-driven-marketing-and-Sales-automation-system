@@ -54,6 +54,7 @@ export interface ContentItem {
   readonly canRetryReview?: boolean;
   readonly canSchedule?: boolean;
   readonly canPublish?: boolean;
+  readonly scheduleBlockedReason?: string | null;
 }
 
 export type ContentPublishingApprovalPolicy = "automatic" | "human_required";
@@ -169,8 +170,17 @@ export interface Trend {
   readonly weekOf: string;
 }
 
+export interface RawTrend {
+  readonly topic: string;
+  readonly source: string;
+  readonly metric: string;
+  readonly sourceScore: number;
+  readonly contentIdeas: readonly string[];
+}
+
 export interface TrendScanResponse {
   readonly trends: readonly Trend[];
+  readonly rawTrends?: readonly RawTrend[] | null;
 }
 
 export interface ContentBriefPayload {
@@ -200,6 +210,7 @@ export interface GenerateImagePromptResponse {
 export interface ContentAssetUploadResponse {
   readonly url: string;
   readonly assetsJson: string;
+  readonly assetId: string;
 }
 
 export interface UpdateContentItemPayload {
@@ -264,8 +275,8 @@ export async function deleteContentBrief(id: string): Promise<void> {
   await apiClient.delete(`/api/content/briefs/${id}`);
 }
 
-export async function getContentTrends(week?: string): Promise<TrendScanResponse> {
-  const res = await apiClient.get<TrendScanResponse>("/api/content/trends", { params: cleanParams({ week }) });
+export async function getContentTrends(week?: string, includeRaw = false): Promise<TrendScanResponse> {
+  const res = await apiClient.get<TrendScanResponse>("/api/content/trends", { params: cleanParams({ week, includeRaw: includeRaw || undefined }) });
   return res.data;
 }
 
@@ -351,6 +362,11 @@ export async function uploadContentAsset(id: string, file: File): Promise<Conten
   body.append("file", file);
   const res = await apiClient.post<ContentAssetUploadResponse>(`/api/content/items/${id}/assets`, body);
   return res.data;
+}
+
+export async function getContentAssetBlob(url: string): Promise<Blob> {
+  const response = await apiClient.get<Blob>(url, { responseType: "blob" });
+  return response.data;
 }
 
 export async function deleteContentItem(id: string): Promise<void> {
@@ -495,5 +511,85 @@ export interface ContentChainMetrics {
 
 export async function getContentChainMetrics(days = 7): Promise<ContentChainMetrics> {
   const res = await apiClient.get<ContentChainMetrics>("/api/content/chain-metrics", { params: { days } });
+  return res.data;
+}
+
+export type PostPerformancePlatform = "facebook" | "instagram";
+
+export interface PostPerformanceParams {
+  readonly days?: number;
+  readonly platform?: PostPerformancePlatform;
+}
+
+export interface PostPerformanceTotals {
+  readonly posts: number;
+  readonly syncedPosts: number;
+  readonly likes: number | null;
+  readonly comments: number | null;
+  readonly avgEngagementPerPost: number | null;
+}
+
+export interface PostPerformanceFreshness {
+  readonly syncedPosts: number;
+  readonly unsyncedPosts: number;
+  readonly oldestEngagementAttemptAt: string | null;
+}
+
+export interface PostPerformancePlatformRow {
+  readonly platform: PostPerformancePlatform;
+  readonly posts: number;
+  readonly syncedPosts: number;
+  readonly likes: number | null;
+  readonly comments: number | null;
+  readonly avgEngagementPerPost: number | null;
+}
+
+export interface PostPerformanceTargetRow {
+  readonly metaAssetId: string | null;
+  readonly targetName: string;
+  readonly posts: number;
+  readonly syncedPosts: number;
+  readonly likes: number | null;
+  readonly comments: number | null;
+  readonly avgEngagementPerPost: number | null;
+}
+
+export interface PostPerformanceDailyPoint {
+  readonly date: string;
+  readonly posts: number;
+  readonly syncedPosts: number;
+  readonly likes: number | null;
+  readonly comments: number | null;
+}
+
+export interface PostPerformanceTopPost {
+  readonly scheduleId: string;
+  readonly contentItemId: string;
+  readonly isContentAvailable: boolean;
+  readonly platform: PostPerformancePlatform;
+  readonly excerpt: string;
+  readonly postUrl: string | null;
+  readonly postedAt: string;
+  readonly likes: number | null;
+  readonly comments: number | null;
+  readonly total: number | null;
+}
+
+export interface PostPerformanceResponse {
+  readonly windowDays: number;
+  readonly from: string;
+  readonly to: string;
+  readonly totals: PostPerformanceTotals;
+  readonly freshness: PostPerformanceFreshness;
+  readonly byPlatform: readonly PostPerformancePlatformRow[];
+  readonly byTarget: readonly PostPerformanceTargetRow[];
+  readonly daily: readonly PostPerformanceDailyPoint[];
+  readonly topPosts: readonly PostPerformanceTopPost[];
+}
+
+export async function getPostPerformance(params: PostPerformanceParams = {}): Promise<PostPerformanceResponse> {
+  const res = await apiClient.get<PostPerformanceResponse>("/api/content/post-performance", {
+    params: cleanParams(params),
+  });
   return res.data;
 }

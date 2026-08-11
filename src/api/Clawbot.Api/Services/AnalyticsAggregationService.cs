@@ -57,8 +57,6 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
             BuildDelta("replies", current.Sum(r => r.Replies), previous.Sum(r => r.Replies)),
             BuildDelta("repliedDms", current.Sum(r => r.RepliedDms), previous.Sum(r => r.RepliedDms)),
             BuildDelta("conversions", current.Sum(r => r.Conversions), previous.Sum(r => r.Conversions)),
-            BuildDelta("adSpend", SumNullable(current.Select(r => r.AdSpend)) ?? 0m, SumNullable(previous.Select(r => r.AdSpend)) ?? 0m),
-            BuildDelta("revenue", SumNullable(current.Select(r => r.Revenue)) ?? 0m, SumNullable(previous.Select(r => r.Revenue)) ?? 0m),
             BuildDelta("avgResponseTimeSec", AverageNullable(current.Select(r => r.AvgResponseTimeSec)) ?? 0m, AverageNullable(previous.Select(r => r.AvgResponseTimeSec)) ?? 0m),
         };
 
@@ -196,10 +194,7 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
                 k.Replies,
                 k.RepliedDms,
                 k.Conversions,
-                k.AvgResponseTimeSec,
-                k.AdSpend,
-                k.AdSpend.HasValue && k.Leads > 0 ? k.AdSpend.Value / k.Leads : null,
-                k.Revenue))
+                k.AvgResponseTimeSec))
             .ToListAsync(ct).ConfigureAwait(false);
     }
 
@@ -211,19 +206,14 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
             .GroupBy(r => r.Platform, StringComparer.OrdinalIgnoreCase)
             .Select(g =>
             {
-                var leads = g.Sum(r => r.Leads);
-                var adSpend = SumNullable(g.Select(r => r.AdSpend));
                 return new OmniChannelRowDto(
                     g.Key,
-                    leads,
+                    g.Sum(r => r.Leads),
                     g.Sum(r => r.Dms),
                     g.Sum(r => r.Replies),
                     g.Sum(r => r.RepliedDms),
                     g.Sum(r => r.Conversions),
-                    AverageNullable(g.Select(r => r.AvgResponseTimeSec)),
-                    adSpend,
-                    adSpend.HasValue && leads > 0 ? Math.Round(adSpend.Value / leads, 2) : null,
-                    SumNullable(g.Select(r => r.Revenue)));
+                    AverageNullable(g.Select(r => r.AvgResponseTimeSec)));
             })
             .OrderBy(r => PlatformOrder(r.Platform))
             .ThenBy(r => r.Platform, StringComparer.OrdinalIgnoreCase)
@@ -283,12 +273,6 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
     {
         var present = values.Where(v => v.HasValue).Select(v => v!.Value).ToList();
         return present.Count == 0 ? null : Math.Round(present.Average(), 2);
-    }
-
-    private static decimal? SumNullable(IEnumerable<decimal?> values)
-    {
-        var present = values.Where(v => v.HasValue).Select(v => v!.Value).ToList();
-        return present.Count == 0 ? null : present.Sum();
     }
 
     private static int PlatformOrder(string platform) =>

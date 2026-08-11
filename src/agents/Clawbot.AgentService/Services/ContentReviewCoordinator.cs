@@ -164,21 +164,16 @@ public sealed class ContentReviewCoordinator(
     private readonly IContentAutoScheduler? _autoScheduler = autoScheduler;
     private readonly IContentRefiner? _refiner = refiner;
 
-    public Task ProcessAsync(
-        Guid taskId,
-        Guid leaseToken,
-        CancellationToken cancellationToken = default) =>
-        ProcessAsync(tenantId: Guid.Empty, taskId, leaseToken, cancellationToken);
-
     public async Task ProcessAsync(
         Guid tenantId,
         Guid taskId,
         Guid leaseToken,
         CancellationToken cancellationToken = default)
     {
-        // Phase 2.3 callers pass the expected tenant. Empty means legacy harness path.
-        _ = tenantId;
-        var execution = await ClaimAsync(taskId, leaseToken, cancellationToken);
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("tenant_id_required", nameof(tenantId));
+
+        var execution = await ClaimAsync(tenantId, taskId, leaseToken, cancellationToken);
         if (execution is null)
             return;
 
@@ -278,8 +273,18 @@ public sealed class ContentReviewCoordinator(
                 return null;
             }
 
-            item.ApplyAgentRefine(draft.Body, at);
-            task.RecordRefineAttempt(leaseToken, at);
+            var refinedAt = await GetLeaseTransitionTimeAsync(cancellationToken);
+            if (!await TryFenceCompletionAsync(
+                    task,
+                    leaseToken,
+                    refinedAt,
+                    cancellationToken))
+            {
+                return null;
+            }
+
+            item.ApplyAgentRefine(draft.Body, refinedAt);
+            task.RecordRefineAttempt(leaseToken, refinedAt);
             await SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
@@ -310,6 +315,7 @@ public sealed class ContentReviewCoordinator(
     }
 
     private async Task<ClaimedExecution?> ClaimAsync(
+        Guid tenantId,
         Guid taskId,
         Guid leaseToken,
         CancellationToken cancellationToken)
@@ -318,6 +324,7 @@ public sealed class ContentReviewCoordinator(
         try
         {
             var task = await LoadLeasedTaskAsync(
+                tenantId,
                 taskId,
                 leaseToken,
                 cancellationToken);
@@ -356,6 +363,42 @@ public sealed class ContentReviewCoordinator(
                 return null;
             }
 
+            var orchestrationEligibility = await OrchestrationSessionGenerationFence.ResolveReviewEligibilityAsync(
+                    db,
+                    item,
+                    cancellationToken).ConfigureAwait(false);
+            var eligibilityAt = await GetLeaseTransitionTimeAsync(cancellationToken);
+            if (orchestrationEligibility == OrchestrationItemReviewEligibility.Deferred)
+            {
+                task.DeferForOrchestrationStop(
+                    leaseToken,
+                    eligibilityAt.AddMinutes(1),
+                    eligibilityAt);
+                if (item.AgentReviewStatus == ContentItem.ReviewStatusRunning)
+                {
+                    item.DeferAgentReviewForOrchestrationStop(
+                        task.ContentRevision,
+                        eligibilityAt);
+                }
+                await SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return null;
+            }
+            if (orchestrationEligibility == OrchestrationItemReviewEligibility.Reject)
+            {
+                if (item.Status == "draft")
+                {
+                    item.RejectForOrchestrationFailure(
+                        item.OrchestrationSessionId!.Value,
+                        item.OrchestrationPlanGeneration!.Value,
+                        eligibilityAt);
+                }
+                task.CancelForOrchestrationFailure(eligibilityAt);
+                await SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return null;
+            }
+
             var reviewer = await FindReviewerAsync(task.TenantId, cancellationToken);
             if (reviewer is null || reviewer.Id == item.CreatedByAgentId)
             {
@@ -372,7 +415,11 @@ public sealed class ContentReviewCoordinator(
                 return null;
             }
 
-            var hasStartedAudit = await HasStartedAuditAsync(task.Id, cancellationToken);
+            var hasStartedAudit = await HasStartedAuditAsync(
+                task.TenantId,
+                task.Id,
+                task.ReviewCycle,
+                cancellationToken);
             var claimedAt = await GetLeaseTransitionTimeAsync(cancellationToken);
             if (!await TryClaimDeliveryAsync(
                     task,
@@ -416,6 +463,7 @@ public sealed class ContentReviewCoordinator(
             await transaction.RollbackAsync(cancellationToken);
             db.ChangeTracker.Clear();
             if (await WasClaimedByAnotherDeliveryAsync(
+                    tenantId,
                     taskId,
                     leaseToken,
                     await GetLeaseTransitionTimeAsync(cancellationToken),
@@ -433,12 +481,13 @@ public sealed class ContentReviewCoordinator(
     }
 
     private async Task<ContentReviewTask?> LoadLeasedTaskAsync(
+        Guid tenantId,
         Guid taskId,
         Guid leaseToken,
         CancellationToken cancellationToken)
     {
-        var task = await db.ContentReviewTasks.SingleOrDefaultAsync(
-            candidate => candidate.Id == taskId,
+        var task = await db.ContentReviewTasks.IgnoreQueryFilters().SingleOrDefaultAsync(
+            candidate => candidate.Id == taskId && candidate.TenantId == tenantId,
             cancellationToken);
         return task is not null
             && task.Status == ContentReviewTask.StatusLeased
@@ -450,7 +499,7 @@ public sealed class ContentReviewCoordinator(
     private Task<ContentItem?> LoadTaskItemAsync(
         ContentReviewTask task,
         CancellationToken cancellationToken) =>
-        db.ContentItems.SingleOrDefaultAsync(
+        db.ContentItems.IgnoreQueryFilters().SingleOrDefaultAsync(
             candidate => candidate.TenantId == task.TenantId
                 && candidate.Id == task.ContentItemId,
             cancellationToken);
@@ -458,7 +507,7 @@ public sealed class ContentReviewCoordinator(
     private Task<AgentDefinition?> FindReviewerAsync(
         Guid tenantId,
         CancellationToken cancellationToken) =>
-        db.AgentDefinitions.SingleOrDefaultAsync(
+        db.AgentDefinitions.IgnoreQueryFilters().SingleOrDefaultAsync(
             candidate => candidate.TenantId == tenantId
                 && candidate.Code == executor.AgentCode
                 && candidate.DeletedAt == null,
@@ -480,6 +529,20 @@ public sealed class ContentReviewCoordinator(
             when (IsPermanentReviewIneligibility(exception.Message))
         {
             task.Fail(leaseToken, exception.Message, at);
+            // Item đã cạn lượt review nhưng vẫn đang pending => UI kẹt "Chờ Agent review" vĩnh viễn.
+            // Kết liễu item cùng lúc với task, trong cùng một SaveChanges.
+            if (exception.Message == ContentItem.ReviewReasonAttemptLimitReached)
+            {
+                try
+                {
+                    item.MarkAgentReviewExhausted(task.ContentRevision, at);
+                }
+                catch (InvalidOperationException)
+                {
+                    // Revision đã đổi hoặc bài đã publish — không có gì phải sửa.
+                }
+            }
+
             await SaveChangesAsync(cancellationToken);
             return false;
         }
@@ -550,7 +613,11 @@ public sealed class ContentReviewCoordinator(
         DateTimeOffset at,
         CancellationToken cancellationToken)
     {
-        var hasStartedAudit = await HasStartedAuditAsync(task.Id, cancellationToken);
+        var hasStartedAudit = await HasStartedAuditAsync(
+            task.TenantId,
+            task.Id,
+            task.ReviewCycle,
+            cancellationToken);
         task.CancelStale(at);
         db.AuditLogs.Add(CreateStaleAudit(
             task,
@@ -578,7 +645,11 @@ public sealed class ContentReviewCoordinator(
                 validationAt,
                 cancellationToken);
             if (task is null)
+            {
+                await TryRecoverLostLeaseExecutionItemAsync(execution, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
                 return;
+            }
 
             var item = await LoadTaskItemAsync(task, cancellationToken)
                 ?? throw new InvalidOperationException("content_review_item_not_found");
@@ -592,6 +663,10 @@ public sealed class ContentReviewCoordinator(
             if (!item.RowVersion.SequenceEqual(execution.ItemRowVersion))
                 throw new DbUpdateConcurrencyException("content_item_concurrency_conflict");
 
+            var reviewEligibility = await OrchestrationSessionGenerationFence.ResolveReviewEligibilityAsync(
+                    db,
+                    item,
+                    cancellationToken).ConfigureAwait(false);
             var policy = await policyResolver.ResolveAsync(task.TenantId, cancellationToken);
             await db.Entry(task).ReloadAsync(cancellationToken);
             await db.Entry(item).ReloadAsync(cancellationToken);
@@ -602,8 +677,56 @@ public sealed class ContentReviewCoordinator(
                     completedAt,
                     cancellationToken))
             {
+                await TryRecoverLostLeaseExecutionItemAsync(execution, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
                 return;
             }
+
+            if (reviewEligibility == OrchestrationItemReviewEligibility.Deferred)
+            {
+                task.DeferForOrchestrationStop(
+                    leaseToken,
+                    completedAt.AddMinutes(1),
+                    completedAt);
+                item.DeferAgentReviewForOrchestrationStop(
+                    task.ContentRevision,
+                    completedAt);
+                await SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return;
+            }
+
+            if (reviewEligibility == OrchestrationItemReviewEligibility.Reject)
+            {
+                if (item.Status == "draft")
+                {
+                    item.RejectForOrchestrationFailure(
+                        item.OrchestrationSessionId!.Value,
+                        item.OrchestrationPlanGeneration!.Value,
+                        completedAt);
+                }
+
+                if (task.Status is ContentReviewTask.StatusPending or ContentReviewTask.StatusLeased)
+                {
+                    task.CancelForOrchestrationFailure(completedAt);
+                    var hasStartedAudit = await HasStartedAuditAsync(
+                        task.TenantId,
+                        task.Id,
+                        task.ReviewCycle,
+                        cancellationToken);
+                    db.AuditLogs.Add(CreateStaleAudit(
+                        task,
+                        item.Id,
+                        item.ContentRevision,
+                        hasStartedAudit ? 2 : 1,
+                        completedAt));
+                }
+
+                await SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return;
+            }
+
             if (item.ContentRevision != task.ContentRevision)
             {
                 await CancelStaleAsync(task, item, completedAt, cancellationToken);
@@ -661,6 +784,33 @@ public sealed class ContentReviewCoordinator(
         }
     }
 
+    // The external reviewer may outlive its lease. Restore only the unchanged item; a reclaimed
+    // lease, a completed review, or a human edit changes the row version. This remains necessary
+    // when a paused session resumes before the old reviewer returns.
+    private async Task TryRecoverLostLeaseExecutionItemAsync(
+        ClaimedExecution execution,
+        CancellationToken cancellationToken)
+    {
+        var item = await db.ContentItems.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(
+                candidate => candidate.TenantId == execution.Request.TenantId
+                    && candidate.Id == execution.Request.ContentItemId,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (item is null
+            || item.ContentRevision != execution.Request.ExpectedRevision
+            || item.AgentReviewStatus != ContentItem.ReviewStatusRunning
+            || !item.RowVersion.SequenceEqual(execution.ItemRowVersion))
+        {
+            return;
+        }
+
+        item.DeferAgentReviewForOrchestrationStop(
+            execution.Request.ExpectedRevision,
+            await GetLeaseTransitionTimeAsync(cancellationToken));
+        await SaveChangesAsync(cancellationToken);
+    }
+
     private async Task<ContentReviewTask?> LoadClaimedTaskAsync(
         Guid taskId,
         ContentReviewExecutionRequest request,
@@ -668,8 +818,9 @@ public sealed class ContentReviewCoordinator(
         DateTimeOffset at,
         CancellationToken cancellationToken)
     {
-        var task = await db.ContentReviewTasks.SingleOrDefaultAsync(
-            candidate => candidate.Id == taskId,
+        var task = await db.ContentReviewTasks.IgnoreQueryFilters().SingleOrDefaultAsync(
+            candidate => candidate.Id == taskId
+                && candidate.TenantId == request.TenantId,
             cancellationToken);
         var hasExpectedLease = db.Database.IsSqlServer()
             ? HasLeaseIdentity(task, leaseToken)
@@ -790,14 +941,17 @@ public sealed class ContentReviewCoordinator(
         && task.ClaimedLeaseToken == leaseToken;
 
     private async Task<bool> WasClaimedByAnotherDeliveryAsync(
+        Guid tenantId,
         Guid taskId,
         Guid leaseToken,
         DateTimeOffset at,
         CancellationToken cancellationToken)
     {
-        var task = await db.ContentReviewTasks
+        var task = await db.ContentReviewTasks.IgnoreQueryFilters()
             .AsNoTracking()
-            .SingleOrDefaultAsync(candidate => candidate.Id == taskId, cancellationToken);
+            .SingleOrDefaultAsync(
+                candidate => candidate.Id == taskId && candidate.TenantId == tenantId,
+                cancellationToken);
         return task is null
             || task.Status != ContentReviewTask.StatusLeased
             || task.LeaseToken != leaseToken
@@ -812,7 +966,7 @@ public sealed class ContentReviewCoordinator(
         DateTimeOffset at,
         CancellationToken cancellationToken)
     {
-        var task = await db.ContentReviewTasks
+        var task = await db.ContentReviewTasks.IgnoreQueryFilters()
             .AsNoTracking()
             .SingleOrDefaultAsync(
                 candidate => candidate.TenantId == request.TenantId
@@ -828,10 +982,13 @@ public sealed class ContentReviewCoordinator(
     }
 
     private Task<bool> HasStartedAuditAsync(
+        Guid tenantId,
         Guid taskId,
+        int reviewCycle,
         CancellationToken cancellationToken) =>
-        db.AuditLogs.AnyAsync(
-            audit => audit.EventKey == EventKey(taskId, "started"),
+        db.AuditLogs.IgnoreQueryFilters().AnyAsync(
+            audit => audit.TenantId == tenantId
+                && audit.EventKey == EventKey(taskId, reviewCycle, "started"),
             cancellationToken);
 
     private async Task SaveChangesAsync(CancellationToken cancellationToken)
@@ -902,13 +1059,14 @@ public sealed class ContentReviewCoordinator(
             ResourceType,
             itemId,
             at,
-            EventKey(task.Id, "started"),
+            EventKey(task.Id, task.ReviewCycle, "started"),
             stateSequence: 1,
             JsonSerializer.Serialize(
                 new
                 {
                     reviewTaskId = task.Id,
                     expectedRevision = task.ContentRevision,
+                    reviewCycle = task.ReviewCycle,
                     reviewerAgentId,
                     reviewStatus = ContentItem.ReviewStatusRunning
                 },
@@ -929,13 +1087,14 @@ public sealed class ContentReviewCoordinator(
             ResourceType,
             item.Id,
             at,
-            EventKey(task.Id, "completed"),
+            EventKey(task.Id, task.ReviewCycle, "completed"),
             stateSequence,
             JsonSerializer.Serialize(
                 new
                 {
                     reviewTaskId = task.Id,
                     expectedRevision = task.ContentRevision,
+                    reviewCycle = task.ReviewCycle,
                     reviewerAgentId,
                     reviewStatus = item.AgentReviewStatus,
                     imageReviewStatus = item.ImageReviewStatus,
@@ -959,20 +1118,21 @@ public sealed class ContentReviewCoordinator(
             ResourceType,
             itemId,
             at,
-            EventKey(task.Id, "stale"),
+            EventKey(task.Id, task.ReviewCycle, "stale"),
             stateSequence,
             JsonSerializer.Serialize(
                 new
                 {
                     reviewTaskId = task.Id,
                     expectedRevision = task.ContentRevision,
+                    reviewCycle = task.ReviewCycle,
                     currentRevision,
                     disposition = "stale_revision"
                 },
                 AuditJsonOptions));
 
-    private static string EventKey(Guid taskId, string transition) =>
-        $"content-review:{taskId:N}:{transition}";
+    private static string EventKey(Guid taskId, int reviewCycle, string transition) =>
+        $"content-review:{taskId:N}:cycle:{reviewCycle}:{transition}";
 
     private sealed record ClaimedExecution(
         Guid TaskId,

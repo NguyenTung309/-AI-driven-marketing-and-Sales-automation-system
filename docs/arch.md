@@ -2,7 +2,7 @@
 Tài liệu Kiến trúc & Triển khai
 Omnichannel Sales Automation cho trung tâm tiếng Trung
 Phiên bản 2.1  |  Tháng 5/2026
-Cập nhật: SQL Server 2022 · 34 tables · 12 bounded contexts · 8 AI agents · 31 skills · SDD artifacts
+Cập nhật: SQL Server 2022 · 34 tables · 11 bounded contexts · 7 AI agents · 31 skills · SDD artifacts
 
 ## ⚠ Strategy update 2026-05-29 — Pancake unified channel
 
@@ -16,7 +16,7 @@ Toàn bộ tích hợp 5 kênh (Facebook Page/Messenger/Comments, Instagram, Zal
 
 
 1. Tổng quan Hệ thống
-ClawBot SaleMkt là nền tảng tự động hoá bán hàng đa nền tảng (Zalo, Facebook, TikTok, Instagram, YouTube) cho trung tâm dạy tiếng Trung. 5 nhân sự thật + 8 AI agent + Knowledge Base tiếng Trung chuyên sâu → tư vấn 24/7, một sale chăm gấp 3× khách hàng.
+ClawBot SaleMkt là nền tảng tự động hoá bán hàng đa nền tảng (Zalo, Facebook, TikTok, Instagram, YouTube) cho trung tâm dạy tiếng Trung. 5 nhân sự thật + 7 AI agent + Knowledge Base tiếng Trung chuyên sâu → tư vấn 24/7, một sale chăm gấp 3× khách hàng.
 1.1 Mục tiêu thiết kế
 Omnichannel inbox: tổng hợp DM + comment từ 5 kênh vào 1 luồng. Không miss tin nhắn.
 Sale Assist: 1 sale chăm 3× khách nhờ AI draft + context panel + alert.
@@ -180,12 +180,11 @@ Contacts/ | Contact + ContactExternalId | Khách unified cross-platform
 Conversations/ | Conversation + Message | Inbox đa kênh; Message immutable log
 KnowledgeBase/ | KbModule + KbVersion + KbTestCase | 6 module + versioning + 20-câu test
 ChatScenarios/ | ChatScenario | 50 kịch bản (KB-001..KB-050)
-Agents/ | AgentConfig + AgentSession + AgentTrace | 8 agent registry + run history
+Agents/ | AgentConfig + AgentSession + AgentTrace | 7 agent registry + run history
 Leads/ | Lead + LeadActivity + LeadScoringRule | Lead scoring 5-channel weighted
 SaleAssist/ | QuickReplyTemplate | Template library 1-click cho sale
 Documents/ | DocumentTemplate + GeneratedDocument | PDF/brochure/slide + read receipt
 Content/ | ContentBrief + ContentItem + ContentSchedule | Content pipeline 5-platform
-Ads/ | AdsCampaign + AdsRule + AdsAction | Meta + TikTok automation
 Analytics/ | KpiDaily | KPI snapshot/ngày/platform
 Security/ | Role + Permission + AuditLog + ApiKey | RBAC tenant-scoped + audit
 Vấn đề | Giải pháp
@@ -210,7 +209,7 @@ KnowledgeBase | kb_modules | 6 KB module
 KnowledgeBase | kb_versions | Versioning + accuracy_score + embedding JSON
 KnowledgeBase | kb_test_cases | 20-câu test set per module
 ChatScenarios | chat_scenarios | 50 kịch bản KB-001..KB-050
-Agents | agents | 8 agent config: skill_files_json + kb_modules_json
+Agents | agents | 7 agent config: skill_files_json + kb_modules_json
 Agents | agent_sessions | Per-run goal + plan_json + status
 Agents | agent_traces | Append-only trace events
 SaleAssist | quick_reply_templates | Template library
@@ -219,9 +218,9 @@ Documents | generated_documents | File đã tạo + sent_via + opened_at
 Content | content_briefs | Brief input từ MKT
 Content | content_items | 5 platform + status draft/approved/published
 Content | content_schedule | Lịch post + posted_at + post_url
-Ads | ads_campaigns | Meta + TikTok mirror
-Ads | ads_rules | metric/comparator/threshold/action
-Ads | ads_actions | Append-only: action_taken + payload_json
+Ads (legacy) | ads_campaigns | Bảng giữ lại sau khi gỡ module Ads — không còn code đọc/ghi
+Ads (legacy) | ads_rules | Bảng giữ lại sau khi gỡ module Ads — không còn code đọc/ghi
+Ads (legacy) | ads_actions | Bảng giữ lại sau khi gỡ module Ads — không còn code đọc/ghi
 Analytics | kpi_daily | (tenant, date, platform) snapshot
 Channel & LLM | pancake_configs | Webhook secret + access token (AES)
 Channel & LLM | llm_configs | Per-tenant LLM provider/model/key
@@ -231,7 +230,6 @@ Agent-SaleAssist | SaleAssistAgentGrpcService | agent_sale_assist.proto | Draft 
 Agent-Lead | LeadAgentGrpcService | agent_lead.proto | Score, dedup, drip, assign
 Agent-Content | ContentAgentGrpcService | agent_content.proto | Sinh content per platform
 Agent-Docs | DocsAgentGrpcService | agent_docs.proto | PDF quote/brochure/slide <30s
-Agent-Ads | AdsAgentGrpcService | agent_ads.proto | Meta + TikTok auto pause/scale
 Agent-Report | ReportAgentGrpcService | agent_report.proto | Daily 7h30 + weekly + alert
 Agent-Research | ResearchAgentGrpcService | agent_research.proto | Weekly trend tiếng Trung VN
 Skill | Agent dùng | Mục đích — giải thích
@@ -310,7 +308,6 @@ T6 | Pancake omnichannel hardening | P1 capture live webhook. P2 verify reply/DM
 T7 | Lead+Marketing | P5 dashboard. P3 drip. | Agent-Lead | Pipeline tự động
 T8 | Content MKT | P2 trend. P4 QA. | Agent-Research + Content | Content 5 platform
 T9 | Document auto | P3 template. P4 QA PDF. | Agent-Docs | Tài liệu <30s
-T10 | Ads automation | P2 ngưỡng. P4 QA. | Agent-Ads | Ads tự tối ưu
 T11 | KB refinement | P3+P4 update từ data. | KB v2 | KB v2
 T12 | QA tổng thể | P4 test 240 UC. P5 SOP. | 240 UC | QA report + SOP
 T13 | Go-live | War room 3 ngày. | Full system | Go-live

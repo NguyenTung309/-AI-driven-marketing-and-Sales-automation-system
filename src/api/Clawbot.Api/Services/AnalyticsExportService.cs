@@ -28,7 +28,7 @@ public sealed class AnalyticsExportService
         ArgumentNullException.ThrowIfNull(rows);
 
         var sb = new StringBuilder();
-        sb.Append("platform,leads,dms,replies,conversions,avg_response_time_sec,ad_spend,cpl\r\n");
+        sb.Append("platform,leads,dms,replies,conversions,avg_response_time_sec\r\n");
         foreach (var row in rows)
         {
             sb.Append(Escape(row.Platform)).Append(',')
@@ -36,9 +36,7 @@ public sealed class AnalyticsExportService
                 .Append(row.Dms.ToString(CultureInfo.InvariantCulture)).Append(',')
                 .Append(row.Replies.ToString(CultureInfo.InvariantCulture)).Append(',')
                 .Append(row.Conversions.ToString(CultureInfo.InvariantCulture)).Append(',')
-                .Append(FormatDecimal(row.AvgResponseTimeSec)).Append(',')
-                .Append(FormatDecimal(row.AdSpend)).Append(',')
-                .Append(FormatDecimal(row.Cpl)).Append("\r\n");
+                .Append(FormatDecimal(row.AvgResponseTimeSec)).Append("\r\n");
         }
 
         return sb.ToString();
@@ -71,8 +69,6 @@ public sealed class AnalyticsExportService
                         columns.RelativeColumn();
                         columns.RelativeColumn();
                         columns.RelativeColumn(1.4f);
-                        columns.RelativeColumn();
-                        columns.RelativeColumn();
                     });
 
                     Header(table, "Platform");
@@ -81,8 +77,6 @@ public sealed class AnalyticsExportService
                     Header(table, "Replies");
                     Header(table, "Conv.");
                     Header(table, "Resp. sec");
-                    Header(table, "Spend");
-                    Header(table, "CPL");
 
                     foreach (var row in snapshot)
                     {
@@ -92,8 +86,6 @@ public sealed class AnalyticsExportService
                         Cell(table, row.Replies.ToString(CultureInfo.InvariantCulture));
                         Cell(table, row.Conversions.ToString(CultureInfo.InvariantCulture));
                         Cell(table, FormatDecimal(row.AvgResponseTimeSec));
-                        Cell(table, FormatDecimal(row.AdSpend));
-                        Cell(table, FormatDecimal(row.Cpl));
                     }
                 });
             });

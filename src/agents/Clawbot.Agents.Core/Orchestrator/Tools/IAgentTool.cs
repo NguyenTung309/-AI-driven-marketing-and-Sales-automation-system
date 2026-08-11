@@ -22,7 +22,9 @@ public sealed record ToolContext(
     string? AgentCode = null,
     bool RequireHighRiskApproval = false,
     bool DryRun = false,
-    bool CanPublishContent = false);
+    bool CanPublishContent = false,
+    Guid? SessionId = null,
+    int? OrchestrationPlanGeneration = null);
 
 public sealed record ToolResult(bool Success, string Output, string? Error)
 {
@@ -32,7 +34,7 @@ public sealed record ToolResult(bool Success, string Output, string? Error)
 
 // A capability a data-defined agent may invoke inside its ReAct loop. Wraps the existing agent adapters so the
 // orchestrator's "hands" (content/ads/lead/report/...) become callable tools without re-implementing them.
-// RequiredPermission is metadata only in Phase 1; enforcement reusing role_permissions is Phase 4 (P4-3).
+// RequiredPermission is enforced by the worker against the initiating user's current role permissions.
 public interface IAgentTool
 {
     string Name { get; }

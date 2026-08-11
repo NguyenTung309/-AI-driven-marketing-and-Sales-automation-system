@@ -34,3 +34,7 @@ decoded.txt
 
 # Scratch build output (verify/run steps)
 .tmp/
+
+# Locally generated user guides and their planning notes
+docs/huong-dan-su-dung/
+docs/superpowers/plans/*-huong-dan-su-dung-*.md

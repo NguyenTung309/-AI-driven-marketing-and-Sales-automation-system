@@ -21,9 +21,28 @@ public sealed partial class ContentReviewDispatchWorker(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(options.Value.PollInterval);
-        await DispatchOnceAsync(stoppingToken).ConfigureAwait(false);
+        await RunTickAsync(stoppingToken).ConfigureAwait(false);
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+            await RunTickAsync(stoppingToken).ConfigureAwait(false);
+    }
+
+    // Câu truy vấn liệt kê tenant nằm NGOÀI try/catch của từng tenant: SQL Server chớp tắt là nó ném
+    // thẳng ra khỏi ExecuteAsync, và mặc định BackgroundServiceExceptionBehavior = StopHost giết cả
+    // host — dừng luôn cả hàng chờ agent review. Bọc từng nhịp để chỉ mất một nhịp.
+    private async Task RunTickAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
             await DispatchOnceAsync(stoppingToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            LogDispatchTickFailed(logger, exception);
+        }
     }
 
     public async Task DispatchOnceAsync(CancellationToken cancellationToken = default)
@@ -72,4 +91,10 @@ public sealed partial class ContentReviewDispatchWorker(
         ILogger logger,
         Exception exception,
         Guid tenantId);
+
+    [LoggerMessage(
+        EventId = 1131,
+        Level = LogLevel.Error,
+        Message = "Content review dispatch tick failed; worker keeps running and retries next tick")]
+    private static partial void LogDispatchTickFailed(ILogger logger, Exception exception);
 }

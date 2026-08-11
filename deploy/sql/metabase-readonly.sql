@@ -25,7 +25,5 @@ GRANT SELECT ON dbo.kpi_daily TO metabase_readonly;
 GRANT SELECT ON dbo.kpi_forecast TO metabase_readonly;
 GRANT SELECT ON dbo.agent_sessions TO metabase_readonly;
 GRANT SELECT ON dbo.agent_traces TO metabase_readonly;
-GRANT SELECT ON dbo.ads_campaigns TO metabase_readonly;
-GRANT SELECT ON dbo.ads_metrics_daily TO metabase_readonly;
 GO
 

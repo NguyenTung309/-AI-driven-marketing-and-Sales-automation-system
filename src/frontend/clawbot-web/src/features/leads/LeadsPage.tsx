@@ -7,11 +7,9 @@ import { Card } from "@/shared/ui/Card";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
 import { InfiniteScrollSentinel, useDebounce, useInfiniteList } from "@/shared/ui";
 import {
-  decideLeadRevenue,
   getLead,
   getLeadContext,
   getLeadForecast,
-  listLeadRevenues,
   listLeads,
   recordLeadActivity,
   updateLeadStage,
@@ -19,14 +17,14 @@ import {
   type LeadContextActivity,
   type LeadListItem,
   type LeadListResponse,
-  type LeadRevenue,
   type LeadStage,
   type LeadStageAction,
 } from "@/shared/api/leads";
 import { useAuthStore } from "@/shared/auth/authStore";
 import { toUserFriendlyError } from "@/shared/utils/userText";
 
-type DrawerTab = "timeline" | "context" | "revenue";
+type OwnerFilter = "all" | "assigned" | "unassigned";
+type DrawerTab = "timeline" | "context";
 
 const STAGES: readonly { value: LeadStage; label: string; tone: StatusTone; icon: string }[] = [
   { value: "hot", label: "Nóng", tone: "error", icon: "local_fire_department" },
@@ -300,58 +298,34 @@ function KanbanBoard({ leads, onSelect }: { readonly leads: readonly LeadListIte
   );
 }
 
-function formatMoney(amount: number, currency = "VND"): string {
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: currency || "VND",
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-function revenueStatusLabel(status: string): string {
-  const value = normalize(status);
-  if (value === "approved") return "Đã duyệt";
-  if (value === "pending") return "Chờ duyệt";
-  if (value === "rejected") return "Từ chối";
-  return status;
-}
-
 function LeadDrawer({
   lead,
   detail,
   context,
-  revenues,
   loading,
   onClose,
   onRecordActivity,
   recording,
   onStageAction,
   stagePending,
-  onDecideRevenue,
-  decidePending,
   canWrite,
 }: {
   readonly lead: LeadListItem;
   readonly detail: LeadListItem | null;
   readonly context: LeadContext | null;
-  readonly revenues: readonly LeadRevenue[];
   readonly loading: boolean;
   readonly onClose: () => void;
   readonly onRecordActivity: (eventCode: string, notes: string) => void;
   readonly recording: boolean;
-  readonly onStageAction: (action: LeadStageAction, amount?: number | null, reason?: string) => void;
+  readonly onStageAction: (action: LeadStageAction, reason?: string) => void;
   readonly stagePending: boolean;
-  readonly onDecideRevenue: (revenueId: string, action: "approve" | "reject", amount?: number | null) => void;
-  readonly decidePending: boolean;
   readonly canWrite: boolean;
 }) {
   const [tab, setTab] = useState<DrawerTab>("timeline");
   const [eventCode, setEventCode] = useState<string>(ACTIVITY_EVENTS[0].value);
   const [notes, setNotes] = useState("");
-  const [payOpen, setPayOpen] = useState(false);
-  const [payAmount, setPayAmount] = useState("");
-  const [payReason, setPayReason] = useState("");
-  const [amendById, setAmendById] = useState<Record<string, string>>({});
+  const [wonOpen, setWonOpen] = useState(false);
+  const [wonReason, setWonReason] = useState("");
   const hydratedLead = detail ?? lead;
   const activities = context?.activities ?? EMPTY_ACTIVITIES;
   const stageNorm = normalize(hydratedLead.stage);
@@ -392,15 +366,15 @@ function LeadDrawer({
                   <button
                     className="rounded bg-success px-3 py-1.5 text-label-sm font-bold text-on-primary hover:opacity-90 disabled:opacity-60"
                     disabled={stagePending}
-                    onClick={() => setPayOpen(true)}
+                    onClick={() => setWonOpen(true)}
                     type="button"
                   >
-                    Đã thanh toán
+                    Đã chốt
                   </button>
                   <button
                     className="rounded border border-outline bg-white px-3 py-1.5 text-label-sm font-bold text-secondary hover:bg-surface-container disabled:opacity-60"
                     disabled={stagePending}
-                    onClick={() => onStageAction("lost", null, "Đánh dấu mất")}
+                    onClick={() => onStageAction("lost", "Đánh dấu mất")}
                     type="button"
                   >
                     Đánh dấu mất
@@ -410,7 +384,7 @@ function LeadDrawer({
                 <button
                   className="rounded border border-outline bg-white px-3 py-1.5 text-label-sm font-bold text-secondary hover:bg-surface-container disabled:opacity-60"
                   disabled={stagePending}
-                  onClick={() => onStageAction("reopen", null, "Mở lại pipeline")}
+                  onClick={() => onStageAction("reopen", "Mở lại pipeline")}
                   type="button"
                 >
                   Mở lại
@@ -418,43 +392,25 @@ function LeadDrawer({
               )}
             </div>
           ) : null}
-          {payOpen ? (
+          {wonOpen ? (
             <form
               className="mt-4 space-y-3 rounded-lg border border-outline bg-surface-container-low p-3"
               onSubmit={(event) => {
                 event.preventDefault();
-                const raw = payAmount.trim().replaceAll(".", "").replaceAll(",", "");
-                let amount: number | null = null;
-                if (raw) {
-                  const parsed = Number(raw);
-                  if (!Number.isFinite(parsed) || parsed <= 0) {
-                    window.alert("Số tiền phải lớn hơn 0, hoặc để trống để AI ước tính.");
-                    return;
-                  }
-                  amount = parsed;
-                }
-                onStageAction("customer", amount, payReason.trim() || "Đã thanh toán");
-                setPayOpen(false);
-                setPayAmount("");
-                setPayReason("");
+                onStageAction("customer", wonReason.trim() || "Đã chốt");
+                setWonOpen(false);
+                setWonReason("");
               }}
             >
-              <p className="text-label-sm font-bold text-secondary">Xác nhận đã thanh toán</p>
+              <p className="text-label-sm font-bold text-secondary">Xác nhận đã chốt</p>
               <p className="text-label-sm text-on-surface-variant">
-                Số tiền tuỳ chọn. Bỏ trống → AI ước tính từ hội thoại và gửi duyệt (trừ khi tenant bật tự duyệt).
+                Lead sẽ chuyển sang trạng thái khách hàng và rời pipeline.
               </p>
               <input
                 className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md text-secondary focus:border-primary focus:outline-none"
-                inputMode="numeric"
-                onChange={(event) => setPayAmount(event.target.value)}
-                placeholder="Số tiền VND (tuỳ chọn)"
-                value={payAmount}
-              />
-              <input
-                className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md text-secondary focus:border-primary focus:outline-none"
-                onChange={(event) => setPayReason(event.target.value)}
+                onChange={(event) => setWonReason(event.target.value)}
                 placeholder="Lý do / ghi chú"
-                value={payReason}
+                value={wonReason}
               />
               <div className="flex gap-2">
                 <button
@@ -466,7 +422,7 @@ function LeadDrawer({
                 </button>
                 <button
                   className="rounded border border-outline bg-white px-3 py-2 text-label-sm font-bold text-secondary"
-                  onClick={() => setPayOpen(false)}
+                  onClick={() => setWonOpen(false)}
                   type="button"
                 >
                   Huỷ
@@ -476,7 +432,7 @@ function LeadDrawer({
           ) : null}
         </div>
 
-        <div className="grid grid-cols-3 border-b border-outline">
+        <div className="grid grid-cols-2 border-b border-outline">
           <button
             className={`px-2 py-3 text-label-caps uppercase ${
               tab === "timeline" ? "border-b-2 border-primary text-primary" : "text-on-surface-variant"
@@ -494,15 +450,6 @@ function LeadDrawer({
             type="button"
           >
             Ngữ cảnh
-          </button>
-          <button
-            className={`px-2 py-3 text-label-caps uppercase ${
-              tab === "revenue" ? "border-b-2 border-primary text-primary" : "text-on-surface-variant"
-            }`}
-            onClick={() => setTab("revenue")}
-            type="button"
-          >
-            Doanh thu
           </button>
         </div>
 
@@ -581,77 +528,6 @@ function LeadDrawer({
                 )}
               </div>
             </div>
-          ) : tab === "revenue" ? (
-            <div className="space-y-3">
-              {revenues.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-outline p-4 text-body-md text-on-surface-variant">
-                  Chưa có dòng doanh thu. Khi đánh dấu thanh toán (kèm số tiền) hoặc AI ước tính, danh sách sẽ hiện ở đây.
-                </div>
-              ) : (
-                revenues.map((row) => {
-                  const pending = normalize(row.status) === "pending";
-                  const amend = amendById[row.id] ?? String(row.amount);
-                  return (
-                    <Card key={row.id}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-body-lg font-bold text-secondary">{formatMoney(row.amount, row.currency)}</p>
-                          <p className="mt-1 text-label-sm text-on-surface-variant">
-                            {normalize(row.source) === "ai" ? "AI ước tính" : "Sale nhập"} · {revenueStatusLabel(row.status)}
-                          </p>
-                        </div>
-                        <StatusPill tone={pending ? "warning" : normalize(row.status) === "approved" ? "success" : "neutral"}>
-                          {revenueStatusLabel(row.status)}
-                        </StatusPill>
-                      </div>
-                      {row.evidence ? (
-                        <p className="mt-3 rounded bg-surface-container-low p-2 text-label-sm text-on-surface-variant">{row.evidence}</p>
-                      ) : null}
-                      {pending && canWrite ? (
-                        <div className="mt-3 space-y-2">
-                          <input
-                            className="w-full rounded border border-outline bg-white px-3 py-2 text-body-md text-secondary focus:border-primary focus:outline-none"
-                            inputMode="numeric"
-                            onChange={(event) => setAmendById((cur) => ({ ...cur, [row.id]: event.target.value }))}
-                            value={amend}
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              className="flex-1 rounded bg-success px-3 py-2 text-label-sm font-bold text-on-primary disabled:opacity-60"
-                              disabled={decidePending}
-                              onClick={() => {
-                                const raw = amend.trim().replaceAll(".", "").replaceAll(",", "");
-                                if (!raw) {
-                                  onDecideRevenue(row.id, "approve", null);
-                                  return;
-                                }
-                                const amount = Number(raw);
-                                if (!Number.isFinite(amount) || amount <= 0) {
-                                  window.alert("Số tiền duyệt phải lớn hơn 0.");
-                                  return;
-                                }
-                                onDecideRevenue(row.id, "approve", amount !== row.amount ? amount : null);
-                              }}
-                              type="button"
-                            >
-                              Duyệt
-                            </button>
-                            <button
-                              className="rounded border border-outline bg-white px-3 py-2 text-label-sm font-bold text-secondary disabled:opacity-60"
-                              disabled={decidePending}
-                              onClick={() => onDecideRevenue(row.id, "reject")}
-                              type="button"
-                            >
-                              Từ chối
-                            </button>
-                          </div>
-                        </div>
-                      ) : null}
-                    </Card>
-                  );
-                })
-              )}
-            </div>
           ) : (
             <div className="space-y-4">
               <Card>
@@ -714,12 +590,10 @@ export default function LeadsPage() {
   const [search, setSearch] = useState("");
   const [source, setSource] = useState("all");
   const [stage, setStage] = useState("all");
-  const [selectedId, setSelectedId] = useState<string | null>(routeLeadId ?? null);
+  const [owner, setOwner] = useState<OwnerFilter>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const activeSelectedId = routeLeadId ?? selectedId;
   const [notice, setNotice] = useState<{ readonly tone: "success" | "error"; readonly message: string } | null>(null);
-
-  useEffect(() => {
-    if (routeLeadId) setSelectedId(routeLeadId);
-  }, [routeLeadId]);
 
   useEffect(() => {
     if (!notice) return;
@@ -729,7 +603,7 @@ export default function LeadsPage() {
 
   const debouncedSearch = useDebounce(search, 300);
   const leadsList = useInfiniteList<LeadListItem, LeadListResponse>({
-    queryKey: ["leads", "list", stage, debouncedSearch, source],
+    queryKey: ["leads", "list", stage, debouncedSearch, source, owner],
     initialPageParam: 1,
     queryFn: (pageParam) =>
       listLeads({
@@ -738,6 +612,7 @@ export default function LeadsPage() {
         stage: stage === "all" ? undefined : stage,
         q: debouncedSearch.trim() || undefined,
         source: source === "all" ? undefined : source,
+        owner: owner === "all" ? undefined : owner,
       }),
   });
   const leadsQuery = leadsList.query;
@@ -747,26 +622,21 @@ export default function LeadsPage() {
     staleTime: 60_000,
   });
   const detailQuery = useQuery({
-    queryKey: ["leads", selectedId, "detail"],
-    queryFn: () => getLead(selectedId ?? ""),
-    enabled: Boolean(selectedId),
+    queryKey: ["leads", activeSelectedId, "detail"],
+    queryFn: () => getLead(activeSelectedId ?? ""),
+    enabled: Boolean(activeSelectedId),
   });
   const contextQuery = useQuery({
-    queryKey: ["leads", selectedId, "context"],
-    queryFn: () => getLeadContext(selectedId ?? ""),
-    enabled: Boolean(selectedId),
-  });
-  const revenuesQuery = useQuery({
-    queryKey: ["leads", selectedId, "revenues"],
-    queryFn: () => listLeadRevenues(selectedId ?? ""),
-    enabled: Boolean(selectedId),
+    queryKey: ["leads", activeSelectedId, "context"],
+    queryFn: () => getLeadContext(activeSelectedId ?? ""),
+    enabled: Boolean(activeSelectedId),
   });
 
   const leads = leadsList.items.length ? leadsList.items : EMPTY_LEADS;
   const leadsTotal = leadsList.total ?? leads.length;
   // All filters (stage/q/source) are server-side; list is already filtered.
   const filteredLeads = leads;
-  const selectedLead = useMemo(() => leads.find((lead) => lead.id === selectedId) ?? null, [leads, selectedId]);
+  const selectedLead = useMemo(() => leads.find((lead) => lead.id === activeSelectedId) ?? null, [leads, activeSelectedId]);
   // Fixed catalog so dropdown is not truncated by loaded pages; merge extras + keep selection.
   const sourceOptions = useMemo(() => {
     const known = ["zalo", "facebook", "website"];
@@ -786,7 +656,7 @@ export default function LeadsPage() {
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["leads", "list"] }),
-        queryClient.invalidateQueries({ queryKey: ["leads", selectedId] }),
+        queryClient.invalidateQueries({ queryKey: ["leads", activeSelectedId] }),
       ]);
       setNotice({ tone: "success", message: "Đã ghi nhận hoạt động." });
     },
@@ -797,25 +667,16 @@ export default function LeadsPage() {
     mutationFn: ({
       leadId,
       action,
-      amount,
       reason,
     }: {
       readonly leadId: string;
       readonly action: LeadStageAction;
-      readonly amount?: number | null;
       readonly reason?: string;
-    }) =>
-      updateLeadStage(leadId, {
-        stage: action,
-        reason: reason ?? null,
-        amount: amount ?? null,
-        currency: amount != null ? "VND" : null,
-      }),
+    }) => updateLeadStage(leadId, { stage: action, reason: reason ?? null }),
     onSuccess: async (res) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["leads", "list"] }),
-        queryClient.invalidateQueries({ queryKey: ["leads", selectedId] }),
-        queryClient.invalidateQueries({ queryKey: ["leads", selectedId, "revenues"] }),
+        queryClient.invalidateQueries({ queryKey: ["leads", activeSelectedId] }),
       ]);
       const label =
         normalize(res.stage) === "customer"
@@ -824,26 +685,6 @@ export default function LeadsPage() {
             ? "Đã đánh dấu mất khách."
             : `Đã mở lại pipeline (${stageLabel(res.stage)}).`;
       setNotice({ tone: "success", message: label });
-    },
-    onError: (error) => setNotice({ tone: "error", message: errorMessage(error) }),
-  });
-
-  const decideRevenueMutation = useMutation({
-    mutationFn: ({
-      revenueId,
-      action,
-      amount,
-    }: {
-      readonly revenueId: string;
-      readonly action: "approve" | "reject";
-      readonly amount?: number | null;
-    }) => decideLeadRevenue(revenueId, { action, amount: amount ?? null }),
-    onSuccess: async (_row, vars) => {
-      await queryClient.invalidateQueries({ queryKey: ["leads", selectedId, "revenues"] });
-      setNotice({
-        tone: "success",
-        message: vars.action === "approve" ? "Đã duyệt doanh thu vào KPI." : "Đã từ chối đề xuất doanh thu.",
-      });
     },
     onError: (error) => setNotice({ tone: "error", message: errorMessage(error) }),
   });
@@ -930,6 +771,18 @@ export default function LeadsPage() {
               </select>
             </label>
             <label className="block">
+              <span className="text-label-sm font-semibold text-on-surface-variant">Agent phụ trách</span>
+              <select
+                className="mt-2 w-full rounded border border-outline bg-white px-3 py-2 text-body-md text-secondary focus:border-primary focus:outline-none"
+                onChange={(event) => setOwner(event.target.value as OwnerFilter)}
+                value={owner}
+              >
+                <option value="all">Tất cả</option>
+                <option value="assigned">Đã phân công</option>
+                <option value="unassigned">Chưa phân công</option>
+              </select>
+            </label>
+            <label className="block">
               <span className="text-label-sm font-semibold text-on-surface-variant">Trạng thái Sale</span>
               <select
                 className="mt-2 w-full rounded border border-outline bg-white px-3 py-2 text-body-md text-secondary focus:border-primary focus:outline-none"
@@ -956,7 +809,7 @@ export default function LeadsPage() {
             <LeadTable
               leads={filteredLeads}
               onSelect={(lead) => setSelectedId(lead.id)}
-              selectedId={selectedId}
+              selectedId={activeSelectedId}
             />
             <div className="flex flex-col gap-3 border-t border-outline px-4 py-3 text-label-sm text-on-surface-variant sm:flex-row sm:items-center sm:justify-between">
               <span>
@@ -988,22 +841,15 @@ export default function LeadsPage() {
           canWrite={canWrite}
           context={contextQuery.data ?? null}
           detail={detailQuery.data ?? null}
-          decidePending={decideRevenueMutation.isPending}
           lead={selectedLead}
-          loading={detailQuery.isLoading || contextQuery.isLoading || revenuesQuery.isLoading}
+          loading={detailQuery.isLoading || contextQuery.isLoading}
           onClose={() => {
             setSelectedId(null);
             if (routeLeadId) navigate("/leads", { replace: true });
           }}
-          onDecideRevenue={(revenueId, action, amount) =>
-            decideRevenueMutation.mutate({ revenueId, action, amount })
-          }
           onRecordActivity={(eventCode, notes) => activityMutation.mutate({ leadId: selectedLead.id, eventCode, notes })}
-          onStageAction={(action, amount, reason) =>
-            stageMutation.mutate({ leadId: selectedLead.id, action, amount, reason })
-          }
+          onStageAction={(action, reason) => stageMutation.mutate({ leadId: selectedLead.id, action, reason })}
           recording={activityMutation.isPending}
-          revenues={revenuesQuery.data ?? []}
           stagePending={stageMutation.isPending}
         />
       ) : null}

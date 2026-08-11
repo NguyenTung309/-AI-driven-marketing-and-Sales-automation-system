@@ -5,6 +5,8 @@ namespace Clawbot.Domain.Agents;
 public sealed class AgentSchedule : AggregateRoot<Guid>, ITenantOwned
 {
     public Guid TenantId { get; private set; }
+    // Nullable only for legacy/non-orchestration rows. LLM orchestration schedules fail closed without it.
+    public Guid? InitiatorUserId { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string GoalTemplate { get; private set; } = string.Empty;
     public string Cadence { get; private set; } = string.Empty;
@@ -41,13 +43,15 @@ public sealed class AgentSchedule : AggregateRoot<Guid>, ITenantOwned
         string misfirePolicy = "skip_missed",
         string? approvalPolicyJson = null,
         string triggerType = "cadence",
-        string? eventKey = null) =>
+        string? eventKey = null,
+        Guid? initiatorUserId = null) =>
         new()
         {
             TriggerType = string.IsNullOrWhiteSpace(triggerType) ? "cadence" : triggerType.Trim().ToLowerInvariant(),
             EventKey = string.IsNullOrWhiteSpace(eventKey) ? null : eventKey.Trim().ToLowerInvariant(),
             Id = Guid.NewGuid(),
             TenantId = tenantId,
+            InitiatorUserId = initiatorUserId,
             Name = name.Trim(),
             GoalTemplate = goalTemplate.Trim(),
             Cadence = cadence.Trim().ToLowerInvariant(),
@@ -103,6 +107,12 @@ public sealed class AgentSchedule : AggregateRoot<Guid>, ITenantOwned
     public void RecordRun(DateTimeOffset lastRunAt, DateTimeOffset nextRunAt, DateTimeOffset updatedAt)
     {
         LastRunAt = lastRunAt;
+        NextRunAt = nextRunAt;
+        UpdatedAt = updatedAt;
+    }
+
+    public void Reschedule(DateTimeOffset nextRunAt, DateTimeOffset updatedAt)
+    {
         NextRunAt = nextRunAt;
         UpdatedAt = updatedAt;
     }
