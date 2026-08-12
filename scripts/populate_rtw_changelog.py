@@ -13,7 +13,7 @@ for row in range(4, ws.max_row + 1):
 changes = [
     {
         'id': 'CHG-001',
-        'date': '2026-01-15',
+        'date': '2026-06-01',
         'version': 'v0.1.0',
         'type': 'Initial baseline',
         'description': 'Project kickoff and requirements baseline established',
@@ -22,11 +22,11 @@ changes = [
         'impact': 'N/A - Initial document creation',
         'changed_by': 'thanglm240723',
         'approved_by': 'NguyenTung309',
-        'approval_date': '2026-01-15'
+        'approval_date': '2026-06-01'
     },
     {
         'id': 'CHG-002',
-        'date': '2026-02-10',
+        'date': '2026-06-05',
         'version': 'v0.2.0',
         'type': 'Feature Addition',
         'description': 'Added JWT authentication with refresh token rotation',
@@ -35,11 +35,11 @@ changes = [
         'impact': 'High - Core authentication mechanism, affects all authenticated endpoints',
         'changed_by': 'NguyenTung309',
         'approved_by': 'NguyenTung309',
-        'approval_date': '2026-02-10'
+        'approval_date': '2026-06-05'
     },
     {
         'id': 'CHG-003',
-        'date': '2026-03-05',
+        'date': '2026-06-10',
         'version': 'v0.3.0',
         'type': 'Feature Addition',
         'description': 'Implemented multi-tenant architecture with tenant isolation',
@@ -48,11 +48,11 @@ changes = [
         'impact': 'High - All domain entities require TenantId, query filters applied globally',
         'changed_by': 'thanglm240723',
         'approved_by': 'NguyenTung309',
-        'approval_date': '2026-03-05'
+        'approval_date': '2026-06-10'
     },
     {
         'id': 'CHG-004',
-        'date': '2026-03-20',
+        'date': '2026-06-15',
         'version': 'v0.4.0',
         'type': 'Feature Addition',
         'description': 'Omnichannel inbox with Facebook Messenger and Pancake integration',
@@ -61,11 +61,11 @@ changes = [
         'impact': 'High - New module with webhook consumers and polling services',
         'changed_by': 'thanglm240723',
         'approved_by': 'NguyenTung309',
-        'approval_date': '2026-03-20'
+        'approval_date': '2026-06-15'
     },
     {
         'id': 'CHG-005',
-        'date': '2026-04-12',
+        'date': '2026-06-20',
         'version': 'v0.5.0',
         'type': 'Feature Addition',
         'description': 'Knowledge Base with vector search via Qdrant',
@@ -74,11 +74,11 @@ changes = [
         'impact': 'Medium - New vector store dependency, embedding model configuration required',
         'changed_by': 'NguyenTung309',
         'approved_by': 'NguyenTung309',
-        'approval_date': '2026-04-12'
+        'approval_date': '2026-06-20'
     },
     {
         'id': 'CHG-006',
-        'date': '2026-04-28',
+        'date': '2026-06-25',
         'version': 'v0.6.0',
         'type': 'Feature Addition',
         'description': 'AI chat agent with ReAct pattern and tool orchestration',
@@ -87,11 +87,11 @@ changes = [
         'impact': 'High - New gRPC service, LLM provider integration, tool registry',
         'changed_by': 'thanglm240723',
         'approved_by': 'NguyenTung309',
-        'approval_date': '2026-04-28'
+        'approval_date': '2026-06-25'
     },
     {
         'id': 'CHG-007',
-        'date': '2026-05-15',
+        'date': '2026-06-28',
         'version': 'v0.7.0',
         'type': 'Feature Addition',
         'description': 'Auto-reply system with conversation context and guardrails',
@@ -100,11 +100,11 @@ changes = [
         'impact': 'High - Requires content review gate and fail-closed safety mechanisms',
         'changed_by': 'thanglm240723',
         'approved_by': 'NguyenTung309',
-        'approval_date': '2026-05-15'
+        'approval_date': '2026-06-28'
     },
     {
         'id': 'CHG-008',
-        'date': '2026-06-01',
+        'date': '2026-07-01',
         'version': 'v0.8.0',
         'type': 'Enhancement',
         'description': 'RBAC permission system with role-based endpoint protection',
@@ -113,11 +113,11 @@ changes = [
         'impact': 'Medium - All endpoints require permission declaration, seed data required',
         'changed_by': 'NguyenTung309',
         'approved_by': 'NguyenTung309',
-        'approval_date': '2026-06-01'
+        'approval_date': '2026-07-01'
     },
     {
         'id': 'CHG-009',
-        'date': '2026-06-18',
+        'date': '2026-07-05',
         'version': 'v0.9.0',
         'type': 'Feature Addition',
         'description': 'Cost tracking and monthly cap enforcement for LLM usage',
@@ -126,11 +126,11 @@ changes = [
         'impact': 'Medium - Preflight check, mid-run reservation, ledger write even at cost=0',
         'changed_by': 'thanglm240723',
         'approved_by': 'NguyenTung309',
-        'approval_date': '2026-06-18'
+        'approval_date': '2026-07-05'
     },
     {
         'id': 'CHG-010',
-        'date': '2026-07-02',
+        'date': '2026-07-08',
         'version': 'v1.0.0',
         'type': 'Milestone',
         'description': 'MVP release: core features complete and production-ready',
@@ -139,7 +139,7 @@ changes = [
         'impact': 'High - Full system goes live, monitoring and support required',
         'changed_by': 'NguyenTung309',
         'approved_by': 'NguyenTung309',
-        'approval_date': '2026-07-02'
+        'approval_date': '2026-07-08'
     },
     {
         'id': 'CHG-011',
