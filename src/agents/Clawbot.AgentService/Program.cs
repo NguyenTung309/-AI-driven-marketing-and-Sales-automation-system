@@ -34,7 +34,11 @@ builder.Host.UseSerilog((ctx, lc) => lc
     .WriteTo.Console(formatProvider: System.Globalization.CultureInfo.InvariantCulture)
     .WriteTo.SystemLogs(ctx.Configuration.GetConnectionString("SqlServer"), "agent-service"));
 
-builder.Services.AddGrpc(o => o.Interceptors.Add<LlmConfigGrpcInterceptor>());
+builder.Services.AddGrpc(o =>
+{
+    o.Interceptors.Add<AgentServiceAuthInterceptor>();
+    o.Interceptors.Add<LlmConfigGrpcInterceptor>();
+});
 var agentServiceAuthentication = builder.Configuration
     .GetSection(AgentServiceAuthenticationOptions.SectionName)
     .Get<AgentServiceAuthenticationOptions>() ?? new AgentServiceAuthenticationOptions();
