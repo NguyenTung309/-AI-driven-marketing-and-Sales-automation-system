@@ -91,7 +91,7 @@ $tokenIssuer = Read-RequiredFile "src/api/Clawbot.Api/Auth/AgentServiceTokenIssu
 $orchestratorInterceptor = Read-RequiredFile "src/api/Clawbot.Api/Auth/OrchestratorServiceAuthInterceptor.cs"
 $callerAuthorizer = Read-RequiredFile "src/agents/Clawbot.AgentService/Services/OrchestratorCallerAuthorizer.cs"
 
-Assert-Match $workflow '(?m)^permissions:\s*\r?\n\s+contents: read$' "workflow defaults must restrict token permissions"
+Assert-Match $workflow '(?m)^permissions:\s*\r?\n\s+contents: read\r?$' "workflow defaults must restrict token permissions"
 Assert-Match $workflow 'id: release_stage' "workflow must create an isolated release stage"
 Assert-Match $workflow '\.clawbot-releases' "workflow must not stage deployment assets in shared /tmp"
 Assert-Match $workflow 'scp_args=.*-P "\$SSH_PORT"' "scp must use uppercase -P for the SSH port"
@@ -141,10 +141,10 @@ Assert-Match $inboxCollaborationRepair 'FOREIGN KEY \(tenant_id, conversation_id
 Assert-Match $deployScript 'validate_environment_file' "deployment must reject duplicate environment keys"
 Assert-Match $deployScript 'preflight_http_port' "deployment must validate the public port before changing state"
 Assert-Match $deployScript 'backup_existing_database' "deployment must back up an existing database before infrastructure recreation"
-Assert-RegexPrecedes $deployScript '(?m)^validate_environment_file "\$compose_env"$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" pull$' "environment validation must happen before pulling images"
-Assert-RegexPrecedes $deployScript '(?m)^preflight_http_port$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" pull$' "port validation must happen before pulling images"
-Assert-RegexPrecedes $deployScript '(?m)^backup_existing_database$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" up -d sqlserver redis rabbitmq qdrant searxng minio --wait$' "database backup must precede SQL Server reconciliation"
-Assert-RegexPrecedes $deployScript '(?m)^\s*docker compose --env-file "\$compose_env" -f "\$compose_file" stop \$previously_running_services$' '(?m)^backup_existing_database$' "database backup must run after application quiescence"
+Assert-RegexPrecedes $deployScript '(?m)^validate_environment_file "\$compose_env"\r?$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" pull\r?$' "environment validation must happen before pulling images"
+Assert-RegexPrecedes $deployScript '(?m)^preflight_http_port\r?$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" pull\r?$' "port validation must happen before pulling images"
+Assert-RegexPrecedes $deployScript '(?m)^backup_existing_database\r?$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" up -d sqlserver redis rabbitmq qdrant searxng minio --wait\r?$' "database backup must precede SQL Server reconciliation"
+Assert-RegexPrecedes $deployScript '(?m)^\s*docker compose --env-file "\$compose_env" -f "\$compose_file" stop \$previously_running_services\r?$' '(?m)^backup_existing_database\r?$' "database backup must run after application quiescence"
 Assert-Precedes $migrateScript 'repair_tenant_runtime_columns.sql' 'verify_content_render_tasks.sql' "repairs must run before verification"
 
 Assert-Match $deployScript 'case "\$mssql_pid" in[\s\S]*Standard\|Enterprise' "deployment must restrict SQL Server editions to Standard or Enterprise"
@@ -213,13 +213,13 @@ Assert-NotMatch $agentServiceProgram '(?m)^builder\.Services\.AddHostedService<'
 
 Assert-Match $deployScript 'CLAWBOT_STARTUP_MODE=passive docker compose --env-file "\$compose_env" -f "\$compose_file" up -d --wait --no-deps agentservice' "deployment must start the candidate AgentService passively"
 Assert-Match $deployScript 'CLAWBOT_STARTUP_MODE=passive docker compose --env-file "\$compose_env" -f "\$compose_file" up -d --wait --no-deps api' "deployment must start the candidate API passively"
-Assert-RegexPrecedes $deployScript '(?m)^CLAWBOT_STARTUP_MODE=passive docker compose' '(?m)^run_smoke$' "the candidate must be started passively before it is smoke-tested"
-Assert-RegexPrecedes $deployScript '(?m)^run_smoke$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" up -d --wait --no-deps agentservice$' "background processing must be activated only after the candidate passes its smoke checks"
-Assert-Match $deployScript '(?ms)^docker compose --env-file "\$compose_env" -f "\$compose_file" up -d --wait --no-deps api$.*?^run_smoke$' "the activated candidate must be smoke-tested again before promotion"
+Assert-RegexPrecedes $deployScript '(?m)^CLAWBOT_STARTUP_MODE=passive docker compose' '(?m)^run_smoke\r?$' "the candidate must be started passively before it is smoke-tested"
+Assert-RegexPrecedes $deployScript '(?m)^run_smoke\r?$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" up -d --wait --no-deps agentservice\r?$' "background processing must be activated only after the candidate passes its smoke checks"
+Assert-Match $deployScript '(?ms)^docker compose --env-file "\$compose_env" -f "\$compose_file" up -d --wait --no-deps api\r?$.*?^run_smoke\r?$' "the activated candidate must be smoke-tested again before promotion"
 
 Assert-Match $rollbackScript 'CLAWBOT_STARTUP_MODE=passive docker compose --env-file "\$rollback_compose_environment" -f "\$COMPOSE_FILE" up -d --wait --no-deps api' "rollback must start the restored API passively"
 Assert-RegexPrecedes $rollbackScript '(?m)^CLAWBOT_STARTUP_MODE=passive docker compose' 'CLAWBOT_PUBLIC_BASE_URL=.*smoke\.sh' "the restored release must be started passively before it is smoke-tested"
-Assert-RegexPrecedes $rollbackScript 'CLAWBOT_PUBLIC_BASE_URL=.*smoke\.sh' '(?m)^docker compose --env-file "\$rollback_compose_environment" -f "\$COMPOSE_FILE" up -d --wait --no-deps agentservice$' "the restored release must pass its smoke checks before background processing is activated"
+Assert-RegexPrecedes $rollbackScript 'CLAWBOT_PUBLIC_BASE_URL=.*smoke\.sh' '(?m)^docker compose --env-file "\$rollback_compose_environment" -f "\$COMPOSE_FILE" up -d --wait --no-deps agentservice\r?$' "the restored release must pass its smoke checks before background processing is activated"
 
 # HIGH #6 — every AgentService gRPC endpoint must be gated by the orchestrator-service policy.
 # Only the API (via OrchestratorServiceAuthInterceptor) issues tokens that satisfy this policy;
