@@ -45,7 +45,8 @@ done
 if [ -n "$environment_file" ]; then
   cp "$environment_file" "$TEST_CAPTURED_ENV"
 fi
-printf '%s\n' "$*" >> "$TEST_DOCKER_TRACE"
+# The startup mode is part of the traced command: a candidate must be started passively.
+printf '%s%s\n' "${CLAWBOT_STARTUP_MODE:+CLAWBOT_STARTUP_MODE=$CLAWBOT_STARTUP_MODE }" "$*" >> "$TEST_DOCKER_TRACE"
 case " $* " in
   *" config --environment "*)
     [ -n "${TEST_RESOLVED_ENV:-}" ] && cat "$TEST_RESOLVED_ENV"
@@ -67,6 +68,9 @@ DOCKER
 chmod 755 "$fake_bin/docker"
 cat > "$fake_bin/curl" <<'CURL'
 #!/usr/bin/env sh
+set -eu
+# Traced alongside Docker so the tests can assert what ran before and after a smoke check.
+[ -z "${TEST_DOCKER_TRACE:-}" ] || printf 'curl %s\n' "$*" >> "$TEST_DOCKER_TRACE"
 exit 0
 CURL
 chmod 755 "$fake_bin/curl"
@@ -371,6 +375,14 @@ grep -q 'up -d --wait --no-deps agentservice' "$temp_dir/docker-trace" || fail "
 if grep -Eq '(sqlserver|redis|rabbitmq|qdrant|minio).*up -d' "$temp_dir/docker-trace"; then
   fail "rollback attempted to recreate infrastructure"
 fi
+# The restored application runs against infrastructure this host has not served it with before, so
+# it must pass its smoke checks passively before anything lets it consume queues or run schedules.
+awk '
+  /^CLAWBOT_STARTUP_MODE=passive .* --no-deps (api|agentservice)$/ { if (smoked) exit 1; passive++ }
+  /^curl / { if (!passive) exit 2; smoked++ }
+  /^compose .* --no-deps (api|agentservice)$/ { if (!smoked) exit 3; activated++ }
+  END { if (passive != 2 || !smoked || activated != 2) exit 4 }
+' "$temp_dir/docker-trace" || fail "rollback did not prove the restored release passively before activating background processing"
 
 # A successful application rollback must make the restored release authoritative for future recovery.
 if [ -L "$release_root/current" ]; then

@@ -500,15 +500,30 @@ if [ "$has_current_release" = false ]; then
   docker compose --env-file "$compose_env" -f "$compose_file" up -d --wait minio-init
 fi
 
-# Phase E: start the candidate application in dependency order and require a public smoke check.
+run_smoke() {
+  CLAWBOT_PUBLIC_BASE_URL=${CLAWBOT_PUBLIC_BASE_URL:-http://127.0.0.1:$http_port} \
+    "$script_dir/smoke.sh"
+}
+
+# Phase E: start the candidate passively and require a public smoke check. A passive candidate
+# serves HTTP but consumes no queue message, runs no schedule, and processes no background job, so
+# a candidate that fails here leaves no background side effect behind for the rollback to undo.
 candidate_application_started=true
-docker compose --env-file "$compose_env" -f "$compose_file" up -d --wait --no-deps agentservice
-docker compose --env-file "$compose_env" -f "$compose_file" up -d --wait --no-deps api
+CLAWBOT_STARTUP_MODE=passive docker compose --env-file "$compose_env" -f "$compose_file" up -d --wait --no-deps agentservice
+CLAWBOT_STARTUP_MODE=passive docker compose --env-file "$compose_env" -f "$compose_file" up -d --wait --no-deps api
 docker compose --env-file "$compose_env" -f "$compose_file" up -d --wait --no-deps gateway
 docker compose --env-file "$compose_env" -f "$compose_file" up -d --wait --no-deps web
 
-CLAWBOT_PUBLIC_BASE_URL=${CLAWBOT_PUBLIC_BASE_URL:-http://127.0.0.1:$http_port} \
-  "$script_dir/smoke.sh"
+run_smoke
+
+# Phase F: activate the proven candidate. Only api and agentservice read the startup mode, so
+# gateway and web keep serving while those two are recreated with background processing enabled,
+# and the smoke check is repeated before the release pointer is allowed to move.
+printf '%s\n' 'Smoke checks passed; activating background processing on the candidate.'
+docker compose --env-file "$compose_env" -f "$compose_file" up -d --wait --no-deps agentservice
+docker compose --env-file "$compose_env" -f "$compose_file" up -d --wait --no-deps api
+
+run_smoke
 
 application_recovery_armed=false
 trap - EXIT HUP INT TERM

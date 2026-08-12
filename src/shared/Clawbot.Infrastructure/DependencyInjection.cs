@@ -120,7 +120,14 @@ public static class DependencyInjection
             bus.UsingRabbitMq((ctx, mq) =>
             {
                 mq.Host(cfg.GetConnectionString("RabbitMq") ?? "amqp://guest:guest@localhost:5672");
-                mq.ConfigureEndpoints(ctx);
+
+                // Passive candidate: declare no receive endpoint, so an unpromoted release never
+                // consumes a message. Publishing still works, and nothing is lost while passive
+                // because the queues and bindings declared by the promoted release are durable.
+                if (!Hosting.ServiceStartupMode.IsPassive(cfg))
+                {
+                    mq.ConfigureEndpoints(ctx);
+                }
             });
         });
 

@@ -138,8 +138,14 @@ builder.Services.AddScoped<Clawbot.AgentService.Services.ITenantTrendScanner, Cl
 builder.Services.AddScoped<Clawbot.AgentService.Services.IAgentScheduleLeaseProvider,
     Clawbot.AgentService.Services.AgentScheduleLeaseProvider>();
 builder.Services.AddScoped<Clawbot.AgentService.Services.AgentScheduleRunner>();
-builder.Services.AddHostedService<Clawbot.AgentService.Services.AgentScheduleWorker>();
-builder.Services.AddHostedService<Clawbot.AgentService.Services.OrchestrationTerminalIntentWorker>();
+// Passive candidate: a release that has not passed its smoke checks runs no schedule and no
+// background worker. The deployment restarts it active before promoting the release pointer.
+var startupIsPassive = Clawbot.Infrastructure.Hosting.ServiceStartupMode.IsPassive(builder.Configuration);
+if (!startupIsPassive)
+{
+    builder.Services.AddHostedService<Clawbot.AgentService.Services.AgentScheduleWorker>();
+    builder.Services.AddHostedService<Clawbot.AgentService.Services.OrchestrationTerminalIntentWorker>();
+}
 builder.Services.Configure<Clawbot.AgentService.Services.ContentReviewWorkerOptions>(
     builder.Configuration.GetSection(Clawbot.AgentService.Services.ContentReviewWorkerOptions.SectionName));
 builder.Services.AddSingleton<Clawbot.Agents.Core.Content.ILlmVisionCapabilityResolver,
@@ -174,8 +180,11 @@ builder.Services.AddScoped<Clawbot.AgentService.Services.IContentPublishingAppro
 builder.Services.AddScoped<Clawbot.AgentService.Services.ReviewTenantWorker>();
 builder.Services.AddScoped<Clawbot.AgentService.Services.IReviewTenantRunner>(sp =>
     sp.GetRequiredService<Clawbot.AgentService.Services.ReviewTenantWorker>());
-builder.Services.AddHostedService<Clawbot.AgentService.Services.ContentReviewDispatchWorker>();
-builder.Services.AddHostedService<Clawbot.AgentService.Services.ChatSessionRecoveryService>();
+if (!startupIsPassive)
+{
+    builder.Services.AddHostedService<Clawbot.AgentService.Services.ContentReviewDispatchWorker>();
+    builder.Services.AddHostedService<Clawbot.AgentService.Services.ChatSessionRecoveryService>();
+}
 builder.Services.AddScoped<IAgent, ChatAgentAdapter>();
 builder.Services.AddScoped<IAgent, ContentAgentAdapter>();
 builder.Services.AddScoped<IAgent, ResearchAgentAdapter>();
@@ -223,13 +232,16 @@ var app = builder.Build();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapGrpcService<OrchestratorGrpcService>().RequireAuthorization("orchestrator-service");
-app.MapGrpcService<ChatAgentGrpcService>();
-app.MapGrpcService<ContentAgentGrpcService>();
-app.MapGrpcService<LeadAgentGrpcService>();
-app.MapGrpcService<SaleAssistAgentGrpcService>();
-app.MapGrpcService<DocsAgentGrpcService>();
-app.MapGrpcService<ReportAgentGrpcService>();
-app.MapGrpcService<ResearchAgentGrpcService>();
+// All other agent services require the same AgentService-signed token that the orchestrator
+// uses. Only the API (via OrchestratorServiceAuthInterceptor) produces those tokens, so an
+// unauthenticated caller or one presenting an arbitrary JWT cannot reach any gRPC service.
+app.MapGrpcService<ChatAgentGrpcService>().RequireAuthorization("orchestrator-service");
+app.MapGrpcService<ContentAgentGrpcService>().RequireAuthorization("orchestrator-service");
+app.MapGrpcService<LeadAgentGrpcService>().RequireAuthorization("orchestrator-service");
+app.MapGrpcService<SaleAssistAgentGrpcService>().RequireAuthorization("orchestrator-service");
+app.MapGrpcService<DocsAgentGrpcService>().RequireAuthorization("orchestrator-service");
+app.MapGrpcService<ReportAgentGrpcService>().RequireAuthorization("orchestrator-service");
+app.MapGrpcService<ResearchAgentGrpcService>().RequireAuthorization("orchestrator-service");
 app.MapGet("/", () => "ClawBot Agent Service — use a gRPC client to call services.");
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.MapGet("/health/ready", () => Results.Ok(new { status = "ready" }));

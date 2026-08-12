@@ -127,6 +127,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://0.0.0.0:8080
+      # Candidate releases start passive; the deployment restarts them active after smoke checks.
+      Clawbot__StartupMode: ${CLAWBOT_STARTUP_MODE:-active}
       AgentService__Url: https://agentservice:15875
       ConnectionStrings__SqlServer: "Server=sqlserver,1433;Database=clawbot;User Id=${APP_SQL_USER:?APP_SQL_USER is required};Password=${APP_SQL_PASSWORD:?APP_SQL_PASSWORD is required};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=true"
       ConnectionStrings__Redis: redis:6379,password=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
@@ -164,6 +166,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://0.0.0.0:15874
+      # Candidate releases start passive; the deployment restarts them active after smoke checks.
+      Clawbot__StartupMode: ${CLAWBOT_STARTUP_MODE:-active}
       AgentService__Url: https://agentservice:15875
       AgentService__HealthUrl: http://agentservice:8080/health/ready
       AgentServiceTls__TrustedCertificatePath: /run/secrets/agentservice-ca.pem

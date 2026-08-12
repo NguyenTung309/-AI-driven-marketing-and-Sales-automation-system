@@ -34,7 +34,18 @@ public sealed class OrchestratorCallerAuthorizer(
             throw new RpcException(new Status(StatusCode.PermissionDenied, "user_mismatch"));
         }
 
-        var permissions = await ResolvePermissionsAsync(tenantId, userId, cancellationToken)
+        // The JWT carries exactly one role_id — the role the API session was issued for.
+        // Resolving from the claim is correct and avoids granting the union of every role the
+        // account holds (the original bug: a multi-role user got wider authority in the agent
+        // service than the API's own permission gate would have given them).
+        if (!Guid.TryParse(principal.FindFirst("role_id")?.Value, out var callerRoleId)
+            || callerRoleId == Guid.Empty)
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "orchestrator_caller_role_missing"));
+        }
+
+        var permissions = await permissionResolver
+            .GetPermissionsAsync(callerRoleId, cancellationToken)
             .ConfigureAwait(false);
         if (!permissions.Contains(requiredPermission))
             throw new RpcException(new Status(StatusCode.PermissionDenied, "permission_denied"));
@@ -42,6 +53,9 @@ public sealed class OrchestratorCallerAuthorizer(
         return new OrchestratorCaller(tenantId, userId, permissions);
     }
 
+    // Used by background contexts (AgentScheduleRunner, OrchestratorGrpcService background re-execution)
+    // where no HTTP JWT is present. Background callers legitimately act on behalf of the user's
+    // current active roles, so the union query is intentional here.
     public async Task<IReadOnlySet<string>> ResolvePermissionsAsync(
         Guid tenantId,
         Guid userId,

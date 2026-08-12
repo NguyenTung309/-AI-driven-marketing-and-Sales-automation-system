@@ -246,7 +246,11 @@ if (demoOpts.Mode)
         .RemoveAllLoggers();
     builder.Services.AddSingleton<DemoRuntimeConfigStore>();
     builder.Services.AddSingleton<DemoTraceService>();
-    builder.Services.AddHostedService<PancakePollingService>();
+    // Passive candidate: no provider polling until the release is proven and activated.
+    if (!Clawbot.Infrastructure.Hosting.ServiceStartupMode.IsPassive(builder.Configuration))
+    {
+        builder.Services.AddHostedService<PancakePollingService>();
+    }
 }
 
 // gRPC agent clients (shared by demo and production modes)
@@ -452,7 +456,12 @@ app.MapHangfireDashboard("/hangfire", new DashboardOptions
 GlobalJobFilters.Filters.Add(new Clawbot.Infrastructure.Jobs.JobFailureNotificationFilter(
     app.Services.GetRequiredService<IServiceScopeFactory>(),
     app.Services.GetRequiredService<ILogger<Clawbot.Infrastructure.Jobs.JobFailureNotificationFilter>>()));
-HangfireModule.ScheduleClawbotJobs(app.Services);
+// Passive candidate: leave the recurring schedule exactly as the promoted release left it. An
+// unpromoted release must not rewrite shared schedule state that a rollback would not undo.
+if (!Clawbot.Infrastructure.Hosting.ServiceStartupMode.IsPassive(builder.Configuration))
+{
+    HangfireModule.ScheduleClawbotJobs(app.Services);
+}
 
 await RbacSeeder.SeedAsync(app.Services).ConfigureAwait(false);
 await InitialAdminBootstrapper.EnsureAsync(app.Services, builder.Configuration).ConfigureAwait(false);

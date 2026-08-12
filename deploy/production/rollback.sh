@@ -147,9 +147,11 @@ if [ "$update_release_pointer" = true ]; then
   rm -f "$release_root/current.new"
 fi
 
+# The restored application images run against the current infrastructure, which is a combination
+# this host has not served before, so it is proven passively first exactly like a candidate.
 rollback_recovery_armed=true
-docker compose --env-file "$rollback_compose_environment" -f "$COMPOSE_FILE" up -d --wait --no-deps agentservice
-docker compose --env-file "$rollback_compose_environment" -f "$COMPOSE_FILE" up -d --wait --no-deps api
+CLAWBOT_STARTUP_MODE=passive docker compose --env-file "$rollback_compose_environment" -f "$COMPOSE_FILE" up -d --wait --no-deps agentservice
+CLAWBOT_STARTUP_MODE=passive docker compose --env-file "$rollback_compose_environment" -f "$COMPOSE_FILE" up -d --wait --no-deps api
 docker compose --env-file "$rollback_compose_environment" -f "$COMPOSE_FILE" up -d --wait --no-deps gateway
 docker compose --env-file "$rollback_compose_environment" -f "$COMPOSE_FILE" up -d --wait --no-deps web
 
@@ -159,6 +161,12 @@ http_port=$(read_resolved_environment_value CLAWBOT_HTTP_PORT "$resolved_environ
   printf '%s\n' 'CLAWBOT_HTTP_PORT is missing from the rollback environment.' >&2
   exit 1
 }
+CLAWBOT_PUBLIC_BASE_URL=${CLAWBOT_PUBLIC_BASE_URL:-http://127.0.0.1:$http_port} "$script_dir/smoke.sh"
+
+printf '%s\n' 'Smoke checks passed; activating background processing on the restored release.'
+docker compose --env-file "$rollback_compose_environment" -f "$COMPOSE_FILE" up -d --wait --no-deps agentservice
+docker compose --env-file "$rollback_compose_environment" -f "$COMPOSE_FILE" up -d --wait --no-deps api
+
 CLAWBOT_PUBLIC_BASE_URL=${CLAWBOT_PUBLIC_BASE_URL:-http://127.0.0.1:$http_port} "$script_dir/smoke.sh"
 
 if [ "$update_release_pointer" = true ]; then

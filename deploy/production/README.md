@@ -2,6 +2,19 @@
 
 The production stack is intentionally separate from `deploy/docker-compose.yml`, which remains the local-development entrypoint.
 
+## Host preparation
+
+Run these once per host, as the deploy account, before the first workflow run. Both scripts are idempotent and safe to re-run.
+
+```sh
+sh bootstrap-host.sh --install-packages
+sh prepare-github-secrets.sh --public-host <ip-or-hostname> --ssh-port <port>
+```
+
+`bootstrap-host.sh` verifies Docker and Compose v2, installs PowerShell (required by the go-live readiness gate), creates `/etc/clawbot` for the deploy account and `/var/backups/clawbot` for SQL Server UID `10001`, provisions the AgentService gRPC CA and server PFX, and confirms the ingress port is free. It escalates through `sudo` only where root is unavoidable; when `sudo` cannot run unattended it prints the exact commands instead of leaving partial state. Existing TLS material is never regenerated, because the PFX password is already referenced by a stored secret.
+
+`prepare-github-secrets.sh` resolves immutable digests for every infrastructure image, generates the shared infrastructure credentials and signing keys, creates a dedicated GitHub Actions SSH key and authorizes it, and writes the host key entry for `PRODUCTION_KNOWN_HOSTS`. Values are written to mode-`0600` files under `/etc/clawbot/github-secrets` and never printed. Copy each one into the GitHub `production` environment, fill the `PRODUCTION_RUNTIME_ENV` placeholders, then delete the directory. Re-running refuses to rotate existing material, since shared infrastructure credentials are fail-closed against the active release; rotation is a controlled maintenance procedure using `--force`.
+
 ## Files on the host
 
 - `/etc/clawbot/releases/<sha>-<run-id>-<attempt>/`: immutable candidate bundle, mode `0700`; contains the Compose file, its resolved environment, runtime/provider configuration, SearXNG settings, scripts, migrations, and SQL contracts.
@@ -34,5 +47,28 @@ The current Compose contract uses `TrustServerCertificate=True` for the internal
 6. Reconcile unchanged infrastructure, apply forward-compatible migrations, and execute each curated repair inside a runner-owned SQL transaction before verification and application startup. The migration runner records a deployment-specific marker in the same SQL transaction as an applied numbered migration, so recovery never restarts an old binary after a committed schema change. Idempotent runtime repairs are deliberately excluded from this marker because they are forward-compatible with the prior binary.
 7. Start candidate services in dependency order, then run `smoke.sh`. A failed candidate is stopped before release-state handling. A failure before a committed migration/repair restores the prior application without recreating infrastructure. Once schema mutation commits, automatic application recovery is blocked because the prior binary may be incompatible; the deploy output gives the exact command for `restore-verified-backup.sh`, which verifies the retained backup, restores it, and restarts the current known-compatible release (or restores without app restart when none exists).
 8. Only after smoke succeeds, promote the candidate to `current`, then advance `previous`. Application-only rollback creates an immutable hybrid rollback release with current infrastructure and restored application images/runtime, then atomically makes that hybrid release `current`.
+
+## Legacy database baseline
+
+`migrate.sh` refuses to touch a database that already contains application tables but has no `dbo.schema_migrations` history, because replaying numbered migrations over an existing schema is not safe. Adopting such a database is a one-time, reviewed operation performed before the first workflow deployment.
+
+1. Stop the legacy application so nothing writes to the database.
+2. Take and verify a full backup (`backup.sh` does both, and `RESTORE VERIFYONLY` must pass).
+3. Determine the highest numbered migration in `deploy/migrations` that the legacy schema already satisfies, by comparing each migration against the live schema. This number is asserted, not verified: too high silently skips migrations the schema still needs, and too low replays migrations that are not all idempotent.
+4. Record the reviewed number as a baseline marker:
+
+```sql
+IF OBJECT_ID(N'dbo.schema_migrations', N'U') IS NULL
+    CREATE TABLE dbo.schema_migrations (
+        filename NVARCHAR(260) NOT NULL CONSTRAINT PK_schema_migrations PRIMARY KEY,
+        applied_at DATETIMEOFFSET NOT NULL);
+
+INSERT INTO dbo.schema_migrations (filename, applied_at)
+VALUES (N'__baseline_0042__', SYSDATETIMEOFFSET());
+```
+
+The marker name is exactly `__baseline_NNNN__` with a four-digit number. The runner takes the highest marker and skips every migration at or below it, then applies the remainder normally. Later baselines can be added the same way; the highest one wins.
+
+5. Run a deployment and confirm the expected `[SKIP]` and applied migrations in the output.
 
 The initial IP-only endpoint is HTTP staging. Do not treat it as secure production until a domain and TLS certificate are configured.
