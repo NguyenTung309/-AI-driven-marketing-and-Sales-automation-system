@@ -41,10 +41,15 @@ BEGIN
 
     IF @legacyUniqueName IS NOT NULL
     BEGIN
+        DECLARE @quotedName nvarchar(128) = QUOTENAME(@legacyUniqueName);
+        DECLARE @sql nvarchar(max);
+
         IF @legacyIsConstraint = 1
-            EXEC(N'ALTER TABLE dbo.processed_messages DROP CONSTRAINT ' + QUOTENAME(@legacyUniqueName) + N';');
+            SET @sql = N'ALTER TABLE dbo.processed_messages DROP CONSTRAINT ' + @quotedName + N';';
         ELSE
-            EXEC(N'DROP INDEX ' + QUOTENAME(@legacyUniqueName) + N' ON dbo.processed_messages;');
+            SET @sql = N'DROP INDEX ' + @quotedName + N' ON dbo.processed_messages;';
+
+        EXEC(@sql);
     END;
 
     IF NOT EXISTS (
