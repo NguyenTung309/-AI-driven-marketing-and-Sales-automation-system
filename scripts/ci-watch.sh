@@ -39,6 +39,8 @@ api() {
     "https://api.github.com/repos/$REPO/$1"
 }
 
+# Mã Python nằm trong chuỗi nháy đơn của bash nên không dùng được nháy đơn bên trong;
+# dùng %-format thay f-string vì f-string có dấu \" chỉ hợp lệ từ Python 3.12.
 py() { PYTHONIOENCODING=utf-8 python -c "$1" "${@:2}"; }
 
 cmd_list() {
@@ -50,9 +52,10 @@ cmd_list() {
   py '
 import io,json,sys
 d=json.load(io.open(sys.argv[1],encoding="utf-8"))
-print(f"{\"RUN ID\":<12} {\"SHA\":<8} {\"WORKFLOW\":<28} {\"STATUS\":<12} {\"RESULT\":<10} CREATED")
+row="%-12s %-8s %-28s %-12s %-10s %s"
+print(row % ("RUN ID","SHA","WORKFLOW","STATUS","RESULT","CREATED"))
 for r in d.get("workflow_runs",[]):
-    print(f"{r[\"id\"]:<12} {r[\"head_sha\"][:7]:<8} {r[\"name\"][:27]:<28} {r[\"status\"]:<12} {str(r[\"conclusion\"]):<10} {r[\"created_at\"]}")
+    print(row % (r["id"], r["head_sha"][:7], r["name"][:27], r["status"], str(r["conclusion"]), r["created_at"]))
 ' "$f"
 }
 
@@ -66,10 +69,10 @@ cmd_status() {
 import io,json,sys
 d=json.load(io.open(sys.argv[1],encoding="utf-8"))
 for j in d.get("jobs",[]):
-    print(f"job {j[\"id\"]} | {j[\"name\"]} | {j[\"status\"]} | {j[\"conclusion\"]}")
+    print("job %s | %s | %s | %s" % (j["id"], j["name"], j["status"], j["conclusion"]))
     for s in j.get("steps") or []:
         if s.get("conclusion") not in ("success","skipped",None):
-            print(f"    FAIL step {s[\"number\"]}: {s[\"name\"]} -> {s[\"conclusion\"]}")
+            print("    FAIL step %s: %s -> %s" % (s["number"], s["name"], s["conclusion"]))
 ' "$f"
 }
 
@@ -143,7 +146,8 @@ else:
     pend=[r for r in rows if r["status"]!="completed"]
     bad=[r for r in rows if r.get("conclusion")=="failure"]
     if pend:
-        r=pend[0]; print(f"RUNNING {r[\"id\"]} {r[\"name\"]} {r[\"status\"]}")
+        r=pend[0]
+        print("RUNNING %s %s %s" % (r["id"], r["name"], r["status"]))
     elif bad:
         print("FAILED " + " ".join(str(r["id"]) for r in bad))
     else:

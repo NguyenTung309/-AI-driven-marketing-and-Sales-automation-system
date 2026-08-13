@@ -66,6 +66,7 @@ function Assert-RegexPrecedes {
 }
 
 $workflow = Read-RequiredFile ".github/workflows/production.yml"
+$credentialScan = Read-RequiredFile "deploy/ci/scan-credentials.sh"
 $deployScript = Read-RequiredFile "deploy/production/deploy.sh"
 $backupScript = Read-RequiredFile "deploy/production/backup.sh"
 $migrateScript = Read-RequiredFile "deploy/production/migrate.sh"
@@ -101,9 +102,12 @@ Assert-NotMatch $workflow '/tmp/\*\.sh|/tmp/repair_\*\.sql|/tmp/migrations|/tmp/
 Assert-Match $workflow 'verify-production-deployment\.ps1' "production validation must execute its deployment contract test"
 Assert-Match $workflow 'COMPOSE_ENV is required' "workflow must reject an empty Compose environment"
 Assert-Match $workflow 'RUNTIME_ENV is required' "workflow must reject an empty runtime environment"
-Assert-Match $workflow 'git grep -I -qE' "credential scan must suppress matching source lines and ignore binary blobs"
-Assert-Match $workflow "'\:\(exclude\)docs/\*\*'" "credential scan must scan tracked source and deployment inputs rather than a narrow file allow-list"
-Assert-NotMatch $workflow 'printf.*\$matches' "credential scan must not print credential-bearing source lines"
+Assert-Match $workflow 'sh deploy/ci/scan-credentials\.sh' "production validation must run the shared credential scan"
+Assert-Match $credentialScan 'git grep -I ' "credential scan must ignore binary blobs"
+Assert-Match $credentialScan "':\(exclude\)docs/\*\*'" "credential scan must scan tracked source and deployment inputs rather than a narrow file allow-list"
+Assert-Match $credentialScan "':\(exclude\)deploy/ci/scan-credentials\.sh'" "credential scan must exclude only its own pattern definition, leaving the calling workflow in scope"
+Assert-Match $credentialScan 'cut -d: -f1,2' "credential scan must report only file and line, never the matching content"
+Assert-NotMatch $credentialScan 'printf[^\r\n]*\$\(scan' "credential scan must not print raw matching source lines"
 Assert-Match $installerScript 'install -d -m 0700 "\$release_root"' "release installer must create protected versioned storage"
 Assert-Match $installerScript 'candidate-production\.env' "release installer must synthesize candidate-only runtime and settings paths"
 Assert-Match $installerScript 'mv -Tf "\$release_root/current\.new" "\$current_link"' "release installer must atomically promote the release pointer"
