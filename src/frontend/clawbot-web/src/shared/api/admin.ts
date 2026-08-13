@@ -24,6 +24,7 @@ export interface AdminUser {
   readonly phone: string | null;
   readonly isActive: boolean;
   readonly lastLoginAt: string | null;
+  readonly roles: readonly string[] | null;
   readonly pancakeChannels: readonly PancakeChannelInfo[];
 }
 
