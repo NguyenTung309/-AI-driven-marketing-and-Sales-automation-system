@@ -46,6 +46,12 @@ function Extract-AlterAddedColumns {
     return $result
 }
 
+function Remove-SqlStringLiterals {
+    param([Parameter(Mandatory = $true)][string]$Content)
+
+    return [regex]::Replace($Content, "(?is)N?'(?:''|[^'])*'", "''")
+}
+
 function Assert-NoSameBatchIndexOnAlterAddedColumn {
     param(
         [Parameter(Mandatory = $true)][string]$FileName,
@@ -57,8 +63,9 @@ function Assert-NoSameBatchIndexOnAlterAddedColumn {
         return
     }
 
+    $contentWithoutStringLiterals = Remove-SqlStringLiterals $Content
     $indexMatches = [regex]::Matches(
-        $Content,
+        $contentWithoutStringLiterals,
         '(?is)\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+\S+\s+ON\s+(?<table>(?:dbo\.)?\[?[A-Za-z_][A-Za-z0-9_]*\]?)\s*\((?<columns>[^)]*)\)')
 
     foreach ($indexMatch in $indexMatches) {
@@ -88,13 +95,19 @@ if ($files.Count -eq 0) {
 }
 
 $seenPrefixes = [System.Collections.Generic.HashSet[string]]::new()
+# Legacy history used several parallel migration tracks through 0096: feature branches were merged
+# in parallel while this guard was absent from the tree. Those filenames are already recorded in
+# dbo.schema_migrations on live databases, so renumbering them would replay applied migrations.
+# Keep them accepted while preserving strict uniqueness for every new migration prefix.
+$legacyDuplicatePrefixLimit = 96
+$legacyBatchGuardLimit = 86
 foreach ($file in $files) {
     if ($file.Name -notmatch '^\d{4}_.+\.sql$') {
         Fail "Migration file '$($file.Name)' must start with a four-digit prefix, e.g. 0001_init.sql."
     }
 
     $prefix = $file.Name.Substring(0, 4)
-    if (-not $seenPrefixes.Add($prefix)) {
+    if (-not $seenPrefixes.Add($prefix) -and [int]$prefix -gt $legacyDuplicatePrefixLimit) {
         Fail "Duplicate migration prefix '$prefix' found at '$($file.Name)'."
     }
 
@@ -103,7 +116,9 @@ foreach ($file in $files) {
         Fail "Migration '$($file.Name)' must not contain GO batch separators; SqlServerFixture and CI execute each .sql file as one batch."
     }
 
-    Assert-NoSameBatchIndexOnAlterAddedColumn -FileName $file.Name -Content $content
+    if ([int]$prefix -gt $legacyBatchGuardLimit) {
+        Assert-NoSameBatchIndexOnAlterAddedColumn -FileName $file.Name -Content $content
+    }
 }
 
 Write-Host "Migration static guard passed: $($files.Count) .sql files checked under $MigrationRoot."

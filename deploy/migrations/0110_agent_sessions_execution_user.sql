@@ -6,7 +6,9 @@ IF OBJECT_ID(N'dbo.agent_sessions', N'U') IS NULL
 IF COL_LENGTH(N'dbo.agent_sessions', N'execution_user_id') IS NULL
     ALTER TABLE dbo.agent_sessions ADD execution_user_id UNIQUEIDENTIFIER NULL;
 
-UPDATE dbo.agent_sessions
+-- Boc EXEC de hoan bien dich: ca file la mot batch, backfill tham chieu thang cot vua ALTER ADD o
+-- tren se loi 207 "Invalid column name" vi cot chua ton tai luc SQL Server compile batch.
+EXEC(N'UPDATE dbo.agent_sessions
 SET execution_user_id = user_id
 WHERE execution_user_id IS NULL
-  AND user_id IS NOT NULL;
+  AND user_id IS NOT NULL;');

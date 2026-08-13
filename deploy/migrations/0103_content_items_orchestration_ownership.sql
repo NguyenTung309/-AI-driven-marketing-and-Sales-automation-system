@@ -9,10 +9,12 @@ IF COL_LENGTH(N'dbo.content_items', N'orchestration_ownership_claimed_at') IS NU
 IF COL_LENGTH(N'dbo.content_items', N'orchestration_ownership_claimed_by') IS NULL
     ALTER TABLE dbo.content_items ADD orchestration_ownership_claimed_by UNIQUEIDENTIFIER NULL;
 
-UPDATE dbo.content_items
+-- Boc EXEC de hoan bien dich: ca file la mot batch, tham chieu thang cot vua ALTER ADD o tren se
+-- loi 207 "Invalid column name" vi cot chua ton tai luc SQL Server compile batch.
+EXEC(N'UPDATE dbo.content_items
 SET orchestration_plan_generation = 0
 WHERE orchestration_session_id IS NOT NULL
-  AND orchestration_plan_generation IS NULL;
+  AND orchestration_plan_generation IS NULL;');
 
 IF NOT EXISTS (
     SELECT 1
@@ -20,11 +22,11 @@ IF NOT EXISTS (
     WHERE name = N'CK_content_items_orchestration_provenance'
       AND parent_object_id = OBJECT_ID(N'dbo.content_items'))
 BEGIN
-    ALTER TABLE dbo.content_items WITH CHECK
+    EXEC(N'ALTER TABLE dbo.content_items WITH CHECK
         ADD CONSTRAINT CK_content_items_orchestration_provenance
         CHECK (
             (orchestration_session_id IS NULL AND orchestration_plan_generation IS NULL)
-            OR (orchestration_session_id IS NOT NULL AND orchestration_plan_generation >= 0));
+            OR (orchestration_session_id IS NOT NULL AND orchestration_plan_generation >= 0));');
 END
 
 IF NOT EXISTS (
@@ -33,11 +35,11 @@ IF NOT EXISTS (
     WHERE name = N'CK_content_items_orchestration_ownership'
       AND parent_object_id = OBJECT_ID(N'dbo.content_items'))
 BEGIN
-    ALTER TABLE dbo.content_items WITH CHECK
+    EXEC(N'ALTER TABLE dbo.content_items WITH CHECK
         ADD CONSTRAINT CK_content_items_orchestration_ownership
         CHECK (
             orchestration_ownership_claimed_at IS NULL
-            OR orchestration_session_id IS NOT NULL);
+            OR orchestration_session_id IS NOT NULL);');
 END
 
 IF NOT EXISTS (
