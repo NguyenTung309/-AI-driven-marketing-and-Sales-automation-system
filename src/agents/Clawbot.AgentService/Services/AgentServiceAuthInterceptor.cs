@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Clawbot.SharedKernel.Security;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Clawbot.AgentService.Services;
@@ -15,10 +16,12 @@ public sealed class AgentServiceAuthInterceptor : Interceptor
     private readonly AgentServiceAuthenticationOptions _options;
     private readonly TokenValidationParameters _validationParameters;
 
-    public AgentServiceAuthInterceptor(AgentServiceAuthenticationOptions options)
+    // Program.cs binds this section with Configure<T>, so only IOptions<T> is in the container;
+    // taking the bare options type made gRPC interceptor activation throw at call time.
+    public AgentServiceAuthInterceptor(IOptions<AgentServiceAuthenticationOptions> options)
     {
-        _options = options;
-        var signingKeyBytes = AgentServiceAuthenticationOptions.GetSigningKeyBytes(options.SigningKey);
+        _options = options.Value;
+        var signingKeyBytes = AgentServiceAuthenticationOptions.GetSigningKeyBytes(_options.SigningKey);
         _validationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
