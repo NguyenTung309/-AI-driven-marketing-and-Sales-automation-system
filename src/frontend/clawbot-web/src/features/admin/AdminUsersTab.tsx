@@ -53,15 +53,16 @@ export function AdminUsersTab({
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[1040px] w-full border-collapse text-left">
+          <table className="min-w-[1180px] w-full border-collapse text-left">
             <thead className="bg-surface-variant text-label-sm uppercase text-secondary">
               <tr>
-                <th className="px-4 py-3 font-bold">Người dùng</th>
-                <th className="px-4 py-3 font-bold">Email</th>
-                <th className="px-4 py-3 font-bold">Đăng nhập cuối</th>
-                <th className="px-4 py-3 font-bold">Kênh Pancake</th>
-                <th className="px-4 py-3 font-bold">Trạng thái</th>
-                <th className="px-4 py-3 text-right font-bold">Hành động</th>
+                <th scope="col" className="px-4 py-3 font-bold">Người dùng</th>
+                <th scope="col" className="px-4 py-3 font-bold">Email</th>
+                <th scope="col" className="px-4 py-3 font-bold">Vai trò</th>
+                <th scope="col" className="px-4 py-3 font-bold">Đăng nhập cuối</th>
+                <th scope="col" className="px-4 py-3 font-bold">Kênh Pancake</th>
+                <th scope="col" className="px-4 py-3 font-bold">Trạng thái</th>
+                <th scope="col" className="px-4 py-3 text-right font-bold">Hành động</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-outline bg-white">
@@ -79,6 +80,17 @@ export function AdminUsersTab({
                     </div>
                   </td>
                   <td className="px-4 py-4 text-body-md text-secondary">{user.email}</td>
+                  <td className="px-4 py-4">
+                    {user.roles === null ? (
+                      <span className="text-body-md text-on-surface-variant">Không có quyền xem</span>
+                    ) : user.roles.length ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {user.roles.map((role) => <StatusPill key={role}>{role}</StatusPill>)}
+                      </div>
+                    ) : (
+                      <span className="text-body-md text-on-surface-variant">Chưa gán</span>
+                    )}
+                  </td>
                   <td className="px-4 py-4 text-body-md text-on-surface-variant">{formatDateTime(user.lastLoginAt)}</td>
                   <td className="px-4 py-4">
                     {user.pancakeChannels && user.pancakeChannels.length > 0 ? (
