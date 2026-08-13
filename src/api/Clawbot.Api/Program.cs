@@ -96,6 +96,7 @@ builder.Services.Configure<AgentServiceAuthenticationOptions>(
 builder.Services.AddSingleton<AgentServiceTokenIssuer>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddTransient<OrchestratorServiceAuthInterceptor>();
+builder.Services.AddTransient<AgentServiceClientAuthInterceptor>();
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -227,11 +228,11 @@ var agentServiceGrpcHandlerFactory = new AgentServiceGrpcHandlerFactory(agentSer
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.SaleAssist.SaleAssistAgent.SaleAssistAgentClient>(o =>
 {
     o.Address = agentServiceUrl;
-}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create());
+}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<AgentServiceClientAuthInterceptor>();
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Docs.DocsAgent.DocsAgentClient>(o =>
 {
     o.Address = agentServiceUrl;
-}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create());
+}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<AgentServiceClientAuthInterceptor>();
 
 // SPEC-12: Demo mode services
 var demoOpts = builder.Configuration.GetSection(DemoOptions.Section).Get<DemoOptions>() ?? new DemoOptions();
@@ -257,19 +258,19 @@ if (demoOpts.Mode)
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Content.ContentAgent.ContentAgentClient>(o =>
 {
     o.Address = agentServiceUrl;
-}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create());
+}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<AgentServiceClientAuthInterceptor>();
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Research.ResearchAgent.ResearchAgentClient>(o =>
 {
     o.Address = agentServiceUrl;
-}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create());
+}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<AgentServiceClientAuthInterceptor>();
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Lead.LeadAgent.LeadAgentClient>(o =>
 {
     o.Address = agentServiceUrl;
-}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create());
+}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<AgentServiceClientAuthInterceptor>();
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Report.ReportAgent.ReportAgentClient>(o =>
 {
     o.Address = agentServiceUrl;
-}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create());
+}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<AgentServiceClientAuthInterceptor>();
 builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Orchestrator.Orchestrator.OrchestratorClient>(o =>
 {
     o.Address = agentServiceUrl;

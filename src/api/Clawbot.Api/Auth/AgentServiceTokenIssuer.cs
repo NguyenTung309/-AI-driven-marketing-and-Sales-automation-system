@@ -13,12 +13,25 @@ public sealed class AgentServiceTokenIssuer(IOptions<AgentServiceAuthenticationO
     // account holds — a wider door into the same permissions than the API itself opens.
     public string Issue(Guid userId, Guid tenantId, Guid roleId)
     {
+        if (roleId == Guid.Empty)
+            throw new ArgumentException("A caller role is required.", nameof(roleId));
+
+        return BuildToken(userId, tenantId, roleId);
+    }
+
+    // Token cho job nền (Hangfire) — không có phiên HTTP nên không có danh tính người dùng thật.
+    // 6 service agent còn lại (report/content/lead/sale-assist/docs/research) không đọc claim nào,
+    // tenant/user đi theo field của message; token này chỉ chứng minh cuộc gọi xuất phát từ API host.
+    // KHÔNG được dùng cho đường orchestrator (bên đó bắt danh tính phiên + permission qua claim).
+    public string IssueServiceToken(Guid tenantId)
+        => BuildToken(AgentServiceAuthenticationOptions.ServiceUserId, tenantId, AgentServiceAuthenticationOptions.ServiceRoleId);
+
+    private string BuildToken(Guid userId, Guid tenantId, Guid roleId)
+    {
         var settings = options.Value;
         var signingKeyBytes = AgentServiceAuthenticationOptions.GetSigningKeyBytes(settings.SigningKey);
         if (settings.TokenLifetimeMinutes is < 1 or > 5)
             throw new InvalidOperationException("agent_service_auth_token_lifetime_invalid");
-        if (roleId == Guid.Empty)
-            throw new ArgumentException("A caller role is required.", nameof(roleId));
 
         var now = DateTimeOffset.UtcNow;
         var claims = new List<Claim>
