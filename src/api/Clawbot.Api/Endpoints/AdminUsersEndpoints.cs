@@ -117,10 +117,11 @@ public static class AdminUsersEndpoints
             query = query.Where(u => u.Email!.Contains(queryText) || u.DisplayName.Contains(queryText));
 
         var total = await query.CountAsync(ct);
-        var rows = await query
+        var pageQuery = query
             .OrderBy(u => u.DisplayName)
             .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            .Take(pageSize);
+        var rows = await pageQuery
             .Select(u => new
             {
                 u.Id,
@@ -133,13 +134,17 @@ public static class AdminUsersEndpoints
             })
             .ToListAsync(ct);
 
-        var userIds = rows.Select(row => row.Id).ToArray();
-        if (userIds.Length == 0)
+        if (rows.Count == 0)
             return new AdminUsersPage(total, page, pageSize, []);
+
+        // Lọc kênh/role theo đúng tập user của trang bằng IN (subquery) thay vì array.Contains:
+        // EF 8 dịch Guid[].Contains thành primitive collection và ném TypeLoadException
+        // ReadOnlySpan trong expression interpreter khi chạy trên runtime .NET 10 (CI).
+        var pageUserIds = pageQuery.Select(u => u.Id);
 
         var channels = await db.InboxMembers
             .IgnoreQueryFilters()
-            .Where(member => member.TenantId == tenantId && userIds.Contains(member.AgentId))
+            .Where(member => member.TenantId == tenantId && pageUserIds.Contains(member.AgentId))
             .Join(db.Inboxes.IgnoreQueryFilters().Where(inbox => inbox.TenantId == tenantId && inbox.DeletedAt == null),
                 member => member.InboxId,
                 inbox => inbox.Id,
@@ -160,7 +165,7 @@ public static class AdminUsersEndpoints
                     userRole => userRole.RoleId,
                     role => role.Id,
                     (userRole, role) => new { userRole.UserId, role.Name })
-                .Where(row => userIds.Contains(row.UserId) && row.Name != null)
+                .Where(row => pageUserIds.Contains(row.UserId) && row.Name != null)
                 .ToListAsync(ct))
                 .GroupBy(row => row.UserId)
                 .ToDictionary(
