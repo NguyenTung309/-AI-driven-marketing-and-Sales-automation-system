@@ -21,6 +21,30 @@ namespace Clawbot.Api.Endpoints;
 public sealed record CreateUserRequest(string Email, string DisplayName, string Password, string[]? Roles, string? PancakeAccessToken, string? PancakePageId, string? PancakePlatform, string? PancakeChannelName);
 public sealed record UpdateUserRequest(string? DisplayName, string[]? Roles, bool? IsActive, string? PancakeAccessToken, bool? ClearPancakeAccessToken, string? PancakePageId, string? PancakePlatform, string? PancakeChannelName);
 
+public sealed record AdminUserListItem(
+    Guid Id,
+    string? Email,
+    string DisplayName,
+    string? Phone,
+    bool IsActive,
+    DateTimeOffset? LastLoginAt,
+    bool HasPancakeAccessToken,
+    IReadOnlyList<string>? Roles,
+    IReadOnlyList<AdminUserPancakeChannel> PancakeChannels);
+
+public sealed record AdminUserPancakeChannel(
+    Guid InboxId,
+    string PageId,
+    string Name,
+    string Platform,
+    bool HasToken);
+
+public sealed record AdminUsersPage(
+    int Total,
+    int Page,
+    int PageSize,
+    IReadOnlyList<AdminUserListItem> Items);
+
 // M23 — admin user management (permission: admin.system). Operates on Identity AppUser (`users` table).
 public static class AdminUsersEndpoints
 {
@@ -62,13 +86,35 @@ public static class AdminUsersEndpoints
         if (!await HasAnyPermissionAsync(principal, permissions, ct, "admin.system", "users:pancake-token:manage"))
             return Results.Forbid();
 
-        var tenantId = tenants.Require().TenantId;
+        // Role assignments disclose broader authorization metadata, so only system administrators receive them.
+        var includeRoles = await HasPermissionAsync(principal, permissions, "admin.system", ct);
+        var usersPage = await QueryUsersAsync(
+            db,
+            tenants.Require().TenantId,
+            q,
+            page,
+            pageSize,
+            includeRoles,
+            ct);
+
+        return Results.Ok(usersPage);
+    }
+
+    internal static async Task<AdminUsersPage> QueryUsersAsync(
+        AppDbContext db,
+        Guid tenantId,
+        string? queryText,
+        int page,
+        int pageSize,
+        bool includeRoles,
+        CancellationToken ct)
+    {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
 
-        var query = users.Users.Where(u => u.TenantId == tenantId);
-        if (!string.IsNullOrWhiteSpace(q))
-            query = query.Where(u => u.Email!.Contains(q) || u.DisplayName.Contains(q));
+        var query = db.Users.Where(u => u.TenantId == tenantId);
+        if (!string.IsNullOrWhiteSpace(queryText))
+            query = query.Where(u => u.Email!.Contains(queryText) || u.DisplayName.Contains(queryText));
 
         var total = await query.CountAsync(ct);
         var rows = await query
@@ -87,32 +133,64 @@ public static class AdminUsersEndpoints
             })
             .ToListAsync(ct);
 
-        // Kenh Pancake tung sale phu trach (inbox_members -> inboxes): hien thi page_id + trang thai token
-        var userIds = rows.Select(r => r.Id).ToList();
+        var userIds = rows.Select(row => row.Id).ToArray();
+        if (userIds.Length == 0)
+            return new AdminUsersPage(total, page, pageSize, []);
+
         var channels = await db.InboxMembers
             .IgnoreQueryFilters()
-            .Where(m => m.TenantId == tenantId && userIds.Contains(m.AgentId))
-            .Join(db.Inboxes.IgnoreQueryFilters().Where(i => i.DeletedAt == null),
-                m => m.InboxId, i => i.Id,
-                (m, i) => new { m.AgentId, InboxId = i.Id, PageId = i.ExternalPageId, i.Name, i.Platform, HasToken = i.EncryptedAccessToken != null })
+            .Where(member => member.TenantId == tenantId && userIds.Contains(member.AgentId))
+            .Join(db.Inboxes.IgnoreQueryFilters().Where(inbox => inbox.TenantId == tenantId && inbox.DeletedAt == null),
+                member => member.InboxId,
+                inbox => inbox.Id,
+                (member, inbox) => new
+                {
+                    member.AgentId,
+                    InboxId = inbox.Id,
+                    PageId = inbox.ExternalPageId,
+                    inbox.Name,
+                    inbox.Platform,
+                    HasToken = inbox.EncryptedAccessToken != null,
+                })
             .ToListAsync(ct);
 
-        var items = rows.Select(u => new
-        {
-            u.Id,
-            u.Email,
-            u.DisplayName,
-            u.Phone,
-            u.IsActive,
-            u.LastLoginAt,
-            u.HasPancakeAccessToken,
-            PancakeChannels = channels
-                .Where(c => c.AgentId == u.Id)
-                .Select(c => new { c.InboxId, c.PageId, c.Name, c.Platform, c.HasToken })
-                .ToList(),
-        }).ToList();
+        var rolesByUserId = includeRoles
+            ? (await db.UserRoles
+                .Join(db.Roles,
+                    userRole => userRole.RoleId,
+                    role => role.Id,
+                    (userRole, role) => new { userRole.UserId, role.Name })
+                .Where(row => userIds.Contains(row.UserId) && row.Name != null)
+                .ToListAsync(ct))
+                .GroupBy(row => row.UserId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => (IReadOnlyList<string>)group
+                        .Select(row => row.Name!)
+                        .OrderBy(name => name, StringComparer.Ordinal)
+                        .ToArray())
+            : new Dictionary<Guid, IReadOnlyList<string>>();
 
-        return Results.Ok(new { total, page, pageSize, items });
+        var items = rows.Select(user => new AdminUserListItem(
+            user.Id,
+            user.Email,
+            user.DisplayName,
+            user.Phone,
+            user.IsActive,
+            user.LastLoginAt,
+            user.HasPancakeAccessToken,
+            includeRoles ? rolesByUserId.GetValueOrDefault(user.Id, Array.Empty<string>()) : null,
+            channels
+                .Where(channel => channel.AgentId == user.Id)
+                .Select(channel => new AdminUserPancakeChannel(
+                    channel.InboxId,
+                    channel.PageId,
+                    channel.Name,
+                    channel.Platform,
+                    channel.HasToken))
+                .ToArray())).ToArray();
+
+        return new AdminUsersPage(total, page, pageSize, items);
     }
 
     private static async Task<IResult> CreateAsync(

@@ -44,11 +44,17 @@ public static class HangfireModule
                 DisableGlobalLocks = true,
             }));
 
-        services.AddHangfireServer(o =>
+        // Passive candidate: register the client and storage (enqueue, dashboard) but start no
+        // processing server, so an unpromoted release never runs a job. Queued work stays in
+        // storage and is picked up once the release is activated.
+        if (!Hosting.ServiceStartupMode.IsPassive(cfg))
         {
-            o.WorkerCount = Math.Max(2, Environment.ProcessorCount / 2);
-            o.Queues = QueueNames;
-        });
+            services.AddHangfireServer(o =>
+            {
+                o.WorkerCount = Math.Max(2, Environment.ProcessorCount / 2);
+                o.Queues = QueueNames;
+            });
+        }
 
         services.AddScoped<RetentionPurgeJob>();
         services.AddScoped<RequestStatsFlushJob>();

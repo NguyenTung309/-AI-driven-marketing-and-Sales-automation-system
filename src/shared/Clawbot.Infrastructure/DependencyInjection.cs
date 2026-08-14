@@ -83,8 +83,10 @@ public static class DependencyInjection
             .AddDefaultTokenProviders();
         services.AddAuthentication();
 
+        // Chuỗi rỗng không phải null nên `??` không đỡ được: appsettings đã xoá secret để lại ""
+        // và Connect("") throw, kéo sập mọi scope chạm RAG (review nội dung, lịch agent, orchestrator).
         services.AddSingleton<IConnectionMultiplexer>(_ =>
-            ConnectionMultiplexer.Connect(cfg.GetConnectionString("Redis") ?? "localhost:6379"));
+            ConnectionMultiplexer.Connect(FallbackWhenBlank(cfg.GetConnectionString("Redis"), "localhost:6379")));
 
         // SPEC-11 auth services: refresh-token rotation + runtime permission resolution.
         // PostConfigure forces the timing from AuthPolicy so appsettings cannot drift it.
@@ -119,8 +121,15 @@ public static class DependencyInjection
 
             bus.UsingRabbitMq((ctx, mq) =>
             {
-                mq.Host(cfg.GetConnectionString("RabbitMq") ?? "amqp://guest:guest@localhost:5672");
-                mq.ConfigureEndpoints(ctx);
+                mq.Host(FallbackWhenBlank(cfg.GetConnectionString("RabbitMq"), "amqp://guest:guest@localhost:5672"));
+
+                // Passive candidate: declare no receive endpoint, so an unpromoted release never
+                // consumes a message. Publishing still works, and nothing is lost while passive
+                // because the queues and bindings declared by the promoted release are durable.
+                if (!Hosting.ServiceStartupMode.IsPassive(cfg))
+                {
+                    mq.ConfigureEndpoints(ctx);
+                }
             });
         });
 
@@ -261,4 +270,8 @@ public static class DependencyInjection
 
         return services;
     }
+
+    // Cấu hình để trống ("") phải được coi như thiếu, giống hệt null.
+    private static string FallbackWhenBlank(string? value, string fallback)
+        => string.IsNullOrWhiteSpace(value) ? fallback : value;
 }

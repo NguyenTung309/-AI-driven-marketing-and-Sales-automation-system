@@ -1,0 +1,236 @@
+{
+  "_note": "Format self-check only: the content mirrors the methodName1 sheet of the template.",
+  "cover": {
+    "project_name": "Clawbot",
+    "project_code": "CLAWBOT",
+    "creator": "<Creator>",
+    "reviewer": "<Reviewer/Approver>",
+    "issue_date": "2026-08-11",
+    "version": "v1.0",
+    "statistics_note": "<List of modules included in this release>",
+    "changes": [
+      {
+        "date": "2026-08-11",
+        "version": "v1.0",
+        "item": "Unit Test Report",
+        "type": "A",
+        "description": "Initial version",
+        "reference": ""
+      }
+    ]
+  },
+  "environment": "<List enviroment requires in this system\n1. Server\n2. Database\n3. Web Browser\n...\n>",
+  "methods": [
+    {
+      "sheet": "methodName1",
+      "module": "ModuleName1",
+      "method": "methodName1",
+      "created_by": "<Developer Name>",
+      "executed_by": "",
+      "requirement": "<Brief description about requirements which are tested in this function>",
+      "description": "",
+      "precondition": "",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "Precondition ",
+              "values": [
+                "Can connect with server",
+                "",
+                ""
+              ]
+            },
+            {
+              "label": "Date",
+              "values": [
+                29,
+                30,
+                31
+              ]
+            },
+            {
+              "label": "Month",
+              "values": [
+                2,
+                3,
+                4
+              ]
+            },
+            {
+              "label": "Year",
+              "values": [
+                2000,
+                2009,
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Return",
+              "values": [
+                "T",
+                "F"
+              ]
+            },
+            {
+              "label": "Exception",
+              "values": [
+                ""
+              ]
+            },
+            {
+              "label": "Log message",
+              "values": [
+                "\"success\"",
+                "\"input1 is null\""
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "UTCID01",
+          "marks": {
+            "Date": 0,
+            "Month": 0,
+            "Year": 0,
+            "Return": 0
+          },
+          "type": "A",
+          "result": "P",
+          "date": "2007-02-26",
+          "defect": ""
+        },
+        {
+          "id": "UTCID02",
+          "marks": {
+            "Date": 0,
+            "Month": 1,
+            "Year": 1,
+            "Return": 0
+          },
+          "type": "N",
+          "result": "P",
+          "date": "2007-02-26",
+          "defect": ""
+        },
+        {
+          "id": "",
+          "marks": {},
+          "type": "",
+          "result": "",
+          "date": null,
+          "defect": ""
+        },
+        {
+          "id": "",
+          "marks": {},
+          "type": "",
+          "result": "",
+          "date": null,
+          "defect": ""
+        },
+        {
+          "id": "",
+          "marks": {},
+          "type": "",
+          "result": "",
+          "date": null,
+          "defect": ""
+        },
+        {
+          "id": "",
+          "marks": {},
+          "type": "",
+          "result": "",
+          "date": null,
+          "defect": ""
+        },
+        {
+          "id": "",
+          "marks": {},
+          "type": "",
+          "result": "",
+          "date": null,
+          "defect": ""
+        },
+        {
+          "id": "",
+          "marks": {},
+          "type": "",
+          "result": "",
+          "date": null,
+          "defect": ""
+        },
+        {
+          "id": "",
+          "marks": {},
+          "type": "",
+          "result": "",
+          "date": null,
+          "defect": ""
+        },
+        {
+          "id": "",
+          "marks": {},
+          "type": "",
+          "result": "",
+          "date": null,
+          "defect": ""
+        },
+        {
+          "id": "",
+          "marks": {},
+          "type": "",
+          "result": "",
+          "date": null,
+          "defect": ""
+        },
+        {
+          "id": "",
+          "marks": {},
+          "type": "",
+          "result": "",
+          "date": null,
+          "defect": ""
+        },
+        {
+          "id": "",
+          "marks": {},
+          "type": "",
+          "result": "",
+          "date": null,
+          "defect": ""
+        },
+        {
+          "id": "",
+          "marks": {},
+          "type": "",
+          "result": "",
+          "date": null,
+          "defect": ""
+        },
+        {
+          "id": "",
+          "marks": {},
+          "type": "",
+          "result": "",
+          "date": null,
+          "defect": ""
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1671 @@
+{
+  "cover": {
+    "project_name": "Clawbot",
+    "project_code": "CLAWBOT",
+    "creator": "<Creator>",
+    "issue_date": "2026-08-11",
+    "version": "1.0",
+    "statistics_note": "Login & Auth, Omnichannel Inbox, Knowledge Base, Lead Management, Content Pipeline, Agent Orchestration",
+    "changes": [
+      {
+        "date": "2026-08-11",
+        "version": "1.0",
+        "item": "All modules",
+        "type": "A",
+        "description": "Initial version",
+        "reference": ""
+      }
+    ]
+  },
+  "environment": "1. Frontend: React + Vite (localhost:15876)\n2. API Backend: .NET 8 (localhost:15874)\n3. AgentService gRPC (localhost:15875)\n4. SQL Server 2022 (Docker :1433)\n5. Redis 7 (Docker :6379)\n6. Qdrant vector store (Docker :6333)",
+  "sheets": [
+    {
+      "sheet": "Login & Authentication",
+      "name": "Login & Authentication",
+      "requirement": "JWT authentication with refresh-token rotation, 2FA, session revocation, password reset and change-password flows",
+      "precondition": "API and database are reachable; a seeded tenant account exists",
+      "scenarios": [
+        {
+          "group": "Login",
+          "cases": [
+            {
+              "id": "TC-LOG-001",
+              "description": "Sign in with valid credentials",
+              "procedure": "1. POST /auth/login with a valid email and password.\n2. Check the response.",
+              "expected": "HTTP 200; response body contains accessToken and refreshToken.",
+              "precondition": "The account is active and no lockout is in effect",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LOG-002",
+              "description": "Reject sign-in with a wrong password",
+              "procedure": "1. POST /auth/login with a valid email and an incorrect password.",
+              "expected": "HTTP 401; no token is issued; generic error message returned.",
+              "precondition": "The account is active",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LOG-003",
+              "description": "Lock the account after five consecutive wrong passwords",
+              "procedure": "1. POST /auth/login with a wrong password five times.\n2. Submit the correct password.",
+              "expected": "HTTP 429 or 401 on the sixth attempt; the correct password is also rejected until lockout expires.",
+              "precondition": "Lockout threshold is configured to five attempts",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Failed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": "Lockout window duration needs product-owner confirmation"
+            }
+          ]
+        },
+        {
+          "group": "Refresh and logout",
+          "cases": [
+            {
+              "id": "TC-LOG-004",
+              "description": "Refresh an access token using a valid refresh token",
+              "procedure": "1. POST /auth/refresh with a valid refreshToken.\n2. Check the response.",
+              "expected": "HTTP 200; new accessToken and rotated refreshToken are returned.",
+              "precondition": "A signed-in session exists with a valid refresh token",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LOG-005",
+              "description": "Replay a refresh token after rotation is rejected",
+              "procedure": "1. POST /auth/refresh to rotate the token.\n2. Replay the original refresh token.",
+              "expected": "HTTP 401; the replayed token is rejected (rotation invalidates the previous token).",
+              "precondition": "A signed-in session exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LOG-006",
+              "description": "Sign out revokes the refresh token",
+              "procedure": "1. POST /auth/logout.\n2. Attempt to use the previous refresh token.",
+              "expected": "Logout returns HTTP 200; the revoked refresh token is rejected with HTTP 401.",
+              "precondition": "An active session exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Two-factor authentication",
+          "cases": [
+            {
+              "id": "TC-LOG-007",
+              "description": "Enable 2FA and verify the setup TOTP code",
+              "procedure": "1. POST /auth/2fa/enable to get the TOTP secret.\n2. POST /auth/2fa/verify with a valid TOTP code.",
+              "expected": "2FA is enabled on the account; subsequent logins require a TOTP step.",
+              "precondition": "Account does not have 2FA enabled",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LOG-008",
+              "description": "Complete login with a valid TOTP code when 2FA is active",
+              "procedure": "1. POST /auth/login to receive a partial token.\n2. POST /auth/login/2fa with the current TOTP code.",
+              "expected": "HTTP 200; full accessToken and refreshToken are returned.",
+              "precondition": "2FA is enabled on the account",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LOG-009",
+              "description": "Reject login with an incorrect TOTP code",
+              "procedure": "1. POST /auth/login to receive a partial token.\n2. POST /auth/login/2fa with an invalid TOTP code.",
+              "expected": "HTTP 401; no full token is issued.",
+              "precondition": "2FA is enabled on the account",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Password management",
+          "cases": [
+            {
+              "id": "TC-LOG-010",
+              "description": "Change password while signed in",
+              "procedure": "1. POST /auth/change-password with the current and new passwords.\n2. Sign out and sign back in with the new password.",
+              "expected": "Password change returns HTTP 200; old password is no longer accepted.",
+              "precondition": "An active session exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LOG-011",
+              "description": "Request a password reset email",
+              "procedure": "1. POST /auth/reset/request with the account email.",
+              "expected": "HTTP 200 is returned regardless of whether the email exists (no user enumeration).",
+              "precondition": "SMTP is configured in the test environment",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LOG-012",
+              "description": "Confirm a password reset with a valid token",
+              "procedure": "1. Extract the reset token from the email link.\n2. POST /auth/reset/confirm with the token and new password.",
+              "expected": "HTTP 200; the user can sign in with the new password; the reset token cannot be reused.",
+              "precondition": "A valid reset token was issued within the expiry window",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "Omnichannel Inbox",
+      "name": "Omnichannel Inbox",
+      "requirement": "Channel connection, message ingestion via webhook and polling, deduplication, outbound replies, auto-reply with AI, pause/resume, draft approval, escalation and conversation search",
+      "precondition": "At least one channel is connected; RabbitMQ consumer is running",
+      "scenarios": [
+        {
+          "group": "Channel connection",
+          "cases": [
+            {
+              "id": "TC-INB-001",
+              "description": "Connect a channel with a valid page token",
+              "procedure": "1. POST /api/admin/inboxes with a valid page token.\n2. Wait for the first sync to start.",
+              "expected": "HTTP 201; channel is listed as connected; initial conversation sync begins.",
+              "precondition": "A valid page token is available",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-002",
+              "description": "Reject a channel connection with an invalid token",
+              "procedure": "1. POST /api/admin/inboxes with an invalid token.",
+              "expected": "HTTP 422; no inbox row is persisted; error message is returned.",
+              "precondition": "None",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-003",
+              "description": "Reconnect a channel after the token is revoked",
+              "procedure": "1. Revoke the token at the provider.\n2. PUT /api/admin/inboxes/{id} with a new token.",
+              "expected": "Sync error is cleared; message ingestion resumes for new messages.",
+              "precondition": "The channel is currently connected",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-004",
+              "description": "Conversations from different tenants remain isolated",
+              "procedure": "1. Connect the same page under two tenants.\n2. Send a message.",
+              "expected": "The message appears only in the correct tenant inbox.",
+              "precondition": "Two active tenant accounts exist",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Message ingestion",
+          "cases": [
+            {
+              "id": "TC-INB-005",
+              "description": "Ingest an inbound message through the webhook",
+              "procedure": "1. POST a valid signed webhook payload to the Pancake webhook endpoint.\n2. GET /api/inbox/conversations/{id}.",
+              "expected": "The message appears in the conversation within a few seconds.",
+              "precondition": "Webhook secret is configured; HMAC signature is valid",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-006",
+              "description": "Reject a webhook payload with an invalid HMAC signature",
+              "procedure": "1. POST a webhook payload with a tampered x-pancake-signature header.",
+              "expected": "HTTP 401; the message is not stored.",
+              "precondition": "Webhook secret is configured",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-007",
+              "description": "Ingest a message through polling when the webhook is unavailable",
+              "procedure": "1. Disable the webhook.\n2. Send a message from the channel.\n3. Wait for the next polling cycle.",
+              "expected": "The message is ingested by the polling worker and appears in the inbox.",
+              "precondition": "Polling is enabled and the channel token is valid",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-008",
+              "description": "Deduplicate a message delivered by both webhook and polling",
+              "procedure": "1. Enable both ingestion paths.\n2. Send a single message from the channel.",
+              "expected": "Exactly one message record is stored.",
+              "precondition": "Both ingestion paths are active",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-009",
+              "description": "Keep the queue intact when the consumer restarts",
+              "procedure": "1. Stop the RabbitMQ consumer.\n2. Send two messages.\n3. Start the consumer again.",
+              "expected": "Both messages are processed after restart; none is lost.",
+              "precondition": "RabbitMQ persistence is enabled",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Failed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": "One message stayed unacked until the next cycle; tracked in backlog"
+            }
+          ]
+        },
+        {
+          "group": "Reply and auto-reply",
+          "cases": [
+            {
+              "id": "TC-INB-010",
+              "description": "Send a manual outbound reply",
+              "procedure": "1. POST /api/inbox/conversations/{id}/messages with a text body.",
+              "expected": "HTTP 201; reply is delivered to the channel and shown as outbound.",
+              "precondition": "The conversation is open and assigned",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-011",
+              "description": "Auto-reply answers a question covered by the knowledge base",
+              "procedure": "1. Enable auto-reply via POST /api/inbox/conversations/{id}/ai.\n2. Send an inbound message matching a KB topic.",
+              "expected": "An accurate automatic reply is sent within the SLA window.",
+              "precondition": "Auto-reply is enabled; KB is deployed",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-012",
+              "description": "A manual reply by an agent pauses auto-reply",
+              "procedure": "1. Confirm auto-reply is enabled.\n2. Send a manual reply as an agent.\n3. Send a new inbound message immediately.",
+              "expected": "Auto-reply does not respond during the configured pause window (default 5 min).",
+              "precondition": "Auto-reply is enabled",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-013",
+              "description": "Auto-reply resumes automatically after the pause window elapses",
+              "procedure": "1. Trigger a pause by sending a manual reply.\n2. Advance the clock past the pause window.\n3. Send a new inbound message.",
+              "expected": "Auto-reply answers the new message without manual intervention.",
+              "precondition": "A pause was triggered; the sweep job is running",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-014",
+              "description": "Escalate a conversation disables auto-reply permanently",
+              "procedure": "1. POST /api/inbox/conversations/{id}/escalate.",
+              "expected": "Auto-reply is disabled and resume_at is null; conversation is flagged as escalated.",
+              "precondition": "Auto-reply is enabled",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Draft approval",
+          "cases": [
+            {
+              "id": "TC-INB-015",
+              "description": "Approve an AI draft and confirm it is sent",
+              "procedure": "1. POST /api/inbox/conversations/{id}/drafts/{messageId}/approve.",
+              "expected": "HTTP 200; draft is sent to the channel; status changes to delivered.",
+              "precondition": "A pending AI draft exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-016",
+              "description": "Reject an AI draft so it is not sent",
+              "procedure": "1. POST /api/inbox/conversations/{id}/drafts/{messageId}/reject.",
+              "expected": "HTTP 200; draft is discarded; no outbound message is delivered.",
+              "precondition": "A pending AI draft exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Conversation management",
+          "cases": [
+            {
+              "id": "TC-INB-017",
+              "description": "Assign a conversation to a different agent",
+              "procedure": "1. POST /api/inbox/conversations/{id}/assign with a target agentId.",
+              "expected": "HTTP 200; the new agent sees the conversation in their queue.",
+              "precondition": "A second agent account exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-018",
+              "description": "Resolve a conversation",
+              "procedure": "1. POST /api/inbox/conversations/{id}/resolve.",
+              "expected": "HTTP 200; status changes to resolved; removed from the open queue.",
+              "precondition": "The conversation is open",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-019",
+              "description": "Search conversations by keyword",
+              "procedure": "1. GET /api/inbox/search?q={keyword}.",
+              "expected": "Only conversations whose messages contain the keyword are returned.",
+              "precondition": "Several conversations with varied message content exist",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-INB-020",
+              "description": "Export conversation history to CSV",
+              "procedure": "1. GET /api/inbox/conversations/{id}/export.csv.",
+              "expected": "HTTP 200 with Content-Type text/csv; file contains all messages in order.",
+              "precondition": "The conversation has at least one message",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "Knowledge Base",
+      "name": "Knowledge Base",
+      "requirement": "KB module management, version creation, content deploy to vector store, rollback, accuracy measurement and auto-approving AI suggestions when accuracy does not decrease",
+      "precondition": "Qdrant vector store is reachable; a configured LLM provider is active",
+      "scenarios": [
+        {
+          "group": "Module management",
+          "cases": [
+            {
+              "id": "TC-KB-001",
+              "description": "Create a knowledge base module",
+              "procedure": "1. POST /api/kb/modules with a name and description.",
+              "expected": "HTTP 201; module is created with status draft.",
+              "precondition": "User holds kb:write permission",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-KB-002",
+              "description": "Archive a module removes it from retrieval",
+              "procedure": "1. POST /api/kb/modules/{id}/archive.\n2. Ask a question that was answered by that module.",
+              "expected": "The archived module is excluded from all retrieval results.",
+              "precondition": "Module is deployed and active",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Version and deployment",
+          "cases": [
+            {
+              "id": "TC-KB-003",
+              "description": "Create a new version with Markdown content",
+              "procedure": "1. POST /api/kb/modules/{id}/versions with contentMd.",
+              "expected": "HTTP 201; version is created in draft state; chunk count is zero until deployed.",
+              "precondition": "Module exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-KB-004",
+              "description": "Deploy a version embeds chunks into the vector store",
+              "procedure": "1. POST /api/kb/modules/{id}/versions/{versionId}/deploy.\n2. Wait for the deploy job to finish.",
+              "expected": "Chunk count is greater than zero; module status changes to deployed.",
+              "precondition": "A draft version with content exists; Qdrant is reachable",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-KB-005",
+              "description": "Rollback to the previous deployed version",
+              "procedure": "1. Deploy version 2.\n2. POST /api/kb/modules/{id}/versions/{v1id}/rollback.",
+              "expected": "Version 1 becomes active; retrieval uses version 1 chunks.",
+              "precondition": "At least two deployed versions exist",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Accuracy and suggestions",
+          "cases": [
+            {
+              "id": "TC-KB-006",
+              "description": "Run the accuracy test suite on a deployed version",
+              "procedure": "1. POST /api/kb/modules/{id}/versions/{versionId}/test.",
+              "expected": "Each test case is evaluated; an overall accuracy score is returned.",
+              "precondition": "Test cases exist; the version is deployed",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-KB-007",
+              "description": "Auto-approve a KB suggestion when accuracy does not decrease",
+              "procedure": "1. Create a suggestion with verdict=approve and accuracy_after >= accuracy_before.\n2. Trigger the auto-approve job.",
+              "expected": "Suggestion is automatically approved and applied without human action.",
+              "precondition": "Auto-approve rail is enabled; suggestion status is pending",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-KB-008",
+              "description": "Hold a KB suggestion for human review when accuracy decreases",
+              "procedure": "1. Create a suggestion with verdict=approve and accuracy_after < accuracy_before.\n2. Trigger the auto-approve job.",
+              "expected": "Suggestion is NOT auto-approved; stays in pending state waiting for human decision.",
+              "precondition": "Auto-approve rail is enabled; suggestion status is pending",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "Lead Management",
+      "name": "Lead Management",
+      "requirement": "Lead CRUD, pipeline stage transitions driven by score, manual stage override, scoring rule management, lead assignment and activity feed",
+      "precondition": "API is running; lead scoring rules are seeded via POST /api/lead-scoring-rules/seed-defaults",
+      "scenarios": [
+        {
+          "group": "Lead CRUD",
+          "cases": [
+            {
+              "id": "TC-LM-001",
+              "description": "Create a lead from a contact",
+              "procedure": "1. POST /api/leads with contactId, source and assignedTo.",
+              "expected": "HTTP 201; lead is created with stage=cold; initial score is 0.",
+              "precondition": "A contact exists; user holds leads:write permission",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LM-002",
+              "description": "List leads with pagination and stage filter",
+              "procedure": "1. GET /api/leads?stage=warm&page=1&pageSize=20.",
+              "expected": "HTTP 200; only leads with stage=warm are returned; pagination metadata is present.",
+              "precondition": "Multiple leads exist across different stages",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LM-003",
+              "description": "Assign a lead to another sales agent",
+              "procedure": "1. POST /api/leads/{id}/assign with the target agentId.",
+              "expected": "HTTP 200; assignedTo is updated; the new agent sees the lead in their queue.",
+              "precondition": "A second agent account exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Lead scoring and stage",
+          "cases": [
+            {
+              "id": "TC-LM-004",
+              "description": "Score increases when a purchase_intent activity is recorded",
+              "procedure": "1. POST /api/leads/{id}/activities with eventCode=purchase_intent.",
+              "expected": "Lead score increases by the purchase_intent delta (default +20); stage may advance to hot.",
+              "precondition": "Lead scoring rules are seeded; lead is cold",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LM-005",
+              "description": "Pipeline stage advances automatically when the score threshold is crossed",
+              "procedure": "1. Record activities until the score reaches 70.\n2. GET /api/leads/{id}.",
+              "expected": "stage=hot (score >= 70); previous warm stage is no longer shown.",
+              "precondition": "Lead scoring rules give enough delta per event",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LM-006",
+              "description": "Re-score a lead using the latest rules",
+              "procedure": "1. POST /api/leads/{id}/rescore.",
+              "expected": "HTTP 200; score is recalculated using the current rule set; stage is updated accordingly.",
+              "precondition": "Lead scoring rules have been modified since the lead was created",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LM-007",
+              "description": "A lost lead is reactivated when new inbound activity arrives",
+              "procedure": "1. Mark the lead as lost.\n2. POST /api/leads/{id}/activities with any inbound event.",
+              "expected": "Lead status changes from lost to active; LastActivityAt is updated.",
+              "precondition": "A lost lead exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Scoring rule management",
+          "cases": [
+            {
+              "id": "TC-LM-008",
+              "description": "Seed default scoring rules for a tenant",
+              "procedure": "1. POST /api/lead-scoring-rules/seed-defaults.",
+              "expected": "HTTP 200; default rules are created (asked_price, purchase_intent, fast_reply etc.); each has the correct default delta.",
+              "precondition": "No rules exist for the tenant yet",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-LM-009",
+              "description": "Create a platform-specific rule that overrides the platform-null rule",
+              "procedure": "1. POST /api/lead-scoring-rules with eventCode=asked_price and platform=facebook and delta=15.\n2. Record asked_price on a facebook conversation.",
+              "expected": "The facebook-specific rule (delta=15) is used instead of the platform-null rule (delta=9).",
+              "precondition": "A platform-null asked_price rule already exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "Content Pipeline",
+      "name": "Content Pipeline",
+      "requirement": "Brief management, AI content generation, review gate, human approval, scheduling and publishing lifecycle for social media posts",
+      "precondition": "A configured LLM provider is active; a deployed KB module exists for RAG context",
+      "scenarios": [
+        {
+          "group": "Brief and generation",
+          "cases": [
+            {
+              "id": "TC-CP-001",
+              "description": "Create a content brief",
+              "procedure": "1. POST /api/content/briefs with platform, topic and target audience.",
+              "expected": "HTTP 201; brief is created in draft state.",
+              "precondition": "User holds content:write permission",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-CP-002",
+              "description": "Generate a content item from a brief",
+              "procedure": "1. POST /api/content/items/generate with briefId.",
+              "expected": "HTTP 202; a background job is queued; polling shows the item transitions to draft with a non-empty body.",
+              "precondition": "A brief exists; LLM provider is configured",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-CP-003",
+              "description": "Generation is blocked when the body contains an absolute guarantee phrase",
+              "procedure": "1. Configure the LLM stub to return a body that contains an absolute-guarantee phrase.\n2. Trigger generation.",
+              "expected": "The content lint step fails; item status becomes needs_human with ErrorCode=lint_absolute_guarantee.",
+              "precondition": "ContentLint is enabled; LLM stub is available",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Review and approval",
+          "cases": [
+            {
+              "id": "TC-CP-004",
+              "description": "Agent review passes and item moves to approved",
+              "procedure": "1. Wait for the AI reviewer agent to process the draft item.",
+              "expected": "AgentReviewStatus=passed; item is eligible for human approval or auto-publish depending on policy.",
+              "precondition": "A reviewer agent is configured and bound to an LLM",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-CP-005",
+              "description": "Human approves an item that requires human review",
+              "procedure": "1. POST /api/content/items/{id}/approve.",
+              "expected": "HTTP 200; item status=approved; ApprovedAt and ApprovedBy are set.",
+              "precondition": "Item is in needs_human state with agent review passed",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-CP-006",
+              "description": "Human rejects an item with a reason",
+              "procedure": "1. POST /api/content/items/{id}/reject with a reason string.",
+              "expected": "HTTP 200; item status=rejected; RejectedReason is stored.",
+              "precondition": "Item is in draft or needs_human state",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Scheduling and publishing",
+          "cases": [
+            {
+              "id": "TC-CP-007",
+              "description": "Schedule an approved item for a future golden-hour slot",
+              "procedure": "1. POST /api/content/items/{id}/schedule with a future publishAt timestamp.",
+              "expected": "HTTP 200; item status=scheduled; publishAt is stored.",
+              "precondition": "Item is approved",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-CP-008",
+              "description": "Repurpose a published item for a different platform",
+              "procedure": "1. POST /api/content/items/{id}/repurpose with targetPlatform.",
+              "expected": "HTTP 202; a new draft item is created for the target platform; the original item is unchanged.",
+              "precondition": "The item has been published; a brief exists for the target platform",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "Agent Orchestration",
+      "name": "Agent Orchestration",
+      "requirement": "Create and run orchestration sessions, pause for manual intervention, resume after approval, manage recurring schedules and verify agent tool grants",
+      "precondition": "AgentService gRPC is running; at least one agent definition is bound to an LLM provider",
+      "scenarios": [
+        {
+          "group": "Session lifecycle",
+          "cases": [
+            {
+              "id": "TC-ORC-001",
+              "description": "Create and start an orchestration run",
+              "procedure": "1. POST /api/orchestration/runs with a planId.\n2. Poll GET /api/orchestration/runs/{id} until status=running.",
+              "expected": "Run transitions from queued to running; agent tasks begin executing.",
+              "precondition": "A plan exists; agents are bound to LLM providers",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-ORC-002",
+              "description": "Pause a running session for manual intervention",
+              "procedure": "1. POST /api/orchestration/runs/{id}/pause.",
+              "expected": "HTTP 200; run status=paused; no new tasks are started.",
+              "precondition": "A run is in running status",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-ORC-003",
+              "description": "Intervene by editing a task output then resume the run",
+              "procedure": "1. POST /api/orchestration/runs/{id}/intervene with an edited taskId and new output.\n2. POST /api/orchestration/runs/{id}/resume.",
+              "expected": "HTTP 200; the run resumes with the edited output; downstream tasks use the corrected data.",
+              "precondition": "Run is paused",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-ORC-004",
+              "description": "Cancel a running session",
+              "procedure": "1. POST /api/orchestration/runs/{id}/cancel.",
+              "expected": "HTTP 200; run status=cancelled; all pending tasks are marked skipped.",
+              "precondition": "A run is in running or paused status",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Schedules",
+          "cases": [
+            {
+              "id": "TC-ORC-005",
+              "description": "Create a recurring weekly schedule",
+              "procedure": "1. POST /api/orchestration/schedules with cadence=weekly and a valid timezone.",
+              "expected": "HTTP 201; schedule is created; nextRunAt is set to the correct window in the given timezone.",
+              "precondition": "A plan exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-ORC-006",
+              "description": "Pause and reactivate a schedule",
+              "procedure": "1. POST /api/orchestration/schedules/{id}/pause.\n2. POST /api/orchestration/schedules/{id}/activate.",
+              "expected": "Pause: status=paused, no new runs are triggered. Activate: status=active, nextRunAt is recalculated.",
+              "precondition": "An active schedule exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Agent tool grants",
+          "cases": [
+            {
+              "id": "TC-ORC-007",
+              "description": "An agent without tool grants cannot call restricted tools",
+              "procedure": "1. Create an agent definition with no tool grants.\n2. Start a run that requires a restricted tool.",
+              "expected": "The tool call is blocked; the agent task fails with a permission error; the run does not crash.",
+              "precondition": "A restricted tool exists in the tool registry",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            },
+            {
+              "id": "TC-ORC-008",
+              "description": "Grant a tool to an agent and confirm the tool call succeeds",
+              "procedure": "1. POST /api/orchestration/agents/{id}/grants with the tool name.\n2. Restart the run.",
+              "expected": "The tool call succeeds; the run completes the task.",
+              "precondition": "TC-ORC-007 has been completed",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-11",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Pending",
+                "date": null,
+                "tester": ""
+              },
+              "note": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

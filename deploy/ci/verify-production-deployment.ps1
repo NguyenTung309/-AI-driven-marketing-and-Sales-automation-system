@@ -66,6 +66,7 @@ function Assert-RegexPrecedes {
 }
 
 $workflow = Read-RequiredFile ".github/workflows/production.yml"
+$credentialScan = Read-RequiredFile "deploy/ci/scan-credentials.sh"
 $deployScript = Read-RequiredFile "deploy/production/deploy.sh"
 $backupScript = Read-RequiredFile "deploy/production/backup.sh"
 $migrateScript = Read-RequiredFile "deploy/production/migrate.sh"
@@ -82,8 +83,16 @@ $orchestrationWorker = Read-RequiredFile "src/agents/Clawbot.Agents.Core/Orchest
 $orchestratorGrpcService = Read-RequiredFile "src/agents/Clawbot.AgentService/Services/OrchestratorGrpcService.cs"
 $inboxNotesEndpoint = Read-RequiredFile "src/api/Clawbot.Api/Endpoints/InboxNotesEndpoints.cs"
 $inboxCollaborationRepair = Read-RequiredFile "deploy/repair_inbox_collaboration_tables.sql"
+$productionCompose = Read-RequiredFile "deploy/docker-compose.production.yml"
+$apiProgram = Read-RequiredFile "src/api/Clawbot.Api/Program.cs"
+$agentServiceProgram = Read-RequiredFile "src/agents/Clawbot.AgentService/Program.cs"
+$infrastructureModule = Read-RequiredFile "src/shared/Clawbot.Infrastructure/DependencyInjection.cs"
+$hangfireModule = Read-RequiredFile "src/shared/Clawbot.Infrastructure/Jobs/HangfireModule.cs"
+$tokenIssuer = Read-RequiredFile "src/api/Clawbot.Api/Auth/AgentServiceTokenIssuer.cs"
+$orchestratorInterceptor = Read-RequiredFile "src/api/Clawbot.Api/Auth/OrchestratorServiceAuthInterceptor.cs"
+$callerAuthorizer = Read-RequiredFile "src/agents/Clawbot.AgentService/Services/OrchestratorCallerAuthorizer.cs"
 
-Assert-Match $workflow '(?m)^permissions:\s*\r?\n\s+contents: read$' "workflow defaults must restrict token permissions"
+Assert-Match $workflow '(?m)^permissions:\s*\r?\n\s+contents: read\r?$' "workflow defaults must restrict token permissions"
 Assert-Match $workflow 'id: release_stage' "workflow must create an isolated release stage"
 Assert-Match $workflow '\.clawbot-releases' "workflow must not stage deployment assets in shared /tmp"
 Assert-Match $workflow 'scp_args=.*-P "\$SSH_PORT"' "scp must use uppercase -P for the SSH port"
@@ -93,9 +102,12 @@ Assert-NotMatch $workflow '/tmp/\*\.sh|/tmp/repair_\*\.sql|/tmp/migrations|/tmp/
 Assert-Match $workflow 'verify-production-deployment\.ps1' "production validation must execute its deployment contract test"
 Assert-Match $workflow 'COMPOSE_ENV is required' "workflow must reject an empty Compose environment"
 Assert-Match $workflow 'RUNTIME_ENV is required' "workflow must reject an empty runtime environment"
-Assert-Match $workflow 'git grep -I -qE' "credential scan must suppress matching source lines and ignore binary blobs"
-Assert-Match $workflow "'\:\(exclude\)docs/\*\*'" "credential scan must scan tracked source and deployment inputs rather than a narrow file allow-list"
-Assert-NotMatch $workflow 'printf.*\$matches' "credential scan must not print credential-bearing source lines"
+Assert-Match $workflow 'sh deploy/ci/scan-credentials\.sh' "production validation must run the shared credential scan"
+Assert-Match $credentialScan 'git grep -I ' "credential scan must ignore binary blobs"
+Assert-Match $credentialScan "':\(exclude\)docs/\*\*'" "credential scan must scan tracked source and deployment inputs rather than a narrow file allow-list"
+Assert-Match $credentialScan "':\(exclude\)deploy/ci/scan-credentials\.sh'" "credential scan must exclude only its own pattern definition, leaving the calling workflow in scope"
+Assert-Match $credentialScan 'cut -d: -f1,2' "credential scan must report only file and line, never the matching content"
+Assert-NotMatch $credentialScan 'printf[^\r\n]*\$\(scan' "credential scan must not print raw matching source lines"
 Assert-Match $installerScript 'install -d -m 0700 "\$release_root"' "release installer must create protected versioned storage"
 Assert-Match $installerScript 'candidate-production\.env' "release installer must synthesize candidate-only runtime and settings paths"
 Assert-Match $installerScript 'mv -Tf "\$release_root/current\.new" "\$current_link"' "release installer must atomically promote the release pointer"
@@ -133,10 +145,10 @@ Assert-Match $inboxCollaborationRepair 'FOREIGN KEY \(tenant_id, conversation_id
 Assert-Match $deployScript 'validate_environment_file' "deployment must reject duplicate environment keys"
 Assert-Match $deployScript 'preflight_http_port' "deployment must validate the public port before changing state"
 Assert-Match $deployScript 'backup_existing_database' "deployment must back up an existing database before infrastructure recreation"
-Assert-RegexPrecedes $deployScript '(?m)^validate_environment_file "\$compose_env"$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" pull$' "environment validation must happen before pulling images"
-Assert-RegexPrecedes $deployScript '(?m)^preflight_http_port$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" pull$' "port validation must happen before pulling images"
-Assert-RegexPrecedes $deployScript '(?m)^backup_existing_database$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" up -d sqlserver redis rabbitmq qdrant searxng minio --wait$' "database backup must precede SQL Server reconciliation"
-Assert-RegexPrecedes $deployScript '(?m)^\s*docker compose --env-file "\$compose_env" -f "\$compose_file" stop \$previously_running_services$' '(?m)^backup_existing_database$' "database backup must run after application quiescence"
+Assert-RegexPrecedes $deployScript '(?m)^validate_environment_file "\$compose_env"\r?$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" pull\r?$' "environment validation must happen before pulling images"
+Assert-RegexPrecedes $deployScript '(?m)^preflight_http_port\r?$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" pull\r?$' "port validation must happen before pulling images"
+Assert-RegexPrecedes $deployScript '(?m)^backup_existing_database\r?$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" up -d sqlserver redis rabbitmq qdrant searxng minio --wait\r?$' "database backup must precede SQL Server reconciliation"
+Assert-RegexPrecedes $deployScript '(?m)^\s*docker compose --env-file "\$compose_env" -f "\$compose_file" stop \$previously_running_services\r?$' '(?m)^backup_existing_database\r?$' "database backup must run after application quiescence"
 Assert-Precedes $migrateScript 'repair_tenant_runtime_columns.sql' 'verify_content_render_tasks.sql' "repairs must run before verification"
 
 Assert-Match $deployScript 'case "\$mssql_pid" in[\s\S]*Standard\|Enterprise' "deployment must restrict SQL Server editions to Standard or Enterprise"
@@ -192,5 +204,52 @@ Assert-RegexPrecedes $rollbackScript 'CLAWBOT_PUBLIC_BASE_URL=.*smoke\.sh' 'ln -
 Assert-Match $rollbackScript 'A release-pointer promotion is incomplete' "rollback must reject partial release-pointer promotion"
 Assert-Match $rollbackScript '\.schema-recovery-required' "rollback must reject an application rollback while schema recovery is required"
 Assert-NotMatch $rollbackScript 'docker compose --env-file "\$PREVIOUS_RELEASE_ENV_FILE" -f "\$COMPOSE_FILE" (config|pull|up)' "rollback must not use the full previous environment directly"
+
+# An unpromoted candidate must not act on its own: it serves HTTP for the smoke checks while every
+# queue consumer, schedule, job server, and provider poller stays off until it is activated.
+Assert-Match $productionCompose '(?ms)^  agentservice:.*?Clawbot__StartupMode: \$\{CLAWBOT_STARTUP_MODE:-active\}' "AgentService must receive the deployment startup mode"
+Assert-Match $productionCompose '(?ms)^  api:.*?Clawbot__StartupMode: \$\{CLAWBOT_STARTUP_MODE:-active\}' "API must receive the deployment startup mode"
+Assert-Match $infrastructureModule 'if \(!Hosting\.ServiceStartupMode\.IsPassive\(cfg\)\)\s*\r?\n\s*\{\s*\r?\n\s*mq\.ConfigureEndpoints\(ctx\);' "a passive release must declare no message receive endpoint"
+Assert-Match $hangfireModule 'if \(!Hosting\.ServiceStartupMode\.IsPassive\(cfg\)\)' "a passive release must not start a job processing server"
+Assert-Match $apiProgram 'ServiceStartupMode\.IsPassive\(builder\.Configuration\)\)\s*\r?\n\s*\{\s*\r?\n\s*HangfireModule\.ScheduleClawbotJobs' "a passive release must not rewrite the recurring schedule"
+Assert-Match $agentServiceProgram 'var startupIsPassive = Clawbot\.Infrastructure\.Hosting\.ServiceStartupMode\.IsPassive\(builder\.Configuration\)' "AgentService must resolve the deployment startup mode"
+Assert-NotMatch $agentServiceProgram '(?m)^builder\.Services\.AddHostedService<' "AgentService background workers must be gated on the startup mode"
+
+Assert-Match $deployScript 'CLAWBOT_STARTUP_MODE=passive docker compose --env-file "\$compose_env" -f "\$compose_file" up -d --wait --no-deps agentservice' "deployment must start the candidate AgentService passively"
+Assert-Match $deployScript 'CLAWBOT_STARTUP_MODE=passive docker compose --env-file "\$compose_env" -f "\$compose_file" up -d --wait --no-deps api' "deployment must start the candidate API passively"
+Assert-RegexPrecedes $deployScript '(?m)^CLAWBOT_STARTUP_MODE=passive docker compose' '(?m)^run_smoke\r?$' "the candidate must be started passively before it is smoke-tested"
+Assert-RegexPrecedes $deployScript '(?m)^run_smoke\r?$' '(?m)^docker compose --env-file "\$compose_env" -f "\$compose_file" up -d --wait --no-deps agentservice\r?$' "background processing must be activated only after the candidate passes its smoke checks"
+Assert-Match $deployScript '(?ms)^docker compose --env-file "\$compose_env" -f "\$compose_file" up -d --wait --no-deps api\r?$.*?^run_smoke\r?$' "the activated candidate must be smoke-tested again before promotion"
+
+Assert-Match $rollbackScript 'CLAWBOT_STARTUP_MODE=passive docker compose --env-file "\$rollback_compose_environment" -f "\$COMPOSE_FILE" up -d --wait --no-deps api' "rollback must start the restored API passively"
+Assert-RegexPrecedes $rollbackScript '(?m)^CLAWBOT_STARTUP_MODE=passive docker compose' 'CLAWBOT_PUBLIC_BASE_URL=.*smoke\.sh' "the restored release must be started passively before it is smoke-tested"
+Assert-RegexPrecedes $rollbackScript 'CLAWBOT_PUBLIC_BASE_URL=.*smoke\.sh' '(?m)^docker compose --env-file "\$rollback_compose_environment" -f "\$COMPOSE_FILE" up -d --wait --no-deps agentservice\r?$' "the restored release must pass its smoke checks before background processing is activated"
+
+# HIGH #6 — every AgentService gRPC endpoint must be gated by the orchestrator-service policy.
+# Only the API (via OrchestratorServiceAuthInterceptor) issues tokens that satisfy this policy;
+# an unauthenticated caller or one with an arbitrary JWT cannot reach any gRPC service.
+foreach ($svc in @(
+    'OrchestratorGrpcService',
+    'ChatAgentGrpcService',
+    'ContentAgentGrpcService',
+    'LeadAgentGrpcService',
+    'SaleAssistAgentGrpcService',
+    'DocsAgentGrpcService',
+    'ReportAgentGrpcService',
+    'ResearchAgentGrpcService'
+)) {
+    Assert-Match $agentServiceProgram "MapGrpcService<$svc>\(\)\.RequireAuthorization\(`"orchestrator-service`"\)" "gRPC service $svc must require orchestrator-service authorization"
+}
+
+# HIGH #8 — token issuer must emit a role_id claim so the single role of the calling session
+# travels into AgentService. The interceptor must read and forward that claim. The caller
+# authorizer must resolve permissions from the JWT role_id rather than querying the union of
+# every role the account holds (which would grant wider authority than the API itself allows).
+Assert-Match $tokenIssuer 'new\s*\(\s*"role_id",\s*roleId\.ToString' "AgentServiceTokenIssuer must emit role_id claim bound to the caller's session role"
+Assert-Match $orchestratorInterceptor '"role_id"' "OrchestratorServiceAuthInterceptor must read role_id from the caller's JWT"
+Assert-Match $orchestratorInterceptor 'Issue\(\s*userId,\s*tenantId,\s*roleId\s*\)' "OrchestratorServiceAuthInterceptor must forward the session roleId to the token issuer"
+Assert-Match $callerAuthorizer 'FindFirst\(\s*"role_id"\s*\)' "OrchestratorCallerAuthorizer must read role_id from the JWT claim"
+Assert-Match $callerAuthorizer 'permissionResolver\s*\.GetPermissionsAsync\(\s*callerRoleId' "OrchestratorCallerAuthorizer.AuthorizeAsync must resolve permissions for the single caller role, not the account's role union"
+Assert-Match $callerAuthorizer 'orchestrator_caller_role_missing' "OrchestratorCallerAuthorizer must fail closed when the caller's JWT carries no role_id"
 
 Write-Host "Production deployment static contract passed."

@@ -11,6 +11,13 @@ public sealed class AgentServiceAuthenticationOptions
     public const string ClientId = "clawbot-api";
     public const int MinimumSigningKeyBytes = 32;
 
+    // Danh tính cố định của token "service" mà background job phát ra. 6 service agent còn lại
+    // (report/content/lead/sale-assist/docs/research) không đọc claim nào — tenant/user đi theo
+    // field của message — nên danh tính service không nới cửa quyền nào; nó chỉ chứng minh
+    // cuộc gọi xuất phát từ chính API host. Đường orchestrator vẫn bắt danh tính phiên thật.
+    public static readonly Guid ServiceUserId = new("11111111-0000-0000-0000-000000000002");
+    public static readonly Guid ServiceRoleId = new("11111111-0000-0000-0000-000000000003");
+
     public string SigningKey { get; set; } = string.Empty;
     public int TokenLifetimeMinutes { get; set; } = 2;
 

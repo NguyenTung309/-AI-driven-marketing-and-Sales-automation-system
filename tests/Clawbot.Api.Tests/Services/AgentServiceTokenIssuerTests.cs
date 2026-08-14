@@ -13,9 +13,10 @@ public sealed class AgentServiceTokenIssuerTests
     {
         var userId = Guid.NewGuid();
         var tenantId = Guid.NewGuid();
+        var roleId = Guid.NewGuid();
         var issuer = CreateIssuer();
 
-        var token = new JwtSecurityTokenHandler().ReadJwtToken(issuer.Issue(userId, tenantId));
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(issuer.Issue(userId, tenantId, roleId));
 
         token.Issuer.Should().Be(AgentServiceAuthenticationOptions.Issuer);
         token.Audiences.Should().ContainSingle(AgentServiceAuthenticationOptions.Audience);
@@ -23,10 +24,22 @@ public sealed class AgentServiceTokenIssuerTests
             && claim.Value == userId.ToString("D"));
         token.Claims.Should().Contain(claim => claim.Type == "tenant_id"
             && claim.Value == tenantId.ToString("D"));
+        // role_id travels with the call so the agent service enforces the exact role the API
+        // session was issued for, rather than the union of every role the account holds.
+        token.Claims.Should().Contain(claim => claim.Type == "role_id"
+            && claim.Value == roleId.ToString("D"));
         token.Claims.Should().Contain(claim => claim.Type == "client_id"
             && claim.Value == AgentServiceAuthenticationOptions.ClientId);
         token.Claims.Should().ContainSingle(claim => claim.Type == JwtRegisteredClaimNames.Jti);
         token.ValidTo.Should().BeCloseTo(DateTime.UtcNow.AddMinutes(2), TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public void Issue_RejectsEmptyRoleId()
+    {
+        var issuer = CreateIssuer();
+        var action = () => issuer.Issue(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty);
+        action.Should().Throw<ArgumentException>();
     }
 
     [Fact]
@@ -49,7 +62,7 @@ public sealed class AgentServiceTokenIssuerTests
         var issuer = new AgentServiceTokenIssuer(Options.Create(
             new AgentServiceAuthenticationOptions { SigningKey = signingKey }));
 
-        var action = () => issuer.Issue(Guid.NewGuid(), Guid.NewGuid());
+        var action = () => issuer.Issue(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
 
         action.Should().Throw<InvalidOperationException>()
             .WithMessage("agent_service_auth_signing_key_invalid");
@@ -75,7 +88,7 @@ public sealed class AgentServiceTokenIssuerTests
         var issuer = new AgentServiceTokenIssuer(Options.Create(
             new AgentServiceAuthenticationOptions { SigningKey = " " }));
 
-        var action = () => issuer.Issue(Guid.NewGuid(), Guid.NewGuid());
+        var action = () => issuer.Issue(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
 
         action.Should().Throw<InvalidOperationException>()
             .WithMessage("agent_service_auth_signing_key_required");

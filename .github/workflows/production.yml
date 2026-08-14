@@ -130,19 +130,7 @@ jobs:
 
       - name: Scan tracked files for credential material
         shell: bash
-        run: |
-          set +e
-          git grep -I -qE 'aigw_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|dev-only-jwt-signing-key|Password=[^;[:space:]]{8,}|Base64Key": "[A-Za-z0-9+/=]{40,}"' -- . ':(exclude)deploy/.env.example' ':(exclude)deploy/.env.production.example' ':(exclude)deploy/docker-compose.yml' ':(exclude)run-all.bat' ':(exclude)docs/**'
-          status=$?
-          set -e
-          if [ "$status" -eq 0 ]; then
-            printf '%s\n' 'Tracked credential-looking material must be removed before production publishing.' >&2
-            exit 1
-          fi
-          if [ "$status" -ne 1 ]; then
-            printf '%s\n' 'Credential scan failed unexpectedly.' >&2
-            exit "$status"
-          fi
+        run: sh deploy/ci/scan-credentials.sh
 
       - name: Build application images without publishing
         run: |
@@ -169,6 +157,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Driver docker mặc định không ký được attestation; provenance/sbom ở các bước
+      # build bên dưới đòi builder docker-container.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Login to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
