@@ -67,6 +67,7 @@ public static class DependencyInjection
                 sp.GetRequiredService<ContentWorkflowWriterSessionInterceptor>());
         });
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
+        services.AddScoped<Jobs.RecurringJobExecutionService>();
 
         // Identity and Auth
         services.AddIdentityCore<AppUser>(opt =>
@@ -76,11 +77,17 @@ public static class DependencyInjection
                 // SPEC-11: lockout policy from AuthPolicy (code is source of truth).
                 opt.Lockout.MaxFailedAccessAttempts = AuthPolicy.MaxFailedAccessAttempts;
                 opt.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(AuthPolicy.LockoutMinutes);
+                // Fix TOTP time drift: sử dụng custom provider với tolerance ±2 phút
+                // thay vì ±30 giây mặc định để xử lý lệch đồng hồ client/server.
+                opt.Tokens.ProviderMap[TokenOptions.DefaultAuthenticatorProvider] =
+                    new TokenProviderDescriptor(typeof(TolerantTotpTokenProvider<AppUser>));
             })
             .AddRoles<AppRole>()
             .AddEntityFrameworkStores<AppDbContext>()
             .AddSignInManager()
             .AddDefaultTokenProviders();
+        // Đăng ký custom TOTP provider vào DI để Identity có thể resolve.
+        services.AddScoped<TolerantTotpTokenProvider<AppUser>>();
         services.AddAuthentication();
 
         // Chuỗi rỗng không phải null nên `??` không đỡ được: appsettings đã xoá secret để lại ""
@@ -136,10 +143,17 @@ public static class DependencyInjection
         // AI auto-reply: consumer goi ChatAgent gRPC (AgentService) khi hoi thoai bat co "AI dang chat".
         // Dang ky o shared DI vi consumer chay o ca API lan AgentService host (AgentService tu goi chinh no).
         var chatAgentUrl = cfg["AgentService:Url"] ?? "http://localhost:15875";
+        // ChatAgent nằm sau policy "orchestrator-service" như 7 service kia, nhưng consumer/job gọi nó
+        // không có phiên HTTP nên phải gắn interceptor phát token — thiếu là auto-reply chết 401.
+        // Issuer + interceptor đăng ký ở đây (shared) để cả API và AgentService cùng dùng một nguồn token.
+        services.Configure<AgentServiceAuthenticationOptions>(
+            cfg.GetSection(AgentServiceAuthenticationOptions.SectionName));
+        services.AddSingleton<AgentServiceTokenIssuer>();
+        services.AddTransient<AgentServiceClientAuthInterceptor>();
         services.AddGrpcClient<Clawbot.Agents.Contracts.Chat.ChatAgent.ChatAgentClient>(o =>
         {
             o.Address = new Uri(chatAgentUrl);
-        });
+        }).AddInterceptor<AgentServiceClientAuthInterceptor>();
         services.AddScoped<Messaging.IChatAutoReplyGateway, Messaging.GrpcChatAutoReplyGateway>();
         // Trả lời tin khách treo khi AI (vừa) bật lại — dùng chung cho toggle tay + sweep AiAutoReplyResumeJob
         // + debouncer gom tin (consumer chỉ đặt đồng hồ, hết cửa sổ resumer trả lời cả khối một lần).

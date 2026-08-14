@@ -108,6 +108,30 @@ function formatDateTime(value: string | null): string {
   }).format(date);
 }
 
+function exportLeadCsv(leads: readonly LeadListItem[]) {
+  const rows = [
+    ["id", "contact_id", "owner_user_id", "score", "stage", "source_platform", "last_activity_at", "created_at"],
+    ...leads.map((lead) => [
+      lead.id,
+      lead.contactId ?? "",
+      lead.ownerUserId ?? "",
+      String(lead.score),
+      lead.stage,
+      lead.sourcePlatform ?? "",
+      lead.lastActivityAt ?? "",
+      lead.createdAt,
+    ]),
+  ];
+  const csv = rows.map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "leads.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function formatRelative(value: string | null): string {
   if (!value) return "Chưa có hoạt động";
   const at = new Date(value).getTime();
@@ -141,30 +165,6 @@ function activityLabel(type: string): string {
   if (value.includes("chat") || value.includes("reply")) return "Tin nhắn";
   if (value.includes("price")) return "Xem bảng giá";
   return type || "Hoạt động";
-}
-
-function exportLeadCsv(leads: readonly LeadListItem[]) {
-  const rows = [
-    ["id", "contact_id", "owner_user_id", "score", "stage", "source_platform", "last_activity_at", "created_at"],
-    ...leads.map((lead) => [
-      lead.id,
-      lead.contactId ?? "",
-      lead.ownerUserId ?? "",
-      String(lead.score),
-      lead.stage,
-      lead.sourcePlatform ?? "",
-      lead.lastActivityAt ?? "",
-      lead.createdAt,
-    ]),
-  ];
-  const csv = rows.map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "leads.csv";
-  link.click();
-  URL.revokeObjectURL(url);
 }
 
 function LeadScore({ score }: { readonly score: number }) {

@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { isAxiosError } from "axios";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
 import {
@@ -16,7 +17,6 @@ import {
   createDocumentTemplate,
   deleteDocumentTemplate,
   generateDocument,
-  generateDocumentKit,
   listDocumentTemplates,
   listGeneratedDocuments,
   updateDocumentTemplate,
@@ -32,6 +32,7 @@ import { TemplateFieldsEditor } from "./TemplateFieldsEditor";
 import {
   applyVars,
   cleanVars,
+  formatVarsForDocument,
   formFieldsFor,
   missingRequired,
   sampleVars,
@@ -77,7 +78,56 @@ function normalize(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
 }
 
+const CONTACT_GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EMAIL_PATTERN = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/;
+const MAX_EMAIL_LENGTH = 320;
+const MAX_EMAIL_LOCAL_PART_LENGTH = 64;
+const MAX_EMAIL_DOMAIN_LENGTH = 255;
+
+type DocumentRecipientTarget =
+  | { readonly kind: "empty" }
+  | { readonly kind: "contact"; readonly contactId: string }
+  | { readonly kind: "email"; readonly recipientEmail: string }
+  | { readonly kind: "invalid" };
+
+/**
+ * Ô người nhận chấp nhận cả mã khách hàng và email. Phân loại trước khi dựng payload để email không
+ * bị gửi nhầm vào `contactId` (Guid), đồng thời không lưu email khi người dùng chỉ tạo tài liệu.
+ */
+function parseDocumentRecipientTarget(value: string): DocumentRecipientTarget {
+  const trimmed = value.trim();
+  if (!trimmed) return { kind: "empty" };
+  if (CONTACT_GUID_PATTERN.test(trimmed)) return { kind: "contact", contactId: trimmed };
+
+  const separatorIndex = trimmed.indexOf("@");
+  const localPartLength = separatorIndex;
+  const domainLength = separatorIndex < 0 ? 0 : trimmed.length - separatorIndex - 1;
+  if (
+    trimmed.length <= MAX_EMAIL_LENGTH &&
+    localPartLength > 0 &&
+    localPartLength <= MAX_EMAIL_LOCAL_PART_LENGTH &&
+    domainLength > 0 &&
+    domainLength <= MAX_EMAIL_DOMAIN_LENGTH &&
+    EMAIL_PATTERN.test(trimmed)
+  ) {
+    return { kind: "email", recipientEmail: trimmed };
+  }
+
+  return { kind: "invalid" };
+}
+
+function responseError(error: unknown): string | null {
+  if (!isAxiosError(error)) return null;
+  const data: unknown = error.response?.data;
+  if (typeof data !== "object" || data === null || !("error" in data)) return null;
+  return typeof data.error === "string" ? data.error : null;
+}
+
 function errorMessage(error: unknown): string {
+  // Chỉ dịch đúng conflict mã mẫu; các 409 khác phải giữ thông báo riêng của API.
+  if (isAxiosError(error) && error.response?.status === 409 && responseError(error) === "code already exists") {
+    return "Mã mẫu này đã tồn tại. Chọn mẫu đó trong Kho mẫu để cập nhật, hoặc đổi sang mã mẫu khác.";
+  }
   return toUserFriendlyError(error, "Không xử lý được thao tác tài liệu. Vui lòng thử lại.");
 }
 
@@ -331,7 +381,6 @@ function GeneratePanel({
   contactId,
   sentVia,
   generating,
-  generatingKit,
   error,
   onTemplateCode,
   onValue,
@@ -339,7 +388,6 @@ function GeneratePanel({
   onContactId,
   onSentVia,
   onGenerate,
-  onGenerateKit,
 }: {
   readonly templates: readonly DocumentTemplate[];
   readonly templateCode: string;
@@ -349,7 +397,6 @@ function GeneratePanel({
   readonly contactId: string;
   readonly sentVia: string;
   readonly generating: boolean;
-  readonly generatingKit: boolean;
   readonly error: unknown;
   readonly onTemplateCode: (value: string) => void;
   readonly onValue: (key: string, value: string) => void;
@@ -357,9 +404,27 @@ function GeneratePanel({
   readonly onContactId: (value: string) => void;
   readonly onSentVia: (value: string) => void;
   readonly onGenerate: () => void;
-  readonly onGenerateKit: () => void;
 }) {
-  const busy = generating || generatingKit;
+  const busy = generating;
+  const recipientTarget = parseDocumentRecipientTarget(contactId);
+  const recipientHint = (() => {
+    if (recipientTarget.kind === "invalid") {
+      return "Chưa nhận ra: nhập một email hợp lệ hoặc mã khách hàng dạng UUID.";
+    }
+    if (sentVia === "email") {
+      if (recipientTarget.kind === "empty") {
+        return "Cần nhập email người nhận hoặc mã khách hàng để gửi qua email.";
+      }
+      if (recipientTarget.kind === "email") {
+        return "Tài liệu sẽ được gửi thẳng tới email này.";
+      }
+      return "Tài liệu sẽ được gửi tới email trong hồ sơ khách hàng.";
+    }
+    if (recipientTarget.kind === "email") {
+      return "Email này chỉ được dùng khi chọn gửi qua Email.";
+    }
+    return "Có thể nhập email khách chưa có hồ sơ CRM, hoặc mã khách hàng dạng UUID.";
+  })();
   return (
     <Card>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
@@ -423,18 +488,15 @@ function GeneratePanel({
           className="w-full rounded border border-outline bg-white px-3 py-2 font-mono text-mono-status outline-none focus:border-primary"
           value={contactId}
           onChange={(event) => onContactId(event.target.value)}
-          placeholder="Dán mã khách hàng để tự điền tên, điện thoại, email"
+          placeholder="Email khách, hoặc mã khách hàng để tự điền tên/điện thoại"
         />
+        <span className="mt-1 block text-label-sm text-on-surface-variant">{recipientHint}</span>
       </label>
 
       <div className="mt-4 flex flex-wrap gap-2">
         <Button type="button" onClick={onGenerate} disabled={busy || !templateCode}>
           <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{sentVia === "email" ? "outgoing_mail" : "picture_as_pdf"}</span>
           {generating ? "Đang xử lý..." : sentVia === "email" ? "Tạo và gửi email" : "Tạo tài liệu"}
-        </Button>
-        <Button type="button" variant="outline" onClick={onGenerateKit} disabled={busy} data-testid="Generate kit">
-          <span aria-hidden="true" className="material-symbols-outlined text-[18px]">inventory_2</span>
-          {generatingKit ? "Đang tạo bộ tài liệu..." : "Tạo bộ tài liệu"}
         </Button>
       </div>
     </Card>
@@ -663,7 +725,9 @@ export default function DocumentsPage() {
       ? draft.body
       : generateTemplate.templateHtml
     : draft.body;
-  const previewBody = applyVars(previewSource, values);
+  // Ngày giữ dạng ISO trong state cho ô <input type="date">, chỉ đổi sang dd/MM/yyyy khi đưa vào tài liệu.
+  const documentVars = useMemo(() => formatVarsForDocument(formFields, values), [formFields, values]);
+  const previewBody = applyVars(previewSource, documentVars);
 
   // Đổi mẫu thì nạp sẵn giá trị mẫu để người dùng thấy kết quả ngay, không phải nhập từ số 0.
   // Làm ngay trong handler chọn mẫu (không dùng effect) để tránh ghi đè khi người dùng đang nhập.
@@ -713,29 +777,22 @@ export default function DocumentsPage() {
   // Sinh tài liệu chạy ngầm: theo dõi job để tự làm mới danh sách khi xong.
   const [generateJobId, setGenerateJobId] = useState<string | null>(null);
   const generateMutation = useMutation({
-    mutationFn: () =>
-      generateDocument({
+    mutationFn: () => {
+      const recipientTarget = parseDocumentRecipientTarget(contactId);
+      return generateDocument({
         templateCode: generateTemplateCode,
-        contactId: contactId.trim() || null,
-        vars: cleanVars(values),
+        contactId: recipientTarget.kind === "contact" ? recipientTarget.contactId : null,
+        recipientEmail:
+          sentVia === "email" && recipientTarget.kind === "email"
+            ? recipientTarget.recipientEmail
+            : null,
+        vars: cleanVars(documentVars),
         sentVia: sentVia || null,
-      }),
+      });
+    },
     onSuccess: (job) => {
       setGenerateJobId(job.jobId);
       setNotice({ tone: "info", message: "Đang tạo tài liệu ở chế độ nền. Xong sẽ có thông báo." });
-    },
-  });
-
-  const generateKitMutation = useMutation({
-    mutationFn: () =>
-      generateDocumentKit({
-        contactId: contactId.trim() || null,
-        vars: cleanVars(values),
-        sentVia: sentVia || null,
-      }),
-    onSuccess: (job) => {
-      setGenerateJobId(job.jobId);
-      setNotice({ tone: "info", message: "Đang tạo bộ tài liệu ở chế độ nền. Xong sẽ có thông báo." });
     },
   });
 
@@ -750,12 +807,26 @@ export default function DocumentsPage() {
     }
   });
 
-  // Chặn ngay ở form: thiếu trường bắt buộc thì không gọi API để khỏi chờ job rồi mới báo lỗi.
+  // Chặn ngay ở form để không phải chờ job rồi mới nhận lỗi có thể phát hiện tại client.
   function startGenerate() {
     if (!generateTemplateCode) {
       setNotice({ tone: "warning", message: "Chọn mẫu tài liệu trước khi tạo." });
       return;
     }
+
+    const recipientTarget = parseDocumentRecipientTarget(contactId);
+    if (recipientTarget.kind === "invalid") {
+      setNotice({ tone: "warning", message: "Nhập một email hợp lệ hoặc mã khách hàng dạng UUID." });
+      return;
+    }
+    if (sentVia === "email" && recipientTarget.kind === "empty") {
+      setNotice({
+        tone: "warning",
+        message: "Cần nhập email người nhận hoặc mã khách hàng để gửi qua email.",
+      });
+      return;
+    }
+
     const missing = missingRequired(formFields, values);
     if (missing.length) {
       setMissingKeys(missing.map((field) => field.key));
@@ -780,9 +851,14 @@ export default function DocumentsPage() {
   }
 
   function pickPreset(preset: TemplatePreset) {
-    setSelectedTemplateId(null);
-    setDraft(draftFromPreset(preset));
-    setGenerateTemplateCode("");
+    // Mẫu dựng sẵn dùng mã cố định (vd BAO-GIA-KHOA-HOC). Lần thứ hai chọn cùng preset, mã đó đã
+    // nằm trong kho -> tạo mới sẽ dính 409. Gắn luôn vào mẫu sẵn có để nút "Lưu" thành cập nhật.
+    const existing = preset.code
+      ? templates.find((item) => normalize(item.code) === normalize(preset.code))
+      : undefined;
+    setSelectedTemplateId(existing?.id ?? null);
+    setDraft({ ...draftFromPreset(preset), id: existing?.id ?? null });
+    setGenerateTemplateCode(existing?.code ?? "");
     setValues(sampleVars(preset.fields));
     setPreviewMode("fill");
   }
@@ -876,8 +952,7 @@ export default function DocumentsPage() {
               contactId={contactId}
               sentVia={sentVia}
               generating={generateMutation.isPending}
-              generatingKit={generateKitMutation.isPending}
-              error={generateMutation.error ?? generateKitMutation.error}
+              error={generateMutation.error}
               onTemplateCode={changeTemplateCode}
               onValue={(key, value) => {
                 setValues((previous) => ({ ...previous, [key]: value }));
@@ -887,7 +962,6 @@ export default function DocumentsPage() {
               onContactId={setContactId}
               onSentVia={setSentVia}
               onGenerate={startGenerate}
-              onGenerateKit={() => generateKitMutation.mutate()}
             />
           </div>
 

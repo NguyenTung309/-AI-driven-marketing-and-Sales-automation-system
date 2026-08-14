@@ -42,10 +42,104 @@ public static class InboxEndpoints
         // Review-gate P3: duyệt/từ chối AI draft đang hold (messages.status=pending_approval)
         grp.MapPost("/conversations/{id:guid}/drafts/{messageId:guid}/approve", ApproveDraftAsync).RequirePermission("conversations:write");
         grp.MapPost("/conversations/{id:guid}/drafts/{messageId:guid}/reject", RejectDraftAsync).RequirePermission("conversations:write");
+        grp.MapGet("/conversations/counts", CountsAsync).RequirePermission("conversations:read");
         grp.MapGet("/channels", ListChannelsAsync).RequirePermission("conversations:read");
         grp.MapGet("/daily-summary", DailySummaryAsync).RequirePermission("conversations:read");
 
         return app;
+    }
+
+    // Đếm theo trạng thái trên TOÀN bộ tập khớp bộ lọc. Frontend không tự đếm được: danh sách chạy
+    // keyset phân trang (40 dòng/lần) nên đếm trên client chỉ ra số của trang đã tải.
+    private static async Task<IResult> CountsAsync(
+        AppDbContext db,
+        ITenantAccessor tenants,
+        ClaimsPrincipal user,
+        IUserInboxResolver resolver,
+        [FromQuery] Guid? inboxId,
+        [FromQuery] string? platform,
+        [FromQuery] string? q,
+        CancellationToken ct = default)
+    {
+        _ = tenants.Require();
+
+        var inboxIds = await resolver.GetInboxIdsAsync(user, ct);
+        var query = BuildVisibleConversations(db, inboxIds, inboxId, platform, q);
+
+        var counts = await QueryConversationCountsAsync(
+                query,
+                CurrentUserId(user),
+                ct)
+            .ConfigureAwait(false);
+
+        return Results.Ok(counts);
+    }
+
+    private static Guid? CurrentUserId(ClaimsPrincipal user) =>
+        Guid.TryParse(user.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) && id != Guid.Empty
+            ? id
+            : null;
+
+    internal sealed record ConversationCountsResult(
+        int Total,
+        int Open,
+        int Escalated,
+        int Resolved,
+        int Mine);
+
+    internal static async Task<ConversationCountsResult> QueryConversationCountsAsync(
+        IQueryable<Clawbot.Domain.Conversations.Conversation> query,
+        Guid? userId,
+        CancellationToken ct)
+    {
+        var counts = await query
+            .GroupBy(_ => 1)
+            .Select(group => new ConversationCountsResult(
+                group.Count(),
+                group.Count(conversation => conversation.Status == "open"),
+                group.Count(conversation => conversation.Status == "escalated"),
+                group.Count(conversation => conversation.Status == "resolved"),
+                userId == null
+                    ? 0
+                    : group.Count(conversation => conversation.AssignedTo == userId)))
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return counts ?? new ConversationCountsResult(0, 0, 0, 0, 0);
+    }
+
+    // Phần lọc dùng chung giữa danh sách và bộ đếm — tách ra để 2 đường không trôi lệch nhau.
+    internal static IQueryable<Clawbot.Domain.Conversations.Conversation> BuildVisibleConversations(
+        AppDbContext db,
+        List<Guid> inboxIds,
+        Guid? inboxId,
+        string? platform,
+        string? q)
+    {
+        var query = db.Conversations.AsNoTracking().AsQueryable();
+        if (inboxIds.Count > 0)
+            query = query.Where(c => c.InboxId != null && inboxIds.Contains(c.InboxId.Value));
+
+        if (inboxId.HasValue) query = query.Where(c => c.InboxId == inboxId);
+        if (!string.IsNullOrEmpty(platform)) query = query.Where(c => c.Platform == platform);
+
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var pattern = "%" + EscapeLike(q.Trim()) + "%";
+            query = query.Where(c =>
+                EF.Functions.Like(c.ExternalThreadId, pattern) ||
+                db.Contacts.Any(contact =>
+                    contact.Id == c.ContactId &&
+                    (EF.Functions.Like(contact.DisplayName, pattern) ||
+                     (contact.Email != null && EF.Functions.Like(contact.Email, pattern)) ||
+                     (contact.Phone != null && EF.Functions.Like(contact.Phone, pattern)))) ||
+                c.Messages.Any(m =>
+                    EF.Functions.Like(m.Content, pattern) ||
+                    (m.OriginalContent != null && EF.Functions.Like(m.OriginalContent, pattern)) ||
+                    (m.RedactedContent != null && EF.Functions.Like(m.RedactedContent, pattern))));
+        }
+
+        return query;
     }
 
     private static async Task<IResult> ListAsync(
@@ -71,31 +165,9 @@ public static class InboxEndpoints
         pageSize = req.PageSize;
 
         var inboxIds = await resolver.GetInboxIdsAsync(user, ct);
-        var query = db.Conversations.AsNoTracking().AsQueryable();
-        if (inboxIds.Count > 0)
-            query = query.Where(c => c.InboxId != null && inboxIds.Contains(c.InboxId.Value));
-
-        if (inboxId.HasValue) query = query.Where(c => c.InboxId == inboxId);
+        var query = BuildVisibleConversations(db, inboxIds, inboxId, platform, q);
         if (!string.IsNullOrEmpty(status)) query = query.Where(c => c.Status == status);
-        if (!string.IsNullOrEmpty(platform)) query = query.Where(c => c.Platform == platform);
         if (assignedTo.HasValue) query = query.Where(c => c.AssignedTo == assignedTo);
-
-        // Server-side search (merged from /inbox/search path for unified list+filter+cursor).
-        if (!string.IsNullOrWhiteSpace(q))
-        {
-            var pattern = "%" + EscapeLike(q.Trim()) + "%";
-            query = query.Where(c =>
-                EF.Functions.Like(c.ExternalThreadId, pattern) ||
-                db.Contacts.Any(contact =>
-                    contact.Id == c.ContactId &&
-                    (EF.Functions.Like(contact.DisplayName, pattern) ||
-                     (contact.Email != null && EF.Functions.Like(contact.Email, pattern)) ||
-                     (contact.Phone != null && EF.Functions.Like(contact.Phone, pattern)))) ||
-                c.Messages.Any(m =>
-                    EF.Functions.Like(m.Content, pattern) ||
-                    (m.OriginalContent != null && EF.Functions.Like(m.OriginalContent, pattern)) ||
-                    (m.RedactedContent != null && EF.Functions.Like(m.RedactedContent, pattern))));
-        }
 
         // Default: keyset on last_message_at DESC, id DESC. Optional "lead_score" uses offset.
         var useLeadScore = string.Equals(sort, "lead_score", StringComparison.OrdinalIgnoreCase);
@@ -475,7 +547,7 @@ public static class InboxEndpoints
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await notifier.NotifyMessageAsync(tenant.TenantId,
-            new InboxMessageEvent(conv.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt, conv.AssignedTo, msg.SenderDisplayName, msg.SenderAvatarUrl, InboxId: conv.InboxId), ct).ConfigureAwait(false);
+            new InboxMessageEvent(conv.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt, conv.AssignedTo, msg.SenderDisplayName, msg.SenderAvatarUrl, InboxId: conv.InboxId, ConversationStatus: conv.Status), ct).ConfigureAwait(false);
 
         return Results.Ok(new MessageDto(msg.Id, msg.Direction, msg.SenderType, msg.SenderUserId, msg.Content, msg.ContentType, msg.SentAt, msg.SenderDisplayName, msg.SenderAvatarUrl, msg.AttachmentUrl));
     }
@@ -628,7 +700,7 @@ public static class InboxEndpoints
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await notifier.NotifyMessageAsync(tenant.TenantId,
-            new InboxMessageEvent(conv.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt, conv.AssignedTo, msg.SenderDisplayName, msg.SenderAvatarUrl, InboxId: conv.InboxId), ct).ConfigureAwait(false);
+            new InboxMessageEvent(conv.Id, msg.Id, msg.Direction, msg.SenderType, msg.Content, msg.ContentType, msg.SentAt, conv.AssignedTo, msg.SenderDisplayName, msg.SenderAvatarUrl, InboxId: conv.InboxId, ConversationStatus: conv.Status), ct).ConfigureAwait(false);
 
         return Results.Ok(new MessageDto(msg.Id, msg.Direction, msg.SenderType, msg.SenderUserId, msg.Content, msg.ContentType, msg.SentAt, msg.SenderDisplayName, msg.SenderAvatarUrl, msg.AttachmentUrl, msg.Status));
     }

@@ -17,7 +17,9 @@ import { platformClasses } from "@/shared/theme/colors";
 import { getMe } from "@/shared/api/auth";
 import {
   approveConversationDraft,
+  CONVERSATION_COUNTS_QUERY_KEY,
   getConversation,
+  getConversationCounts,
   listConversations,
   listChannels,
   regenerateAiReply,
@@ -661,22 +663,6 @@ function ChatPanel({
       </div>
 
       <footer className="shrink-0 border-t border-outline bg-white p-2 sm:p-3">
-        <div className="mb-1.5 flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 rounded border border-outline px-2 py-0.5 text-label-sm text-secondary hover:bg-surface"
-          >
-            <span aria-hidden="true" className="material-symbols-outlined text-[14px]">attach_file</span>
-            Đính kèm
-          </button>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50/70 px-2 py-0.5 text-label-sm text-amber-800"
-          >
-            <span aria-hidden="true" className="material-symbols-outlined text-[14px]">star</span>
-            Gắn thẻ khách VIP
-          </button>
-        </div>
         <div className="flex items-end gap-2 rounded-xl border border-outline bg-surface-container-low p-1.5 focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
           <textarea
             value={draft}
@@ -869,6 +855,22 @@ export default function ConversationsPage() {
     },
   });
 
+  const countsQuery = useQuery({
+    queryKey: [
+      ...CONVERSATION_COUNTS_QUERY_KEY,
+      {
+        inboxId: inboxIdFilter,
+        q: debouncedSearch.trim() || undefined,
+      },
+    ],
+    queryFn: () =>
+      getConversationCounts({
+        inboxId: inboxIdFilter === "all" ? undefined : inboxIdFilter,
+        q: debouncedSearch.trim() || undefined,
+      }),
+    staleTime: 15_000,
+  });
+
   const conversationItems = conversationsList.items;
   const filteredItems = conversationItems;
   const conversationsQuery = conversationsList.query;
@@ -998,9 +1000,14 @@ export default function ConversationsPage() {
   const actionError = sendMutation.error;
 
   const selectedConversation = detailQuery.data;
-  const openCount = conversationItems.filter((item) => item.status === "open").length;
-  const escalatedCount = conversationItems.filter((item) => item.status === "escalated").length;
-  const mineCount = meId ? conversationItems.filter((item) => item.assignedTo === meId).length : 0;
+  const countLabel = (value: number | undefined): string => {
+    if (countsQuery.isLoading) return "…";
+    if (countsQuery.isError) return "—";
+    return String(value ?? 0);
+  };
+  const openCount = countLabel(countsQuery.data?.open);
+  const escalatedCount = countLabel(countsQuery.data?.escalated);
+  const mineCount = countLabel(countsQuery.data?.mine);
 
   return (
     <AppShell title="Hội thoại đa kênh" noPadding>
@@ -1030,10 +1037,16 @@ export default function ConversationsPage() {
             <span className="text-body-md font-bold leading-none text-tertiary">{mineCount}</span>
             <span className="text-on-surface-variant">Của tôi</span>
           </span>
-          <StatusPill tone={conversationsQuery.isError ? "error" : "success"}>
+          <StatusPill
+            tone={conversationsQuery.isError || countsQuery.isError ? "error" : "success"}
+          >
             {conversationsQuery.isError
               ? "Mất kết nối"
-              : `${conversationsList.total ?? conversationItems.length} hội thoại`}
+              : countsQuery.isError
+                ? "Không tải được số liệu"
+                : conversationsQuery.isLoading
+                  ? "Đang tải..."
+                  : `${conversationsList.total ?? "—"} hội thoại`}
           </StatusPill>
         </div>
       </div>

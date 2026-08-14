@@ -245,12 +245,6 @@ export default function LoginPage() {
             </>
           )}
 
-          <div className="mt-8 pt-6 border-t border-outline-variant/30 text-center">
-            <p className="text-on-surface-variant text-label-sm">
-              Gặp sự cố truy cập?{" "}
-              <a href="#" className="text-primary hover:underline font-semibold">Liên hệ hỗ trợ kỹ thuật</a>
-            </p>
-          </div>
         </div>
 
         <div className="absolute bottom-8 right-8 flex items-center gap-2 text-on-surface-variant/40 select-none">

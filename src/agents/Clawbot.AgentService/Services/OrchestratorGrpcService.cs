@@ -138,6 +138,7 @@ public sealed partial class OrchestratorGrpcService(
         var response = new RunScheduleResponse
         {
             Status = result.Status,
+            RunId = result.RunId?.ToString("D") ?? string.Empty,
             SessionId = result.SessionId?.ToString("D") ?? string.Empty,
         };
         if (result.NextRunAt is { } nextRunAt)

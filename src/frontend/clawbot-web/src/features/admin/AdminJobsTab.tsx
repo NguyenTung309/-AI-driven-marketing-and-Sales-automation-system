@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Alert, Button, Card, StatusPill } from "@/shared/ui";
 import { toUserFriendlyError } from "@/shared/utils/userText";
 import {
@@ -12,6 +13,8 @@ import {
 } from "@/shared/api/admin";
 import { formatDateTime } from "./adminHelpers";
 import { EmptyState } from "./adminUi";
+import { AdminRecurringExecutionDialog } from "./AdminRecurringExecutionDialog";
+import { AdminScheduleRunDialog } from "./AdminScheduleRunDialog";
 
 const CADENCE_LABELS: Record<string, string> = {
   daily: "Hằng ngày",
@@ -34,16 +37,28 @@ function agentPill(agent?: string | null) {
 
 export function AdminJobsTab() {
   const queryClient = useQueryClient();
+  const [trackedExecutionId, setTrackedExecutionId] = useState<string | null>(null);
+  const [trackedScheduleRunId, setTrackedScheduleRunId] = useState<string | null>(null);
   const jobsQuery = useQuery({ queryKey: ["admin", "jobs"], queryFn: getAdminJobs, refetchInterval: 30_000 });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] });
-  const triggerMutation = useMutation({ mutationFn: triggerAdminRecurringJob, onSuccess: invalidate });
-  const runNowMutation = useMutation({ mutationFn: runAdminScheduleJobNow, onSuccess: invalidate });
+  const triggerMutation = useMutation({
+    mutationFn: triggerAdminRecurringJob,
+    onSuccess: async (response) => {
+      setTrackedExecutionId(response.trackingId);
+      await invalidate();
+    },
+  });
+  const runNowMutation = useMutation({
+    mutationFn: runAdminScheduleJobNow,
+    onSuccess: async (response) => {
+      setTrackedScheduleRunId(response.runId);
+      await invalidate();
+    },
+  });
   const pauseMutation = useMutation({ mutationFn: pauseAdminScheduleJob, onSuccess: invalidate });
   const activateMutation = useMutation({ mutationFn: activateAdminScheduleJob, onSuccess: invalidate });
 
-  const busy =
-    triggerMutation.isPending || runNowMutation.isPending || pauseMutation.isPending || activateMutation.isPending;
   const error =
     jobsQuery.error ?? triggerMutation.error ?? runNowMutation.error ?? pauseMutation.error ?? activateMutation.error;
 
@@ -69,7 +84,7 @@ export function AdminJobsTab() {
                 <th className="px-3 py-2">Cron</th>
                 <th className="px-3 py-2">Hàng đợi</th>
                 <th className="px-3 py-2">Agent</th>
-                <th className="px-3 py-2">Lần chạy cuối</th>
+                <th className="px-3 py-2">Hangfire gần nhất</th>
                 <th className="px-3 py-2">Kế tiếp</th>
                 <th className="px-3 py-2" />
               </tr>
@@ -96,9 +111,24 @@ export function AdminJobsTab() {
                   </td>
                   <td className="px-3 py-3 text-on-surface-variant">{job.nextExecution ? formatDateTime(job.nextExecution) : "—"}</td>
                   <td className="px-3 py-3">
-                    <Button size="sm" variant="outline" disabled={busy} onClick={() => triggerMutation.mutate(job.id)}>
-                      Chạy ngay
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      {job.latestExecution ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setTrackedExecutionId(job.latestExecution!.id)}
+                        >
+                          Theo dõi lần gần nhất
+                        </Button>
+                      ) : null}
+                      {job.canTriggerManually ? (
+                        <Button size="sm" variant="outline" disabled={triggerMutation.isPending} onClick={() => triggerMutation.mutate(job.id)}>
+                          Chạy ngay
+                        </Button>
+                      ) : (
+                        <span className="self-center text-label-sm text-on-surface-variant">Chưa hỗ trợ</span>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -158,15 +188,30 @@ export function AdminJobsTab() {
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex gap-2">
-                      <Button size="sm" variant="outline" disabled={busy} onClick={() => runNowMutation.mutate(schedule.id)}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={runNowMutation.isPending && runNowMutation.variables === schedule.id}
+                        onClick={() => runNowMutation.mutate(schedule.id)}
+                      >
                         Chạy ngay
                       </Button>
                       {schedule.isActive ? (
-                        <Button size="sm" variant="outline" disabled={busy} onClick={() => pauseMutation.mutate(schedule.id)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={pauseMutation.isPending && pauseMutation.variables === schedule.id}
+                          onClick={() => pauseMutation.mutate(schedule.id)}
+                        >
                           Tạm dừng
                         </Button>
                       ) : (
-                        <Button size="sm" variant="outline" disabled={busy} onClick={() => activateMutation.mutate(schedule.id)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={activateMutation.isPending && activateMutation.variables === schedule.id}
+                          onClick={() => activateMutation.mutate(schedule.id)}
+                        >
                           Bật lại
                         </Button>
                       )}
@@ -179,6 +224,15 @@ export function AdminJobsTab() {
           {!jobsQuery.isLoading && !schedules.length ? <EmptyState>Chưa có lịch agent nào.</EmptyState> : null}
         </div>
       </Card>
+      <AdminRecurringExecutionDialog
+        executionId={trackedExecutionId}
+        onClose={() => setTrackedExecutionId(null)}
+        onExecutionTracked={setTrackedExecutionId}
+      />
+      <AdminScheduleRunDialog
+        runId={trackedScheduleRunId}
+        onClose={() => setTrackedScheduleRunId(null)}
+      />
     </div>
   );
 }

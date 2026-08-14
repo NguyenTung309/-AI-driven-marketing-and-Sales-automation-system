@@ -79,6 +79,8 @@ public static class LeadsEndpoints
     private static async Task<IResult> ListAsync(
         AppDbContext db,
         ITenantAccessor tenants,
+        HttpContext http,
+        ILeadScopeResolver scopes,
         [FromQuery] string? stage,
         [FromQuery] string? q,
         [FromQuery] string? source,
@@ -89,8 +91,9 @@ public static class LeadsEndpoints
     {
         _ = tenants.Require();
         var req = PageRequest.Create(page, pageSize);
+        var scope = await scopes.GetScopeAsync(http.User, ct).ConfigureAwait(false);
 
-        var query = db.Leads.AsNoTracking().Where(l => l.DeletedAt == null);
+        var query = db.Leads.AsNoTracking().Where(l => l.DeletedAt == null).ApplyLeadScope(scope, db);
         if (!string.IsNullOrEmpty(stage)) query = query.Where(l => l.Stage == stage);
         if (!string.IsNullOrWhiteSpace(source) && !string.Equals(source, "all", StringComparison.OrdinalIgnoreCase))
             query = query.Where(l => l.SourcePlatform == source);
@@ -139,10 +142,13 @@ public static class LeadsEndpoints
     private static async Task<IResult> ExportCsvAsync(
         ITenantAccessor tenants,
         LeadCsvService service,
+        HttpContext http,
+        ILeadScopeResolver scopes,
         CancellationToken ct)
     {
         var tenantId = tenants.Require().TenantId;
-        var export = await service.ExportCsvAsync(tenantId, ct).ConfigureAwait(false);
+        var scope = await scopes.GetScopeAsync(http.User, ct).ConfigureAwait(false);
+        var export = await service.ExportCsvAsync(tenantId, scope, ct).ConfigureAwait(false);
         return Results.File(Encoding.UTF8.GetBytes(export.Content), "text/csv; charset=utf-8", export.FileName);
     }
 
@@ -159,10 +165,21 @@ public static class LeadsEndpoints
         return Results.Ok(result);
     }
 
-    private static async Task<IResult> GetAsync(Guid id, AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
+    private static async Task<IResult> GetAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        HttpContext http,
+        ILeadScopeResolver scopes,
+        CancellationToken ct)
     {
         _ = tenants.Require();
-        var lead = await db.Leads.AsNoTracking().FirstOrDefaultAsync(l => l.Id == id, ct).ConfigureAwait(false);
+        var scope = await scopes.GetScopeAsync(http.User, ct).ConfigureAwait(false);
+        // Ngoai pham vi = 404 (khong tiet lo su ton tai cua lead thuoc kenh sale khac).
+        var lead = await db.Leads.AsNoTracking()
+            .ApplyLeadScope(scope, db)
+            .FirstOrDefaultAsync(l => l.Id == id, ct)
+            .ConfigureAwait(false);
         if (lead is null) return Results.NotFound();
         var contact = lead.ContactId is null
             ? null
@@ -295,17 +312,37 @@ public static class LeadsEndpoints
         return Guid.TryParse(roleIdRaw, out var roleId) && roleId != Guid.Empty ? roleId : null;
     }
 
+    /// <summary>
+    /// Nap lead de ghi, nhung chi trong pham vi nguoi goi duoc xem. Lead ngoai pham vi tra ve
+    /// null -> 404: khong the doi stage/activity/assign lead cua kenh sale khac chi vi lead do
+    /// chua co owner (leads:write khong tu dong mo toan tenant).
+    /// </summary>
+    private static async Task<Lead?> FindInScopeAsync(
+        Guid id,
+        AppDbContext db,
+        HttpContext http,
+        ILeadScopeResolver scopes,
+        CancellationToken ct)
+    {
+        var scope = await scopes.GetScopeAsync(http.User, ct).ConfigureAwait(false);
+        return await db.Leads
+            .ApplyLeadScope(scope, db)
+            .FirstOrDefaultAsync(l => l.Id == id, ct)
+            .ConfigureAwait(false);
+    }
+
     private static async Task<IResult> RecordActivityAsync(
         Guid id,
         LeadActivityRequest body,
         HttpContext http,
         AppDbContext db,
         ITenantAccessor tenants,
+        ILeadScopeResolver scopes,
         IClock clock,
         CancellationToken ct)
     {
         _ = tenants.Require();
-        var lead = await db.Leads.FirstOrDefaultAsync(l => l.Id == id, ct).ConfigureAwait(false);
+        var lead = await FindInScopeAsync(id, db, http, scopes, ct).ConfigureAwait(false);
         if (lead is null) return Results.NotFound();
 
         if (string.Equals(body.EventCode, "payment_confirmed", StringComparison.OrdinalIgnoreCase))
@@ -350,11 +387,12 @@ public static class LeadsEndpoints
         HttpContext http,
         AppDbContext db,
         ITenantAccessor tenants,
+        ILeadScopeResolver scopes,
         IClock clock,
         CancellationToken ct)
     {
         _ = tenants.Require();
-        var lead = await db.Leads.FirstOrDefaultAsync(l => l.Id == id, ct).ConfigureAwait(false);
+        var lead = await FindInScopeAsync(id, db, http, scopes, ct).ConfigureAwait(false);
         if (lead is null) return Results.NotFound();
         if (!CanManageLead(http, lead))
             return Results.Json(new { error = "lead_not_owned" }, statusCode: StatusCodes.Status403Forbidden);
@@ -396,11 +434,12 @@ public static class LeadsEndpoints
         AppDbContext db,
         ITenantAccessor tenants,
         ILeadAssignmentService assignment,
+        ILeadScopeResolver scopes,
         UserManager<AppUser> users,
         CancellationToken ct)
     {
         var tenant = tenants.Require();
-        var lead = await db.Leads.FirstOrDefaultAsync(l => l.Id == id, ct).ConfigureAwait(false);
+        var lead = await FindInScopeAsync(id, db, http, scopes, ct).ConfigureAwait(false);
         if (lead is null) return Results.NotFound();
 
         var actorId = CurrentUserId(http);
@@ -502,15 +541,19 @@ public static class LeadsEndpoints
         [FromServices] AppDbContext db,
         [FromServices] ITenantAccessor tenants,
         [FromServices] IForecaster forecaster,
+        [FromServices] ILeadScopeResolver scopes,
+        HttpContext http,
         [FromQuery] int horizonDays = 7,
         CancellationToken ct = default)
     {
         var tenantId = tenants.Require().TenantId;
         var since = DateTimeOffset.UtcNow.AddDays(-60);
+        var scope = await scopes.GetScopeAsync(http.User, ct).ConfigureAwait(false);
 
         var dailyCounts = await db.Leads
             .IgnoreQueryFilters()
             .Where(l => l.TenantId == tenantId && l.CreatedAt >= since)
+            .ApplyLeadScope(scope, db)
             .GroupBy(l => l.CreatedAt.Date)
             .Select(g => new { Date = g.Key, Count = g.Count() })
             .OrderBy(x => x.Date)
@@ -541,12 +584,16 @@ public static class LeadsEndpoints
         Guid id,
         AppDbContext db,
         ITenantAccessor tenants,
+        HttpContext http,
+        ILeadScopeResolver scopes,
         CancellationToken ct)
     {
         var tenantId = tenants.Require().TenantId;
+        var scope = await scopes.GetScopeAsync(http.User, ct).ConfigureAwait(false);
         var lead = await db.Leads
             .IgnoreQueryFilters()
             .Where(l => l.Id == id && l.TenantId == tenantId)
+            .ApplyLeadScope(scope, db)
             .Select(l => new
             {
                 l.Id,

@@ -23,6 +23,7 @@ public sealed partial class RetentionPurgeJob(
     private const int ContentWorkflowMetricsRetentionDays = 180;
     // Prompt chaining P5 (§6): trace chuỗi sinh nội dung giữ 30 ngày — đủ so chất lượng khi sửa prompt, không phình.
     private const int ContentGenerationTraceRetentionDays = 30;
+    private const int RecurringJobExecutionRetentionDays = 180;
 
     private readonly AppDbContext _db = db;
     private readonly IPiiRedactor _pii = pii;
@@ -101,6 +102,12 @@ public sealed partial class RetentionPurgeJob(
             .Where(trace => trace.CreatedAt < traceCutoff)
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
         LogContentGenerationTracesPurged(_logger, tracesRemoved, traceCutoff);
+
+        var recurringExecutionCutoff = now.AddDays(-RecurringJobExecutionRetentionDays);
+        var recurringExecutionsRemoved = await _db.RecurringJobExecutions
+            .Where(execution => execution.RequestedAt < recurringExecutionCutoff)
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        LogRecurringJobExecutionsPurged(_logger, recurringExecutionsRemoved, recurringExecutionCutoff);
     }
 
     [LoggerMessage(EventId = 5001, Level = LogLevel.Information, Message = "Retention purge removed {Count} audit_logs before {Cutoff:o}")]
@@ -123,6 +130,12 @@ public sealed partial class RetentionPurgeJob(
 
     [LoggerMessage(EventId = 5006, Level = LogLevel.Information, Message = "Retention purge removed {Count} content_generation_traces before {Cutoff:o}")]
     private static partial void LogContentGenerationTracesPurged(
+        ILogger logger,
+        int count,
+        DateTimeOffset cutoff);
+
+    [LoggerMessage(EventId = 5007, Level = LogLevel.Information, Message = "Retention purge removed {Count} recurring job executions before {Cutoff:o}")]
+    private static partial void LogRecurringJobExecutionsPurged(
         ILogger logger,
         int count,
         DateTimeOffset cutoff);

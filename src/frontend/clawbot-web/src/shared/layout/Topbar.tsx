@@ -6,6 +6,7 @@ import { getUnreadNotificationCount, markNotificationRead, type AppNotification 
 import { listJobs } from "@/shared/api/jobs";
 import { useAuthStore } from "@/shared/auth/authStore";
 import { useNotificationsRealtime } from "@/features/notifications/useNotificationsRealtime";
+import { JobCenterDialog } from "@/features/jobs/JobCenterDialog";
 import { useVisibleNav } from "@/shared/auth/access";
 import { type NavItem } from "./nav";
 
@@ -55,7 +56,10 @@ export function Topbar({ title }: TopbarProps) {
   });
   const unreadCount = data?.count ?? 0;
 
-  // Việc AI chạy ngầm của tenant — badge dẫn thẳng vào dialog job center ở /agents.
+  // Việc AI chạy ngầm của tenant — badge mở thẳng dialog job center tại chỗ, KHÔNG điều hướng
+  // sang /agents: người dùng đang ở trang nào thì ở nguyên trang đó sau khi đóng dialog.
+  const [jobCenterOpen, setJobCenterOpen] = useState(false);
+  const [jobCenterSelectedId, setJobCenterSelectedId] = useState<string | null>(null);
   const { data: activeJobs } = useQuery({
     queryKey: ["jobs", "active"],
     queryFn: () => listJobs("active"),
@@ -152,17 +156,32 @@ export function Topbar({ title }: TopbarProps) {
         </NavLink>
 
         {activeJobCount > 0 ? (
-          <NavLink
+          <button
             aria-label={`${activeJobCount} việc đang chạy`}
             className="relative flex size-9 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-low"
+            onClick={() => {
+              setJobCenterSelectedId(null);
+              setJobCenterOpen(true);
+            }}
             title="Việc AI đang chạy ngầm"
-            to="/agents?jobs=open"
+            type="button"
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[22px]">pending_actions</span>
             <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-4 text-on-primary">
               {activeJobCount > 9 ? "9+" : activeJobCount}
             </span>
-          </NavLink>
+          </button>
+        ) : null}
+
+        {jobCenterOpen ? (
+          <JobCenterDialog
+            onClose={() => {
+              setJobCenterOpen(false);
+              setJobCenterSelectedId(null);
+            }}
+            onSelect={setJobCenterSelectedId}
+            selectedId={jobCenterSelectedId}
+          />
         ) : null}
 
         <details className="relative">

@@ -37,7 +37,11 @@ public sealed class ApiKeyAuthenticationHandler(
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+        // An API key is the credential that establishes tenant context, so this pre-authentication
+        // lookup must bypass the tenant query filter. The hash is high-entropy and the query still
+        // requires a non-revoked, non-expired key before issuing any tenant claim.
         var key = await db.ApiKeys
+            .IgnoreQueryFilters()
             .AsNoTracking()
             .FirstOrDefaultAsync(k => k.KeyHash == hash && k.RevokedAt == null);
 
