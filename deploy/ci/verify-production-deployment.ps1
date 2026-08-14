@@ -88,7 +88,7 @@ $apiProgram = Read-RequiredFile "src/api/Clawbot.Api/Program.cs"
 $agentServiceProgram = Read-RequiredFile "src/agents/Clawbot.AgentService/Program.cs"
 $infrastructureModule = Read-RequiredFile "src/shared/Clawbot.Infrastructure/DependencyInjection.cs"
 $hangfireModule = Read-RequiredFile "src/shared/Clawbot.Infrastructure/Jobs/HangfireModule.cs"
-$tokenIssuer = Read-RequiredFile "src/api/Clawbot.Api/Auth/AgentServiceTokenIssuer.cs"
+$tokenIssuer = Read-RequiredFile "src/shared/Clawbot.Infrastructure/Security/AgentServiceTokenIssuer.cs"
 $orchestratorInterceptor = Read-RequiredFile "src/api/Clawbot.Api/Auth/OrchestratorServiceAuthInterceptor.cs"
 $callerAuthorizer = Read-RequiredFile "src/agents/Clawbot.AgentService/Services/OrchestratorCallerAuthorizer.cs"
 
