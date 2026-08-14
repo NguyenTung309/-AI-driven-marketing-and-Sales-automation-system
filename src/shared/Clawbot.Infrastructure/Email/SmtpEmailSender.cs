@@ -14,7 +14,15 @@ public sealed partial class SmtpEmailSender(IOptions<SmtpOptions> options, ILogg
 {
     private readonly SmtpOptions _opts = options.Value;
 
-    public async Task SendAsync(string recipient, string subject, string body, CancellationToken ct = default)
+    public async Task SendAsync(string recipient, string subject, string body, CancellationToken ct = default) =>
+        await SendAsync(recipient, subject, body, Array.Empty<EmailAttachment>(), ct).ConfigureAwait(false);
+
+    public async Task SendAsync(
+        string recipient,
+        string subject,
+        string body,
+        IReadOnlyList<EmailAttachment> attachments,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(_opts.Host))
         {
@@ -23,6 +31,12 @@ public sealed partial class SmtpEmailSender(IOptions<SmtpOptions> options, ILogg
         }
 
         using var message = new MailMessage(_opts.From, recipient, subject, body);
+        foreach (var att in attachments ?? Array.Empty<EmailAttachment>())
+        {
+            var stream = new MemoryStream(att.Content, writable: false);
+            message.Attachments.Add(new Attachment(stream, att.FileName, att.ContentType));
+        }
+
         using var client = new SmtpClient(_opts.Host, _opts.Port);
         if (!string.IsNullOrWhiteSpace(_opts.User))
             client.Credentials = new NetworkCredential(_opts.User, _opts.Password);
