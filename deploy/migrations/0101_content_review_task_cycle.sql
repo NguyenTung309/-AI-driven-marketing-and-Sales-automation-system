@@ -4,7 +4,8 @@ IF COL_LENGTH(N'dbo.content_review_tasks', N'review_cycle') IS NULL
 BEGIN
     ALTER TABLE dbo.content_review_tasks
         ADD review_cycle INT NOT NULL
-            CONSTRAINT DF_content_review_tasks_review_cycle DEFAULT (1);
+            CONSTRAINT DF_content_review_tasks_review_cycle DEFAULT (1),
+            CONSTRAINT CK_content_review_tasks_review_cycle CHECK (review_cycle > 0);
 END
 
 -- Boc EXEC de hoan bien dich: ca file la mot batch, tham chieu thang review_cycle o day se loi

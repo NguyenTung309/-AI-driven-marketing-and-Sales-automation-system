@@ -387,7 +387,7 @@ function AgentRadar({ agents }: { readonly agents: readonly AgentPerformance[] }
   const polygon = points.map((point) => `${point.x},${point.y}`).join(" ");
   return (
     <Card>
-      <h2 className="text-headline-sm text-secondary">Độ tin cậy câu trả lời</h2>
+      <h2 className="text-headline-sm text-secondary">Mức độ hoàn thành của Agents</h2>
       <p className="mt-1 text-body-md text-on-surface-variant">Radar hiệu suất theo tỉ lệ hoàn tất.</p>
       <div className="mt-4 flex justify-center">
         <svg viewBox={`0 0 ${size} ${size}`} className="size-[260px] max-w-full">

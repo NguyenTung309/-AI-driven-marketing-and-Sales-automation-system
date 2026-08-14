@@ -7,7 +7,7 @@ services:
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?MSSQL_SA_PASSWORD is required}
       MSSQL_PID: Developer
     ports:
-      - "127.0.0.1:11433:1433"
+      - "11433:1433"
     volumes:
       - sqlserver_data:/var/opt/mssql
     healthcheck:

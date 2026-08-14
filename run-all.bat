@@ -112,6 +112,8 @@ call :read_env_value Meta__Graph__FrontendReturnUrl
 call :read_env_value Meta__Graph__ApiVersion
 call :read_env_value Ads__Meta__Enabled
 call :read_env_value Ads__Meta__WebhookSecret
+call :read_env_value RABBITMQ_USER
+call :read_env_value RABBITMQ_PASSWORD
 
 call :require_env_value MSSQL_SA_PASSWORD
 if errorlevel 1 exit /b 1
@@ -221,6 +223,8 @@ REM Dung 127.0.0.1 chu khong phai localhost: docker publish cong o 127.0.0.1:114
 REM Windows phan giai localhost ra ::1 truoc. SqlClient thu IPv6, goi tin bi nuot chu khong bi tu choi
 REM nen no cho het Connect Timeout roi moi bo cuoc, keo theo pool het cho va host tu tat.
 set "ConnectionStrings__SqlServer=Server=127.0.0.1,11433;Database=clawbot;User Id=sa;Password=%MSSQL_SA_PASSWORD%;TrustServerCertificate=True;MultipleActiveResultSets=true"
+set "ConnectionStrings__Redis=localhost:6379"
+set "ConnectionStrings__RabbitMq=amqp://%RABBITMQ_USER%:%RABBITMQ_PASSWORD%@localhost:5672"
 set "Jwt__SigningKey=%JWT_SIGNING_KEY%"
 set "AgentServiceAuthentication__SigningKey=%AGENT_SERVICE_AUTH_SIGNING_KEY%"
 set "Encryption__Base64Key=%ENCRYPTION_BASE64_KEY%"
@@ -284,6 +288,8 @@ ping -n 3 127.0.0.1 >nul
 
 REM Frontend khong can secret backend: bo khoi environment block truoc khi start Vite/npm.
 set "ConnectionStrings__SqlServer="
+set "ConnectionStrings__Redis="
+set "ConnectionStrings__RabbitMq="
 set "Jwt__SigningKey="
 set "Encryption__Base64Key="
 set "WebPush__PublicKey="
