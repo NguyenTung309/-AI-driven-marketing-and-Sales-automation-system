@@ -536,7 +536,7 @@ public sealed class ContentItem : AggregateRoot<Guid>, ITenantOwned
     public bool CanScheduleCurrentRevision() =>
         DeletedAt is null
         && ActivePublishAttemptId is null
-        && Status == "approved"
+        && Status is "approved" or "scheduled"
         && HasCurrentCompletedReview()
         && ApprovedRevision == ContentRevision;
 

@@ -671,6 +671,7 @@ public static class ContentEndpoints
         ITenantAccessor tenants,
         IClock clock,
         Clawbot.Infrastructure.Content.IContentAutoScheduler autoScheduler,
+        IMetaIntegrationService metaIntegrations,
         ClaimsPrincipal user,
         HttpContext http,
         CancellationToken ct)
@@ -704,7 +705,17 @@ public static class ContentEndpoints
                 tenant.ContentPublishingPolicyVersion,
                 body.OverrideReason,
                 now);
-            await autoScheduler.CreateIntentAsync(item, publishTargetId: null, now, cancellationToken: ct).ConfigureAwait(false);
+
+            // Resolve default Facebook page so the schedule doesn't end up held with auto_schedule_target_missing.
+            Guid? publishTargetId = null;
+            if (string.Equals(item.Platform, "facebook", StringComparison.OrdinalIgnoreCase))
+            {
+                var pages = await metaIntegrations.GetPublishablePagesAsync(tenantContext.TenantId, ct).ConfigureAwait(false);
+                var page = pages.FirstOrDefault(x => x.IsDefault) ?? (pages.Count > 0 ? pages[0] : null);
+                if (page is not null) publishTargetId = page.Id;
+            }
+
+            await autoScheduler.CreateIntentAsync(item, publishTargetId, now, cancellationToken: ct).ConfigureAwait(false);
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
             return Results.Ok(ToDto(item));
         }
