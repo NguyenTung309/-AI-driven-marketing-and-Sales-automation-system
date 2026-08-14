@@ -6,7 +6,6 @@ IF OBJECT_ID(N'dbo.agent_sessions', N'U') IS NULL
 IF COL_LENGTH(N'dbo.agent_sessions', N'execution_user_id') IS NULL
     ALTER TABLE dbo.agent_sessions ADD execution_user_id UNIQUEIDENTIFIER NULL;
 
-UPDATE dbo.agent_sessions
-SET execution_user_id = user_id
-WHERE execution_user_id IS NULL
-  AND user_id IS NOT NULL;
+DECLARE @executionUserSql nvarchar(max);
+SET @executionUserSql = N'UPDATE dbo.agent_sessions SET execution_user_id = user_id WHERE execution_user_id IS NULL AND user_id IS NOT NULL;';
+EXEC(@executionUserSql);

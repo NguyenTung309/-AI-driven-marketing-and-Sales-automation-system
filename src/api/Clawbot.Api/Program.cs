@@ -300,12 +300,19 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 });
+var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
+if (corsOrigins.Length == 0 && builder.Environment.IsDevelopment())
+    corsOrigins = ["http://localhost:15876"];
 builder.Services.AddCors(c =>
     c.AddDefaultPolicy(p =>
-        p.WithOrigins("http://localhost:15876")
+    {
+        if (corsOrigins.Length == 0)
+            return;
+        p.WithOrigins(corsOrigins)
          .AllowAnyMethod()
          .AllowAnyHeader()
-         .AllowCredentials()));
+         .AllowCredentials();
+    }));
 
 // Dev only: the repo ships no EF migrations, so create the database + EF schema up front.
 // Must run BEFORE builder.Build() because Hangfire installs its own schema during host
@@ -335,6 +342,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseExceptionHandler();
+app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseSerilogRequestLogging(options =>
 {
     options.GetLevel = (httpContext, elapsed, ex) =>

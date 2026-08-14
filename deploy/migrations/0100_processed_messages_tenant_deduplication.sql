@@ -16,6 +16,7 @@ BEGIN
 
     DECLARE @legacyUniqueName sysname;
     DECLARE @legacyIsConstraint bit;
+    DECLARE @dropSql nvarchar(max);
 
     SELECT TOP (1)
         @legacyUniqueName = i.name,
@@ -42,9 +43,15 @@ BEGIN
     IF @legacyUniqueName IS NOT NULL
     BEGIN
         IF @legacyIsConstraint = 1
-            EXEC(N'ALTER TABLE dbo.processed_messages DROP CONSTRAINT ' + QUOTENAME(@legacyUniqueName) + N';');
+        BEGIN
+            SET @dropSql = N'ALTER TABLE dbo.processed_messages DROP CONSTRAINT ' + QUOTENAME(@legacyUniqueName) + N';';
+            EXEC(@dropSql);
+        END;
         ELSE
-            EXEC(N'DROP INDEX ' + QUOTENAME(@legacyUniqueName) + N' ON dbo.processed_messages;');
+        BEGIN
+            SET @dropSql = N'DROP INDEX ' + QUOTENAME(@legacyUniqueName) + N' ON dbo.processed_messages;';
+            EXEC(@dropSql);
+        END;
     END;
 
     IF NOT EXISTS (
