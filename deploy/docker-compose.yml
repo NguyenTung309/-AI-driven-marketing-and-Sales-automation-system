@@ -1,4 +1,4 @@
-﻿services:
+services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: clawbot-sqlserver
@@ -10,7 +10,6 @@
       - "127.0.0.1:11433:1433"
     volumes:
       - sqlserver_data:/var/opt/mssql
-      - D:/qnh-convert/db_sobannganh:/mnt/db_sobannganh
     healthcheck:
       test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"${MSSQL_SA_PASSWORD:?MSSQL_SA_PASSWORD is required}\" -C -Q 'SELECT 1' || exit 1"]
       interval: 10s
@@ -57,7 +56,7 @@
     image: searxng/searxng:latest
     container_name: clawbot-searxng
     ports:
-      - "127.0.0.1:8888:8080"
+      - "127.0.0.1:8889:8080"
     volumes:
       - ./searxng:/etc/searxng
     restart: unless-stopped
