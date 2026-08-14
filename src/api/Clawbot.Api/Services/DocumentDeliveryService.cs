@@ -1,4 +1,5 @@
 using System.Globalization;
+using Clawbot.Agents.Core.Docs;
 using Clawbot.Application.Abstractions;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Channels;
@@ -11,11 +12,15 @@ public sealed class DocumentDeliveryService(
     AppDbContext db,
     IEmailSender email,
     IEnumerable<IChannelAdapter> channels,
+    IDocumentStorage storage,
+    DocsStorageOptions storageOptions,
     IClock clock)
 {
     private readonly AppDbContext _db = db;
     private readonly IEmailSender _email = email;
     private readonly IReadOnlyList<IChannelAdapter> _channels = channels.ToArray();
+    private readonly IDocumentStorage _storage = storage;
+    private readonly DocsStorageOptions _storageOptions = storageOptions;
     private readonly IClock _clock = clock;
 
     public Task<bool> TrySendAsync(
@@ -80,12 +85,54 @@ public sealed class DocumentDeliveryService(
             }
         }
 
-        await _email.SendAsync(recipient, "Tài liệu từ Học Bá", BuildMessage(doc.FileUrl, FormatExpiry(doc.ExpiresAt)), ct)
+        // FileUrl tuyệt đối (presigned MinIO) thì người nhận click link được ngay. Ngược lại đó là
+        // key nội bộ dạng "/generated-docs/..." không thể mở trực tiếp → đính kèm file vào mail để
+        // người nhận luôn xem được mà không phụ thuộc public base URL của deployment.
+        var attachments = Array.Empty<EmailAttachment>();
+        string body;
+        if (Uri.TryCreate(doc.FileUrl, UriKind.Absolute, out _)
+            && (doc.FileUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || doc.FileUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+        {
+            body = BuildLinkMessage(doc.FileUrl, FormatExpiry(doc.ExpiresAt));
+        }
+        else
+        {
+            try
+            {
+                var storageKey = ResolveStorageKey(doc.FileUrl, _storageOptions.PublicBaseUrl);
+                var bytes = await _storage.ReadAsync(storageKey, ct).ConfigureAwait(false);
+                var fileName = Path.GetFileName(storageKey);
+                if (string.IsNullOrWhiteSpace(fileName))
+                    fileName = $"document-{documentId}.pdf";
+
+                attachments = [new EmailAttachment(fileName, bytes, "application/pdf")];
+                body = BuildAttachedMessage(FormatExpiry(doc.ExpiresAt));
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                // Storage đã xóa file hoặc di chuyển — giữ nguyên body link cũ để không phá luồng gửi,
+                // nhưng người nhận sẽ không xem được. Ghi log để ops điều tra.
+                body = BuildLinkMessage(doc.FileUrl, FormatExpiry(doc.ExpiresAt));
+            }
+        }
+
+        await _email.SendAsync(recipient, "Tài liệu từ Học Bá", body, attachments, ct)
             .ConfigureAwait(false);
 
         doc.MarkSent("email", _clock.UtcNow);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
         return true;
+    }
+
+    // Cắt prefix PublicBaseUrl khỏi FileUrl để lấy đúng storage key lúc đọc bytes (giống DocumentsEndpoints.ResolveStorageKey).
+    private static string ResolveStorageKey(string fileUrl, string publicBaseUrl)
+    {
+        var trimmed = (fileUrl ?? string.Empty).Trim();
+        var prefix = (publicBaseUrl ?? string.Empty).TrimEnd('/') + "/";
+        if (prefix.Length > 1 && trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            return trimmed[prefix.Length..];
+        return trimmed.TrimStart('/');
     }
 
     private async Task<bool> TrySendByZaloAsync(Guid tenantId, Guid documentId, CancellationToken ct)
@@ -121,7 +168,7 @@ public sealed class DocumentDeliveryService(
                     doc.TenantId,
                     "zalo",
                     threadId,
-                    BuildMessage(doc.FileUrl, FormatExpiry(doc.ExpiresAt)),
+                    BuildLinkMessage(doc.FileUrl, FormatExpiry(doc.ExpiresAt)),
                     ct)
                 .ConfigureAwait(false);
         }
@@ -141,6 +188,11 @@ public sealed class DocumentDeliveryService(
     // Review-gate P5 (QĐ6 template-approved): template tĩnh duyệt 1 lần; biến nội suy là URL nội bộ do hệ
     // thống sinh + ngày hết hạn — không có dữ liệu ngoài, nên không cần toxicity per-send. Thêm biến từ
     // dữ liệu khách/LLM thì bản render phải qua toxicity trước SendAsync (xem DripSequenceJob).
-    private static string BuildMessage(string fileUrl, string expiry) =>
+    private static string BuildLinkMessage(string fileUrl, string expiry) =>
         $"Xin chào, tài liệu của bạn đã sẵn sàng: {fileUrl}\nLiên kết có hiệu lực đến {expiry}.";
+
+    // Khi gửi email với file đính kèm, không hiển thị đường dẫn nội bộ trong body vì người nhận
+    // không thể mở được. Thay vào đó thông báo rằng tài liệu nằm trong file đính kèm.
+    private static string BuildAttachedMessage(string expiry) =>
+        $"Xin chào, tài liệu của bạn đã được đính kèm trong email này.\nTài liệu có hiệu lực đến {expiry}.";
 }
