@@ -114,24 +114,38 @@ public sealed class KpiAggregator(AppDbContext db) : IKpiAggregator
         foreach (var conversation in conversations.Where(c => c.Messages.Any(m => m.SentAt >= dayStart && m.SentAt < dayEnd)))
         {
             var row = PlatformRow(conversation.Platform);
-            var messages = conversation.Messages
-                .Where(m => m.SentAt >= dayStart && m.SentAt < dayEnd)
+            var allMessages = conversation.Messages
                 .OrderBy(m => m.SentAt)
                 .ToList();
 
-            var replies = messages.Count(m => m.Direction == "out");
+            var replies = allMessages.Count(m => m.Direction == "out" && m.SentAt >= dayStart && m.SentAt < dayEnd);
             row.Replies += replies;
             aggregate.Replies += replies;
 
-            foreach (var inbound in messages.Where(m => m.Direction == "in"))
+            DateTimeOffset? firstUnansweredInbound = null;
+            foreach (var m in allMessages)
             {
-                var outbound = messages.FirstOrDefault(m => m.Direction == "out" && m.SentAt > inbound.SentAt);
-                if (outbound is null)
-                    continue;
-
-                var seconds = (decimal)(outbound.SentAt - inbound.SentAt).TotalSeconds;
-                row.ResponseSeconds.Add(seconds);
-                aggregate.ResponseSeconds.Add(seconds);
+                if (m.Direction == "in")
+                {
+                    // Chỉ lưu lại thời gian của tin nhắn đến ĐẦU TIÊN trong 1 lô tin nhắn liên tiếp
+                    firstUnansweredInbound ??= m.SentAt;
+                }
+                else if (m.Direction == "out")
+                {
+                    if (firstUnansweredInbound != null)
+                    {
+                        // Thời gian phản hồi được tính vào báo cáo của ngày mà agent thực sự trả lời
+                        if (m.SentAt >= dayStart && m.SentAt < dayEnd)
+                        {
+                            var seconds = (decimal)(m.SentAt - firstUnansweredInbound.Value).TotalSeconds;
+                            row.ResponseSeconds.Add(seconds);
+                            aggregate.ResponseSeconds.Add(seconds);
+                        }
+                        
+                        // Đặt lại để chờ lượt chat (session) tiếp theo
+                        firstUnansweredInbound = null;
+                    }
+                }
             }
         }
 

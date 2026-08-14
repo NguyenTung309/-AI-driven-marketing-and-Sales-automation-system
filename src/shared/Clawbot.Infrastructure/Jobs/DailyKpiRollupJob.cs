@@ -39,6 +39,22 @@ public sealed partial class DailyKpiRollupJob(
     public Task RunIntradayAsync(CancellationToken ct = default) =>
         RollupAsync(Today(), ct);
 
+    /// <summary>
+    /// Chạy tính toán lại lịch sử (dùng cho việc vá lỗi logic hoặc clean data).
+    /// </summary>
+    [AutomaticRetry(Attempts = 0)]
+    public async Task RunBackfillAsync(int days, CancellationToken ct = default)
+    {
+        var end = Today();
+        var start = end.AddDays(-days);
+
+        for (var date = start; date <= end; date = date.AddDays(1))
+        {
+            ct.ThrowIfCancellationRequested();
+            await RollupAsync(date, ct).ConfigureAwait(false);
+        }
+    }
+
     private DateOnly Today() =>
         DateOnly.FromDateTime(_clock.UtcNow.ToOffset(AnalyticsOffset).DateTime);
 
