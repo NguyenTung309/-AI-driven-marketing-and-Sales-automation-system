@@ -6,6 +6,7 @@ using Clawbot.Agents.Core.Orchestrator;
 using Clawbot.Domain.Agents;
 using Clawbot.Domain.Content;
 using Clawbot.Infrastructure.Content.Publishing;
+using Clawbot.Infrastructure.Integrations.Meta;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Content;
 using Clawbot.SharedKernel.Time;
@@ -216,11 +217,13 @@ public sealed class ContentPublishTool(
 public sealed class ContentScheduleTool(
     AppDbContext db,
     IClock clock,
-    Clawbot.Infrastructure.Content.IContentAutoScheduler autoScheduler) : IAgentTool
+    Clawbot.Infrastructure.Content.IContentAutoScheduler autoScheduler,
+    IMetaIntegrationService? metaIntegrations = null) : IAgentTool
 {
     private readonly AppDbContext _db = db;
     private readonly IClock _clock = clock;
     private readonly Clawbot.Infrastructure.Content.IContentAutoScheduler _autoScheduler = autoScheduler;
+    private readonly IMetaIntegrationService? _metaIntegrations = metaIntegrations;
 
     public string Name => "content.schedule";
     public string Description =>
@@ -259,7 +262,7 @@ public sealed class ContentScheduleTool(
 
             var schedule = await _autoScheduler.CreateIntentAsync(
                 item,
-                publishTargetId: null,
+                publishTargetId: await ResolveDefaultFacebookTargetAsync(item, ct).ConfigureAwait(false),
                 _clock.UtcNow,
                 cancellationToken: ct).ConfigureAwait(false);
             await _db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -280,6 +283,24 @@ public sealed class ContentScheduleTool(
         catch (InvalidOperationException ex)
         {
             return ToolResult.Fail(ex.Message);
+        }
+    }
+
+    private async Task<Guid?> ResolveDefaultFacebookTargetAsync(ContentItem item, CancellationToken ct)
+    {
+        if (_metaIntegrations is null
+            || !string.Equals(item.Platform, "facebook", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        try
+        {
+            var pages = await _metaIntegrations.GetPublishablePagesAsync(item.TenantId, ct).ConfigureAwait(false);
+            var page = pages.FirstOrDefault(x => x.IsDefault) ?? (pages.Count > 0 ? pages[0] : null);
+            return page?.Id;
+        }
+        catch
+        {
+            return null;
         }
     }
 }
