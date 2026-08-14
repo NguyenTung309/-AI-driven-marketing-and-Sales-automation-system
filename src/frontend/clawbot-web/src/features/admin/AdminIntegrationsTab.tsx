@@ -1,16 +1,10 @@
-import { Alert, Button, Card, StatusPill } from "@/shared/ui";
-import { errorMessage, inputClass, type BrandingForm, type PancakeForm } from "./adminHelpers";
+import { Button, Card, StatusPill } from "@/shared/ui";
+import { inputClass, type PancakeForm } from "./adminHelpers";
 import { Field } from "./adminUi";
 import type { PancakeConfig, PancakeWebhookUrl } from "@/shared/api/admin";
 import { AdminSocialChannelsSection } from "./AdminSocialChannelsSection";
 
 interface AdminIntegrationsTabProps {
-  readonly brandingForm: BrandingForm;
-  readonly onUpdateBrandingForm: (patch: Partial<BrandingForm>) => void;
-  readonly brandingMutationError: unknown;
-  readonly brandingMutationPending: boolean;
-  readonly brandingFetching: boolean;
-  readonly onSubmitBranding: () => void;
   readonly pancakeForm: PancakeForm;
   readonly onUpdatePancakeForm: (patch: Partial<PancakeForm>) => void;
   readonly pancakeData: PancakeConfig | null | undefined;
@@ -23,12 +17,6 @@ interface AdminIntegrationsTabProps {
 }
 
 export function AdminIntegrationsTab({
-  brandingForm,
-  onUpdateBrandingForm,
-  brandingMutationError,
-  brandingMutationPending,
-  brandingFetching,
-  onSubmitBranding,
   pancakeForm,
   onUpdatePancakeForm,
   pancakeData,
@@ -41,58 +29,6 @@ export function AdminIntegrationsTab({
 }: AdminIntegrationsTabProps) {
   return (
     <section className="space-y-gutter">
-      <Card>
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-headline-sm text-secondary">Thương hiệu đơn vị</h2>
-            <p className="mt-1 text-body-md text-on-surface-variant">Tên, logo và màu hiển thị trên trang hỗ trợ khách hàng.</p>
-          </div>
-          <div className="flex items-center gap-2 rounded border border-outline bg-surface px-3 py-2">
-            <span className="size-5 rounded" style={{ backgroundColor: brandingForm.primaryColor }} />
-            <span className="size-5 rounded" style={{ backgroundColor: brandingForm.accentColor }} />
-          </div>
-        </div>
-        {brandingMutationError ? <Alert tone="error">{errorMessage(brandingMutationError)}</Alert> : null}
-        <form
-          className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onSubmitBranding();
-          }}
-        >
-          <Field label="Tên thương hiệu">
-            <input className={inputClass} value={brandingForm.brandName} onChange={(event) => onUpdateBrandingForm({ brandName: event.target.value })} />
-          </Field>
-          <Field label="Tên hỗ trợ">
-            <input className={inputClass} value={brandingForm.supportName} onChange={(event) => onUpdateBrandingForm({ supportName: event.target.value })} />
-          </Field>
-          <Field label="Logo hiển thị">
-            <input className={inputClass} value={brandingForm.logoUrl} onChange={(event) => onUpdateBrandingForm({ logoUrl: event.target.value })} />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Màu chính">
-              <input className={`${inputClass} h-11 p-1`} type="color" value={brandingForm.primaryColor} onChange={(event) => onUpdateBrandingForm({ primaryColor: event.target.value })} />
-            </Field>
-            <Field label="Màu nhấn">
-              <input className={`${inputClass} h-11 p-1`} type="color" value={brandingForm.accentColor} onChange={(event) => onUpdateBrandingForm({ accentColor: event.target.value })} />
-            </Field>
-          </div>
-          <Field label="Lời chào khung chat">
-            <textarea
-              className={`${inputClass} min-h-24`}
-              value={brandingForm.widgetGreeting}
-              onChange={(event) => onUpdateBrandingForm({ widgetGreeting: event.target.value })}
-            />
-          </Field>
-          <div className="flex items-end justify-end">
-            <Button type="submit" disabled={brandingMutationPending || brandingFetching}>
-              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">palette</span>
-              Lưu thương hiệu
-            </Button>
-          </div>
-        </form>
-      </Card>
-
       <div className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1fr)_420px]">
         <Card>
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
