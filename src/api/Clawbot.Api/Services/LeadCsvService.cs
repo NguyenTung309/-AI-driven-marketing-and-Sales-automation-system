@@ -15,10 +15,15 @@ public sealed class LeadCsvService(AppDbContext db, IClock clock)
     private readonly AppDbContext _db = db;
     private readonly IClock _clock = clock;
 
-    public async Task<LeadCsvExportResult> ExportCsvAsync(Guid tenantId, CancellationToken ct = default)
+    /// <param name="scope">
+    /// Pham vi nguoi goi; null = khong gioi han. File CSV phai trung voi danh sach tren trang,
+    /// khong de sale tai ve lead cua kenh khac.
+    /// </param>
+    public async Task<LeadCsvExportResult> ExportCsvAsync(Guid tenantId, LeadScope? scope = null, CancellationToken ct = default)
     {
         var leads = await _db.Leads.IgnoreQueryFilters()
             .Where(l => l.TenantId == tenantId && l.DeletedAt == null)
+            .ApplyLeadScope(scope ?? LeadScope.All, _db)
             .OrderByDescending(l => l.Score)
             .ThenByDescending(l => l.LastActivityAt ?? l.CreatedAt)
             .ToListAsync(ct)

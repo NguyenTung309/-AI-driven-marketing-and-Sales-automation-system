@@ -43,6 +43,9 @@ public static partial class RbacSeeder
         ("conversations:read", All),
         ("conversations:write", [Admin, SalesLead, Sale]),
         ("leads:read", All),
+        // Sale chi thay lead cua kenh Pancake minh phu trach; cac role con lai xem toan bo
+        // lead cua tenant (LeadScopeResolver doc quyen nay de quyet dinh pham vi).
+        ("leads:read:all", [Admin, SalesLead, Marketer, QA, Viewer]),
         ("leads:write", [Admin, SalesLead, Sale]),
         ("content:read", All),
         ("content:write", [Admin, Marketer]),
@@ -161,7 +164,7 @@ public static partial class RbacSeeder
         var tenantId = await EnsureDefaultTenantAsync(db, now, ct);
         await SeedDomainRolesAsync(db, tenantId, now, ct);
         await SeedPermissionsAsync(db, ct);
-        await SeedRolePermissionsAsync(db, ct);
+        await SeedRolePermissionsAsync(db, sp, ct);
         await RemoveDeprecatedPermissionsAsync(db, sp, logger, ct);
         await SeedTenantResourcesAsync(db, now, logger, ct);
 
@@ -218,11 +221,12 @@ public static partial class RbacSeeder
         await db.SaveChangesAsync(ct);
     }
 
-    private static async Task SeedRolePermissionsAsync(AppDbContext db, CancellationToken ct)
+    private static async Task SeedRolePermissionsAsync(AppDbContext db, IServiceProvider sp, CancellationToken ct)
     {
         var permIdByCode = await db.Permissions.ToDictionaryAsync(p => p.Code, p => p.Id, ct);
         var have = (await db.RolePermissions.Select(rp => new { rp.RoleId, rp.PermissionId }).ToListAsync(ct))
             .Select(x => (x.RoleId, x.PermissionId)).ToHashSet();
+        var granted = new HashSet<Guid>();
 
         foreach (var (code, roles) in Matrix)
         {
@@ -233,6 +237,7 @@ public static partial class RbacSeeder
                 // Cập nhật have sau Add — Matrix + Legacy có thể trùng (role,perm).
                 if (!have.Add((roleId, permId))) continue;
                 db.RolePermissions.Add(RolePermission.Create(roleId, permId));
+                granted.Add(roleId);
             }
         }
 
@@ -244,10 +249,18 @@ public static partial class RbacSeeder
                 if (!permIdByCode.TryGetValue(code, out var permId)) continue;
                 if (!have.Add((roleId, permId))) continue;
                 db.RolePermissions.Add(RolePermission.Create(roleId, permId));
+                granted.Add(roleId);
             }
         }
 
         await db.SaveChangesAsync(ct);
+
+        // Quyền mới seed phải hiệu lực ngay: PermissionResolver cache Redis 10' nên nếu không
+        // invalidate, role vừa được cấp quyền vẫn bị từ chối hết TTL sau khi deploy.
+        if (granted.Count == 0) return;
+        var resolver = sp.GetRequiredService<IPermissionResolver>();
+        foreach (var roleId in granted)
+            await resolver.InvalidateAsync(roleId, ct);
     }
 
     /// <summary>

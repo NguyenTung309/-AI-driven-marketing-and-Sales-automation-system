@@ -17,7 +17,7 @@ public sealed partial class HealthCheckJob(AppDbContext db, ILogger<HealthCheckJ
         }
         catch (Exception ex)
         {
-            LogUnhealthy(logger, ex);
+            LogUnhealthy(logger, ex.GetType().Name);
             throw;
         }
     }
@@ -25,6 +25,6 @@ public sealed partial class HealthCheckJob(AppDbContext db, ILogger<HealthCheckJ
     [LoggerMessage(EventId = 5002, Level = LogLevel.Information, Message = "Health check passed: database responsive")]
     private static partial void LogHealthy(ILogger logger);
 
-    [LoggerMessage(EventId = 5003, Level = LogLevel.Error, Message = "Health check failed: database unreachable")]
-    private static partial void LogUnhealthy(ILogger logger, Exception ex);
+    [LoggerMessage(EventId = 5003, Level = LogLevel.Error, Message = "Health check failed: database unreachable ({ExceptionType})")]
+    private static partial void LogUnhealthy(ILogger logger, string exceptionType);
 }

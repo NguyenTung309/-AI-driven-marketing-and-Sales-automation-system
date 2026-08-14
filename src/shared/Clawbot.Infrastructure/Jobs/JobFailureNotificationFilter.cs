@@ -29,11 +29,15 @@ public sealed partial class JobFailureNotificationFilter(
 {
     private const string AdminRoleName = "Admin";
 
+    internal static bool ShouldHandle(Type? jobType) =>
+        jobType != typeof(JobRunner)
+        && (jobType is null || !typeof(ITrackedRecurringJob).IsAssignableFrom(jobType));
+
     public void OnStateApplied(ApplyStateContext context, IWriteOnlyTransaction transaction)
     {
         ArgumentNullException.ThrowIfNull(context);
         if (context.NewState is not FailedState failed) return;
-        if (context.BackgroundJob.Job?.Type == typeof(JobRunner)) return;
+        if (!ShouldHandle(context.BackgroundJob.Job?.Type)) return;
 
         var jobName = context.BackgroundJob.Job?.Type.Name ?? "Job";
         var args = context.BackgroundJob.Job?.Args ?? [];

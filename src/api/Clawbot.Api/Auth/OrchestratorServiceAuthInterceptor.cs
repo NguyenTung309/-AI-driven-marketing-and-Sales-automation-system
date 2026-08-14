@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using Clawbot.SharedKernel.Security;
+using Clawbot.Infrastructure.Security;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Microsoft.AspNetCore.Http;
@@ -13,35 +13,58 @@ public sealed class OrchestratorServiceAuthInterceptor(
     public override AsyncUnaryCall<TResponse> AsyncUnaryCall<TRequest, TResponse>(
         TRequest request,
         ClientInterceptorContext<TRequest, TResponse> context,
-        AsyncUnaryCallContinuation<TRequest, TResponse> continuation)
+        AsyncUnaryCallContinuation<TRequest, TResponse> continuation) =>
+        continuation(request, WithCallerAuthorization(context));
+
+    public override AsyncServerStreamingCall<TResponse> AsyncServerStreamingCall<TRequest, TResponse>(
+        TRequest request,
+        ClientInterceptorContext<TRequest, TResponse> context,
+        AsyncServerStreamingCallContinuation<TRequest, TResponse> continuation) =>
+        continuation(request, WithCallerAuthorization(context));
+
+    private ClientInterceptorContext<TRequest, TResponse> WithCallerAuthorization<TRequest, TResponse>(
+        ClientInterceptorContext<TRequest, TResponse> context)
+        where TRequest : class
+        where TResponse : class
     {
-        var httpContext = httpContextAccessor.HttpContext
-            ?? throw new RpcException(new Status(StatusCode.Unauthenticated, "orchestrator_caller_required"));
+        var httpContext = httpContextAccessor.HttpContext;
+        if (httpContext?.User.Identity?.IsAuthenticated != true)
+        {
+            throw new RpcException(new Status(
+                StatusCode.Unauthenticated,
+                "orchestrator_caller_required"));
+        }
+
         var userId = ReadRequiredGuid(httpContext.User, ClaimTypes.NameIdentifier);
         var tenantId = ReadRequiredGuid(httpContext.User, "tenant_id");
         // Orchestration runs with the role of the session that asked for it, so the caller's role
         // travels with the call instead of being re-derived downstream.
         var roleId = ReadRequiredGuid(httpContext.User, "role_id");
-        var headers = new Metadata();
-        if (context.Options.Headers is not null)
-        {
-            foreach (var header in context.Options.Headers)
-            {
-                if (string.Equals(header.Key, "authorization", StringComparison.OrdinalIgnoreCase))
-                    continue;
-                if (header.IsBinary)
-                    headers.Add(header.Key, header.ValueBytes);
-                else
-                    headers.Add(header.Key, header.Value);
-            }
-        }
-
+        var headers = CopyHeadersWithoutAuthorization(context.Options.Headers);
         headers.Add("authorization", $"Bearer {tokenIssuer.Issue(userId, tenantId, roleId)}");
-        var options = context.Options.WithHeaders(headers);
-        return continuation(request, new ClientInterceptorContext<TRequest, TResponse>(
+        return new ClientInterceptorContext<TRequest, TResponse>(
             context.Method,
             context.Host,
-            options));
+            context.Options.WithHeaders(headers));
+    }
+
+    private static Metadata CopyHeadersWithoutAuthorization(Metadata? source)
+    {
+        var headers = new Metadata();
+        if (source is null)
+            return headers;
+
+        foreach (var header in source)
+        {
+            if (string.Equals(header.Key, "authorization", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (header.IsBinary)
+                headers.Add(header.Key, header.ValueBytes);
+            else
+                headers.Add(header.Key, header.Value);
+        }
+
+        return headers;
     }
 
     private static Guid ReadRequiredGuid(ClaimsPrincipal principal, string claimType)

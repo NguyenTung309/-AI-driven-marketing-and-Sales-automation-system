@@ -18,13 +18,25 @@ public sealed class DocumentDeliveryService(
     private readonly IReadOnlyList<IChannelAdapter> _channels = channels.ToArray();
     private readonly IClock _clock = clock;
 
-    public async Task<bool> TrySendAsync(Guid tenantId, Guid documentId, string? sentVia, CancellationToken ct = default)
+    public Task<bool> TrySendAsync(
+        Guid tenantId,
+        Guid documentId,
+        string? sentVia,
+        CancellationToken ct = default) =>
+        TrySendAsync(tenantId, documentId, sentVia, recipientEmail: null, ct);
+
+    public async Task<bool> TrySendAsync(
+        Guid tenantId,
+        Guid documentId,
+        string? sentVia,
+        string? recipientEmail,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(sentVia))
             return false;
 
         if (string.Equals(sentVia, "email", StringComparison.OrdinalIgnoreCase))
-            return await TrySendByEmailAsync(tenantId, documentId, ct).ConfigureAwait(false);
+            return await TrySendByEmailAsync(tenantId, documentId, recipientEmail, ct).ConfigureAwait(false);
 
         if (string.Equals(sentVia, "zalo", StringComparison.OrdinalIgnoreCase))
             return await TrySendByZaloAsync(tenantId, documentId, ct).ConfigureAwait(false);
@@ -32,18 +44,41 @@ public sealed class DocumentDeliveryService(
         return false;
     }
 
-    private async Task<bool> TrySendByEmailAsync(Guid tenantId, Guid documentId, CancellationToken ct)
+    private async Task<bool> TrySendByEmailAsync(
+        Guid tenantId,
+        Guid documentId,
+        string? recipientEmail,
+        CancellationToken ct)
     {
         var doc = await _db.GeneratedDocuments.IgnoreQueryFilters()
             .FirstOrDefaultAsync(d => d.Id == documentId && d.TenantId == tenantId, ct)
             .ConfigureAwait(false);
-        if (doc?.ContactId is null) return false;
+        if (doc is null) return false;
 
-        var recipient = await _db.Contacts.IgnoreQueryFilters()
-            .Where(c => c.Id == doc.ContactId && c.TenantId == tenantId)
-            .Select(c => c.Email)
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(recipient)) return false;
+        // Email gõ tay thắng: sale thường gửi báo giá cho người chưa có hồ sơ trong CRM. Không có
+        // email tay thì mới tra ngược contact như cũ.
+        if (!DocumentDeliveryTargetValidator.TryNormalizeEmail(
+                recipientEmail,
+                out var recipient))
+        {
+            return false;
+        }
+
+        if (recipient is null)
+        {
+            if (doc.ContactId is null) return false;
+            var contactEmail = await _db.Contacts.IgnoreQueryFilters()
+                .Where(c => c.Id == doc.ContactId && c.TenantId == tenantId)
+                .Select(c => c.Email)
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            if (!DocumentDeliveryTargetValidator.TryNormalizeEmail(
+                    contactEmail,
+                    out recipient) ||
+                recipient is null)
+            {
+                return false;
+            }
+        }
 
         await _email.SendAsync(recipient, "Tài liệu từ Học Bá", BuildMessage(doc.FileUrl, FormatExpiry(doc.ExpiresAt)), ct)
             .ConfigureAwait(false);

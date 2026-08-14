@@ -18,30 +18,50 @@ public static class LlmBaseUrlGuard
     public static bool IsAllowedBaseUrl(
         string baseUrl,
         bool allowPrivateHosts = false,
+        IReadOnlyCollection<string>? allowedPrivateOrigins = null) =>
+        CheckBaseUrl(baseUrl, allowPrivateHosts, allowedPrivateOrigins).IsAllowed();
+
+    /// <summary>
+    /// Như <see cref="IsAllowedBaseUrl"/> nhưng nói rõ vì sao bị chặn, để tầng trên hiện thông báo
+    /// đúng bệnh thay vì gộp mọi nguyên nhân vào một chữ "URL không hợp lệ".
+    /// </summary>
+    public static BaseUrlVerdict CheckBaseUrl(
+        string baseUrl,
+        bool allowPrivateHosts = false,
         IReadOnlyCollection<string>? allowedPrivateOrigins = null)
     {
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri))
-            return false;
+            return BaseUrlVerdict.Malformed;
         if (!string.IsNullOrWhiteSpace(uri.UserInfo))
-            return false;
+            return BaseUrlVerdict.Malformed;
         if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
-            return false;
+            return BaseUrlVerdict.SchemeNotAllowed;
 
         var hostClass = ClassifyHost(uri);
         if (uri.Scheme == Uri.UriSchemeHttp)
         {
             // Public cleartext is never allowed. Private HTTP only with operator grant.
             if (hostClass != HostClass.KnownPrivate)
-                return false;
-            return IsPrivateAccessGranted(uri, allowPrivateHosts, allowedPrivateOrigins);
+                return BaseUrlVerdict.SchemeNotAllowed;
+            return IsPrivateAccessGranted(uri, allowPrivateHosts, allowedPrivateOrigins)
+                ? BaseUrlVerdict.Allowed
+                : BaseUrlVerdict.PrivateHostNotGranted;
         }
 
         return hostClass switch
         {
-            HostClass.Public => true,
-            HostClass.KnownPrivate => IsPrivateAccessGranted(uri, allowPrivateHosts, allowedPrivateOrigins),
-            // Mixed / unresolved / empty DNS: fail closed unless operator explicitly grants.
-            _ => IsPrivateAccessGranted(uri, allowPrivateHosts, allowedPrivateOrigins),
+            HostClass.Public => BaseUrlVerdict.Allowed,
+            HostClass.KnownPrivate => IsPrivateAccessGranted(uri, allowPrivateHosts, allowedPrivateOrigins)
+                ? BaseUrlVerdict.Allowed
+                : BaseUrlVerdict.PrivateHostNotGranted,
+            // Vừa public vừa private trong cùng câu trả lời DNS là dấu hiệu rebinding — chặn.
+            HostClass.MixedPublicPrivate => IsPrivateAccessGranted(uri, allowPrivateHosts, allowedPrivateOrigins)
+                ? BaseUrlVerdict.Allowed
+                : BaseUrlVerdict.MixedDnsAnswer,
+            // Không phân giải được tên miền: KHÔNG kết luận URL sai. Máy chủ có thể đang hỏng DNS
+            // hoặc chưa được mở ra ngoài. Việc chặn thật nằm ở ConnectCallback — mỗi lần mở kết nối
+            // đều phân giải lại và từ chối mọi địa chỉ nội bộ — nên cho qua ở bước kiểm hình thức này.
+            _ => BaseUrlVerdict.AllowedDnsUnverified,
         };
     }
 
@@ -70,7 +90,8 @@ public static class LlmBaseUrlGuard
     {
         Public = 0,
         KnownPrivate = 1,
-        UnresolvedOrMixed = 2,
+        MixedPublicPrivate = 2,
+        Unresolved = 3,
     }
 
     private static HostClass ClassifyHost(Uri uri)
@@ -89,20 +110,20 @@ public static class LlmBaseUrlGuard
         {
             var addresses = ResolveHostAddresses(host);
             if (addresses.Length == 0)
-                return HostClass.UnresolvedOrMixed;
+                return HostClass.Unresolved;
             if (addresses.Any(IsPrivateOrLocalAddress))
             {
-                // All-private → known private; mixed → unresolved/mixed (fail closed).
+                // Toàn bộ private → private đã biết; lẫn public+private → nghi rebinding, chặn.
                 return addresses.All(IsPrivateOrLocalAddress)
                     ? HostClass.KnownPrivate
-                    : HostClass.UnresolvedOrMixed;
+                    : HostClass.MixedPublicPrivate;
             }
 
             return HostClass.Public;
         }
         catch (Exception ex) when (ex is SocketException or ArgumentException)
         {
-            return HostClass.UnresolvedOrMixed;
+            return HostClass.Unresolved;
         }
     }
 

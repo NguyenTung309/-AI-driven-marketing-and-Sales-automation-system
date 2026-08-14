@@ -286,7 +286,8 @@ public static class PublicWidgetEndpoints
             AssignedTo: conversation.AssignedTo,
             SenderDisplayName: message.SenderDisplayName,
             SenderAvatarUrl: message.SenderAvatarUrl,
-            InboxId: conversation.InboxId), ct);
+            InboxId: conversation.InboxId,
+            ConversationStatus: conversation.Status), ct);
 
         await notifier.NotifyConversationUpdatedAsync(tenantId, new InboxConversationEvent(
             conversation.Id,

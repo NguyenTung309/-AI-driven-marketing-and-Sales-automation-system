@@ -100,6 +100,15 @@ export async function summarizeSaleAssistConversation(conversationId: string): P
   return res.data;
 }
 
+export async function getSaleAssistConversationSummary(
+  conversationId: string,
+): Promise<SaleAssistSummaryResponse | null> {
+  const res = await apiClient.get<SaleAssistSummaryResponse>(
+    `/api/sale-assist/summary/${conversationId}`,
+  );
+  return res.status === 204 ? null : res.data;
+}
+
 export async function listQuickReplies(): Promise<readonly QuickReply[]> {
   const res = await apiClient.get<readonly QuickReply[]>("/api/sale-assist/quick-replies");
   return res.data;

@@ -95,9 +95,23 @@ function toRequiredInt(value: string, fallback: number): number {
   return Number.isInteger(parsed) ? parsed : fallback;
 }
 
+const CONFIG_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+  invalid_provider: "Nhà cung cấp không được hỗ trợ.",
+  invalid_model_id: "Tên mô hình không hợp lệ.",
+  invalid_base_url: "Base URL không hợp lệ.",
+  base_url_requires_https: "Base URL phải dùng https:// (không cho http thường ra internet).",
+  base_url_private_host: "Base URL trỏ vào mạng nội bộ; cần người vận hành cấp phép.",
+  base_url_mixed_dns: "Tên miền trả về cả địa chỉ công cộng lẫn nội bộ (nghi DNS rebinding).",
+  invalid_rate: "Chi phí không được âm.",
+  invalid_timeout: "Timeout phải từ 1 đến 600 giây.",
+  invalid_max_output_tokens: "Max output tokens phải từ 1 đến 200000.",
+  api_key_required: "Cần nhập khóa API.",
+};
+
 function readError(err: unknown): string {
   const apiError = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-  return apiError ?? "Đã xảy ra lỗi, vui lòng thử lại.";
+  if (!apiError) return "Đã xảy ra lỗi, vui lòng thử lại.";
+  return CONFIG_ERROR_MESSAGES[apiError] ?? apiError;
 }
 
 function toNullableBooleanTriState(value: "" | "true" | "false"): boolean | null {

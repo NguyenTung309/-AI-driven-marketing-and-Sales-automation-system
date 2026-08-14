@@ -1,10 +1,12 @@
 namespace Clawbot.Api.Contracts.Documents;
 
+// RecipientEmail: gửi thẳng tới email người dùng gõ tay, không bắt buộc phải có contact trong CRM.
 public sealed record GenerateDocumentRequest(
     string TemplateCode,
     Guid? ContactId,
     IReadOnlyDictionary<string, string>? Vars,
-    string? SentVia);
+    string? SentVia,
+    string? RecipientEmail = null);
 
 public sealed record GenerateDocumentResponse(
     Guid DocumentId,
@@ -17,7 +19,8 @@ public sealed record GenerateDocumentKitRequest(
     IReadOnlyList<string>? TemplateCodes,
     Guid? ContactId,
     IReadOnlyDictionary<string, string>? Vars,
-    string? SentVia);
+    string? SentVia,
+    string? RecipientEmail = null);
 
 public sealed record GenerateDocumentKitResponse(
     IReadOnlyList<GenerateDocumentResponse> Documents,

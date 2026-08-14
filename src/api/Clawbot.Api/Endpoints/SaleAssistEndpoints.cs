@@ -1,9 +1,12 @@
+using System.Security.Claims;
+using System.Text.Json;
 using Clawbot.Agents.Contracts.SaleAssist;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.SaleAssist;
 using Clawbot.Api.Jobs;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
+using Clawbot.Domain.Jobs;
 using Clawbot.Domain.SaleAssist;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Jobs;
@@ -16,13 +19,17 @@ namespace Clawbot.Api.Endpoints;
 
 public static class SaleAssistEndpoints
 {
+    // Cùng mốc ngày với KpiAggregator để 2 nơi không lệch nhau khi cùng nói "hôm nay".
+    private static readonly TimeSpan AnalyticsOffset = TimeSpan.FromHours(7);
+
     public static IEndpointRouteBuilder MapSaleAssist(this IEndpointRouteBuilder app)
     {
-var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         grp.MapPost("/draft", DraftAsync);
         grp.MapPost("/draft-feedback", DraftFeedbackAsync);
         grp.MapPost("/summary", SummarizeAsync);
+        grp.MapGet("/summary/{conversationId:guid}", GetSummaryAsync);
 
         grp.MapGet("/quick-replies", ListQuickRepliesAsync);
         grp.MapPost("/quick-replies", CreateQuickReplyAsync);
@@ -40,16 +47,28 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
     // thấy được trong "Việc đang chạy", huỷ được, lỗi thì báo. Không bắn thông báo lúc xong —
     // sale đang mở hội thoại và nhìn màn hình chờ (NotifyOnSuccess=false ở handler).
     // Upsell: gate lead stage=hot ngay tại API — chưa đủ điều kiện thì trả 200 thẳng, không đẻ job/log.
-    private static async Task<IResult> UpsellAsync(
+    internal static async Task<IResult> UpsellAsync(
         Guid conversationId,
         IJobLauncher jobs,
         ITenantAccessor tenants,
         AppDbContext db,
+        IUserInboxResolver resolver,
         HttpContext http,
         CancellationToken ct)
     {
         var tenantId = tenants.Require().TenantId;
         if (conversationId == Guid.Empty) return Results.BadRequest(new { error = "conversationId required" });
+
+        if (!await CanAccessConversationAsync(
+                db,
+                resolver,
+                http.User,
+                tenantId,
+                conversationId,
+                ct).ConfigureAwait(false))
+        {
+            return Results.NotFound(new { error = "conversation not found" });
+        }
 
         var conv = await db.Conversations.AsNoTracking()
             .Where(c => c.Id == conversationId && c.TenantId == tenantId)
@@ -106,15 +125,28 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
             .ConfigureAwait(false);
     }
 
-    private static async Task<IResult> DraftAsync(
+    internal static async Task<IResult> DraftAsync(
         SaleAssistDraftRequest body,
         IJobLauncher jobs,
         ITenantAccessor tenants,
+        AppDbContext db,
+        IUserInboxResolver resolver,
         HttpContext http,
         CancellationToken ct)
     {
-        _ = tenants.Require();
+        var tenantId = tenants.Require().TenantId;
         if (body.ConversationId == Guid.Empty) return Results.BadRequest(new { error = "conversationId required" });
+
+        if (!await CanAccessConversationAsync(
+                db,
+                resolver,
+                http.User,
+                tenantId,
+                body.ConversationId,
+                ct).ConfigureAwait(false))
+        {
+            return Results.NotFound(new { error = "conversation not found" });
+        }
 
         // Composer gợi ý nháp theo nhịp gõ: khoá idempotency theo hội thoại để 1 loạt gõ chỉ dùng
         // đúng job đang chạy, không đẻ hàng chục job.
@@ -144,13 +176,30 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
             ? id
             : null;
 
-    private static async Task<IResult> DraftFeedbackAsync(
+    internal static async Task<IResult> DraftFeedbackAsync(
         SaleAssistDraftFeedbackRequest body,
         ITenantAccessor tenants,
+        AppDbContext db,
+        IUserInboxResolver resolver,
+        ClaimsPrincipal user,
         SaleAssistDraftFeedbackService feedback,
         CancellationToken ct)
     {
         var tenant = tenants.Require();
+        if (body.ConversationId == Guid.Empty)
+            return Results.BadRequest(new { error = "conversationId required" });
+
+        if (!await CanAccessConversationAsync(
+                db,
+                resolver,
+                user,
+                tenant.TenantId,
+                body.ConversationId,
+                ct).ConfigureAwait(false))
+        {
+            return Results.NotFound(new { error = "conversation not found" });
+        }
+
         try
         {
             return Results.Ok(await feedback.RecordAsync(tenant.TenantId, body, ct).ConfigureAwait(false));
@@ -168,15 +217,116 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
     private static async Task<IResult> SummarizeAsync(
         SaleAssistSummaryRequest body,
         IJobLauncher jobs,
+        AppDbContext db,
+        IUserInboxResolver resolver,
         ITenantAccessor tenants,
         HttpContext http,
         CancellationToken ct)
     {
-        _ = tenants.Require();
-        if (body.ConversationId == Guid.Empty) return Results.BadRequest(new { error = "conversationId required" });
+        var tenantId = tenants.Require().TenantId;
+        if (body.ConversationId == Guid.Empty)
+            return Results.BadRequest(new { error = "conversationId required" });
 
-        return await LaunchAsync(jobs, http, SaleAssistSummaryJobHandler.JobType, "Tóm tắt hội thoại", body.ConversationId, ct)
+        if (!await CanAccessConversationAsync(
+                db,
+                resolver,
+                http.User,
+                tenantId,
+                body.ConversationId,
+                ct).ConfigureAwait(false))
+        {
+            return Results.NotFound(new { error = "conversation not found" });
+        }
+
+        return await LaunchAsync(
+                jobs,
+                http,
+                SaleAssistSummaryJobHandler.JobType,
+                "Tóm tắt hội thoại",
+                body.ConversationId,
+                ct)
             .ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> GetSummaryAsync(
+        Guid conversationId,
+        AppDbContext db,
+        IUserInboxResolver resolver,
+        ITenantAccessor tenants,
+        ClaimsPrincipal user,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        if (!await CanAccessConversationAsync(
+                db,
+                resolver,
+                user,
+                tenantId,
+                conversationId,
+                ct).ConfigureAwait(false))
+        {
+            return Results.NotFound(new { error = "conversation not found" });
+        }
+
+        var summary = await FindLatestSummaryAsync(db, tenantId, conversationId, ct)
+            .ConfigureAwait(false);
+        return summary is null ? Results.NoContent() : Results.Ok(summary);
+    }
+
+    internal static async Task<SaleAssistSummaryResponse?> FindLatestSummaryAsync(
+        AppDbContext db,
+        Guid tenantId,
+        Guid conversationId,
+        CancellationToken ct)
+    {
+        var resultLink = $"/inbox?conversation={conversationId}";
+        var resultJson = await db.BackgroundJobs
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(job =>
+                job.TenantId == tenantId &&
+                job.Type == SaleAssistSummaryJobHandler.JobType &&
+                job.Status == BackgroundJobStatuses.Succeeded &&
+                job.ResultLink == resultLink &&
+                job.ResultSummary != null)
+            .OrderByDescending(job => job.FinishedAt ?? job.CreatedAt)
+            .ThenByDescending(job => job.Id)
+            .Select(job => job.ResultSummary)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(resultJson))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<SaleAssistSummaryResponse>(resultJson, JobResultJson.Web);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static async Task<bool> CanAccessConversationAsync(
+        AppDbContext db,
+        IUserInboxResolver resolver,
+        ClaimsPrincipal user,
+        Guid tenantId,
+        Guid conversationId,
+        CancellationToken ct)
+    {
+        var inboxIds = await resolver.GetInboxIdsAsync(user, ct).ConfigureAwait(false);
+        var query = db.Conversations
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(conversation =>
+                conversation.Id == conversationId &&
+                conversation.TenantId == tenantId &&
+                conversation.DeletedAt == null)
+            .ApplyInboxScope(inboxIds);
+
+        return await query.AnyAsync(ct).ConfigureAwait(false);
     }
 
     private static async Task<IResult> ListQuickRepliesAsync(AppDbContext db, ITenantAccessor tenants, CancellationToken ct)
@@ -240,30 +390,51 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
         return Results.NoContent();
     }
 
-    private static async Task<IResult> DailySummaryAsync(
+    internal static async Task<IResult> DailySummaryAsync(
         AppDbContext db,
+        IUserInboxResolver resolver,
         ITenantAccessor tenants,
+        ClaimsPrincipal user,
+        IClock clock,
         CancellationToken ct)
     {
         var tenantId = tenants.Require().TenantId;
-        var today = DateTimeOffset.UtcNow.Date;
-        var tomorrow = today.AddDays(1);
+        var inboxIds = await resolver.GetInboxIdsAsync(user, ct).ConfigureAwait(false);
+        // "Hôm nay" phải là ngày giờ VN (UTC+7) như KpiAggregator, không phải ngày UTC: lấy mốc UTC
+        // thì cả khung 00:00-07:00 giờ VN bị đếm sang hôm trước và panel hiện 0 suốt buổi sáng.
+        var today = DateOnly.FromDateTime(clock.UtcNow.ToOffset(AnalyticsOffset).DateTime);
+        var dayStart = new DateTimeOffset(today.ToDateTime(TimeOnly.MinValue), AnalyticsOffset);
+        var tomorrow = dayStart.AddDays(1);
 
-        var newLeads = await db.Leads
+        var leadQuery = db.Leads
             .IgnoreQueryFilters()
-            .CountAsync(l => l.TenantId == tenantId && l.CreatedAt >= today && l.CreatedAt < tomorrow, ct);
+            .Where(lead => lead.TenantId == tenantId && lead.DeletedAt == null)
+            .ApplyInboxScope(db, tenantId, inboxIds);
+        var conversationQuery = db.Conversations
+            .IgnoreQueryFilters()
+            .Where(conversation => conversation.TenantId == tenantId && conversation.DeletedAt == null)
+            .ApplyInboxScope(inboxIds);
+        var messageQuery = db.Messages
+            .IgnoreQueryFilters()
+            .Where(message => message.TenantId == tenantId)
+            .ApplyInboxScope(db, tenantId, inboxIds);
 
-        var conversations = await db.Conversations
-            .IgnoreQueryFilters()
-            .CountAsync(c => c.TenantId == tenantId && c.CreatedAt >= today && c.CreatedAt < tomorrow, ct);
-
-        var messagesSent = await db.Messages
-            .IgnoreQueryFilters()
-            .CountAsync(m => m.TenantId == tenantId && m.Direction == "out" && m.SentAt >= today && m.SentAt < tomorrow, ct);
-
-        var hotLeads = await db.Leads
-            .IgnoreQueryFilters()
-            .CountAsync(l => l.TenantId == tenantId && l.Stage == "hot", ct);
+        var newLeads = await leadQuery
+            .CountAsync(lead => lead.CreatedAt >= dayStart && lead.CreatedAt < tomorrow, ct)
+            .ConfigureAwait(false);
+        var conversations = await conversationQuery
+            .CountAsync(conversation => conversation.CreatedAt >= dayStart && conversation.CreatedAt < tomorrow, ct)
+            .ConfigureAwait(false);
+        var messagesSent = await messageQuery
+            .CountAsync(message =>
+                message.Direction == "out" &&
+                message.SentAt >= dayStart &&
+                message.SentAt < tomorrow,
+                ct)
+            .ConfigureAwait(false);
+        var hotLeads = await leadQuery
+            .CountAsync(lead => lead.Stage == "hot", ct)
+            .ConfigureAwait(false);
 
         return Results.Ok(new
         {
@@ -275,13 +446,16 @@ var grp = app.MapGroup("/api/sale-assist").RequirePermission("sale-assist:use").
         });
     }
 
-    private static async Task<IResult> UpsellSuggestionsAsync(
+    internal static async Task<IResult> UpsellSuggestionsAsync(
         ITenantAccessor tenants,
+        IUserInboxResolver resolver,
+        ClaimsPrincipal user,
         SaleAssistUpsellSuggestionService suggestions,
         CancellationToken ct)
     {
         var tenantId = tenants.Require().TenantId;
-        return Results.Ok(await suggestions.GetSuggestionsAsync(tenantId, ct: ct).ConfigureAwait(false));
+        var inboxIds = await resolver.GetInboxIdsAsync(user, ct).ConfigureAwait(false);
+        return Results.Ok(await suggestions.GetSuggestionsAsync(tenantId, inboxIds, ct: ct).ConfigureAwait(false));
     }
 }
 

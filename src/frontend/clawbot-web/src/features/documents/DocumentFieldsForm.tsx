@@ -1,4 +1,5 @@
 import type { TemplateField } from "@/shared/api/documents";
+import { toDateInputValue } from "./templateModel";
 
 const INPUT_CLASS =
   "w-full rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary";
@@ -38,7 +39,9 @@ export function DocumentFieldsForm({
   return (
     <div className="space-y-3">
       {fields.map((field) => {
-        const value = values[field.key] ?? "";
+        const raw = values[field.key] ?? "";
+        // Ô ngày chỉ nhận yyyy-MM-dd; giá trị mẫu/dữ liệu cũ dạng dd/MM/yyyy sẽ bị nuốt mất.
+        const value = field.type === "date" ? toDateInputValue(raw) : raw;
         const isMissing = missingKeys.includes(field.key);
         const borderClass = isMissing ? "border-error" : "";
         const describedBy = hint(field) ? `${field.key}-hint` : undefined;

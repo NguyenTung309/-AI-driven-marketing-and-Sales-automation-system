@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
 import { getMe } from "@/shared/api/auth";
 import {
+  CONVERSATION_COUNTS_QUERY_KEY,
   listConversations,
   listChannels,
   getConversation,
@@ -97,6 +98,7 @@ export default function AgentHubLayout() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["inbox", "conversation", activeId] });
       void queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
+      void queryClient.invalidateQueries({ queryKey: CONVERSATION_COUNTS_QUERY_KEY });
     },
   });
 
@@ -105,6 +107,7 @@ export default function AgentHubLayout() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["inbox", "conversation", activeId] });
       void queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
+      void queryClient.invalidateQueries({ queryKey: CONVERSATION_COUNTS_QUERY_KEY });
     },
   });
 

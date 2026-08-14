@@ -369,9 +369,11 @@ internal abstract class HtmlTrendSource<TOptions>(
         if (!(tenantOverride?.Enabled ?? _options.Enabled) || string.IsNullOrWhiteSpace(url))
             return [];
 
-        // Tenant-supplied URLs must pass the SSRF guard (public https hosts only); appsettings URLs are operator-owned.
+        // Tenant-supplied URLs must pass the SSRF guard strictly (host resolves to public addresses
+        // only); appsettings URLs are operator-owned. Source này dùng HttpClient thường (không phải
+        // guarded client) nên KHÔNG được nương tay với DNS chưa xác minh như các đường LLM.
         if (!string.Equals(url, _options.Url, StringComparison.OrdinalIgnoreCase)
-            && !Chat.LlmBaseUrlGuard.IsAllowedBaseUrl(url))
+            && Chat.LlmBaseUrlGuard.CheckBaseUrl(url) != Chat.BaseUrlVerdict.Allowed)
         {
             return [];
         }

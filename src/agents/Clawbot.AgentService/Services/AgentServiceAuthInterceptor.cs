@@ -1,5 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
+using Clawbot.Infrastructure.Security;
 using Clawbot.SharedKernel.Security;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
@@ -40,7 +40,7 @@ public sealed class AgentServiceAuthInterceptor : Interceptor
         ServerCallContext context,
         UnaryServerMethod<TRequest, TResponse> continuation)
     {
-        AuthenticateCall(context);
+        AuthenticateCall(request, context);
         return continuation(request, context);
     }
 
@@ -50,11 +50,11 @@ public sealed class AgentServiceAuthInterceptor : Interceptor
         ServerCallContext context,
         ServerStreamingServerMethod<TRequest, TResponse> continuation)
     {
-        AuthenticateCall(context);
+        AuthenticateCall(request, context);
         return continuation(request, responseStream, context);
     }
 
-    private void AuthenticateCall(ServerCallContext context)
+    private void AuthenticateCall(object request, ServerCallContext context)
     {
         var authHeader = context.RequestHeaders.GetValue("authorization");
         if (string.IsNullOrWhiteSpace(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.Ordinal))
@@ -67,6 +67,7 @@ public sealed class AgentServiceAuthInterceptor : Interceptor
         {
             var handler = new JwtSecurityTokenHandler();
             var principal = handler.ValidateToken(token, _validationParameters, out _);
+            AgentServiceTenantBinding.EnsurePrincipalMatchesRequest(principal, request);
             context.GetHttpContext().User = principal;
         }
         catch (SecurityTokenException)

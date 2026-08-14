@@ -39,29 +39,10 @@ export interface GeneratedDocument {
 export interface GenerateDocumentPayload {
   readonly templateCode: string;
   readonly contactId?: string | null;
+  /** Email gõ tay — dùng khi khách chưa có hồ sơ trong CRM. Ưu tiên hơn email của contact. */
+  readonly recipientEmail?: string | null;
   readonly vars?: Record<string, string> | null;
   readonly sentVia?: string | null;
-}
-
-export interface GenerateDocumentResponse {
-  readonly documentId: string;
-  readonly fileUrl: string;
-  readonly fileHash: string;
-  readonly sizeBytes: number;
-  readonly latencyMs: number;
-}
-
-export interface GenerateDocumentKitPayload {
-  readonly templateCodes?: readonly string[] | null;
-  readonly contactId?: string | null;
-  readonly vars?: Record<string, string> | null;
-  readonly sentVia?: string | null;
-}
-
-export interface GenerateDocumentKitResponse {
-  readonly documents: readonly GenerateDocumentResponse[];
-  readonly totalSizeBytes: number;
-  readonly totalLatencyMs: number;
 }
 
 export interface DocumentTemplatePayload {
@@ -128,11 +109,6 @@ export async function listGeneratedDocuments(
 
 export async function generateDocument(payload: GenerateDocumentPayload): Promise<JobAccepted> {
   const res = await apiClient.post<JobAccepted>("/api/docs/generate", payload);
-  return res.data;
-}
-
-export async function generateDocumentKit(payload: GenerateDocumentKitPayload): Promise<JobAccepted> {
-  const res = await apiClient.post<JobAccepted>("/api/docs/generate-kit", payload);
   return res.data;
 }
 

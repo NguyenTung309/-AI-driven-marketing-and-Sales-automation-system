@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using Clawbot.Api.Auth;
+using Clawbot.Infrastructure.Security;
 using Clawbot.SharedKernel.Security;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
@@ -34,11 +35,29 @@ public sealed class AgentServiceTokenIssuerTests
         token.ValidTo.Should().BeCloseTo(DateTime.UtcNow.AddMinutes(2), TimeSpan.FromSeconds(5));
     }
 
-    [Fact]
-    public void Issue_RejectsEmptyRoleId()
+    [Theory]
+    [InlineData("user")]
+    [InlineData("tenant")]
+    [InlineData("role")]
+    public void Issue_RejectsEmptyIdentityComponent(string component)
     {
         var issuer = CreateIssuer();
-        var action = () => issuer.Issue(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty);
+        var userId = component == "user" ? Guid.Empty : Guid.NewGuid();
+        var tenantId = component == "tenant" ? Guid.Empty : Guid.NewGuid();
+        var roleId = component == "role" ? Guid.Empty : Guid.NewGuid();
+
+        var action = () => issuer.Issue(userId, tenantId, roleId);
+
+        action.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void IssueServiceToken_RejectsEmptyTenantId()
+    {
+        var issuer = CreateIssuer();
+
+        var action = () => issuer.IssueServiceToken(Guid.Empty);
+
         action.Should().Throw<ArgumentException>();
     }
 
