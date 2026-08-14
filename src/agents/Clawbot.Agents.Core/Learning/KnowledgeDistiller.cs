@@ -179,7 +179,7 @@ public sealed class KnowledgeDistiller(IClaudeChatClient claude, ILlmCallScope l
     }
 }
 
-// Self-repair dùng chung cho các bước LLM-JSON của lớp Learning (+ lead revenue estimate):
+// Self-repair dùng chung cho các bước LLM-JSON của lớp Learning:
 // parse fail -> đưa chính lỗi cho model tự sửa, tối đa maxAttempts; hết lượt -> null (caller skip, KHÔNG ghi đoán).
 public static class LlmJsonRepair
 {

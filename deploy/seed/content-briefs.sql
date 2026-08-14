@@ -30,7 +30,7 @@ DECLARE @briefs TABLE (
 
 INSERT INTO @briefs (platform, brief)
 VALUES
-    (N'tiktok', N'Create a short HSK 3 listening drill about ordering drinks, with one hook, one example sentence, and a call to comment the missing word.'),
+    (N'instagram', N'Create a short Reels script for an HSK 3 listening drill about ordering drinks, with one hook, one example sentence, and a call to comment the missing word.'),
     (N'instagram', N'Create a carousel brief for Mandarin tone pairs: slide-by-slide idea, one learner mistake per slide, and a final save/share prompt.'),
     (N'facebook', N'Create a community post for busy office workers learning Chinese: empathy hook, 3 practical study tips, and a soft invite to book a placement test.'),
     (N'youtube', N'Create a 6-minute YouTube lesson outline for HSK 4 result complements, including intro hook, examples, practice prompts, and CTA.'),

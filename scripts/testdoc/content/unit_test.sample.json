@@ -1,0 +1,1395 @@
+{
+  "cover": {
+    "project_name": "Clawbot",
+    "project_code": "CLAWBOT",
+    "creator": "<Creator>",
+    "reviewer": "<Reviewer/Approver>",
+    "issue_date": "2026-08-11",
+    "version": "v1.0",
+    "statistics_note": "Clawbot.Agents.Core.Chat, Clawbot.Agents.Core.Content, Clawbot.Domain.ChatScenarios, Clawbot.SharedKernel.Content, Clawbot.Agents.Core.Orchestrator, Clawbot.Domain.KnowledgeBase, Clawbot.Domain.Conversations, Clawbot.Infrastructure.Security, Clawbot.Infrastructure.Content.Publishing, Clawbot.Domain.Leads, Clawbot.SharedKernel.Security",
+    "changes": [
+      {
+        "date": "2026-08-11",
+        "version": "v1.0",
+        "item": "Unit Test Report",
+        "type": "A",
+        "description": "Initial version",
+        "reference": ""
+      }
+    ]
+  },
+  "environment": "1. Windows 11 + .NET 8 SDK\n2. SQL Server 2022 (Docker :1433)\n3. Redis 7 (Docker :6379)\n4. xUnit + FluentAssertions\n5. Moq (DNS stub via LlmBaseUrlGuard.ResolveHostAddresses test seam)",
+  "methods": [
+    {
+      "sheet": "IsAllowedBaseUrl",
+      "module": "Clawbot.Agents.Core.Chat",
+      "method": "LlmBaseUrlGuard.IsAllowedBaseUrl",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "Guard outbound LLM provider URLs against SSRF: reject non-http/https schemes, embedded credentials, public cleartext HTTP, and private hosts without explicit operator grant. Fail closed when DNS resolves to a mix of public and private addresses or when resolution fails.",
+      "description": "Validate a base URL before an outbound HttpClient is created for an LLM provider",
+      "precondition": "The DNS test seam (LlmBaseUrlGuard.ResolveHostAddresses) is replaced with a stub in test setup",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "baseUrl",
+              "values": [
+                "\"not-a-uri\" (malformed, no scheme)",
+                "\"ftp://api.example.com\" (unsupported scheme)",
+                "\"https://user:pass@api.example.com\" (userInfo present)",
+                "\"http://api.openai.com\" (HTTP + public host)",
+                "\"http://10.0.0.5:8080\" (HTTP + private RFC-1918 host)",
+                "\"https://api.openai.com\" (HTTPS + public host)",
+                "\"https://localhost:11434\" (HTTPS + loopback)",
+                "\"https://10.0.0.5:8080\" (HTTPS + private RFC-1918)"
+              ]
+            },
+            {
+              "label": "allowPrivateHosts",
+              "values": [
+                "false (default)",
+                "true (operator grant)"
+              ]
+            },
+            {
+              "label": "allowedPrivateOrigins",
+              "values": [
+                "empty list",
+                "list containing \"http://10.0.0.5:8080\""
+              ]
+            },
+            {
+              "label": "DNS stub",
+              "values": [
+                "returns public IPv4 only (e.g. 1.2.3.4)",
+                "returns private IPv4 only (e.g. 10.0.0.5)",
+                "returns mix: one public + one private address",
+                "throws SocketException (DNS resolution failure)"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Return",
+              "values": [
+                "true  (URL is allowed)",
+                "false (URL is blocked)"
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "UTCID01",
+          "marks": { "baseUrl": 0, "allowPrivateHosts": 0, "allowedPrivateOrigins": 0, "DNS stub": 0, "Return": 1 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID02",
+          "marks": { "baseUrl": 1, "allowPrivateHosts": 0, "allowedPrivateOrigins": 0, "DNS stub": 0, "Return": 1 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID03",
+          "marks": { "baseUrl": 2, "allowPrivateHosts": 0, "allowedPrivateOrigins": 0, "DNS stub": 0, "Return": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID04",
+          "marks": { "baseUrl": 3, "allowPrivateHosts": 1, "allowedPrivateOrigins": 0, "DNS stub": 0, "Return": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID05",
+          "marks": { "baseUrl": 4, "allowPrivateHosts": 0, "allowedPrivateOrigins": 0, "DNS stub": 1, "Return": 1 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID06",
+          "marks": { "baseUrl": 4, "allowPrivateHosts": 1, "allowedPrivateOrigins": 0, "DNS stub": 1, "Return": 0 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID07",
+          "marks": { "baseUrl": 4, "allowPrivateHosts": 0, "allowedPrivateOrigins": 1, "DNS stub": 1, "Return": 0 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID08",
+          "marks": { "baseUrl": 5, "allowPrivateHosts": 0, "allowedPrivateOrigins": 0, "DNS stub": 0, "Return": 0 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID09",
+          "marks": { "baseUrl": 5, "allowPrivateHosts": 0, "allowedPrivateOrigins": 0, "DNS stub": 1, "Return": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID10",
+          "marks": { "baseUrl": 5, "allowPrivateHosts": 0, "allowedPrivateOrigins": 0, "DNS stub": 2, "Return": 1 },
+          "type": "B", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID11",
+          "marks": { "baseUrl": 5, "allowPrivateHosts": 0, "allowedPrivateOrigins": 0, "DNS stub": 3, "Return": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID12",
+          "marks": { "baseUrl": 6, "allowPrivateHosts": 0, "allowedPrivateOrigins": 0, "DNS stub": 1, "Return": 1 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID13",
+          "marks": { "baseUrl": 6, "allowPrivateHosts": 1, "allowedPrivateOrigins": 0, "DNS stub": 1, "Return": 0 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID14",
+          "marks": { "baseUrl": 7, "allowPrivateHosts": 0, "allowedPrivateOrigins": 0, "DNS stub": 1, "Return": 1 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        }
+      ]
+    },
+    {
+      "sheet": "NormalizeApiKey",
+      "module": "Clawbot.Infrastructure.Security",
+      "method": "AesEncryptor.ParseKey (constructor validation)",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "The AesEncryptor constructor must reject missing, malformed, or wrong-length base64 keys with a clear InvalidOperationException before any encryption call can be made.",
+      "description": "Validate the Encryption:Base64Key option when AesEncryptor is constructed via DI",
+      "precondition": "AesEncryptor is constructed directly using OptionsWrapper<EncryptionOptions>",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "Base64Key option",
+              "values": [
+                "null or empty string",
+                "whitespace-only string",
+                "valid base64 but decodes to 16 bytes (wrong length)",
+                "valid base64 but decodes to 64 bytes (wrong length)",
+                "non-base64 characters (e.g. \"!!invalid!!\") ",
+                "valid base64 that decodes to exactly 32 bytes"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Outcome",
+              "values": [
+                "Constructor succeeds; Encrypt returns a non-empty base64 string",
+                "InvalidOperationException is thrown with a descriptive message"
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "UTCID01",
+          "marks": { "Base64Key option": 0, "Outcome": 1 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID02",
+          "marks": { "Base64Key option": 1, "Outcome": 1 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID03",
+          "marks": { "Base64Key option": 2, "Outcome": 1 },
+          "type": "B", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID04",
+          "marks": { "Base64Key option": 3, "Outcome": 1 },
+          "type": "B", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID05",
+          "marks": { "Base64Key option": 4, "Outcome": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID06",
+          "marks": { "Base64Key option": 5, "Outcome": 0 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        }
+      ]
+    },
+    {
+      "sheet": "ContentLintCheck",
+      "module": "Clawbot.Agents.Core.Content",
+      "method": "ContentLint.Check",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "Deterministic pre-LLM lint: reject content bodies that contain absolute outcome guarantees, external links or junk encoding characters. Pass empty/whitespace bodies and clean bodies unchanged.",
+      "description": "Static content lint that runs before the LLM reviewer gate",
+      "precondition": "No external dependencies; pure function",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "body",
+              "values": [
+                "null",
+                "whitespace-only string",
+                "clean body text (no violations)",
+                "body with tab and newline only (allowed control chars)",
+                "body containing an absolute-guarantee phrase (prohibited commitment)",
+                "body containing \"100% do\" (absolute guarantee phrase, uppercase variant)",
+                "body containing \"https://example.com\" (external link)",
+                "body containing \"www.example.com\" (www link)",
+                "body containing U+FFFD replacement character (mojibake)",
+                "body containing C0 control char 0x01 (junk)"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Succeeded",
+              "values": [
+                "true",
+                "false"
+              ]
+            },
+            {
+              "label": "ErrorCode",
+              "values": [
+                "(empty string)",
+                "lint_absolute_guarantee",
+                "lint_external_link",
+                "lint_junk_chars"
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "UTCID01",
+          "marks": { "body": 0, "Succeeded": 0, "ErrorCode": 0 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID02",
+          "marks": { "body": 1, "Succeeded": 0, "ErrorCode": 0 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID03",
+          "marks": { "body": 2, "Succeeded": 0, "ErrorCode": 0 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID04",
+          "marks": { "body": 3, "Succeeded": 0, "ErrorCode": 0 },
+          "type": "B", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID05",
+          "marks": { "body": 4, "Succeeded": 1, "ErrorCode": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID06",
+          "marks": { "body": 5, "Succeeded": 1, "ErrorCode": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID07",
+          "marks": { "body": 6, "Succeeded": 1, "ErrorCode": 2 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID08",
+          "marks": { "body": 7, "Succeeded": 1, "ErrorCode": 2 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID09",
+          "marks": { "body": 8, "Succeeded": 1, "ErrorCode": 3 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID10",
+          "marks": { "body": 9, "Succeeded": 1, "ErrorCode": 3 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        }
+      ]
+    },
+    {
+      "sheet": "ScenarioMatcher",
+      "module": "Clawbot.Domain.ChatScenarios",
+      "method": "ChatScenarioMatcher.Match",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "Return the best-matching ChatScenario for an inbound text. Regex trigger scores 1000 + match.Length; substring scores trigger.Length. Tiebreak: higher SuccessRate then lower Code. Platform CSV filter: empty or 'all' matches any platform.",
+      "description": "Pure scenario selector used by the auto-reply pipeline to pick the correct response template",
+      "precondition": "No external dependencies; pure function with in-memory candidate list",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "text",
+              "values": [
+                "null or empty string",
+                "text matching one scenario via regex",
+                "text matching two scenarios; one has longer regex match (more specific)",
+                "text matching two scenarios; equal score; one has higher SuccessRate",
+                "text matching two scenarios; equal score and rate; one has lower Code (ordinal)"
+              ]
+            },
+            {
+              "label": "candidates",
+              "values": [
+                "empty list",
+                "single scenario, no platform filter (platforms empty)",
+                "scenarios with platform = \"facebook\"",
+                "scenarios with platform = \"all\""
+              ]
+            },
+            {
+              "label": "platform arg",
+              "values": [
+                "null",
+                "\"facebook\"",
+                "\"zalo\""
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Return",
+              "values": [
+                "null (no match)",
+                "the expected scenario"
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "UTCID01",
+          "marks": { "text": 0, "candidates": 1, "platform arg": 0, "Return": 0 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID02",
+          "marks": { "text": 1, "candidates": 0, "platform arg": 0, "Return": 0 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID03",
+          "marks": { "text": 1, "candidates": 1, "platform arg": 0, "Return": 1 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID04",
+          "marks": { "text": 2, "candidates": 1, "platform arg": 0, "Return": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID05",
+          "marks": { "text": 3, "candidates": 1, "platform arg": 0, "Return": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID06",
+          "marks": { "text": 4, "candidates": 1, "platform arg": 0, "Return": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID07",
+          "marks": { "text": 1, "candidates": 2, "platform arg": 1, "Return": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID08",
+          "marks": { "text": 1, "candidates": 2, "platform arg": 2, "Return": 0 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID09",
+          "marks": { "text": 1, "candidates": 3, "platform arg": 2, "Return": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        }
+      ]
+    },
+    {
+      "sheet": "GoldenHourResolve",
+      "module": "Clawbot.SharedKernel.Content",
+      "method": "DefaultGoldenHourResolver.ResolveNext",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "Return the next golden-hour slot in UTC+7 for a given platform. Known platforms: facebook=20:30, tiktok=20:00, instagram=19:30, youtube=18:00, zalo=08:00. Unknown platform defaults to 19:00. If the candidate slot has already passed today, return the same slot tomorrow.",
+      "description": "Calculates the next optimal posting time per platform for the content scheduler",
+      "precondition": "No external dependencies; pure function",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "platform",
+              "values": [
+                "\"facebook\"",
+                "\"tiktok\"",
+                "\"instagram\"",
+                "\"youtube\"",
+                "\"zalo\"",
+                "\"unknown_platform\" (not in the map)",
+                "\"FACEBOOK\" (uppercase — case-insensitive check)"
+              ]
+            },
+            {
+              "label": "utcNow (Vietnam time context)",
+              "values": [
+                "before the platform golden hour today (e.g. 10:00 VN for facebook 20:30)",
+                "after the platform golden hour today (e.g. 21:00 VN for facebook 20:30)",
+                "exactly at the platform golden hour (boundary)"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Return",
+              "values": [
+                "today's golden hour in UTC+7 (converted to UTC)",
+                "tomorrow's golden hour in UTC+7 (converted to UTC)"
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "UTCID01",
+          "marks": { "platform": 0, "utcNow (Vietnam time context)": 0, "Return": 0 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID02",
+          "marks": { "platform": 0, "utcNow (Vietnam time context)": 1, "Return": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID03",
+          "marks": { "platform": 0, "utcNow (Vietnam time context)": 2, "Return": 1 },
+          "type": "B", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID04",
+          "marks": { "platform": 1, "utcNow (Vietnam time context)": 0, "Return": 0 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID05",
+          "marks": { "platform": 4, "utcNow (Vietnam time context)": 0, "Return": 0 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID06",
+          "marks": { "platform": 5, "utcNow (Vietnam time context)": 0, "Return": 0 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID07",
+          "marks": { "platform": 6, "utcNow (Vietnam time context)": 0, "Return": 0 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID08",
+          "marks": { "platform": 2, "utcNow (Vietnam time context)": 1, "Return": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        }
+      ]
+    },
+    {
+      "sheet": "RecurrenceCalc",
+      "module": "Clawbot.Agents.Core.Orchestrator",
+      "method": "RecurrenceCalculator.NextRunUtc + WindowKey",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "NextRunUtc advances a UTC timestamp by one cadence unit in the given timezone. WindowKey returns a deterministic string key for the cadence window (e.g. weekly:2026-W33, quarterly:2026-Q3). Month-end dates are clamped to the last valid day of the target month.",
+      "description": "Recurrence engine used by AgentSchedules to compute the next run time and deduplicate runs within a window",
+      "precondition": "Timezone ID must be a valid IANA/Windows timezone (e.g. SE Asia Standard Time)",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "method",
+              "values": [
+                "NextRunUtc",
+                "WindowKey"
+              ]
+            },
+            {
+              "label": "cadence",
+              "values": [
+                "\"daily\"",
+                "\"weekly\"",
+                "\"monthly\"",
+                "\"quarterly\"",
+                "\"biennial\" (unsupported)"
+              ]
+            },
+            {
+              "label": "fromUtc / dueAtUtc",
+              "values": [
+                "normal date (e.g. 2026-08-11 10:00 UTC)",
+                "Jan 31 (month end, +1 month → Feb should clamp to Feb 28)",
+                "last day of a quarter (e.g. Sep 30 for Q3)"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Return",
+              "values": [
+                "next daily timestamp (+1 day)",
+                "next weekly timestamp (+7 days)",
+                "next monthly timestamp (+1 month, clamped)",
+                "next quarterly timestamp (+3 months, clamped)",
+                "window key string matching expected format"
+              ]
+            },
+            {
+              "label": "Exception",
+              "values": [
+                "ArgumentOutOfRangeException"
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "UTCID01",
+          "marks": { "method": 0, "cadence": 0, "fromUtc / dueAtUtc": 0, "Return": 0 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID02",
+          "marks": { "method": 0, "cadence": 1, "fromUtc / dueAtUtc": 0, "Return": 1 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID03",
+          "marks": { "method": 0, "cadence": 2, "fromUtc / dueAtUtc": 0, "Return": 2 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID04",
+          "marks": { "method": 0, "cadence": 3, "fromUtc / dueAtUtc": 0, "Return": 3 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID05",
+          "marks": { "method": 0, "cadence": 2, "fromUtc / dueAtUtc": 1, "Return": 2 },
+          "type": "B", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID06",
+          "marks": { "method": 0, "cadence": 3, "fromUtc / dueAtUtc": 2, "Return": 3 },
+          "type": "B", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID07",
+          "marks": { "method": 0, "cadence": 4, "fromUtc / dueAtUtc": 0, "Exception": 0 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID08",
+          "marks": { "method": 1, "cadence": 1, "fromUtc / dueAtUtc": 0, "Return": 4 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID09",
+          "marks": { "method": 1, "cadence": 3, "fromUtc / dueAtUtc": 0, "Return": 4 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID10",
+          "marks": { "method": 1, "cadence": 0, "fromUtc / dueAtUtc": 0, "Return": 4 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        }
+      ]
+    },
+    {
+      "sheet": "KbSuggestionApprove",
+      "module": "Clawbot.Domain.KnowledgeBase",
+      "method": "KbSuggestion.IsAutoApprovable + Approve",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "IsAutoApprovable returns true only when: Status=pending, Verdict=approve, both accuracy values present, accuracy_after >= accuracy_before. Approve(auto) requires IsAutoApprovable=true and no decidedBy. Approve(human) requires a decidedBy userId. Reject requires a non-empty reason string.",
+      "description": "Domain aggregate methods controlling the KB suggestion lifecycle",
+      "precondition": "KbSuggestion instance built via KbSuggestion.Create with valid parameters",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "Status",
+              "values": [
+                "pending",
+                "approved (already processed)",
+                "rejected (already processed)"
+              ]
+            },
+            {
+              "label": "Verdict",
+              "values": [
+                "approve",
+                "reject"
+              ]
+            },
+            {
+              "label": "accuracy_after vs accuracy_before",
+              "values": [
+                "after > before (improved)",
+                "after == before (unchanged)",
+                "after < before (degraded)",
+                "either value is null"
+              ]
+            },
+            {
+              "label": "decidedBy",
+              "values": [
+                "null (auto path)",
+                "valid userId (human path)"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "IsAutoApprovable",
+              "values": [
+                "true",
+                "false"
+              ]
+            },
+            {
+              "label": "Approve outcome",
+              "values": [
+                "auto-approved (ApprovalMode=automatic)",
+                "human-approved (ApprovalMode=human)",
+                "InvalidOperationException"
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "UTCID01",
+          "marks": { "Status": 0, "Verdict": 0, "accuracy_after vs accuracy_before": 0, "decidedBy": 0, "IsAutoApprovable": 0, "Approve outcome": 0 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID02",
+          "marks": { "Status": 0, "Verdict": 0, "accuracy_after vs accuracy_before": 1, "decidedBy": 0, "IsAutoApprovable": 0, "Approve outcome": 0 },
+          "type": "B", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID03",
+          "marks": { "Status": 0, "Verdict": 0, "accuracy_after vs accuracy_before": 2, "decidedBy": 0, "IsAutoApprovable": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID04",
+          "marks": { "Status": 0, "Verdict": 0, "accuracy_after vs accuracy_before": 3, "decidedBy": 0, "IsAutoApprovable": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID05",
+          "marks": { "Status": 0, "Verdict": 1, "accuracy_after vs accuracy_before": 0, "decidedBy": 0, "IsAutoApprovable": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID06",
+          "marks": { "Status": 1, "Verdict": 0, "accuracy_after vs accuracy_before": 0, "decidedBy": 0, "IsAutoApprovable": 1, "Approve outcome": 2 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID07",
+          "marks": { "Status": 0, "Verdict": 0, "accuracy_after vs accuracy_before": 0, "decidedBy": 1, "IsAutoApprovable": 0, "Approve outcome": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID08",
+          "marks": { "Status": 2, "Verdict": 0, "accuracy_after vs accuracy_before": 0, "decidedBy": 0, "IsAutoApprovable": 1, "Approve outcome": 2 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        }
+      ]
+    },
+    {
+      "sheet": "ConversationResume",
+      "module": "Clawbot.Domain.Conversations",
+      "method": "Conversation.TryResumeAiAutoReply + PauseAiAutoReplyUntil",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "PauseAiAutoReplyUntil sets enabled=false and records resumeAt. TryResumeAiAutoReply returns true and clears resumeAt only when enabled=false AND resumeAt <= now. SetAiAutoReply(false) is a permanent toggle (clears resumeAt). Escalate sets enabled=false with resumeAt=null permanently.",
+      "description": "AI auto-reply state machine on the Conversation aggregate",
+      "precondition": "Conversation instance is in a valid state (not resolved/deleted)",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "method called",
+              "values": [
+                "PauseAiAutoReplyUntil(resumeAt)",
+                "TryResumeAiAutoReply(now)",
+                "SetAiAutoReply(false)",
+                "Escalate()"
+              ]
+            },
+            {
+              "label": "enabled state before call",
+              "values": [
+                "true",
+                "false"
+              ]
+            },
+            {
+              "label": "resumeAt vs now",
+              "values": [
+                "resumeAt <= now (window elapsed)",
+                "resumeAt > now (still in window)",
+                "resumeAt is null"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Return / side-effect",
+              "values": [
+                "TryResume returns true; enabled=true; resumeAt=null",
+                "TryResume returns false; state unchanged",
+                "enabled=false; resumeAt set to the given future time",
+                "enabled=false; resumeAt=null (permanent disable)"
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "id": "UTCID01",
+          "marks": { "method called": 0, "enabled state before call": 0, "resumeAt vs now": 2, "Return / side-effect": 2 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID02",
+          "marks": { "method called": 1, "enabled state before call": 1, "resumeAt vs now": 0, "Return / side-effect": 0 },
+          "type": "N", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID03",
+          "marks": { "method called": 1, "enabled state before call": 1, "resumeAt vs now": 1, "Return / side-effect": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID04",
+          "marks": { "method called": 1, "enabled state before call": 0, "resumeAt vs now": 1, "Return / side-effect": 1 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID05",
+          "marks": { "method called": 1, "enabled state before call": 0, "resumeAt vs now": 2, "Return / side-effect": 1 },
+          "type": "B", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID06",
+          "marks": { "method called": 2, "enabled state before call": 0, "resumeAt vs now": 0, "Return / side-effect": 3 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID07",
+          "marks": { "method called": 3, "enabled state before call": 0, "resumeAt vs now": 0, "Return / side-effect": 3 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        },
+        {
+          "id": "UTCID08",
+          "marks": { "method called": 3, "enabled state before call": 0, "resumeAt vs now": 2, "Return / side-effect": 3 },
+          "type": "A", "result": "P", "date": "2026-08-11", "defect": ""
+        }
+      ]
+    },
+    {
+      "sheet": "PlanValidator",
+      "module": "Clawbot.Agents.Core.Orchestrator",
+      "method": "OrchestrationPlanValidator.Validate",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "Reject an orchestration plan before any agent runs: empty plan, task count above MaxTaskCount (50), missing or duplicate task id, task input above MaxTaskInputChars (8192), agent not present in the orchestratable catalog, dangling dependency, and dependency cycle. Fail closed with a machine-readable error code.",
+      "description": "Validate a planner-produced plan document against the bound agent catalog",
+      "precondition": "A catalog is supplied with at least one entry where Orchestratable is true",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "plan.Tasks",
+              "values": [
+                "null (property not set)",
+                "empty collection",
+                "51 tasks (above MaxTaskCount)",
+                "one task, null element",
+                "one task, Id is whitespace",
+                "two tasks with the same Id (different casing)",
+                "one task, input total length 8193 chars",
+                "one valid task",
+                "two tasks, second DependsOn an unknown id",
+                "two tasks forming a dependency cycle",
+                "three tasks in a valid dependency chain"
+              ]
+            },
+            {
+              "label": "task.Agent",
+              "values": [
+                "matches catalog Code exactly",
+                "matches catalog ShortName (different casing)",
+                "matches catalog AgentType",
+                "not present in the catalog"
+              ]
+            },
+            {
+              "label": "catalog entry Orchestratable",
+              "values": [
+                "true (agent is bound and orchestratable)",
+                "false (agent exists but is not orchestratable)"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Result",
+              "values": [
+                "Valid (IsValid is true)",
+                "Invalid \"empty_plan\"",
+                "Invalid \"too_many_tasks:51:50\"",
+                "Invalid \"task_required\"",
+                "Invalid \"task_id_required\"",
+                "Invalid \"duplicate_task:...\"",
+                "Invalid \"input_too_large:...\"",
+                "Invalid \"unknown_agent:...\" listing allowed codes",
+                "Invalid \"dangling_dependency:...\"",
+                "Invalid \"cycle_detected\""
+              ]
+            },
+            {
+              "label": "Exception",
+              "values": [
+                "ArgumentNullException (plan or catalog is null)"
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        { "id": "UTCID01", "marks": { "plan.Tasks": 0, "Result": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID02", "marks": { "plan.Tasks": 1, "Result": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID03", "marks": { "plan.Tasks": 2, "task.Agent": 0, "catalog entry Orchestratable": 0, "Result": 2 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID04", "marks": { "plan.Tasks": 3, "Result": 3 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID05", "marks": { "plan.Tasks": 4, "Result": 4 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID06", "marks": { "plan.Tasks": 5, "task.Agent": 0, "catalog entry Orchestratable": 0, "Result": 5 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID07", "marks": { "plan.Tasks": 6, "task.Agent": 0, "catalog entry Orchestratable": 0, "Result": 6 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID08", "marks": { "plan.Tasks": 7, "task.Agent": 3, "catalog entry Orchestratable": 0, "Result": 7 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID09", "marks": { "plan.Tasks": 7, "task.Agent": 0, "catalog entry Orchestratable": 1, "Result": 7 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID10", "marks": { "plan.Tasks": 8, "task.Agent": 0, "catalog entry Orchestratable": 0, "Result": 8 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID11", "marks": { "plan.Tasks": 9, "task.Agent": 0, "catalog entry Orchestratable": 0, "Result": 9 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID12", "marks": { "plan.Tasks": 7, "task.Agent": 0, "catalog entry Orchestratable": 0, "Result": 0 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID13", "marks": { "plan.Tasks": 7, "task.Agent": 1, "catalog entry Orchestratable": 0, "Result": 0 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID14", "marks": { "plan.Tasks": 7, "task.Agent": 2, "catalog entry Orchestratable": 0, "Result": 0 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID15", "marks": { "plan.Tasks": 10, "task.Agent": 0, "catalog entry Orchestratable": 0, "Result": 0 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID16", "marks": { "Exception": 0 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" }
+      ]
+    },
+    {
+      "sheet": "CostGuard",
+      "module": "Clawbot.Agents.Core.Orchestrator",
+      "method": "OrchestratorCostGuard.CanStartAsync / TryReserveAsync / RecordAsync",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "Block an orchestration run when the month-to-date spend plus the estimate would exceed the tenant cap. Treat a negative estimate as zero. Prefer the reservation store when the tracker implements it. Always write a ledger entry when there are tokens, even when the computed cost is zero, so the monthly cap cannot silently lose data.",
+      "description": "Enforce the per-tenant monthly LLM cost cap before and during an orchestration run",
+      "precondition": "A fake ILlmCostTracker returns a controlled SummaryAsync result; a separate fake also implements ILlmCostReservationStore",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "method under test",
+              "values": [
+                "CanStartAsync (preflight)",
+                "TryReserveAsync (mid-run)",
+                "RecordAsync (ledger write)",
+                "ReleaseReservationAsync"
+              ]
+            },
+            {
+              "label": "summary MonthToDate vs Cap",
+              "values": [
+                "MonthToDate 10 + estimate 5, Cap 200 (well under)",
+                "MonthToDate 195 + estimate 5, Cap 200 (exactly at cap)",
+                "MonthToDate 199 + estimate 5, Cap 200 (over cap)"
+              ]
+            },
+            {
+              "label": "estimatedUsd",
+              "values": [
+                "positive value",
+                "zero",
+                "negative value (clamped to zero)"
+              ]
+            },
+            {
+              "label": "tracker implements reservation store",
+              "values": [
+                "no (plain tracker)",
+                "yes, store allows the reservation",
+                "yes, store denies the reservation"
+              ]
+            },
+            {
+              "label": "reply tokens / cost",
+              "values": [
+                "cost 0, input 0, output 0 (nothing to record)",
+                "cost 0 but input tokens above zero (provider returned no usage rate)",
+                "cost above zero with tokens"
+              ]
+            },
+            {
+              "label": "reservationId",
+              "values": [
+                "null",
+                "a valid Guid"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Outcome",
+              "values": [
+                "Allowed is true, Reason is null",
+                "Denied \"cost_cap_preflight\"",
+                "Denied \"cost_cap_midrun\"",
+                "Allowed is true with the store ReservationId propagated",
+                "RecordAsync writes one CostEntry to the tracker",
+                "RecordAsync writes nothing (short-circuit)",
+                "ReleaseReservationAsync forwards to the store",
+                "ReleaseReservationAsync is a no-op"
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        { "id": "UTCID01", "marks": { "method under test": 0, "summary MonthToDate vs Cap": 0, "estimatedUsd": 0, "tracker implements reservation store": 0, "Outcome": 0 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID02", "marks": { "method under test": 0, "summary MonthToDate vs Cap": 1, "estimatedUsd": 0, "tracker implements reservation store": 0, "Outcome": 0 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID03", "marks": { "method under test": 0, "summary MonthToDate vs Cap": 2, "estimatedUsd": 0, "tracker implements reservation store": 0, "Outcome": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID04", "marks": { "method under test": 0, "summary MonthToDate vs Cap": 2, "estimatedUsd": 2, "tracker implements reservation store": 0, "Outcome": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID05", "marks": { "method under test": 1, "summary MonthToDate vs Cap": 0, "estimatedUsd": 0, "tracker implements reservation store": 0, "Outcome": 0 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID06", "marks": { "method under test": 1, "summary MonthToDate vs Cap": 2, "estimatedUsd": 0, "tracker implements reservation store": 0, "Outcome": 2 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID07", "marks": { "method under test": 1, "summary MonthToDate vs Cap": 0, "estimatedUsd": 0, "tracker implements reservation store": 1, "Outcome": 3 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID08", "marks": { "method under test": 1, "summary MonthToDate vs Cap": 0, "estimatedUsd": 0, "tracker implements reservation store": 2, "Outcome": 2 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID09", "marks": { "method under test": 2, "reply tokens / cost": 0, "reservationId": 0, "Outcome": 5 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID10", "marks": { "method under test": 2, "reply tokens / cost": 1, "reservationId": 0, "Outcome": 4 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID11", "marks": { "method under test": 2, "reply tokens / cost": 2, "reservationId": 1, "Outcome": 4 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID12", "marks": { "method under test": 3, "tracker implements reservation store": 1, "reservationId": 1, "Outcome": 6 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID13", "marks": { "method under test": 3, "tracker implements reservation store": 1, "reservationId": 0, "Outcome": 7 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID14", "marks": { "method under test": 3, "tracker implements reservation store": 0, "reservationId": 1, "Outcome": 7 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" }
+      ]
+    },
+    {
+      "sheet": "PublicUrlSafety",
+      "module": "Clawbot.Infrastructure.Content.Publishing",
+      "method": "DnsPublicUrlSafetyValidator.IsSafeAsync",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "Only allow HTTPS URLs that resolve exclusively to public addresses before media is handed to a social platform. Reject non-HTTPS schemes, embedded credentials, loopback and .local or .localhost names, RFC-1918 and shared-address ranges, IPv4-mapped IPv6 loopback, link-local and site-local IPv6, documentation prefixes, DNS failures and resolution timeouts.",
+      "description": "Validate a public media URL before it is submitted to an external publishing API",
+      "precondition": "A stub IHostAddressResolver is injected; the resolution timeout is shortened for the timeout case",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "uri",
+              "values": [
+                "relative URI (not absolute)",
+                "\"http://cdn.example.com/a.jpg\" (HTTPS required)",
+                "\"https://user:pass@cdn.example.com/a.jpg\" (userInfo present)",
+                "\"https://localhost/a.jpg\"",
+                "\"https://svc.local/a.jpg\" (mDNS suffix)",
+                "\"https://cdn/a.jpg\" (single label, no dot)",
+                "\"https://127.0.0.1/a.jpg\" (loopback literal)",
+                "\"https://10.1.2.3/a.jpg\" (RFC-1918 literal)",
+                "\"https://100.64.0.1/a.jpg\" (shared address space)",
+                "\"https://169.254.1.1/a.jpg\" (link-local literal)",
+                "\"https://[::1]/a.jpg\" (IPv6 loopback in brackets)",
+                "\"https://[2001:db8::1]/a.jpg\" (IPv6 documentation prefix)",
+                "\"https://8.8.8.8/a.jpg\" (public IPv4 literal)",
+                "\"https://cdn.example.com/a.jpg\" (public DNS name)"
+              ]
+            },
+            {
+              "label": "resolver stub",
+              "values": [
+                "not called (literal or early reject)",
+                "returns one public IPv4",
+                "returns one private IPv4",
+                "returns public and private together",
+                "returns an empty array",
+                "throws SocketException",
+                "never completes (forces the resolution timeout)"
+              ]
+            },
+            {
+              "label": "cancellationToken",
+              "values": [
+                "None",
+                "already cancelled"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Return",
+              "values": [
+                "true  (URL is safe to publish)",
+                "false (URL is rejected)"
+              ]
+            },
+            {
+              "label": "Exception",
+              "values": [
+                "OperationCanceledException (caller cancelled)",
+                "ArgumentNullException (uri is null)"
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        { "id": "UTCID01", "marks": { "uri": 0, "resolver stub": 0, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID02", "marks": { "uri": 1, "resolver stub": 0, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID03", "marks": { "uri": 2, "resolver stub": 0, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID04", "marks": { "uri": 3, "resolver stub": 0, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID05", "marks": { "uri": 4, "resolver stub": 0, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID06", "marks": { "uri": 5, "resolver stub": 0, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID07", "marks": { "uri": 6, "resolver stub": 0, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID08", "marks": { "uri": 7, "resolver stub": 0, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID09", "marks": { "uri": 8, "resolver stub": 0, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID10", "marks": { "uri": 9, "resolver stub": 0, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID11", "marks": { "uri": 10, "resolver stub": 0, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID12", "marks": { "uri": 11, "resolver stub": 0, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID13", "marks": { "uri": 12, "resolver stub": 0, "cancellationToken": 0, "Return": 0 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID14", "marks": { "uri": 13, "resolver stub": 1, "cancellationToken": 0, "Return": 0 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID15", "marks": { "uri": 13, "resolver stub": 2, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID16", "marks": { "uri": 13, "resolver stub": 3, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID17", "marks": { "uri": 13, "resolver stub": 4, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID18", "marks": { "uri": 13, "resolver stub": 5, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID19", "marks": { "uri": 13, "resolver stub": 6, "cancellationToken": 0, "Return": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID20", "marks": { "uri": 13, "resolver stub": 6, "cancellationToken": 1, "Exception": 0 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID21", "marks": { "Exception": 1 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" }
+      ]
+    },
+    {
+      "sheet": "ReviewOutcomeParse",
+      "module": "Clawbot.Agents.Core.Content",
+      "method": "StrictContentReviewOutcomeParser.Parse / ParseVision",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "Fail closed when parsing a reviewer verdict. Check the completion envelope first (terminal success, refusal, content filter, truncation, finish reason), then require the whole trimmed output to be exactly one closed-schema JSON object. Reject prose, code fences, trailing tokens, unknown fields, duplicate keys, an unknown verdict and a reason exceeding the length limit. The vision path additionally requires reviewedPartIds to match the requested and sent part ids exactly.",
+      "description": "Parse a content reviewer completion into an accepted verdict or a machine-readable error code",
+      "precondition": "ReviewCompletionEnvelope is constructed directly in the test; no LLM call is made",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "envelope flags",
+              "values": [
+                "ObservedTerminalSuccess is false",
+                "IsRefused is true",
+                "IsContentFiltered is true",
+                "IsTruncated is true",
+                "all clear (terminal success, nothing set)"
+              ]
+            },
+            {
+              "label": "FinishReason",
+              "values": [
+                "\"end_turn\" (allowed)",
+                "\"stop\" (allowed)",
+                "whitespace only",
+                "\"max_tokens\"",
+                "\"length\"",
+                "\"tool_use\" (not allowed)"
+              ]
+            },
+            {
+              "label": "RawText",
+              "values": [
+                "empty after trim",
+                "{\"verdict\":\"approve\",\"reason\":\"ok\"}",
+                "{\"verdict\":\"reject\",\"reason\":\"off brand\"}",
+                "{\"verdict\":\"needs_human\",\"reason\":\"unclear\"}",
+                "prose wrapping a JSON object",
+                "a fenced code block containing JSON",
+                "a valid object followed by a trailing token",
+                "an object with an unknown extra field",
+                "an object with verdict repeated twice",
+                "{\"verdict\":\"maybe\"} (unknown verdict)",
+                "a valid object with a reason above the length limit",
+                "{\"verdict\":\"approve\",\"reason\":\"ok\",\"reviewedPartIds\":[\"p1\"]}"
+              ]
+            },
+            {
+              "label": "part ids (vision path)",
+              "values": [
+                "requested, sent and reviewed all match",
+                "reviewed misses one requested id",
+                "requested and sent differ",
+                "all three are empty"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Outcome",
+              "values": [
+                "Accepted, ReviewStatus \"passed\"",
+                "Accepted, ReviewStatus \"rejected\"",
+                "Accepted, ReviewStatus \"needs_human\"",
+                "Rejected \"review_terminal_incomplete\"",
+                "Rejected \"review_refused\"",
+                "Rejected \"review_content_filtered\"",
+                "Rejected \"review_truncated\"",
+                "Rejected \"review_finish_reason_missing\"",
+                "Rejected \"review_finish_reason_disallowed\"",
+                "Rejected \"review_empty_output\"",
+                "Rejected \"review_parse_failed\"",
+                "Rejected \"review_part_ids_incomplete\""
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        { "id": "UTCID01", "marks": { "envelope flags": 0, "FinishReason": 0, "RawText": 1, "Outcome": 3 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID02", "marks": { "envelope flags": 1, "FinishReason": 0, "RawText": 1, "Outcome": 4 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID03", "marks": { "envelope flags": 2, "FinishReason": 0, "RawText": 1, "Outcome": 5 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID04", "marks": { "envelope flags": 3, "FinishReason": 0, "RawText": 1, "Outcome": 6 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID05", "marks": { "envelope flags": 4, "FinishReason": 2, "RawText": 1, "Outcome": 7 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID06", "marks": { "envelope flags": 4, "FinishReason": 3, "RawText": 1, "Outcome": 6 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID07", "marks": { "envelope flags": 4, "FinishReason": 4, "RawText": 1, "Outcome": 6 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID08", "marks": { "envelope flags": 4, "FinishReason": 5, "RawText": 1, "Outcome": 8 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID09", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 0, "Outcome": 9 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID10", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 1, "Outcome": 0 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID11", "marks": { "envelope flags": 4, "FinishReason": 1, "RawText": 2, "Outcome": 1 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID12", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 3, "Outcome": 2 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID13", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 4, "Outcome": 10 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID14", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 5, "Outcome": 10 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID15", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 6, "Outcome": 10 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID16", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 7, "Outcome": 10 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID17", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 8, "Outcome": 10 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID18", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 9, "Outcome": 10 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID19", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 10, "Outcome": 10 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID20", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 11, "Outcome": 10 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID21", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 11, "part ids (vision path)": 0, "Outcome": 0 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID22", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 11, "part ids (vision path)": 1, "Outcome": 11 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID23", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 11, "part ids (vision path)": 2, "Outcome": 11 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID24", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 11, "part ids (vision path)": 3, "Outcome": 11 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID25", "marks": { "envelope flags": 4, "FinishReason": 0, "RawText": 1, "part ids (vision path)": 0, "Outcome": 10 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" }
+      ]
+    },
+    {
+      "sheet": "LeadScoringWeights",
+      "module": "Clawbot.Domain.Leads",
+      "method": "LeadScoringDefaults.Rules",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "The default rule set is the contract between the seed-defaults endpoint and the message classifier event codes. Every event code emitted by the classifier must have exactly one rule, weights must match the agreed values, and no code may be duplicated. purchase_intent must outweigh every other single signal.",
+      "description": "Confirm the default lead-scoring rule table stays in sync with the classifier event codes",
+      "precondition": "None; the rule table is a static readonly collection",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "assertion target",
+              "values": [
+                "rule count",
+                "asked_substantive_question weight",
+                "asked_class_size weight",
+                "asked_schedule weight",
+                "asked_teacher weight",
+                "asked_commitment weight",
+                "asked_price weight",
+                "purchase_intent weight",
+                "fast_reply weight",
+                "event code uniqueness",
+                "purchase_intent is the highest weight",
+                "every rule has a non-empty description"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Expected",
+              "values": [
+                "8 rules",
+                "weight is 8",
+                "weight is 12",
+                "weight is 10",
+                "weight is 15",
+                "weight is 9",
+                "weight is 20",
+                "weight is 5",
+                "no duplicate event code",
+                "purchase_intent weight is strictly greater than all others",
+                "description length is above zero for every rule"
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        { "id": "UTCID01", "marks": { "assertion target": 0, "Expected": 0 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID02", "marks": { "assertion target": 1, "Expected": 1 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID03", "marks": { "assertion target": 2, "Expected": 2 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID04", "marks": { "assertion target": 3, "Expected": 3 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID05", "marks": { "assertion target": 4, "Expected": 3 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID06", "marks": { "assertion target": 5, "Expected": 4 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID07", "marks": { "assertion target": 6, "Expected": 5 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID08", "marks": { "assertion target": 7, "Expected": 6 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID09", "marks": { "assertion target": 8, "Expected": 7 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID10", "marks": { "assertion target": 9, "Expected": 8 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID11", "marks": { "assertion target": 10, "Expected": 9 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID12", "marks": { "assertion target": 11, "Expected": 10 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" }
+      ]
+    },
+    {
+      "sheet": "AuthPolicyConstants",
+      "module": "Clawbot.SharedKernel.Security",
+      "method": "AuthPolicy (SPEC-11 timing constants)",
+      "created_by": "<Developer Name>",
+      "executed_by": "<Tester Name>",
+      "requirement": "Code is the single source of truth for auth timing. The API JwtOptions and the Infrastructure RefreshTokenOptions and Identity lockout all PostConfigure from these constants, so a stray appsettings value cannot drift the access-token lifetime, clock skew, refresh window or lockout out of sync. The Gateway is isolated by ADR-007 and must carry an identical ClockSkewSeconds in its own configuration.",
+      "description": "Lock auth timing constants and confirm bound options match after PostConfigure",
+      "precondition": "A host is built with a deliberately wrong appsettings value for each option under test",
+      "bands": [
+        {
+          "name": "Condition",
+          "groups": [
+            {
+              "label": "constant / bound option",
+              "values": [
+                "AccessTokenMinutes",
+                "ClockSkewSeconds",
+                "RefreshTokenDays",
+                "RefreshGraceSeconds",
+                "MaxFailedAccessAttempts",
+                "LockoutMinutes",
+                "JwtOptions after PostConfigure",
+                "RefreshTokenOptions after PostConfigure",
+                "Identity lockout options after PostConfigure",
+                "Gateway configuration ClockSkewSeconds"
+              ]
+            },
+            {
+              "label": "appsettings value",
+              "values": [
+                "absent",
+                "matches the constant",
+                "deliberately different from the constant"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Confirm",
+          "groups": [
+            {
+              "label": "Expected",
+              "values": [
+                "value is 15",
+                "value is 30",
+                "value is 7",
+                "value is 10",
+                "value is 5",
+                "bound option equals the constant, appsettings is ignored",
+                "Gateway value equals AuthPolicy.ClockSkewSeconds"
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": [
+        { "id": "UTCID01", "marks": { "constant / bound option": 0, "appsettings value": 0, "Expected": 0 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID02", "marks": { "constant / bound option": 1, "appsettings value": 0, "Expected": 1 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID03", "marks": { "constant / bound option": 2, "appsettings value": 0, "Expected": 2 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID04", "marks": { "constant / bound option": 3, "appsettings value": 0, "Expected": 3 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID05", "marks": { "constant / bound option": 4, "appsettings value": 0, "Expected": 4 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID06", "marks": { "constant / bound option": 5, "appsettings value": 0, "Expected": 1 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID07", "marks": { "constant / bound option": 6, "appsettings value": 2, "Expected": 5 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID08", "marks": { "constant / bound option": 7, "appsettings value": 2, "Expected": 5 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID09", "marks": { "constant / bound option": 8, "appsettings value": 2, "Expected": 5 }, "type": "A", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID10", "marks": { "constant / bound option": 6, "appsettings value": 1, "Expected": 5 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" },
+        { "id": "UTCID11", "marks": { "constant / bound option": 9, "appsettings value": 1, "Expected": 6 }, "type": "N", "result": "P", "date": "2026-08-11", "defect": "" }
+      ]
+    }
+  ]
+}

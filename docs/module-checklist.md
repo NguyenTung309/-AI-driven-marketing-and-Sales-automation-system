@@ -372,7 +372,10 @@
 - [x] Full HTTP endpoint tests deferred to M21 (repo integration-test pattern)
 - [x] Build 0/0, 168 tests green
 
-### M19 — Ads automation (Meta + TikTok) · Imp 3 · Diff 4 · T10 · **DONE 2026-06-07**
+### M19 — Ads automation (Meta + TikTok) · Imp 3 · Diff 4 · T10 · **DONE 2026-06-07** · **ĐÃ GỠ 2026-08-09**
+
+> Module Ads đã được gỡ hẳn khỏi codebase (agent, endpoint, job, connector, seed, proto, UI). Các mục dưới đây giữ lại làm bản ghi lịch sử. Bảng `ads_campaigns` / `ads_rules` / `ads_actions` / `ads_creatives` / `ads_metrics_daily` vẫn còn trong DB nhưng không còn code đọc/ghi.
+
 - [x] Impl `AdsAgentGrpcService` (Evaluate, BuildLookalike, Remarket, HandleSignal)
 - [x] Meta Marketing API connector (`MetaAdsConnector`, config-gated, graceful)
 - [x] TikTok Business API connector (`TikTokAdsConnector`, config-gated, graceful)

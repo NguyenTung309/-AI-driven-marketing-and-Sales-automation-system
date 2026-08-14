@@ -9,7 +9,22 @@ namespace Clawbot.Infrastructure.Jobs;
 public static class HangfireModule
 {
     // "ai": job LLM chạy vài phút — để chung "default" là nghẽn cả retention/kpi khi có 1 lô sinh tài liệu.
+    // "ads" vẫn nằm trong danh sách queue: hàng đợi cũ có thể còn job Ads chờ, giữ worker để chúng
+    // được dọn thay vì kẹt lại vĩnh viễn trong storage.
     private static readonly string[] QueueNames = { "default", "retention", "kpi", "content", "ads", "ai" };
+
+    // Recurring job đã gỡ khỏi code. Bỏ AddOrUpdate thôi thì bản ghi cũ vẫn nằm trong Hangfire storage
+    // và tiếp tục kích hoạt rồi fail vì không còn type — phải xoá tường minh ở lần khởi động kế tiếp.
+    private static readonly string[] RemovedRecurringJobs =
+    [
+        "ads-weekly-report",
+        "ads-rule-evaluation",
+        "ads-creative-rotation",
+        "ads-remarketing",
+        "ads-lookalike-refresh",
+        "ads-daypart-pause",
+        "ads-daypart-resume",
+    ];
 
     public static IServiceCollection AddClawbotJobs(this IServiceCollection services, IConfiguration cfg)
     {
@@ -29,11 +44,17 @@ public static class HangfireModule
                 DisableGlobalLocks = true,
             }));
 
-        services.AddHangfireServer(o =>
+        // Passive candidate: register the client and storage (enqueue, dashboard) but start no
+        // processing server, so an unpromoted release never runs a job. Queued work stays in
+        // storage and is picked up once the release is activated.
+        if (!Hosting.ServiceStartupMode.IsPassive(cfg))
         {
-            o.WorkerCount = Math.Max(2, Environment.ProcessorCount / 2);
-            o.Queues = QueueNames;
-        });
+            services.AddHangfireServer(o =>
+            {
+                o.WorkerCount = Math.Max(2, Environment.ProcessorCount / 2);
+                o.Queues = QueueNames;
+            });
+        }
 
         services.AddScoped<RetentionPurgeJob>();
         services.AddScoped<RequestStatsFlushJob>();
@@ -56,13 +77,6 @@ public static class HangfireModule
         services.AddScoped<MetaCommentSyncJob>();
         services.AddScoped<MetaConnectionHealthJob>();
         services.AddScoped<MetaBusinessIntegrationWebhookJob>();
-        services.AddScoped<AdsRuleEvaluationJob>();
-        services.AddScoped<AdsCreativeRotationJob>();
-        services.AddScoped<AdsRemarketingJob>();
-        services.AddScoped<AdsLookalikeRefreshJob>();
-        services.AddScoped<AdsDaypartPauseJob>();
-        services.AddScoped<AdsDaypartResumeJob>();
-        services.AddScoped<WeeklyAdsReportJob>();
         services.AddScoped<AutoSummaryJob>();
         services.AddScoped<CommentAutoReplyJob>();
         services.AddScoped<HealthCheckJob>();
@@ -88,11 +102,8 @@ public static class HangfireModule
         // Lớp 2: trích facts về khách sau hội thoại idle.
         services.AddScoped<Clawbot.Agents.Core.Learning.ContactFactExtractor>();
         services.AddScoped<ContactMemoryExtractionJob>();
-        // Ước tính doanh thu lead từ hội thoại (launch từ API khi → customer, không có revenue).
-        services.AddScoped<Clawbot.Agents.Core.Lead.LeadRevenueEstimator>();
         services.AddScoped<Clawbot.Infrastructure.Leads.ILeadNotificationRecipientResolver,
             Clawbot.Infrastructure.Leads.LeadNotificationRecipientResolver>();
-        services.AddScoped<Clawbot.Infrastructure.Leads.LeadRevenueEstimateService>();
         // Lớp 3: bài học cho reviewer từ lý do reject + nén KB weekly.
         services.AddScoped<Clawbot.Agents.Core.Learning.AgentMistakeExtractor>();
         services.AddScoped<AgentMemoryDistillationJob>();
@@ -140,11 +151,20 @@ public static class HangfireModule
             "default",
             j => j.RunAsync(CancellationToken.None),
             "* * * * *");
+        // Thiếu TimeZone thì Hangfire hiểu là UTC: 00:30 UTC = 07:30 giờ VN, tức suốt buổi sáng chưa
+        // có cả số liệu hôm qua. KPI gom theo mốc UTC+7 nên lịch cũng phải theo giờ VN.
         recurring.AddOrUpdate<DailyKpiRollupJob>(
             "kpi-daily-rollup",
             "kpi",
             j => j.RunAsync(CancellationToken.None),
-            Cron.Daily(0, 30));
+            Cron.Daily(0, 30),
+            new RecurringJobOptions { TimeZone = VietnamTimeZone });
+        // Gom KPI trong ngày mỗi giờ: báo cáo/agent hỏi "hôm nay" phải có số, không đợi tới chốt sổ đêm.
+        recurring.AddOrUpdate<DailyKpiRollupJob>(
+            "kpi-daily-rollup-intraday",
+            "kpi",
+            j => j.RunIntradayAsync(CancellationToken.None),
+            "0 * * * *");
         recurring.AddOrUpdate<UnreadFailureEmailJob>(
             "unread-failure-email",
             "default",
@@ -161,11 +181,13 @@ public static class HangfireModule
             j => j.RunAsync(CancellationToken.None),
             Cron.Daily(7, 30),
             new RecurringJobOptions { TimeZone = VietnamTimeZone });
+        // Phút 10 để chạy SAU kpi-daily-rollup-intraday (phút 0) — soi bất thường trên số vừa gom,
+        // không phải trên số của giờ trước.
         recurring.AddOrUpdate<AnomalyAlertJob>(
             "kpi-anomaly-alert",
             "kpi",
             j => j.RunAsync(CancellationToken.None),
-            "0 * * * *");
+            "10 * * * *");
         recurring.AddOrUpdate<ForecastPrecomputeJob>(
             "kpi-forecast-precompute",
             "kpi",
@@ -220,41 +242,10 @@ public static class HangfireModule
             "default",
             j => j.RunAsync(CancellationToken.None),
             "*/5 * * * *");
-        recurring.AddOrUpdate<AdsRuleEvaluationJob>(
-            "ads-rule-evaluation",
-            "ads",
-            j => j.RunAsync(CancellationToken.None),
-            "0 * * * *");
-        recurring.AddOrUpdate<AdsCreativeRotationJob>(
-            "ads-creative-rotation",
-            "ads",
-            j => j.RunAsync(CancellationToken.None),
-            Cron.Daily(3));
-        recurring.AddOrUpdate<AdsRemarketingJob>(
-            "ads-remarketing",
-            "ads",
-            j => j.RunAsync(CancellationToken.None),
-            Cron.Daily(4));
-        recurring.AddOrUpdate<AdsLookalikeRefreshJob>(
-            "ads-lookalike-refresh",
-            "ads",
-            j => j.RunAsync(CancellationToken.None),
-            Cron.Weekly(DayOfWeek.Monday, 1, 0));
-        recurring.AddOrUpdate<AdsDaypartPauseJob>(
-            "ads-daypart-pause",
-            "ads",
-            j => j.RunAsync(CancellationToken.None),
-            "0 19 * * *");
-        recurring.AddOrUpdate<AdsDaypartResumeJob>(
-            "ads-daypart-resume",
-            "ads",
-            j => j.RunAsync(CancellationToken.None),
-            "0 22 * * *");
-        recurring.AddOrUpdate<WeeklyAdsReportJob>(
-            "ads-weekly-report",
-            "ads",
-            j => j.RunAsync(CancellationToken.None),
-            Cron.Weekly(DayOfWeek.Monday, 2, 0));
+        // Job đã gỡ: bỏ AddOrUpdate thôi thì bản ghi recurring cũ vẫn nằm trong storage và tiếp tục
+        // kích hoạt rồi fail vì không còn type. Phải xoá tường minh khi deploy bản này.
+        foreach (var removed in RemovedRecurringJobs)
+            recurring.RemoveIfExists(removed);
         recurring.AddOrUpdate<HealthCheckJob>(
             "health-check",
             "default",

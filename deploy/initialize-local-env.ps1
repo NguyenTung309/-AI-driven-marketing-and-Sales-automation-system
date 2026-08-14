@@ -83,6 +83,7 @@ $generators = [ordered]@{
     # Tien to 'Cb1-' bao dam du 4 nhom do phuc tap ma SQL Server yeu cau (hoa, thuong, so, ky tu dac biet).
     'MSSQL_SA_PASSWORD'     = { 'Cb1-' + (New-SafeSecret 36) }
     'JWT_SIGNING_KEY'       = { New-Base64Secret 48 }
+    'AGENT_SERVICE_AUTH_SIGNING_KEY' = { New-Base64Secret 48 }
     'ENCRYPTION_BASE64_KEY' = {
         $configured = Get-ConfiguredEncryptionKey $AppSettingsFile
         if ([string]::IsNullOrWhiteSpace($configured)) { New-Base64Secret 32 } else { $configured }

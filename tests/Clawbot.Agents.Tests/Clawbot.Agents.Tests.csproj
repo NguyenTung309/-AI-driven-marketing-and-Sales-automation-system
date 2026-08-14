@@ -11,10 +11,23 @@
     <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="NSubstitute" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\agents\Clawbot.Agents.Core\Clawbot.Agents.Core.csproj" />
+    <ProjectReference Include="..\..\src\shared\Clawbot.Infrastructure\Clawbot.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\AutonomousRunSink.cs" Link="Services\AutonomousRunSink.cs" />
+    <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\OrchestrationSessionGenerationFence.cs" Link="Services\OrchestrationSessionGenerationFence.cs" />
+    <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\AgentScheduleLease.cs" Link="Services\AgentScheduleLease.cs" />
+    <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\IAgentScheduleLeaseProvider.cs" Link="Services\IAgentScheduleLeaseProvider.cs" />
+    <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\AgentScheduleRunner.cs" Link="Services\AgentScheduleRunner.cs" />
+    <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\IOrchestratorCallerAuthorizer.cs" Link="Services\IOrchestratorCallerAuthorizer.cs" />
+    <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\IOrchestratorPermissionResolver.cs" Link="Services\IOrchestratorPermissionResolver.cs" />
+    <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\ITenantTrendScanner.cs" Link="Services\ITenantTrendScanner.cs" />
   </ItemGroup>
 
   <ItemGroup>

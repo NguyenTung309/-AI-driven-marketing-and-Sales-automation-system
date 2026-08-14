@@ -1,0 +1,567 @@
+{
+  "cover": {
+    "project_name": "Clawbot",
+    "project_code": "CLAWBOT",
+    "creator": "<Creator>",
+    "issue_date": "2026-08-11",
+    "version": "v1.0",
+    "statistics_note": "WF01 Onboarding, WF02 Auto-reply, WF03 Incident Recovery, WF04 Lead Pipeline, WF05 Content Pipeline",
+    "changes": [
+      {
+        "date": "2026-08-11",
+        "version": "v1.0",
+        "item": "System Test Report",
+        "type": "A",
+        "description": "Initial version",
+        "reference": ""
+      }
+    ]
+  },
+  "environment": "1. Frontend: React + Vite (localhost:15876)\n2. API Backend: .NET 8 (localhost:15874)\n3. AgentService gRPC (localhost:15875)\n4. Gateway: .NET 10 Ocelot (localhost:15873)\n5. SQL Server 2022 (Docker :1433)\n6. Redis 7 (Docker :6379)\n7. Qdrant (Docker :6333)\n8. MinIO (Docker :9001)\n9. RabbitMQ (Docker :15672)",
+  "workflows": [
+    {
+      "sheet": "WF01 Onboarding",
+      "name": "Tenant onboarding and initial configuration",
+      "requirement": "Create a new tenant, configure an LLM provider, connect a channel, grant roles and verify the first sign-in and permission fence",
+      "precondition": "The full stack is running (all services up); an admin seed account exists",
+      "scenarios": [
+        {
+          "group": "Tenant and user setup",
+          "cases": [
+            {
+              "id": "TC-ST-ONB-001",
+              "description": "Create a new tenant from the admin panel",
+              "procedure": "1. Sign in as system admin.\n2. Open system settings and create a new tenant with a unique name.",
+              "expected": "The tenant is created and visible in the tenant list with status active.",
+              "precondition": "System admin account is seeded",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-ONB-002",
+              "description": "Create the first admin user for the new tenant",
+              "procedure": "1. Open the new tenant.\n2. Create an admin user account with a temporary password.",
+              "expected": "The user is created; a welcome email is sent; the user can sign in.",
+              "precondition": "The tenant was created in TC-ST-ONB-001",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-ONB-003",
+              "description": "Sign in as the new tenant admin and change the temporary password",
+              "procedure": "1. Sign in with the temporary password.\n2. Follow the password-change prompt.\n3. Sign in again with the new password.",
+              "expected": "Password change succeeds; the temporary password is no longer accepted; the dashboard loads.",
+              "precondition": "TC-ST-ONB-002 has been completed",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-ONB-004",
+              "description": "Navigation menu reflects the granted role permissions",
+              "procedure": "1. Create a user with a restricted role (conversations:read only).\n2. Sign in as that user.",
+              "expected": "Only the Inbox section is visible; /leads, /content, /kb, /agents are inaccessible.",
+              "precondition": "A restricted role has been created and granted",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "LLM provider configuration",
+          "cases": [
+            {
+              "id": "TC-ST-ONB-005",
+              "description": "Configure an LLM provider with a valid API key",
+              "procedure": "1. Open LLM Providers (/llm-providers).\n2. Add a provider (e.g. OpenAI) with a valid API key.\n3. Save and run the connection test.",
+              "expected": "Provider is saved; connection test returns success; status shows active.",
+              "precondition": "A valid API key is available in the test environment",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-ONB-006",
+              "description": "Reject an LLM provider URL that points to a private host without a grant",
+              "procedure": "1. Attempt to save an LLM provider with baseUrl = http://192.168.1.10:8080.\n2. Submit without enabling private host access.",
+              "expected": "Save is rejected with an SSRF-guard error; no provider row is persisted.",
+              "precondition": "allowPrivateHosts is false (default)",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Channel connection",
+          "cases": [
+            {
+              "id": "TC-ST-ONB-007",
+              "description": "Connect a Facebook channel and verify the first message sync",
+              "procedure": "1. Open system channels (/system/channels).\n2. Connect a Facebook page with a valid token.\n3. Wait for the initial sync.",
+              "expected": "Channel shows as connected; existing conversations appear in /conversations within a few minutes.",
+              "precondition": "A Facebook test page and valid token are available",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "WF02 Auto-reply",
+      "name": "End-to-end auto-reply, handover and lead creation",
+      "requirement": "Receive an inbound message, answer it automatically using the knowledge base, pause when a sales agent intervenes, resume after the pause window, and create a scored lead from the conversation",
+      "precondition": "A channel is connected; a knowledge base is deployed; auto-reply is enabled on the test conversation",
+      "scenarios": [
+        {
+          "group": "Automatic answering",
+          "cases": [
+            {
+              "id": "TC-ST-ARP-001",
+              "description": "Receive an inbound message and get an automatic reply",
+              "procedure": "1. Send a message from the test channel that matches a KB topic.\n2. Wait up to 30 seconds.",
+              "expected": "An automatic outbound reply is sent; the reply text reflects the KB content.",
+              "precondition": "Auto-reply is enabled; KB is deployed and indexed",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-ARP-002",
+              "description": "Decline to answer when no KB content covers the question",
+              "procedure": "1. Send a message on a topic completely outside the KB.\n2. Wait up to 30 seconds.",
+              "expected": "The auto-reply sends a safe fallback message and optionally escalates to a human agent.",
+              "precondition": "Auto-reply is enabled; the question is outside all KB modules",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-ARP-003",
+              "description": "Deduplicate a message delivered by both webhook and polling",
+              "procedure": "1. Enable both ingestion paths.\n2. Send a single message from the channel.",
+              "expected": "Exactly one auto-reply is sent; exactly one message record is stored.",
+              "precondition": "Both ingestion paths are active",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Handover to sales agent",
+          "cases": [
+            {
+              "id": "TC-ST-ARP-004",
+              "description": "A manual reply by a sales agent pauses auto-reply",
+              "procedure": "1. Sign in as a sales agent.\n2. Send a manual reply on the conversation.\n3. Send a new inbound message from the channel.",
+              "expected": "Auto-reply stays silent for the configured pause window (default 5 minutes).",
+              "precondition": "Auto-reply is enabled on the conversation",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-ARP-005",
+              "description": "Auto-reply resumes after the pause window without manual action",
+              "procedure": "1. Trigger a pause by sending a manual reply.\n2. Advance time past the pause window (or wait).\n3. Send a new inbound message.",
+              "expected": "The sweep job re-enables auto-reply; the new message gets an automatic response.",
+              "precondition": "A pause was triggered; the TryResumeAiAutoReply sweep job is running",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-ARP-006",
+              "description": "Manually disabling auto-reply prevents automatic resumption",
+              "procedure": "1. Toggle auto-reply OFF via the conversation UI.\n2. Advance time past the default pause window.\n3. Send a new inbound message.",
+              "expected": "Auto-reply remains disabled (resume_at is null); no automatic response is sent.",
+              "precondition": "Auto-reply was explicitly toggled off",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Lead creation from conversation",
+          "cases": [
+            {
+              "id": "TC-ST-ARP-007",
+              "description": "Create a lead from a conversation and verify the initial score",
+              "procedure": "1. Open a conversation that has contact details.\n2. Create a lead from the conversation panel.\n3. Inspect the lead score on /leads.",
+              "expected": "Lead is created; score is calculated based on the lead scoring rules; pipeline stage reflects the score (cold / warm / hot).",
+              "precondition": "The conversation has an identifiable contact; lead scoring rules are seeded",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-ARP-008",
+              "description": "Lead score increases when a purchase-intent event is recorded",
+              "procedure": "1. Open the lead created in TC-ST-ARP-007.\n2. Record a purchase_intent activity.\n3. Refresh the lead card.",
+              "expected": "The lead score increases by the purchase_intent delta (default +20); pipeline stage may advance.",
+              "precondition": "TC-ST-ARP-007 completed; lead is in cold or warm stage",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-ARP-009",
+              "description": "Reactivate a lost lead when new inbound activity arrives",
+              "procedure": "1. Mark a lead as lost.\n2. Send a new inbound message from the same contact.",
+              "expected": "The lead is reactivated; LastActivityAt is updated; the lost status is cleared.",
+              "precondition": "A lost lead exists for the contact",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "WF03 Incident Recovery",
+      "name": "Recovery from job failures, queue outages and KB deploy errors",
+      "requirement": "Failed background jobs are retried and logged; message queue outages do not lose messages; a KB deploy failure leaves the previous version active and is surfaced in the error log",
+      "precondition": "Hangfire job scheduler and RabbitMQ are running; the system error log tab is accessible",
+      "scenarios": [
+        {
+          "group": "Background job failure and retry",
+          "cases": [
+            {
+              "id": "TC-ST-REC-001",
+              "description": "A Hangfire job that fails is retried the configured number of times",
+              "procedure": "1. Inject a transient failure into a job handler.\n2. Observe the Hangfire dashboard or job logs.",
+              "expected": "The job is retried up to the configured retry count, then marked as failed with the error recorded.",
+              "precondition": "Retry count is configured; Hangfire dashboard is accessible",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-REC-002",
+              "description": "A failed job appears in the system error log",
+              "procedure": "1. Let a job fail permanently (exhaust retries).\n2. Open the error log tab (/logs).",
+              "expected": "The failure entry is listed with its exception type, message and timestamp.",
+              "precondition": "TC-ST-REC-001 has been completed",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-REC-003",
+              "description": "A Hangfire job runs in an isolated DI scope with the correct tenant context",
+              "procedure": "1. Trigger a scheduled job for a specific tenant.\n2. Verify the job reads and writes data only for that tenant.",
+              "expected": "No cross-tenant data contamination; ITenantOwned query filters are applied.",
+              "precondition": "Two tenant accounts with overlapping data exist",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Message queue outage",
+          "cases": [
+            {
+              "id": "TC-ST-REC-004",
+              "description": "Messages queued during a consumer outage are processed after restart",
+              "procedure": "1. Stop the RabbitMQ consumer service.\n2. Send three inbound messages from the channel.\n3. Start the consumer again.",
+              "expected": "All three messages are ingested in order after the consumer restarts; none is lost.",
+              "precondition": "RabbitMQ queue durability is enabled",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-REC-005",
+              "description": "A duplicate message delivered by a second consumer instance is not processed twice",
+              "procedure": "1. Start a second consumer instance.\n2. Deliver one inbound message to the queue.",
+              "expected": "Only one consumer processes the message; no duplicate reply is sent.",
+              "precondition": "RabbitMQ is configured with exclusive consumer or logical dedup",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "KB deploy failure",
+          "cases": [
+            {
+              "id": "TC-ST-REC-006",
+              "description": "A KB deploy failure leaves the previously deployed version active",
+              "procedure": "1. Deploy a version while Qdrant is unavailable.\n2. Check which version is active after the deploy job fails.",
+              "expected": "The deploy job fails and is logged; the previous deployed version remains active for retrieval.",
+              "precondition": "A deployed version exists; Qdrant can be temporarily stopped",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-REC-007",
+              "description": "KB deploy retries succeed once the vector store recovers",
+              "procedure": "1. Restore Qdrant after it was stopped in TC-ST-REC-006.\n2. Re-trigger the deploy job.",
+              "expected": "The deploy job completes successfully; the new version becomes active.",
+              "precondition": "TC-ST-REC-006 completed; Qdrant is restored",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "WF04 Lead Pipeline",
+      "name": "WF04 Lead Pipeline",
+      "objective": "Verify the full lead lifecycle: contact creation, automatic scoring and stage advancement, manual override, handoff to won or lost, and reactivation on renewed inbound contact",
+      "precondition": "The full stack is running (all services up); an admin seed account exists; lead scoring rules are seeded via POST /api/lead-scoring-rules/seed-defaults",
+      "scenarios": [
+        {
+          "group": "Lead creation and initial scoring",
+          "cases": [
+            {
+              "id": "TC-ST-LP-001",
+              "description": "A new conversation from Facebook creates a lead in cold stage",
+              "procedure": "1. Simulate an inbound Facebook message.\n2. Allow the auto-reply and lead-creation agent to run.\n3. GET /api/leads and filter by contactId.",
+              "expected": "A lead is created with stage=cold and score=0; the contact is linked.",
+              "precondition": "No existing lead for the contact",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-LP-002",
+              "description": "Score advances the lead from cold to warm after price inquiry activities",
+              "procedure": "1. Record asked_price and fast_reply activities via POST /api/leads/{id}/activities.\n2. GET /api/leads/{id}.",
+              "expected": "score >= 30; stage=warm.",
+              "precondition": "Lead is in cold stage; scoring rules are seeded",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Stage advancement and manual override",
+          "cases": [
+            {
+              "id": "TC-ST-LP-003",
+              "description": "Enough purchase-intent signals advance the lead to hot",
+              "procedure": "1. Record purchase_intent activities until score >= 70.\n2. GET /api/leads/{id}.",
+              "expected": "stage=hot; score >= 70.",
+              "precondition": "Lead is in warm stage",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-LP-004",
+              "description": "A sales agent manually moves a hot lead to won",
+              "procedure": "1. POST /api/leads/{id}/stage with stage=won.",
+              "expected": "HTTP 200; stage=won; WonAt timestamp is set; the lead no longer appears in active pipeline views.",
+              "precondition": "Lead is in hot stage",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-LP-005",
+              "description": "A hot lead is moved to lost and a reason is recorded",
+              "procedure": "1. POST /api/leads/{id}/stage with stage=lost and reason.",
+              "expected": "HTTP 200; stage=lost; LostReason is stored.",
+              "precondition": "Lead is in hot stage",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Reactivation and forecast",
+          "cases": [
+            {
+              "id": "TC-ST-LP-006",
+              "description": "A lost lead is reactivated when the customer sends a new message",
+              "procedure": "1. Simulate an inbound message from the lost lead contact.\n2. GET /api/leads/{id}.",
+              "expected": "Lead status returns to active; LastActivityAt is updated; stage resets to warm (not cold).",
+              "precondition": "A lost lead exists; the contact has an active conversation channel",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-LP-007",
+              "description": "Forecast shows the correct count and estimated value for hot leads",
+              "procedure": "1. GET /api/leads/forecast.",
+              "expected": "Response includes hot lead count and summed estimated value; numbers match the current database state.",
+              "precondition": "At least two leads are in hot stage",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-LP-008",
+              "description": "Re-scoring all leads after a rule change updates stages in bulk",
+              "procedure": "1. Update the purchase_intent delta via PUT /api/lead-scoring-rules/{id}.\n2. POST /api/leads/rescore-all.",
+              "expected": "All affected leads have their scores and stages recalculated; no leads are left with a stale score.",
+              "precondition": "Multiple leads with purchase_intent activities exist",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "WF05 Content Pipeline",
+      "name": "WF05 Content Pipeline",
+      "objective": "Verify the end-to-end content pipeline: brief creation, AI generation with lint, agent review, human approval, scheduling at the golden hour and simulated publish",
+      "precondition": "The full stack is running (all services up); a configured LLM provider is active; a deployed KB module exists for RAG context",
+      "scenarios": [
+        {
+          "group": "Brief creation and AI generation",
+          "cases": [
+            {
+              "id": "TC-ST-CP-001",
+              "description": "A content brief triggers AI generation and produces a draft item",
+              "procedure": "1. POST /api/content/briefs with platform=facebook and topic.\n2. POST /api/content/items/generate with the briefId.\n3. Poll until item status=draft.",
+              "expected": "A content item with a non-empty body is created in draft status within 60 seconds.",
+              "precondition": "LLM provider responds within the configured timeout",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-CP-002",
+              "description": "Lint blocks a draft that contains an absolute guarantee phrase",
+              "procedure": "1. Generate a draft using a stub that returns a body containing the phrase \"100% guaranteed\".\n2. Check item status.",
+              "expected": "Item status=needs_human; lint error code is reported.",
+              "precondition": "LLM stub is configured; ContentLint is enabled",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Review and approval",
+          "cases": [
+            {
+              "id": "TC-ST-CP-003",
+              "description": "Agent reviewer approves a clean draft and it becomes ready for human approval",
+              "procedure": "1. Wait for the reviewer agent run to complete on the draft item.\n2. GET /api/content/items/{id}.",
+              "expected": "AgentReviewStatus=passed; item is in the human approval queue.",
+              "precondition": "Reviewer agent is bound to an LLM provider; draft item is clean",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-CP-004",
+              "description": "A human approves the item and it becomes approved",
+              "procedure": "1. POST /api/content/items/{id}/approve.",
+              "expected": "HTTP 200; status=approved; ApprovedAt and ApprovedBy are recorded.",
+              "precondition": "Item has passed agent review",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-CP-005",
+              "description": "A human rejects a draft and provides a reason",
+              "procedure": "1. POST /api/content/items/{id}/reject with reason=\"off-brand tone\".",
+              "expected": "HTTP 200; status=rejected; RejectedReason=off-brand tone.",
+              "precondition": "Item is in draft or needs_human state",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        },
+        {
+          "group": "Scheduling and repurpose",
+          "cases": [
+            {
+              "id": "TC-ST-CP-006",
+              "description": "An approved item is scheduled for the Facebook golden hour",
+              "procedure": "1. Calculate the next Facebook golden hour (20:30 VN time).\n2. POST /api/content/items/{id}/schedule with publishAt set to that time.",
+              "expected": "HTTP 200; status=scheduled; publishAt matches the golden hour.",
+              "precondition": "Item is approved",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-CP-007",
+              "description": "A published item is repurposed for TikTok",
+              "procedure": "1. POST /api/content/items/{id}/repurpose with targetPlatform=tiktok.",
+              "expected": "HTTP 202; a new draft item is created for tiktok; the original item status is unchanged.",
+              "precondition": "A published item exists; a brief for tiktok exists",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            },
+            {
+              "id": "TC-ST-CP-008",
+              "description": "Chain metrics are recorded after a successful publish",
+              "procedure": "1. Trigger a simulated publish for the scheduled item.\n2. GET /api/content/chain-metrics.",
+              "expected": "A metric entry exists for the chain run; generation and review latencies are recorded.",
+              "precondition": "The mock publish adapter is active",
+              "round1": { "result": "Pending", "date": null, "tester": "" },
+              "round2": { "result": "Pending", "date": null, "tester": "" },
+              "round3": { "result": "Pending", "date": null, "tester": "" },
+              "note": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

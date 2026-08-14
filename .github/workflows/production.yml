@@ -1,0 +1,441 @@
+name: Production — Build, Publish, Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy the release after publishing immutable images
+        required: true
+        default: true
+        type: boolean
+
+env:
+  DOTNET_VERSION: "8.0.x"
+  NODE_VERSION: "20.x"
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clawbot-production
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate source and production Compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      image_prefix: ${{ steps.image_prefix.outputs.value }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Normalize GHCR image prefix
+        id: image_prefix
+        shell: bash
+        run: |
+          owner=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          printf 'value=ghcr.io/%s\n' "$owner" >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: src/frontend/clawbot-web/package-lock.json
+
+      - name: Restore and build .NET
+        run: |
+          dotnet restore Clawbot.sln
+          dotnet build Clawbot.sln --no-restore --configuration Release
+
+      - name: Run .NET tests
+        run: dotnet test Clawbot.sln --no-build --configuration Release
+
+      - name: Install and lint frontend
+        working-directory: src/frontend/clawbot-web
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+
+      - name: Validate migration and identity contracts
+        shell: pwsh
+        run: |
+          ./deploy/ci/verify-migrations.ps1
+          ./deploy/ci/verify-identity-ddl.ps1
+          ./deploy/ci/verify-production-deployment.ps1
+
+      - name: Test production deployment scripts
+        shell: bash
+        run: |
+          sh -n deploy/production/*.sh deploy/ci/test-production-deployment.sh
+          sh deploy/ci/test-production-deployment.sh
+
+      - name: Prepare Compose validation inputs
+        shell: bash
+        run: |
+          printf '%s\n' '# validation-only SearXNG settings' > "$RUNNER_TEMP/searxng-settings.yml"
+          : > "$RUNNER_TEMP/runtime.env"
+          cat > "$RUNNER_TEMP/compose.env" <<EOF
+          SQLSERVER_IMAGE=mcr.microsoft.com/mssql/server:2022-latest@sha256:$(printf '0%.0s' {1..64})
+          REDIS_IMAGE=redis:7-alpine@sha256:$(printf '0%.0s' {1..64})
+          RABBITMQ_IMAGE=rabbitmq:3.13-management@sha256:$(printf '0%.0s' {1..64})
+          QDRANT_IMAGE=qdrant/qdrant:v1.14.1@sha256:$(printf '0%.0s' {1..64})
+          SEARXNG_IMAGE=searxng/searxng:2025.8.1@sha256:$(printf '0%.0s' {1..64})
+          MINIO_IMAGE=minio/minio:RELEASE.2025-02-28T09-55-16Z@sha256:$(printf '0%.0s' {1..64})
+          MINIO_MC_IMAGE=minio/mc@sha256:$(printf '0%.0s' {1..64})
+          CLAWBOT_API_IMAGE=ghcr.io/example/clawbot-api@sha256:$(printf '0%.0s' {1..64})
+          CLAWBOT_GATEWAY_IMAGE=ghcr.io/example/clawbot-gateway@sha256:$(printf '0%.0s' {1..64})
+          CLAWBOT_AGENT_IMAGE=ghcr.io/example/clawbot-agent@sha256:$(printf '0%.0s' {1..64})
+          CLAWBOT_WEB_IMAGE=ghcr.io/example/clawbot-web@sha256:$(printf '0%.0s' {1..64})
+          CLAWBOT_HTTP_PORT=58080
+          MSSQL_PID=Standard
+          MSSQL_SA_PASSWORD=validation-only-not-a-secret
+          APP_SQL_USER=clawbot_app
+          APP_SQL_PASSWORD=validation-only
+          SQLSERVER_BACKUP_DIR=$RUNNER_TEMP
+          REDIS_PASSWORD=validation-only
+          RABBITMQ_USER=clawbot
+          RABBITMQ_PASSWORD=validation-only
+          MINIO_ROOT_USER=clawbot-root
+          MINIO_ROOT_PASSWORD=validation-only
+          MINIO_APP_ACCESS_KEY=validation-access-key
+          MINIO_APP_SECRET_KEY=validation-secret-key
+          JWT_SIGNING_KEY=validation-only-jwt-signing-key-material
+          AGENT_SERVICE_AUTH_SIGNING_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          AGENT_SERVICE_TLS_CERTIFICATE_PATH=$RUNNER_TEMP/agentservice-grpc.pfx
+          AGENT_SERVICE_TLS_CERTIFICATE_PASSWORD=validation-only
+          AGENT_SERVICE_TLS_CA_CERTIFICATE_PATH=$RUNNER_TEMP/agentservice-ca.pem
+          ENCRYPTION_BASE64_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          PANCAKE_WEBHOOK_SECRET=validation-only
+          CLAWBOT_RUNTIME_ENV_FILE=$RUNNER_TEMP/runtime.env
+          SEARXNG_SETTINGS_FILE=$RUNNER_TEMP/searxng-settings.yml
+          EOF
+
+      - name: Validate production Compose
+        shell: bash
+        run: docker compose --env-file "$RUNNER_TEMP/compose.env" -f deploy/docker-compose.production.yml config --quiet
+
+      - name: Scan tracked files for credential material
+        shell: bash
+        run: sh deploy/ci/scan-credentials.sh
+
+      - name: Build application images without publishing
+        run: |
+          docker build --file src/api/Clawbot.Api/Dockerfile --tag clawbot-api:ci .
+          docker build --file src/gateway/Clawbot.Gateway/Dockerfile --tag clawbot-gateway:ci .
+          docker build --file src/agents/Clawbot.AgentService/Dockerfile --tag clawbot-agent:ci .
+          docker build --file src/frontend/clawbot-web/Dockerfile --tag clawbot-web:ci .
+
+  publish:
+    name: Publish immutable GHCR images
+    needs: validate
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.deploy == true)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE_PREFIX: ${{ needs.validate.outputs.image_prefix }}
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    outputs:
+      release_artifact: ${{ steps.release.outputs.artifact_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Driver docker mặc định không ký được attestation; provenance/sbom ở các bước
+      # build bên dưới đòi builder docker-container.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Login to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API
+        id: api
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: src/api/Clawbot.Api/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/clawbot-api:sha-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Build and push Gateway
+        id: gateway
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: src/gateway/Clawbot.Gateway/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/clawbot-gateway:sha-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Build and push AgentService
+        id: agent
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: src/agents/Clawbot.AgentService/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/clawbot-agent:sha-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Build and push frontend
+        id: web
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: src/frontend/clawbot-web/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/clawbot-web:sha-${{ github.sha }}
+          build-args: VITE_API_BASE_URL=
+          provenance: mode=max
+          sbom: true
+
+      - name: Write digest-only release manifest
+        id: release
+        shell: bash
+        run: |
+          mkdir -p release
+          cat > release/images.env <<EOF
+          CLAWBOT_API_IMAGE=${{ env.IMAGE_PREFIX }}/clawbot-api@${{ steps.api.outputs.digest }}
+          CLAWBOT_GATEWAY_IMAGE=${{ env.IMAGE_PREFIX }}/clawbot-gateway@${{ steps.gateway.outputs.digest }}
+          CLAWBOT_AGENT_IMAGE=${{ env.IMAGE_PREFIX }}/clawbot-agent@${{ steps.agent.outputs.digest }}
+          CLAWBOT_WEB_IMAGE=${{ env.IMAGE_PREFIX }}/clawbot-web@${{ steps.web.outputs.digest }}
+          RELEASE_SHA=${{ github.sha }}
+          EOF
+          echo "artifact_name=release-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ github.sha }}
+          path: release/images.env
+          if-no-files-found: error
+          retention-days: 30
+
+  deploy:
+    name: Deploy to protected production environment
+    needs: publish
+    if: needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    timeout-minutes: 25
+    steps:
+      - name: Checkout deployment files
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Download release manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-${{ github.sha }}
+          path: release
+
+      - name: Configure SSH trust
+        shell: bash
+        env:
+          KNOWN_HOSTS: ${{ secrets.PRODUCTION_KNOWN_HOSTS }}
+          SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/clawbot_deploy
+          chmod 600 ~/.ssh/clawbot_deploy
+
+      - name: Authenticate production host to GHCR
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.PRODUCTION_HOST }}
+          SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          SSH_USER: ${{ secrets.PRODUCTION_USER }}
+          GHCR_USERNAME: ${{ secrets.PRODUCTION_GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.PRODUCTION_GHCR_TOKEN }}
+        run: |
+          case "$GHCR_USERNAME" in
+            ''|*[!A-Za-z0-9-]*)
+              printf '%s\n' 'PRODUCTION_GHCR_USERNAME must contain only letters, digits, and hyphens.' >&2
+              exit 1
+              ;;
+          esac
+          [ -n "$GHCR_TOKEN" ] || { printf '%s\n' 'PRODUCTION_GHCR_TOKEN is required.' >&2; exit 1; }
+          ssh_args=(-i ~/.ssh/clawbot_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -p "$SSH_PORT")
+          printf '%s' "$GHCR_TOKEN" | ssh "${ssh_args[@]}" "$SSH_USER@$SSH_HOST" \
+            "docker login ghcr.io --username $GHCR_USERNAME --password-stdin"
+
+      - name: Create isolated release stage
+        id: release_stage
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.PRODUCTION_HOST }}
+          SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          SSH_USER: ${{ secrets.PRODUCTION_USER }}
+          RELEASE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          case "$SSH_USER" in
+            ''|*[!A-Za-z0-9_-]*) printf '%s\n' 'PRODUCTION_USER has unsupported characters.' >&2; exit 1 ;;
+          esac
+          case "$RELEASE_SHA" in
+            ???????*) ;;
+            *) printf '%s\n' 'Release SHA is invalid.' >&2; exit 1 ;;
+          esac
+          printf '%s' "$RELEASE_SHA" | grep -Eq '^[a-f0-9]{40}$' || { printf '%s\n' 'Release SHA is invalid.' >&2; exit 1; }
+          case "$RUN_ID" in ''|*[!0-9]*) printf '%s\n' 'GitHub run ID is invalid.' >&2; exit 1 ;; esac
+          case "$RUN_ATTEMPT" in ''|*[!0-9]*) printf '%s\n' 'GitHub run attempt is invalid.' >&2; exit 1 ;; esac
+          release_dir="/home/$SSH_USER/.clawbot-releases/$RELEASE_SHA-$RUN_ID-$RUN_ATTEMPT"
+          ssh_args=(-i ~/.ssh/clawbot_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -p "$SSH_PORT")
+          ssh "${ssh_args[@]}" "$SSH_USER@$SSH_HOST" "umask 077; install -d -m 0700 '/home/$SSH_USER/.clawbot-releases'; rm -rf '$release_dir'; install -d -m 0700 '$release_dir'"
+          printf 'path=%s\n' "$release_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare protected configuration
+        shell: bash
+        env:
+          COMPOSE_ENV: ${{ secrets.PRODUCTION_COMPOSE_ENV }}
+          RUNTIME_ENV: ${{ secrets.PRODUCTION_RUNTIME_ENV }}
+          SEARXNG_SETTINGS: ${{ secrets.PRODUCTION_SEARXNG_SETTINGS }}
+        run: |
+          [ -n "$COMPOSE_ENV" ] || { printf '%s\n' 'COMPOSE_ENV is required.' >&2; exit 1; }
+          [ -n "$RUNTIME_ENV" ] || { printf '%s\n' 'RUNTIME_ENV is required.' >&2; exit 1; }
+          [ -n "$SEARXNG_SETTINGS" ] || { printf '%s\n' 'PRODUCTION_SEARXNG_SETTINGS is required.' >&2; exit 1; }
+          umask 077
+          compose_file="$RUNNER_TEMP/production.env"
+          runtime_file="$RUNNER_TEMP/runtime.env"
+          searxng_file="$RUNNER_TEMP/settings.yml"
+          printf '%s\n' "$COMPOSE_ENV" > "$compose_file"
+          printf '%s\n' "$RUNTIME_ENV" > "$runtime_file"
+          printf '%s\n' "$SEARXNG_SETTINGS" > "$searxng_file"
+          validate_environment_file() {
+            local file=$1
+            local error
+            error=$(awk '
+              /^[[:space:]]*($|#)/ { next }
+              !/^[A-Za-z_][A-Za-z0-9_]*=/ { print "invalid-format"; exit 1 }
+              { key = substr($0, 1, index($0, "=") - 1); if (seen[key]++) { print key; exit 1 } }
+            ' "$file") || { printf 'Invalid or duplicate environment key in %s: %s\n' "$file" "${error:-unknown}" >&2; exit 1; }
+          }
+          validate_environment_file "$compose_file"
+          validate_environment_file "$runtime_file"
+          if awk -F= '$1 ~ /^CLAWBOT_(API|GATEWAY|AGENT|WEB)_IMAGE$/ { exit 1 }' "$compose_file"; then
+            :
+          else
+            printf '%s\n' 'PRODUCTION_COMPOSE_ENV must not define application image variables.' >&2
+            exit 1
+          fi
+
+      - name: Upload deployment files
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.PRODUCTION_HOST }}
+          SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          SSH_USER: ${{ secrets.PRODUCTION_USER }}
+          RELEASE_DIR: ${{ steps.release_stage.outputs.path }}
+        run: |
+          ssh_args=(-i ~/.ssh/clawbot_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -p "$SSH_PORT")
+          scp_args=(-i ~/.ssh/clawbot_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -P "$SSH_PORT")
+          destination="$SSH_USER@$SSH_HOST:$RELEASE_DIR/"
+          scp "${scp_args[@]}" \
+            deploy/docker-compose.production.yml \
+            deploy/ci/verify-go-live-readiness.ps1 \
+            deploy/production/backup.sh \
+            deploy/production/common.sh \
+            deploy/production/deploy.sh \
+            deploy/production/install-release.sh \
+            deploy/production/migrate.sh \
+            deploy/production/rollback.sh \
+            deploy/production/restore-verified-backup.sh \
+            deploy/production/smoke.sh \
+            deploy/repair_tenant_runtime_columns.sql \
+            deploy/repair_inbox_runtime_columns.sql \
+            deploy/repair_agent_runtime_columns.sql \
+            deploy/repair_inbox_collaboration_tables.sql \
+            deploy/repair_agent_allowed_tools.sql \
+            deploy/verify_content_render_tasks.sql \
+            deploy/verify_database_table_consolidation.sql \
+            release/images.env \
+            "$RUNNER_TEMP/production.env" \
+            "$RUNNER_TEMP/runtime.env" \
+            "$RUNNER_TEMP/settings.yml" \
+            "$destination"
+          scp -r "${scp_args[@]}" deploy/migrations "$destination"
+          ssh "${ssh_args[@]}" "$SSH_USER@$SSH_HOST" "test -f '$RELEASE_DIR/images.env'"
+
+      - name: Install release and deploy remotely
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.PRODUCTION_HOST }}
+          SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          SSH_USER: ${{ secrets.PRODUCTION_USER }}
+          RELEASE_DIR: ${{ steps.release_stage.outputs.path }}
+        run: |
+          ssh_args=(-i ~/.ssh/clawbot_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -p "$SSH_PORT")
+          release_id=${RELEASE_DIR##*/}
+          ssh "${ssh_args[@]}" "$SSH_USER@$SSH_HOST" "sh -s -- '$RELEASE_DIR' '$release_id'" <<'REMOTE'
+          set -eu
+          stage=$1
+          release_id=$2
+          [ -d "$stage" ] || { printf '%s\n' 'Release staging directory is missing.' >&2; exit 1; }
+          cleanup_stage() {
+            rm -rf -- "$stage"
+          }
+          trap cleanup_stage EXIT
+          trap 'exit 1' HUP INT TERM
+          [ -w /etc/clawbot ] || {
+            printf '%s\n' 'The Clawbot configuration directory is missing or not writable by the deploy account.' >&2
+            exit 1
+          }
+          command -v pwsh >/dev/null 2>&1 || {
+            printf '%s\n' 'PowerShell is required for the AgentService TLS readiness gate.' >&2
+            exit 1
+          }
+          pwsh -NoLogo -NoProfile -NonInteractive \
+            -File "$stage/verify-go-live-readiness.ps1" \
+            -Strict \
+            -AgentServiceAuthenticationOnly \
+            -EnvironmentFile "$stage/production.env"
+          sh "$stage/install-release.sh" "$stage" "$release_id"
+          REMOTE
+
+      - name: Remove release staging files
+        if: ${{ always() && steps.release_stage.outcome == 'success' }}
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.PRODUCTION_HOST }}
+          SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          SSH_USER: ${{ secrets.PRODUCTION_USER }}
+          RELEASE_DIR: ${{ steps.release_stage.outputs.path }}
+          RELEASE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          expected_dir="/home/$SSH_USER/.clawbot-releases/$RELEASE_SHA-$RUN_ID-$RUN_ATTEMPT"
+          [ "$RELEASE_DIR" = "$expected_dir" ] || {
+            printf '%s\n' 'Refusing to remove an unexpected release staging directory.' >&2
+            exit 1
+          }
+          ssh_args=(-i ~/.ssh/clawbot_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -p "$SSH_PORT")
+          ssh "${ssh_args[@]}" "$SSH_USER@$SSH_HOST" "rm -rf -- '$RELEASE_DIR'"

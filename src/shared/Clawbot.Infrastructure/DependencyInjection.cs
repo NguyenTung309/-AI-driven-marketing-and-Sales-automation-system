@@ -1,11 +1,9 @@
-using Clawbot.Agents.Core.Ads;
 using Clawbot.Agents.Core.Lead;
 using Clawbot.Agents.Core.Rag;
 using Clawbot.Agents.Core.Skills;
 using Clawbot.Agents.Core.Skills.Content;
 using Clawbot.Agents.Core.Skills.Nlp;
 using Clawbot.Application.Abstractions;
-using Clawbot.Infrastructure.Ads;
 using Clawbot.Infrastructure.Analytics;
 using Clawbot.Infrastructure.Audit;
 using Clawbot.Infrastructure.Channels;
@@ -85,8 +83,10 @@ public static class DependencyInjection
             .AddDefaultTokenProviders();
         services.AddAuthentication();
 
+        // Chuỗi rỗng không phải null nên `??` không đỡ được: appsettings đã xoá secret để lại ""
+        // và Connect("") throw, kéo sập mọi scope chạm RAG (review nội dung, lịch agent, orchestrator).
         services.AddSingleton<IConnectionMultiplexer>(_ =>
-            ConnectionMultiplexer.Connect(cfg.GetConnectionString("Redis") ?? "localhost:6379"));
+            ConnectionMultiplexer.Connect(FallbackWhenBlank(cfg.GetConnectionString("Redis"), "localhost:6379")));
 
         // SPEC-11 auth services: refresh-token rotation + runtime permission resolution.
         // PostConfigure forces the timing from AuthPolicy so appsettings cannot drift it.
@@ -121,8 +121,15 @@ public static class DependencyInjection
 
             bus.UsingRabbitMq((ctx, mq) =>
             {
-                mq.Host(cfg.GetConnectionString("RabbitMq") ?? "amqp://guest:guest@localhost:5672");
-                mq.ConfigureEndpoints(ctx);
+                mq.Host(FallbackWhenBlank(cfg.GetConnectionString("RabbitMq"), "amqp://guest:guest@localhost:5672"));
+
+                // Passive candidate: declare no receive endpoint, so an unpromoted release never
+                // consumes a message. Publishing still works, and nothing is lost while passive
+                // because the queues and bindings declared by the promoted release are durable.
+                if (!Hosting.ServiceStartupMode.IsPassive(cfg))
+                {
+                    mq.ConfigureEndpoints(ctx);
+                }
             });
         });
 
@@ -243,18 +250,6 @@ public static class DependencyInjection
             .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
         services.AddScoped<ISocialPublisher, RoutingSocialPublisher>();
 
-        // Ads connectors
-        services.Configure<MetaAdsOptions>(cfg.GetSection(MetaAdsOptions.SectionName));
-        services.Configure<TikTokAdsOptions>(cfg.GetSection(TikTokAdsOptions.SectionName));
-        services.AddSingleton<IAdsPlatformThrottle, AdsPlatformThrottle>();
-        services.AddScoped<IAdsPlatformConnector, MetaAdsConnector>();
-        services.AddHttpClient<IAdsPlatformConnector, TikTokAdsConnector>()
-            .AddPolicyHandler(HttpResiliencePolicies.Retry())
-            .AddPolicyHandler(HttpResiliencePolicies.CircuitBreaker())
-            .AddPolicyHandler(HttpResiliencePolicies.Timeout(TimeSpan.FromSeconds(10)));
-        services.AddScoped<IAdsConnectorResolver, AdsConnectorResolver>();
-        services.AddScoped<AdsAgent>();
-
         // Vector store: Qdrant is the only supported backend now SQL Server doesn't carry pgvector.
         services.Configure<QdrantOptions>(cfg.GetSection(QdrantOptions.SectionName));
         services.AddSingleton(sp =>
@@ -275,4 +270,8 @@ public static class DependencyInjection
 
         return services;
     }
+
+    // Cấu hình để trống ("") phải được coi như thiếu, giống hệt null.
+    private static string FallbackWhenBlank(string? value, string fallback)
+        => string.IsNullOrWhiteSpace(value) ? fallback : value;
 }

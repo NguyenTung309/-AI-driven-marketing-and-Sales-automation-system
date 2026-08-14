@@ -17,7 +17,7 @@ public static class OrchestrationPlanJson
 
         try
         {
-            return JsonSerializer.Deserialize<OrchestrationPlanDocument>(json, Options);
+            return JsonSerializer.Deserialize<OrchestrationPlanDocument>(json, Options)?.Normalize();
         }
         catch (JsonException)
         {

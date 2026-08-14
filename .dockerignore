@@ -12,5 +12,39 @@ src/frontend/dist/
 .vscode/
 **/*.user
 
-# Local env
+# Local env and generated configuration
 deploy/.env
+deploy/.env.*
+**/.env
+**/.env.*
+**/appsettings.Local.json
+**/appsettings.Development.local.json
+
+# Generated publish output and runtime data
+deploy/api-publish/
+deploy/publish/
+deploy/*
+!deploy/nginx/
+!deploy/nginx/clawbot.conf
+src/api/**/logs/
+src/agents/**/logs/
+src/gateway/**/logs/
+**/dist/
+**/*.log
+**/TestResults/
+
+# Agent worktrees and local automation state
+.claude/
+.codegraph/
+.playwright-mcp/
+.e2e-logs/
+.kilo/
+.kilocode/
+.sdd/
+TestResults/
+.tmp-runall.log
+
+# Documentation and local scratch artifacts
+docs/
+*.userguide.*
+**/planning-notes/

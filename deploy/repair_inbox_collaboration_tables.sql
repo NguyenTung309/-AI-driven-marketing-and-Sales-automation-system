@@ -286,6 +286,38 @@ BEGIN TRY
     )
         ALTER INDEX ix_conv_labels_label ON dbo.conversation_labels REBUILD;
 
+    IF EXISTS (
+        SELECT 1
+        FROM sys.indexes i
+        WHERE i.object_id = OBJECT_ID(N'dbo.conversations')
+          AND i.name = N'UX_conversations_tenant_id'
+          AND (
+              i.is_unique <> 1
+              OR i.has_filter <> 0
+              OR (SELECT COUNT(*) FROM sys.index_columns ic WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.key_ordinal > 0) <> 2
+              OR NOT EXISTS (
+                  SELECT 1 FROM sys.index_columns ic
+                  INNER JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                  WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id
+                    AND ic.key_ordinal = 1 AND c.name = N'tenant_id'
+              )
+              OR NOT EXISTS (
+                  SELECT 1 FROM sys.index_columns ic
+                  INNER JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                  WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id
+                    AND ic.key_ordinal = 2 AND c.name = N'id'
+              )
+          )
+    )
+        THROW 51095, 'inbox_collaboration_conversations_tenant_index_malformed', 1;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE object_id = OBJECT_ID(N'dbo.conversations')
+          AND name = N'UX_conversations_tenant_id'
+    )
+        CREATE UNIQUE INDEX UX_conversations_tenant_id ON dbo.conversations (tenant_id, id);
+
     IF OBJECT_ID(N'dbo.conversation_notes', N'U') IS NULL
     BEGIN
         CREATE TABLE dbo.conversation_notes (
@@ -369,6 +401,55 @@ BEGIN TRY
 
         ALTER TABLE dbo.conversation_notes WITH CHECK
             ADD CONSTRAINT FK_conversation_notes_users FOREIGN KEY (created_by_user_id) REFERENCES dbo.users(id);
+    END;
+
+    IF EXISTS (
+        SELECT 1
+        FROM dbo.conversation_notes note
+        LEFT JOIN dbo.conversations conversation
+          ON conversation.id = note.conversation_id
+         AND conversation.tenant_id = note.tenant_id
+        WHERE conversation.id IS NULL
+    )
+        THROW 51095, 'inbox_collaboration_notes_cross_tenant_conversation', 1;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM sys.foreign_keys fk
+        WHERE fk.parent_object_id = OBJECT_ID(N'dbo.conversation_notes')
+          AND fk.referenced_object_id = OBJECT_ID(N'dbo.conversations')
+          AND (SELECT COUNT(*) FROM sys.foreign_key_columns x WHERE x.constraint_object_id = fk.object_id) = 2
+          AND EXISTS (
+              SELECT 1
+              FROM sys.foreign_key_columns x
+              INNER JOIN sys.columns parent_column
+                ON parent_column.object_id = x.parent_object_id
+               AND parent_column.column_id = x.parent_column_id
+              INNER JOIN sys.columns referenced_column
+                ON referenced_column.object_id = x.referenced_object_id
+               AND referenced_column.column_id = x.referenced_column_id
+              WHERE x.constraint_object_id = fk.object_id
+                AND parent_column.name = N'tenant_id'
+                AND referenced_column.name = N'tenant_id'
+          )
+          AND EXISTS (
+              SELECT 1
+              FROM sys.foreign_key_columns x
+              INNER JOIN sys.columns parent_column
+                ON parent_column.object_id = x.parent_object_id
+               AND parent_column.column_id = x.parent_column_id
+              INNER JOIN sys.columns referenced_column
+                ON referenced_column.object_id = x.referenced_object_id
+               AND referenced_column.column_id = x.referenced_column_id
+              WHERE x.constraint_object_id = fk.object_id
+                AND parent_column.name = N'conversation_id'
+                AND referenced_column.name = N'id'
+          )
+    )
+    BEGIN
+        ALTER TABLE dbo.conversation_notes WITH CHECK
+            ADD CONSTRAINT FK_conversation_notes_tenant_conversations
+            FOREIGN KEY (tenant_id, conversation_id) REFERENCES dbo.conversations(tenant_id, id);
     END;
 
     IF EXISTS (

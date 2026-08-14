@@ -95,9 +95,11 @@ if ($files.Count -eq 0) {
 }
 
 $seenPrefixes = [System.Collections.Generic.HashSet[string]]::new()
-# Legacy history used several parallel migration tracks through 0048. Keep those immutable
-# prefixes accepted while preserving strict uniqueness for every new migration prefix.
-$legacyDuplicatePrefixLimit = 48
+# Legacy history used several parallel migration tracks through 0096: feature branches were merged
+# in parallel while this guard was absent from the tree. Those filenames are already recorded in
+# dbo.schema_migrations on live databases, so renumbering them would replay applied migrations.
+# Keep them accepted while preserving strict uniqueness for every new migration prefix.
+$legacyDuplicatePrefixLimit = 96
 $legacyBatchGuardLimit = 86
 foreach ($file in $files) {
     if ($file.Name -notmatch '^\d{4}_.+\.sql$') {

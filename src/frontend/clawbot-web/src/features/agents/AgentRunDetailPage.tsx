@@ -52,7 +52,15 @@ function exportRunCsv(session: OrchestrationV2RunDetail) {
   downloadFile(`phien-${session.sessionId}.csv`, "text/csv;charset=utf-8", csv);
 }
 
-const ACTIVE_STATUSES = new Set<OrchestrationV2Status>(["draft", "pending_approval", "running", "paused"]);
+const ACTIVE_STATUSES = new Set<OrchestrationV2Status>([
+  "draft",
+  "pending_approval",
+  "running",
+  "pause_requested",
+  "paused",
+  "cancelling",
+  "failing",
+]);
 const POLL_INTERVAL_MS = 3_000;
 
 export default function AgentRunDetailPage() {
@@ -73,7 +81,7 @@ export default function AgentRunDetailPage() {
   const session = sessionQuery.data ?? null;
 
   // Traces are embedded in the run-detail response, so no separate polling query is needed.
-  const traceItems = session?.traces ?? [];
+  const traceItems = useMemo(() => session?.traces ?? [], [session?.traces]);
 
   const toolTracesByTask = useMemo(() => {
     const map = new Map<string, OrchestrationV2Trace[]>();
@@ -86,6 +94,12 @@ export default function AgentRunDetailPage() {
     }
     return map;
   }, [traceItems]);
+
+  // Bước có kết quả do người dùng sửa tay khi phiên tạm dừng.
+  const editedTaskIds = useMemo(
+    () => new Set(traceItems.filter((trace) => trace.phase === "task_edited").map((trace) => trace.taskId)),
+    [traceItems],
+  );
 
   return (
     <AppShell title="Chi tiết phiên điều phối">
@@ -196,7 +210,11 @@ export default function AgentRunDetailPage() {
                       {toUserFriendlyOrchestrationError(task.error) ?? task.error}
                     </p>
                   )}
-                  <TaskResultDetails task={task} toolTraces={toolTracesByTask.get(task.id) ?? []} />
+                  <TaskResultDetails
+                    editedByUser={editedTaskIds.has(task.id)}
+                    task={task}
+                    toolTraces={toolTracesByTask.get(task.id) ?? []}
+                  />
                 </li>
               ))}
             </ul>

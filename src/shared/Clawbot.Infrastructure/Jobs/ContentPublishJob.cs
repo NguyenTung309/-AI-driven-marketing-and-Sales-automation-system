@@ -1,3 +1,5 @@
+using System.Data;
+using Clawbot.Domain.Agents;
 using Clawbot.Domain.Content;
 using Clawbot.Infrastructure.Content;
 using Clawbot.Infrastructure.Content.Publishing;
@@ -188,6 +190,20 @@ public sealed partial class ContentPublishJob(
             return;
         }
 
+        // Claim and transmission are serialized with replan/failure. Once the durable attempt is active,
+        // the orchestration sink refuses to supersede this generation until the external outcome is known.
+        await using var publicationClaimTransaction = await _db.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, ct)
+            .ConfigureAwait(false);
+        ContentPublishAttempt attempt;
+        try
+        {
+            if (!await IsCurrentOrchestrationGenerationAsync(item, ct).ConfigureAwait(false))
+            {
+                schedule.Cancel(now, "orchestration_plan_failed");
+                return;
+            }
+
         // Phase 3.7: conditional claim freezes immutable snapshot + stable idempotency before external call.
         var publishTargetId = schedule.PublishTargetId
             ?? schedule.MetaAssetId
@@ -215,6 +231,8 @@ public sealed partial class ContentPublishJob(
             if (existingAttempt.HasConfirmedPublication())
             {
                 ReconcileConfirmedPublication(schedule, item, existingAttempt, now);
+                await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+                await publicationClaimTransaction.CommitAsync(ct).ConfigureAwait(false);
                 LogPublished(_logger, schedule.TenantId, item.Id, schedule.Id);
                 return;
             }
@@ -231,7 +249,6 @@ public sealed partial class ContentPublishJob(
             }
         }
 
-        ContentPublishAttempt attempt;
         if (existingAttempt is null)
         {
             // Snapshot bất biến chỉ chốt một lần khi claim; reopen tái dùng nên không cần load lại.
@@ -266,6 +283,14 @@ public sealed partial class ContentPublishJob(
         // Mark transmitted before provider call so timeout/process-loss becomes outcome_unknown, not blind retry.
         attempt.MarkTransmitted(attempt.LeaseToken!.Value, providerRequestId: null, now);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+        await publicationClaimTransaction.CommitAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            await publicationClaimTransaction.RollbackAsync(ct).ConfigureAwait(false);
+            _db.ChangeTracker.Clear();
+            throw;
+        }
 
         var request = new PublishRequest(
             schedule.TenantId,
@@ -365,6 +390,48 @@ public sealed partial class ContentPublishJob(
             using var saveCts = new CancellationTokenSource(AmbiguousOutcomeSaveTimeout);
             await _db.SaveChangesAsync(saveCts.Token).ConfigureAwait(false);
         }
+    }
+
+    private async Task<bool> IsCurrentOrchestrationGenerationAsync(
+        ContentItem item,
+        CancellationToken cancellationToken)
+    {
+        if (item.OrchestrationSessionId is null || item.OrchestrationOwnershipClaimedAt is not null)
+            return true;
+        if (item.OrchestrationPlanGeneration is not { } planGeneration)
+            return false;
+
+        AgentSession? session;
+        if (_db.Database.IsSqlServer())
+        {
+            session = await _db.AgentSessions
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM dbo.agent_sessions WITH (UPDLOCK, HOLDLOCK)
+                    WHERE id = {item.OrchestrationSessionId.Value}
+                        AND tenant_id = {item.TenantId}
+                    """)
+                .IgnoreQueryFilters()
+                .SingleOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            session = await _db.AgentSessions
+                .IgnoreQueryFilters()
+                .SingleOrDefaultAsync(
+                    candidate => candidate.Id == item.OrchestrationSessionId.Value
+                        && candidate.TenantId == item.TenantId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (session is not null)
+            await _db.Entry(session).ReloadAsync(cancellationToken).ConfigureAwait(false);
+
+        return session is not null
+            && session.ReplanCount == planGeneration
+            && session.Status is AgentSessionStatuses.Running or AgentSessionStatuses.Completed;
     }
 
     // Attempt trước đã xác nhận lên provider nhưng schedule bị đưa lại 'pending' (vd. thao tác thử lại

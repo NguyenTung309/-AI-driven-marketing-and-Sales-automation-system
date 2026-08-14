@@ -9,8 +9,11 @@ export function statusTone(status: OrchestrationV2Status): StatusTone {
     case "cancelled":
       return "error";
     case "running":
+    case "pause_requested":
     case "paused":
     case "pending_approval":
+    case "cancelling":
+    case "failing":
       return "warning";
     default:
       return "neutral";
@@ -25,8 +28,14 @@ export function statusLabel(status: OrchestrationV2Status): string {
       return "Chờ phê duyệt";
     case "running":
       return "Đang chạy";
+    case "pause_requested":
+      return "Đang dừng an toàn";
     case "paused":
       return "Tạm dừng";
+    case "cancelling":
+      return "Đang hủy sau khi hoàn tất phát hành";
+    case "failing":
+      return "Đang dừng sau khi hoàn tất phát hành";
     case "completed":
       return "Hoàn tất";
     case "failed":
@@ -79,6 +88,28 @@ export function taskTone(status: string): StatusTone {
     default:
       return "warning";
   }
+}
+
+// Các bước phụ thuộc trực tiếp hoặc gián tiếp vào `rootId`. Sửa output của bước gốc mà không đặt lại nhóm
+// này thì bản sửa không đi tới đâu — chúng đã chạy với kết quả cũ. Khớp ResetDownstream ở OrchestratorGrpcService.
+export function transitiveDependents(
+  tasks: readonly OrchestrationV2TaskDto[],
+  rootId: string,
+): readonly OrchestrationV2TaskDto[] {
+  const affected = new Set<string>([rootId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const task of tasks) {
+      if (affected.has(task.id)) continue;
+      if (task.dependsOn.some((dep) => affected.has(dep))) {
+        affected.add(task.id);
+        changed = true;
+      }
+    }
+  }
+  affected.delete(rootId);
+  return tasks.filter((task) => affected.has(task.id));
 }
 
 // SPEC-16 P3-2: order tasks by dependency depth (topological) so the DAG reads root→leaf, and expose each

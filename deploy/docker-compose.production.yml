@@ -1,0 +1,251 @@
+name: clawbot-production
+
+services:
+  sqlserver:
+    image: ${SQLSERVER_IMAGE:?SQLSERVER_IMAGE must be a digest-pinned image}
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: ${MSSQL_PID:?MSSQL_PID must be Standard or Enterprise}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?MSSQL_SA_PASSWORD is required}
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+      - ${SQLSERVER_BACKUP_DIR:?SQLSERVER_BACKUP_DIR is required}:/var/opt/mssql/backup
+    networks: [backend]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "SQLCMDPASSWORD=\"$$MSSQL_SA_PASSWORD\" /opt/mssql-tools18/bin/sqlcmd -S localhost,1433 -U sa -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  redis:
+    image: ${REDIS_IMAGE:?REDIS_IMAGE must be a digest-pinned image}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redis_data:/data
+    networks: [backend]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *default-logging
+
+  rabbitmq:
+    image: ${RABBITMQ_IMAGE:?RABBITMQ_IMAGE must be a digest-pinned image}
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?RABBITMQ_USER is required}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks: [backend]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    logging: *default-logging
+
+  qdrant:
+    image: ${QDRANT_IMAGE:?QDRANT_IMAGE must be a digest-pinned image}
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks: [backend]
+    restart: unless-stopped
+    healthcheck:
+      # Image qdrant khong co curl lan wget, va /bin/sh la dash nen khong co /dev/tcp.
+      # Bash la cach duy nhat goi duoc HTTP tu ben trong container nay.
+      test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/6333 && printf "GET /healthz HTTP/1.0\r\n\r\n" >&3 && head -n 1 <&3 | grep -q "200 OK"']
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    logging: *default-logging
+
+  searxng:
+    image: ${SEARXNG_IMAGE:?SEARXNG_IMAGE must be a digest-pinned image}
+    volumes:
+      - ${SEARXNG_SETTINGS_FILE:?SEARXNG_SETTINGS_FILE is required}:/etc/searxng/settings.yml:ro
+    networks: [backend]
+    restart: unless-stopped
+    healthcheck:
+      # Image searxng chi co wget cua busybox, khong co curl.
+      test: ["CMD-SHELL", "wget --quiet --spider http://localhost:8080/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    logging: *default-logging
+
+  minio:
+    image: ${MINIO_IMAGE:?MINIO_IMAGE must be a digest-pinned image}
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+    volumes:
+      - minio_data:/data
+    networks: [backend]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:9000/minio/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    logging: *default-logging
+
+  minio-init:
+    image: ${MINIO_MC_IMAGE:?MINIO_MC_IMAGE must be a digest-pinned image}
+    entrypoint: ["/bin/sh", "-ec"]
+    # Command phai la list mot phan tu: o dang chuoi, Compose tach tu theo khoang trang
+    # nen "sh -ec" chi nhan token dau tien lam script, mc chay khong tham so va thoat 1.
+    command:
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc admin user remove local "$$MINIO_APP_ACCESS_KEY" || true
+        mc admin user add local "$$MINIO_APP_ACCESS_KEY" "$$MINIO_APP_SECRET_KEY"
+        mc admin policy attach local readwrite --user "$$MINIO_APP_ACCESS_KEY"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      MINIO_APP_ACCESS_KEY: ${MINIO_APP_ACCESS_KEY:?MINIO_APP_ACCESS_KEY is required}
+      MINIO_APP_SECRET_KEY: ${MINIO_APP_SECRET_KEY:?MINIO_APP_SECRET_KEY is required}
+    networks: [backend]
+    depends_on:
+      minio: { condition: service_healthy }
+    restart: "no"
+    logging: *default-logging
+
+  agentservice:
+    image: ${CLAWBOT_AGENT_IMAGE:?CLAWBOT_AGENT_IMAGE must be a digest-pinned image}
+    env_file:
+      - ${CLAWBOT_RUNTIME_ENV_FILE:?CLAWBOT_RUNTIME_ENV_FILE is required}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      # Candidate releases start passive; the deployment restarts them active after smoke checks.
+      Clawbot__StartupMode: ${CLAWBOT_STARTUP_MODE:-active}
+      AgentService__Url: https://agentservice:15875
+      ConnectionStrings__SqlServer: "Server=sqlserver,1433;Database=clawbot;User Id=${APP_SQL_USER:?APP_SQL_USER is required};Password=${APP_SQL_PASSWORD:?APP_SQL_PASSWORD is required};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=true"
+      ConnectionStrings__Redis: redis:6379,password=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      ConnectionStrings__RabbitMq: amqp://${RABBITMQ_USER:?RABBITMQ_USER is required}:${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}@rabbitmq:5672
+      Vector__Qdrant__Host: qdrant
+      Searxng__BaseUrl: http://searxng:8080
+      Docs__Storage__Minio__Endpoint: http://minio:9000
+      Docs__Storage__Minio__AccessKey: ${MINIO_APP_ACCESS_KEY:?MINIO_APP_ACCESS_KEY is required}
+      Docs__Storage__Minio__SecretKey: ${MINIO_APP_SECRET_KEY:?MINIO_APP_SECRET_KEY is required}
+      Kestrel__Endpoints__Grpc__Url: https://0.0.0.0:15875
+      Kestrel__Endpoints__Grpc__Protocols: Http2
+      Kestrel__Endpoints__Grpc__Certificate__Path: /run/secrets/agentservice-grpc.pfx
+      Kestrel__Endpoints__Grpc__Certificate__Password: ${AGENT_SERVICE_TLS_CERTIFICATE_PASSWORD:?AGENT_SERVICE_TLS_CERTIFICATE_PASSWORD is required}
+      Kestrel__Endpoints__Health__Url: http://0.0.0.0:8080
+      Kestrel__Endpoints__Health__Protocols: Http1
+      AgentServiceAuthentication__SigningKey: ${AGENT_SERVICE_AUTH_SIGNING_KEY:?AGENT_SERVICE_AUTH_SIGNING_KEY is required}
+    volumes:
+      - ${AGENT_SERVICE_TLS_CERTIFICATE_PATH:?AGENT_SERVICE_TLS_CERTIFICATE_PATH is required}:/run/secrets/agentservice-grpc.pfx:ro
+    networks: [backend]
+    depends_on:
+      sqlserver: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+      searxng: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+    restart: unless-stopped
+    logging: *default-logging
+
+  api:
+    image: ${CLAWBOT_API_IMAGE:?CLAWBOT_API_IMAGE must be a digest-pinned image}
+    env_file:
+      - ${CLAWBOT_RUNTIME_ENV_FILE:?CLAWBOT_RUNTIME_ENV_FILE is required}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://0.0.0.0:15874
+      # Candidate releases start passive; the deployment restarts them active after smoke checks.
+      Clawbot__StartupMode: ${CLAWBOT_STARTUP_MODE:-active}
+      AgentService__Url: https://agentservice:15875
+      AgentService__HealthUrl: http://agentservice:8080/health/ready
+      AgentServiceTls__TrustedCertificatePath: /run/secrets/agentservice-ca.pem
+      ConnectionStrings__SqlServer: "Server=sqlserver,1433;Database=clawbot;User Id=${APP_SQL_USER:?APP_SQL_USER is required};Password=${APP_SQL_PASSWORD:?APP_SQL_PASSWORD is required};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=true"
+      ConnectionStrings__Redis: redis:6379,password=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      ConnectionStrings__RabbitMq: amqp://${RABBITMQ_USER:?RABBITMQ_USER is required}:${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}@rabbitmq:5672
+      Vector__Qdrant__Host: qdrant
+      Docs__Storage__Minio__Endpoint: http://minio:9000
+      Docs__Storage__Minio__AccessKey: ${MINIO_APP_ACCESS_KEY:?MINIO_APP_ACCESS_KEY is required}
+      Docs__Storage__Minio__SecretKey: ${MINIO_APP_SECRET_KEY:?MINIO_APP_SECRET_KEY is required}
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY is required}
+      AgentServiceAuthentication__SigningKey: ${AGENT_SERVICE_AUTH_SIGNING_KEY:?AGENT_SERVICE_AUTH_SIGNING_KEY is required}
+      Encryption__Base64Key: ${ENCRYPTION_BASE64_KEY:?ENCRYPTION_BASE64_KEY is required}
+    volumes:
+      - ${AGENT_SERVICE_TLS_CA_CERTIFICATE_PATH:?AGENT_SERVICE_TLS_CA_CERTIFICATE_PATH is required}:/run/secrets/agentservice-ca.pem:ro
+    networks: [backend]
+    depends_on:
+      agentservice: { condition: service_healthy }
+      sqlserver: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:15874/health/ready || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 45s
+    logging: *default-logging
+
+  gateway:
+    image: ${CLAWBOT_GATEWAY_IMAGE:?CLAWBOT_GATEWAY_IMAGE must be a digest-pinned image}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://0.0.0.0:15873
+      Gateway__ApiHealthUrl: http://api:15874/health/ready
+      Gateway__Pancake__WebhookSecret: ${PANCAKE_WEBHOOK_SECRET:?PANCAKE_WEBHOOK_SECRET is required}
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY is required}
+      ReverseProxy__Clusters__backend__Destinations__backend/primary__Address: http://api:15874
+    networks: [backend, edge]
+    depends_on:
+      api: { condition: service_healthy }
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:15873/health/ready || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+    logging: *default-logging
+
+  web:
+    image: ${CLAWBOT_WEB_IMAGE:?CLAWBOT_WEB_IMAGE must be a digest-pinned image}
+    networks: [edge]
+    ports:
+      - "${CLAWBOT_HTTP_PORT:?CLAWBOT_HTTP_PORT is required}:8080"
+    depends_on:
+      gateway: { condition: service_healthy }
+    restart: unless-stopped
+    logging: *default-logging
+
+networks:
+  backend:
+    internal: true
+  edge:
+
+volumes:
+  sqlserver_data:
+  redis_data:
+  rabbitmq_data:
+  qdrant_data:
+  minio_data:

@@ -424,11 +424,10 @@ public static partial class DevDataSeeder
         ("content-agent",     "Content Agent",     "content",     "Create campaign content briefs and channel-ready drafts.", """["content-agent"]"""),
         ("research-agent",    "Research Agent",    "research",    "Research competitors, trends, and knowledge gaps. Call research-agent or web.search with geo/keywords.", """["research-agent","web.search"]"""),
         ("docs-agent",        "Docs Agent",        "docs",        "Prepare quote, brochure, onboarding documents via docs-agent tool.", """["docs-agent"]"""),
-        ("report-agent",      "Report Agent",      "report",      "Aggregate KPI via report-agent tool (snapshot/anomaly/forecast). Pass date/platform/metric as needed.", """["report-agent"]"""),
-        ("ads-agent",         "Ads Agent",         "ads",         "Plan ad tasks via ads-agent tool. High-risk actions may require approval.", """["ads-agent"]"""),
+        ("report-agent",      "Report Agent",      "report",      "USE THIS for any request about KPI, metrics, analytics, or a business report: it queries the tenant database via the report-agent tool (operation=snapshot/anomaly/forecast, date/platform/metric). Do NOT confuse with reporter-agent, which has no data access.", """["report-agent"]"""),
         ("reviewer-agent",    "Reviewer Agent",    "reviewer",    "Review sub-agent outputs for quality, safety, and policy gates.", """["content.review"]"""),
         ("publisher-agent",   "Publisher Agent",   "publisher",   "Publishing is handled by the durable worker; no autonomous publishing tools are granted by default.", "[]"),
-        ("reporter-agent",    "Reporter Agent",    "reporter",    "Summarize A2A run outputs, decisions, costs, and next actions.", "[]"),
+        ("reporter-agent",    "Reporter Agent",    "reporter",    "Write a prose wrap-up of THIS run only: what each sub-agent produced, decisions taken, costs, next actions. Has NO data tools and cannot read KPI — for metrics or analytics numbers plan report-agent instead.", "[]"),
     ];
 
     /// <summary>

@@ -24,6 +24,7 @@ export interface AdminUser {
   readonly phone: string | null;
   readonly isActive: boolean;
   readonly lastLoginAt: string | null;
+  readonly roles: readonly string[] | null;
   readonly pancakeChannels: readonly PancakeChannelInfo[];
 }
 
@@ -296,9 +297,12 @@ export interface TenantOrchestrationSettings {
   readonly idleAlertMinutes: number;
   /** Lead im lặng quá N ngày → lost; 0 = tắt. */
   readonly leadLostAfterDays: number;
-  /** AI ước tính doanh thu tự duyệt (default tắt). */
-  readonly autoApproveLeadRevenue: boolean;
+  /** Một bước điều phối lỗi thì làm gì: pause (chờ người sửa) | replan (AI lập lại) | fail (dừng hẳn). */
+  readonly orchestratorFailurePolicy: OrchestratorFailurePolicy;
 }
+
+/** Mặc định "pause": dừng tại bước lỗi để người sửa, thay vì để orchestrator lập lại kế hoạch (tốn LLM). */
+export type OrchestratorFailurePolicy = "pause" | "replan" | "fail";
 
 export interface TenantOrchestrationUpdateResult {
   readonly requireOrchestrationApproval: boolean;
@@ -310,7 +314,7 @@ export interface TenantOrchestrationUpdateResult {
   readonly skipChatReplyReview: boolean;
   readonly idleAlertMinutes: number;
   readonly leadLostAfterDays: number;
-  readonly autoApproveLeadRevenue: boolean;
+  readonly orchestratorFailurePolicy: OrchestratorFailurePolicy;
 }
 
 /** PATCH-like: chỉ field được set mới gửi (undefined = BE giữ nguyên). Tránh GET fail fallback ghi đè. */
@@ -325,7 +329,7 @@ export type TenantOrchestrationPatch = {
   readonly skipChatReplyReview?: boolean;
   readonly idleAlertMinutes?: number;
   readonly leadLostAfterDays?: number;
-  readonly autoApproveLeadRevenue?: boolean;
+  readonly orchestratorFailurePolicy?: OrchestratorFailurePolicy;
 };
 
 export async function getTenantOrchestration(): Promise<TenantOrchestrationSettings> {
@@ -349,7 +353,7 @@ export async function setTenantOrchestration(
       skipChatReplyReview: patch.skipChatReplyReview,
       idleAlertMinutes: patch.idleAlertMinutes,
       leadLostAfterDays: patch.leadLostAfterDays,
-      autoApproveLeadRevenue: patch.autoApproveLeadRevenue,
+      orchestratorFailurePolicy: patch.orchestratorFailurePolicy,
     },
   );
   return res.data;

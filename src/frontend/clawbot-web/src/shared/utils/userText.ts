@@ -13,6 +13,34 @@ const STATUS_MESSAGES: Partial<Record<number, string>> = {
   429: "Bạn thao tác quá nhanh. Vui lòng thử lại sau ít phút.",
 };
 
+const CONTENT_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+  "content.meta_page_required": "Chưa có Facebook Page sẵn sàng đăng. Hãy kết nối Page trong phần Quản trị hệ thống rồi thử lại.",
+  "content.item_not_schedulable": "Nội dung này chưa đủ điều kiện lên lịch. Hãy duyệt lại bản nội dung hiện tại rồi thử lại.",
+  "content.approval_context_missing": "Nội dung này thiếu thông tin phê duyệt. Hãy duyệt lại bản nội dung hiện tại rồi lên lịch.",
+  "content.schedule_in_past": "Thời điểm đăng phải ở tương lai. Hãy chọn lại ngày giờ.",
+  "content.meta_page_invalid": "Page đã chọn không phù hợp với kênh đăng của nội dung này.",
+  "content.instagram_credentials_invalid": "Thông tin kết nối Instagram chưa hợp lệ. Hãy kiểm tra lại trong phần Quản trị hệ thống.",
+  "content.instagram_target_mode_conflict": "Cấu hình đích đăng Instagram đang xung đột. Hãy chọn lại tài khoản hoặc Meta Page.",
+  "content.instagram_target_required": "Hãy chọn tài khoản hoặc Meta Page để đăng Instagram.",
+  "content.instagram_reconnect_required": "Kết nối Instagram đã hết hiệu lực. Hãy kết nối lại rồi thử lại.",
+  "content.instagram_permissions_missing": "Kết nối Instagram đang thiếu quyền cần thiết. Hãy kết nối lại và cấp đủ quyền.",
+  "content.instagram_not_linked": "Instagram chưa được liên kết với Meta Page đã chọn.",
+  "content.instagram_target_unavailable": "Không thể dùng tài khoản Instagram đã chọn. Hãy chọn lại đích đăng.",
+  "content.instagram_meta_unavailable": "Không thể kiểm tra tài khoản Meta/Instagram lúc này. Hãy thử lại sau.",
+};
+
+type ApiErrorBody = Readonly<{ errorCode?: unknown; message?: unknown }>;
+
+export function contentErrorMessage(errorCode: string | null | undefined): string | null {
+  return errorCode ? CONTENT_ERROR_MESSAGES[errorCode] ?? null : null;
+}
+
+function errorCodeFromResponse(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const { errorCode } = value as ApiErrorBody;
+  return typeof errorCode === "string" ? errorCode : null;
+}
+
 const ORCHESTRATION_FAILURE_HINTS: readonly { readonly needle: string; readonly message: string }[] = [
   { needle: "llm_config_not_configured", message: "Có agent trong kế hoạch chưa được gắn LLM. Mở Sơ đồ agent → Cấu hình → tab LLM để gắn, rồi gửi lại mục tiêu." },
   { needle: "cost_cap", message: "Phiên bị chặn vì vượt hạn mức chi phí AI của tháng. Kiểm tra thẻ Chi phí AI hoặc nâng hạn mức trước khi chạy lại." },
@@ -45,6 +73,8 @@ export function toUserFriendlyError(error: unknown, options: UserFriendlyErrorOp
 
   if (isAxiosError(error)) {
     const status = error.response?.status;
+    const errorCode = errorCodeFromResponse(error.response?.data);
+    if (errorCode && CONTENT_ERROR_MESSAGES[errorCode]) return CONTENT_ERROR_MESSAGES[errorCode];
     if (status && normalizedOptions.statusMessages?.[status]) return normalizedOptions.statusMessages[status] as string;
     if (status && STATUS_MESSAGES[status]) return STATUS_MESSAGES[status] as string;
     if (status && status >= 500) return "Hệ thống đang gặp sự cố. Vui lòng thử lại sau.";
@@ -96,6 +126,11 @@ export function operationalPhaseLabel(value: string | null | undefined): string 
   if (normalized === "dependency_blocked") return "Chờ phụ thuộc";
   if (normalized === "planning_failed") return "Lập kế hoạch thất bại";
   if (normalized === "replan") return "Lập lại kế hoạch";
+  // Can thiệp tay thay cho lập lại kế hoạch: phiên dừng tại bước lỗi, người dùng sửa/chạy lại/bỏ qua.
+  if (normalized === "awaiting_intervention") return "Chờ bạn xử lý";
+  if (normalized === "task_edited") return "Người dùng sửa kết quả";
+  if (normalized === "task_retry") return "Cho chạy lại bước";
+  if (normalized === "task_skipped") return "Bỏ qua bước";
   if (normalized.includes("error") || normalized.includes("fail")) return "Lỗi";
   if (normalized.includes("warn")) return "Cảnh báo";
   if (normalized === "input") return "Đầu vào";
@@ -116,6 +151,27 @@ const TOOL_RESULTS_MARKER = "[tool_results]";
 // Splits an agent task output into its human text and the structured tool-result block the worker appends
 // (`[tool_results]\n{json}`). Tool results are operational identifiers (content_id, schedule_id, post_url) the
 // user explicitly wants to see, so they are returned verbatim — they are not redacted like free-text traces.
+export function toHumanTaskSummary(output: string | null | undefined): string {
+  const { text, toolResults } = splitToolResults(output);
+  const cleaned = text
+    .replaceAll("```json", "")
+    .replaceAll("```", "")
+    .trim();
+  if (cleaned) return cleaned;
+  if (!toolResults || Object.keys(toolResults).length === 0) return "Chưa có kết quả để hiển thị.";
+
+  const resultLabels: Readonly<Record<string, string>> = {
+    content_id: "Đã tạo nội dung.",
+    schedule_id: "Đã tạo lịch đăng.",
+    post_url: "Đã đăng nội dung.",
+    lead_id: "Đã cập nhật khách hàng tiềm năng.",
+    conversation_id: "Đã cập nhật cuộc hội thoại.",
+  };
+  return Object.keys(toolResults)
+    .map((key) => resultLabels[key] ?? `Đã hoàn tất: ${key.replaceAll("_", " ")}.`)
+    .join(" ");
+}
+
 export function splitToolResults(output: string | null | undefined): {
   readonly text: string;
   readonly toolResults: Readonly<Record<string, string>> | null;
@@ -138,4 +194,13 @@ export function splitToolResults(output: string | null | undefined): {
     /* not parseable JSON — fall through and treat the whole thing as text */
   }
   return { text: raw, toolResults: null };
+}
+
+// Nghịch đảo của splitToolResults: ghép phần văn bản với khối tool_results theo đúng định dạng worker sinh ra,
+// để output do người sửa tay vẫn được agent kế tiếp đọc như output máy sinh.
+export function joinToolResults(text: string, toolResults: Readonly<Record<string, string>> | null): string {
+  const body = text.trim();
+  if (!toolResults || Object.keys(toolResults).length === 0) return body;
+  const block = `${TOOL_RESULTS_MARKER}\n${JSON.stringify(toolResults, null, 2)}`;
+  return body ? `${body}\n${block}` : block;
 }

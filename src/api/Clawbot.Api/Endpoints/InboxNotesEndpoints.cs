@@ -64,6 +64,10 @@ public static class InboxNotesEndpoints
         var userId = CurrentUserId(user);
         if (userId is null) return Results.BadRequest(new { error = "invalid_user" });
 
+        var conversationExists = await db.Conversations.AsNoTracking()
+            .AnyAsync(c => c.Id == conversationId && c.TenantId == tenant.TenantId, ct);
+        if (!conversationExists) return Results.NotFound();
+
         var userDisplayName = await db.Users
             .Where(u => u.Id == userId.Value)
             .Select(u => u.DisplayName)

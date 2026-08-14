@@ -143,6 +143,7 @@ export function VersionRail({
   selectedId,
   loading,
   accuracy,
+  onDelete,
   onSelect,
 }: {
   readonly module: KbModule | null;
@@ -150,6 +151,7 @@ export function VersionRail({
   readonly selectedId: string | null;
   readonly loading: boolean;
   readonly accuracy: KbAccuracySummary | null;
+  readonly onDelete: (version: KbVersion) => void;
   readonly onSelect: (id: string) => void;
 }) {
   return (
@@ -169,29 +171,40 @@ export function VersionRail({
           <p className="p-3 text-body-md text-on-surface-variant">Đang tải phiên bản...</p>
         ) : versions.length ? (
           versions.map((version) => (
-            <button
-              className={[
-                "w-full rounded border p-3 text-left transition-colors",
-                selectedId === version.id
-                  ? "border-primary bg-red-50"
-                  : "border-outline bg-white hover:border-primary/50 hover:bg-surface-container-low",
-              ].join(" ")}
-              key={version.id}
-              onClick={() => onSelect(version.id)}
-              type="button"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-body-md font-bold text-secondary">Bản {version.version}</p>
-                  <p className="mt-1 text-label-sm text-on-surface-variant">{formatDateTime(version.createdAt)}</p>
+            <div className="relative" key={version.id}>
+              <button
+                className={[
+                  "w-full rounded border p-3 text-left transition-colors",
+                  selectedId === version.id
+                    ? "border-primary bg-red-50"
+                    : "border-outline bg-white hover:border-primary/50 hover:bg-surface-container-low",
+                ].join(" ")}
+                onClick={() => onSelect(version.id)}
+                type="button"
+              >
+                <div className="flex items-start justify-between gap-2 pr-7">
+                  <div>
+                    <p className="text-body-md font-bold text-secondary">Bản {version.version}</p>
+                    <p className="mt-1 text-label-sm text-on-surface-variant">{formatDateTime(version.createdAt)}</p>
+                  </div>
+                  <StatusPill tone={statusTone(version.status)}>{statusLabel(version.status)}</StatusPill>
                 </div>
-                <StatusPill tone={statusTone(version.status)}>{statusLabel(version.status)}</StatusPill>
-              </div>
-              <div className="mt-3 flex items-center justify-between gap-3 font-mono text-label-sm">
-                <span className="text-on-surface-variant">Độ chính xác</span>
-                <span className="font-bold text-secondary">{accuracyLabel(version.accuracyScore)}</span>
-              </div>
-            </button>
+                <div className="mt-3 flex items-center justify-between gap-3 font-mono text-label-sm">
+                  <span className="text-on-surface-variant">Độ chính xác</span>
+                  <span className="font-bold text-secondary">{accuracyLabel(version.accuracyScore)}</span>
+                </div>
+              </button>
+              {normalize(version.status) !== "deployed" ? (
+                <button
+                  aria-label={`Xóa Bản ${version.version}`}
+                  className="absolute right-2 top-2 rounded p-1 text-on-surface-variant hover:bg-red-100 hover:text-error"
+                  onClick={() => onDelete(version)}
+                  type="button"
+                >
+                  <span aria-hidden="true" className="material-symbols-outlined text-[18px]">delete</span>
+                </button>
+              ) : null}
+            </div>
           ))
         ) : (
           <div className="rounded border border-dashed border-outline p-4 text-body-md text-on-surface-variant">

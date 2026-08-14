@@ -1,6 +1,5 @@
 using System.Reflection;
 using Clawbot.Application.Abstractions;
-using Clawbot.Domain.Ads;
 using Clawbot.Domain.Agents;
 using Clawbot.Domain.Analytics;
 using Clawbot.Domain.Channels;
@@ -27,6 +26,7 @@ using MassTransit;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Clawbot.Infrastructure.Persistence;
 
@@ -64,7 +64,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     // Leads
     public DbSet<Lead> Leads => Set<Lead>();
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
-    public DbSet<LeadRevenue> LeadRevenues => Set<LeadRevenue>();
     public DbSet<LeadScoringRule> LeadScoringRules => Set<LeadScoringRule>();
     public DbSet<DripSequence> DripSequences => Set<DripSequence>();
     public DbSet<DripSequenceStep> DripSequenceSteps => Set<DripSequenceStep>();
@@ -120,16 +119,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<MetaAsset> MetaAssets => Set<MetaAsset>();
     public DbSet<MetaOAuthState> MetaOAuthStates => Set<MetaOAuthState>();
 
-    // Ads
-    public DbSet<AdsCampaign> AdsCampaigns => Set<AdsCampaign>();
-    public DbSet<AdsRule> AdsRules => Set<AdsRule>();
-    public DbSet<AdsAction> AdsActions => Set<AdsAction>();
-    public DbSet<AdsCreative> AdsCreatives => Set<AdsCreative>();
-    public DbSet<AdsMetricsDaily> AdsMetricsDailies => Set<AdsMetricsDaily>();
 
     // Analytics
     public DbSet<KpiDaily> KpiDailies => Set<KpiDaily>();
     public DbSet<KpiForecast> KpiForecasts => Set<KpiForecast>();
+    public DbSet<ReportArtifact> ReportArtifacts => Set<ReportArtifact>();
 
     // Experiments / A-B testing
     public DbSet<Experiment> Experiments => Set<Experiment>();
@@ -220,6 +214,49 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
             builder.Entity<AgentSession>().Property(x => x.RowVersion)
                 .IsConcurrencyToken()
                 .ValueGeneratedNever();
+
+            // Các cấu hình dùng nvarchar(max) cho cột text dài. SQLite không hiểu "max" nên
+            // EnsureCreated sinh ra DDL lỗi cú pháp; bỏ column type để provider tự chọn TEXT.
+            foreach (var property in builder.Model.GetEntityTypes()
+                .SelectMany(entity => entity.GetDeclaredProperties()))
+            {
+                var columnType = property.GetColumnType();
+                if (columnType is not null
+                    && columnType.Contains("(max)", StringComparison.OrdinalIgnoreCase))
+                {
+                    property.SetColumnType(null);
+                }
+            }
+
+            // Filtered index dùng cú pháp SQL Server ([cột], N'literal'). SQLite không parse được
+            // nên dịch sang cú pháp chuẩn: bỏ ngoặc vuông và tiền tố N của chuỗi Unicode.
+            foreach (var index in builder.Model.GetEntityTypes()
+                .SelectMany(entity => entity.GetDeclaredIndexes()))
+            {
+                var filter = index.GetFilter();
+                if (string.IsNullOrEmpty(filter))
+                {
+                    continue;
+                }
+
+                index.SetFilter(filter
+                    .Replace("[", "\"", StringComparison.Ordinal)
+                    .Replace("]", "\"", StringComparison.Ordinal)
+                    .Replace("N'", "'", StringComparison.Ordinal));
+            }
+
+            // SQLite không so sánh được DateTimeOffset trong ORDER BY. Lưu theo UTC ticks để giữ
+            // đúng thứ tự; toàn bộ ứng dụng ghi thời điểm UTC nên không mất thông tin offset.
+            var utcTicksConverter = new ValueConverter<DateTimeOffset, long>(
+                value => value.UtcTicks,
+                ticks => new DateTimeOffset(ticks, TimeSpan.Zero));
+            foreach (var property in builder.Model.GetEntityTypes()
+                .SelectMany(entity => entity.GetDeclaredProperties())
+                .Where(property => property.ClrType == typeof(DateTimeOffset)
+                    || property.ClrType == typeof(DateTimeOffset?)))
+            {
+                property.SetValueConverter(utcTicksConverter);
+            }
         }
         else
         {

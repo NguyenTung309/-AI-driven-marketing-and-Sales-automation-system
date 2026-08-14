@@ -37,6 +37,7 @@ public sealed class ContentAsset : Entity<Guid>, ITenantOwned, IAuditExempt
         Guid tenantId,
         Guid contentItemId,
         string? originalFileName,
+        string? extension,
         int sortOrder,
         DateTimeOffset createdAt)
     {
@@ -50,7 +51,7 @@ public sealed class ContentAsset : Entity<Guid>, ITenantOwned, IAuditExempt
             Id = id,
             TenantId = tenantId,
             ContentItemId = contentItemId,
-            StorageKey = $"tenants/{tenantId:N}/content/{contentItemId:N}/{id:N}",
+            StorageKey = $"tenants/{tenantId:N}/content/{contentItemId:N}/{id:N}{NormalizeExtension(extension)}",
             OriginalFileName = NormalizeFileName(originalFileName),
             SortOrder = sortOrder,
             CreatedAt = createdAt,
@@ -113,6 +114,12 @@ public sealed class ContentAsset : Entity<Guid>, ITenantOwned, IAuditExempt
         DeletedAt = at;
         LastErrorCode = null;
     }
+
+    private static string NormalizeExtension(string? extension) => extension?.ToLowerInvariant() switch
+    {
+        ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" => extension.ToLowerInvariant(),
+        _ => string.Empty,
+    };
 
     private static string? NormalizeFileName(string? originalFileName)
     {

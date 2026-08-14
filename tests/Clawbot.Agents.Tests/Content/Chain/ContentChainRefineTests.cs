@@ -81,6 +81,22 @@ public sealed class ContentChainRefineTests
         act.Should().Throw<InvalidOperationException>().WithMessage("content_review_task_lease_expired");
     }
 
+    [Fact]
+    public void DeferExhaustedForOrchestrationStop_RefundsExpiredLeaseAttempt()
+    {
+        var task = LeasedTask(out _, out var at);
+        var deferredAt = at.AddMinutes(6);
+
+        task.DeferExhaustedForOrchestrationStop(deferredAt.AddMinutes(1), deferredAt);
+
+        task.Status.Should().Be(ContentReviewTask.StatusPending);
+        task.AttemptCount.Should().Be(0);
+        task.LeaseToken.Should().BeNull();
+        task.LeaseExpiresAt.Should().BeNull();
+        task.NextAttemptAt.Should().Be(deferredAt.AddMinutes(1));
+        task.LastErrorCode.Should().Be("orchestration_session_stopped");
+    }
+
     // ===== ContentItem.ApplyAgentRefine — đổi body giữ revision, review vẫn running =====
 
     [Fact]

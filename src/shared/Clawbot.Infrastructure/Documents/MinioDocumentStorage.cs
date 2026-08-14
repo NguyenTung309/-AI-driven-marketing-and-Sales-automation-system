@@ -56,7 +56,7 @@ public sealed class MinioDocumentStorage : IDocumentStorage
             .WithContentType(string.IsNullOrWhiteSpace(contentType) ? "application/pdf" : contentType), ct).ConfigureAwait(false);
 
         if (!string.IsNullOrWhiteSpace(_publicBaseUrl))
-            return $"{_publicBaseUrl}/{Uri.EscapeDataString(fileName)}";
+            return $"{_publicBaseUrl}/{string.Join('/', fileName.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.EscapeDataString))}";
 
         return await _client.PresignedGetObjectAsync(new PresignedGetObjectArgs()
             .WithBucket(_bucket)
@@ -76,5 +76,15 @@ public sealed class MinioDocumentStorage : IDocumentStorage
             .WithCallbackStream(stream => stream.CopyTo(ms)), ct).ConfigureAwait(false);
 
         return ms.ToArray();
+    }
+
+    public async Task DeleteAsync(string fileName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+            throw new ArgumentException("fileName required", nameof(fileName));
+
+        await _client.RemoveObjectAsync(new RemoveObjectArgs()
+            .WithBucket(_bucket)
+            .WithObject(fileName), ct).ConfigureAwait(false);
     }
 }

@@ -9,7 +9,6 @@ const SAMPLE_AGENTS: readonly AgentListItem[] = [
   { code: "sale", displayName: "Sale", agentType: "sale_assist", model: "claude", status: "running", updatedAt: "", lastRunAt: null },
   { code: "content", displayName: "Content", agentType: "content", model: "claude", status: "running", updatedAt: "", lastRunAt: null },
   { code: "research", displayName: "Nghiên cứu", agentType: "research", model: "claude", status: "stopped", updatedAt: "", lastRunAt: null },
-  { code: "ads", displayName: "Ads", agentType: "ads", model: "rules", status: "running", updatedAt: "", lastRunAt: null },
   { code: "docs", displayName: "Docs", agentType: "docs", model: "questpdf", status: "stopped", updatedAt: "", lastRunAt: null },
   { code: "report", displayName: "Báo cáo", agentType: "report", model: "mlnet", status: "running", updatedAt: "", lastRunAt: null },
   { code: "lead", displayName: "Lead", agentType: "lead", model: "rules", status: "error", updatedAt: "", lastRunAt: null },
@@ -78,7 +77,6 @@ function agentLabel(agent: AgentListItem): string {
   if (type === "sale_assist") return "Tư vấn";
   if (type === "lead") return "Chấm lead";
   if (type === "docs") return "Tài liệu";
-  if (type === "ads") return "Quảng cáo";
   if (type === "report") return "Báo cáo";
   if (type === "research") return "Nghiên cứu";
   if (type === "content") return "Nội dung";

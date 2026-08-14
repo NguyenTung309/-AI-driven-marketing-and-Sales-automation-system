@@ -7,6 +7,10 @@ public sealed class Tenant : AggregateRoot<Guid>
     public const string ContentPublishingPolicyAutomatic = "automatic";
     public const string ContentPublishingPolicyHumanRequired = "human_required";
 
+    public const string OrchestratorFailurePolicyPause = "pause";
+    public const string OrchestratorFailurePolicyReplan = "replan";
+    public const string OrchestratorFailurePolicyFail = "fail";
+
     public string Slug { get; private set; } = string.Empty;
     public string DisplayName { get; private set; } = string.Empty;
     public string PlanName { get; private set; } = "free";
@@ -18,6 +22,9 @@ public sealed class Tenant : AggregateRoot<Guid>
     public string? SupportName { get; private set; }
     public string? WidgetGreeting { get; private set; }
     public bool RequireOrchestrationApproval { get; private set; }
+    // Xử lý task orchestration lỗi: "pause" (mặc định — dừng chờ người sửa output, không tốn LLM),
+    // "replan" (hành vi cũ: sinh plan mới, chạy lại từ đầu), "fail" (dừng hẳn).
+    public string OrchestratorFailurePolicy { get; private set; } = OrchestratorFailurePolicyPause;
     // Review-gate P1 (QĐ1: default OFF, opt-in per tenant): khi bật, item chỉ được publish khi có
     // chữ ký reviewer agent (ContentItem.ApprovedByAgentId).
     public bool RequireContentReview { get; private set; }
@@ -44,7 +51,6 @@ public sealed class Tenant : AggregateRoot<Guid>
     // Lead pipeline không có tín hiệu thật quá ngưỡng này sẽ chuyển lost; 0 = tắt.
     public int LeadLostAfterDays { get; private set; } = 60;
     // AI ước tính doanh thu được duyệt tự động; mặc định tắt để sale kiểm tra số tiền.
-    public bool AutoApproveLeadRevenue { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     private Tenant() { }
@@ -81,6 +87,15 @@ public sealed class Tenant : AggregateRoot<Guid>
 
     public void SetRequireOrchestrationApproval(bool requireApproval) =>
         RequireOrchestrationApproval = requireApproval;
+
+    public void SetOrchestratorFailurePolicy(string policy)
+    {
+        var normalized = policy?.Trim().ToLowerInvariant();
+        if (normalized is not (OrchestratorFailurePolicyPause or OrchestratorFailurePolicyReplan or OrchestratorFailurePolicyFail))
+            throw new ArgumentException("orchestrator_failure_policy_invalid", nameof(policy));
+
+        OrchestratorFailurePolicy = normalized;
+    }
 
     public void SetRequireContentReview(bool requireReview) =>
         RequireContentReview = requireReview;
@@ -122,9 +137,6 @@ public sealed class Tenant : AggregateRoot<Guid>
 
     public void SetLeadLostAfterDays(int days) =>
         LeadLostAfterDays = days < 0 ? 60 : Math.Min(days, 365);
-
-    public void SetAutoApproveLeadRevenue(bool autoApprove) =>
-        AutoApproveLeadRevenue = autoApprove;
 
     private static string? NormalizeNullable(string? value)
     {

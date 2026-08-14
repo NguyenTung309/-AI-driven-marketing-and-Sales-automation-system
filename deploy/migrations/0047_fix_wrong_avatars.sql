@@ -10,7 +10,8 @@ UPDATE c
 SET c.avatar_url = NULL
 FROM contacts c
 INNER JOIN contact_external_ids ce ON ce.contact_id = c.id
-INNER JOIN inboxes i ON i.external_page_id = ce.external_id OR c.display_name = i.name
+INNER JOIN inboxes i ON i.tenant_id = c.tenant_id
+    AND (i.external_page_id = ce.external_id OR c.display_name = i.name)
 WHERE c.avatar_url = i.avatar_url;
 
 -- 2. Cập nhật lại avatar đúng cho các Contact từ tin nhắn inbound (direction = 'in') có chứa avatar hợp lệ (không trùng với avatar của Page)
@@ -20,9 +21,9 @@ WITH CorrectAvatars AS (
         m.sender_avatar_url AS real_avatar_url,
         ROW_NUMBER() OVER (PARTITION BY c.id ORDER BY m.sent_at DESC) as rn
     FROM contacts c
-    INNER JOIN conversations conv ON conv.contact_id = c.id
-    INNER JOIN messages m ON m.conversation_id = conv.id
-    LEFT JOIN inboxes i ON i.avatar_url = m.sender_avatar_url
+    INNER JOIN conversations conv ON conv.contact_id = c.id AND conv.tenant_id = c.tenant_id
+    INNER JOIN messages m ON m.conversation_id = conv.id AND m.tenant_id = c.tenant_id
+    LEFT JOIN inboxes i ON i.tenant_id = c.tenant_id AND i.avatar_url = m.sender_avatar_url
     WHERE m.direction = 'in' 
       AND m.sender_avatar_url IS NOT NULL 
       AND m.sender_avatar_url <> ''
@@ -38,8 +39,8 @@ WHERE ca.rn = 1 AND (c.avatar_url IS NULL OR c.avatar_url = '');
 UPDATE m
 SET m.sender_avatar_url = NULL
 FROM messages m
-INNER JOIN conversations conv ON conv.id = m.conversation_id
-INNER JOIN inboxes i ON i.avatar_url = m.sender_avatar_url
+INNER JOIN conversations conv ON conv.id = m.conversation_id AND conv.tenant_id = m.tenant_id
+INNER JOIN inboxes i ON i.tenant_id = m.tenant_id AND i.avatar_url = m.sender_avatar_url
 WHERE m.direction = 'in';
 
 COMMIT;

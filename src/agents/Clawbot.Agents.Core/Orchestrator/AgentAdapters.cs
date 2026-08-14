@@ -1,19 +1,15 @@
 using System.Text.Json;
-using Clawbot.Agents.Core.Ads;
 using Clawbot.Agents.Core.Chat;
 using Clawbot.Agents.Core.Content;
 using Clawbot.Agents.Core.Docs;
 using Clawbot.Agents.Core.Research;
 using Clawbot.Agents.Core.SaleAssist;
-using Clawbot.Domain.Ads;
 using Clawbot.SharedKernel.Content;
 
 namespace Clawbot.Agents.Core.Orchestrator;
 
 public abstract class AgentAdapterBase(string name) : IAgent
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-
     public string Name { get; } = name;
 
     public async Task<AgentResult> ExecuteAsync(AgentTask task, CancellationToken ct)
@@ -31,7 +27,7 @@ public abstract class AgentAdapterBase(string name) : IAgent
 
     protected abstract Task<string> ExecuteCoreAsync(AgentTask task, CancellationToken ct);
 
-    protected static string Json<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
+    protected static string Json<T>(T value) => JsonSerializer.Serialize(value, AgentJson.Options);
 }
 
 public sealed class ChatAgentAdapter(Chat.ChatAgent agent) : AgentAdapterBase("chat-agent")
@@ -123,44 +119,6 @@ public sealed class DocsAgentAdapter(DocsAgent agent) : AgentAdapterBase("docs-a
             AgentTaskInput.StringMap(input, "vars_json"),
             DocBranding.For(AgentTaskInput.OptionalString(input, "tenant_name") ?? "ClawBot")), ct).ConfigureAwait(false);
         return Json(new { result.Sha256, result.SizeBytes, result.LatencyMs });
-    }
-}
-
-public sealed class AdsAgentAdapter(AdsAgent agent) : AgentAdapterBase("ads-agent")
-{
-    private readonly AdsAgent _agent = agent;
-
-    protected override async Task<string> ExecuteCoreAsync(AgentTask task, CancellationToken ct)
-    {
-        var input = task.Input;
-        var tenantId = AgentTaskInput.RequiredGuid(input, "tenant_id");
-        var operation = AgentTaskInput.OptionalString(input, "operation") ?? "apply";
-        if (string.Equals(operation, "lookalike", StringComparison.OrdinalIgnoreCase))
-        {
-            var audienceId = await _agent.BuildLookalikeAsync(
-                tenantId,
-                AgentTaskInput.RequiredString(input, "platform"),
-                AgentTaskInput.StringList(input, "seed_contact_keys"), ct).ConfigureAwait(false);
-            return Json(new { audienceId });
-        }
-
-        if (string.Equals(operation, "remarketing", StringComparison.OrdinalIgnoreCase))
-        {
-            var ok = await _agent.BuildRemarketingAsync(
-                tenantId,
-                AgentTaskInput.RequiredString(input, "platform"),
-                AgentTaskInput.RequiredString(input, "audience_name"),
-                AgentTaskInput.StringList(input, "contact_keys"), ct).ConfigureAwait(false);
-            return Json(new { ok });
-        }
-
-        var applied = await _agent.ApplyActionAsync(
-            tenantId,
-            AgentTaskInput.RequiredString(input, "platform"),
-            AgentTaskInput.RequiredString(input, "campaign_id"),
-            AgentTaskInput.RequiredString(input, "action"),
-            AgentTaskInput.OptionalDecimal(input, "new_budget"), ct).ConfigureAwait(false);
-        return Json(new { applied });
     }
 }
 

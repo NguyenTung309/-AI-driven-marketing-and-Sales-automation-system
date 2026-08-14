@@ -27,10 +27,10 @@ END
 
 BEGIN TRANSACTION;
 
-DECLARE @expected_rows INT = 11;
+DECLARE @expected_rows INT = 10;
 
 -- allowed_tools_json mirrors DevDataSeeder.OrchestratorAgents (tool names = ToolRegistry).
--- lead/sale/report/research/chat/docs/ads must NOT be [] — empty = text-only soft-fail ("thiếu list").
+-- lead/sale/report/research/chat/docs must NOT be [] — empty = text-only soft-fail ("thiếu list").
 MERGE agent_definitions AS target
 USING (VALUES
     (N'chat-agent',        N'Chat Agent',        N'chat',        N'Handle customer conversation context and produce safe handoff summaries. Call chat-agent tool when a reply is needed.', N'["chat-agent"]'),
@@ -39,11 +39,10 @@ USING (VALUES
     (N'content-agent',     N'Content Agent',     N'content',     N'Create campaign content briefs and channel-ready drafts.',                          N'["content-agent"]'),
     (N'research-agent',    N'Research Agent',    N'research',    N'Research competitors, trends, and knowledge gaps. Call research-agent or web.search with geo/keywords.', N'["research-agent","web.search"]'),
     (N'docs-agent',        N'Docs Agent',        N'docs',        N'Prepare quote, brochure, onboarding documents via docs-agent tool.',                N'["docs-agent"]'),
-    (N'report-agent',      N'Report Agent',      N'report',      N'Aggregate KPI via report-agent tool (snapshot/anomaly/forecast). Pass date/platform/metric as needed.', N'["report-agent"]'),
-    (N'ads-agent',         N'Ads Agent',         N'ads',         N'Plan ad tasks via ads-agent tool. High-risk actions may require approval.',       N'["ads-agent"]'),
+    (N'report-agent',      N'Report Agent',      N'report',      N'USE THIS for any request about KPI, metrics, analytics, or a business report: it queries the tenant database via the report-agent tool (operation=snapshot/anomaly/forecast, date/platform/metric). Do NOT confuse with reporter-agent, which has no data access.', N'["report-agent"]'),
     (N'reviewer-agent',    N'Reviewer Agent',    N'reviewer',    N'Review sub-agent outputs for quality, safety, and policy gates.',                   N'["content.review"]'),
     (N'publisher-agent',   N'Publisher Agent',   N'publisher',   N'Publishing is handled by the durable worker; no autonomous publishing tools are granted by default.', N'[]'),
-    (N'reporter-agent',    N'Reporter Agent',    N'reporter',    N'Summarize A2A run outputs, decisions, costs, and next actions.',                    N'[]')
+    (N'reporter-agent',    N'Reporter Agent',    N'reporter',    N'Write a prose wrap-up of THIS run only: what each sub-agent produced, decisions taken, costs, next actions. Has NO data tools and cannot read KPI — for metrics or analytics numbers plan report-agent instead.', N'[]')
 ) AS source (code, display_name, agent_type, persona_prompt, allowed_tools_json)
 ON target.tenant_id = @tenant_id AND target.code = source.code
 WHEN MATCHED THEN
@@ -67,7 +66,7 @@ DECLARE @actual_rows INT;
 SELECT @actual_rows = COUNT(*)
 FROM agent_definitions
 WHERE tenant_id = @tenant_id
-  AND code IN (N'chat-agent', N'sale-assist-agent', N'lead-agent', N'content-agent', N'research-agent', N'docs-agent', N'report-agent', N'ads-agent', N'reviewer-agent', N'publisher-agent', N'reporter-agent')
+  AND code IN (N'chat-agent', N'sale-assist-agent', N'lead-agent', N'content-agent', N'research-agent', N'docs-agent', N'report-agent', N'reviewer-agent', N'publisher-agent', N'reporter-agent')
   AND deleted_at IS NULL;
 
 IF @actual_rows <> @expected_rows

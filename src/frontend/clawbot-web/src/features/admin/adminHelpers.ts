@@ -6,7 +6,6 @@ import type { ApiKeyItem, Role } from "@/shared/api/admin";
 export type ConfirmTarget =
   | { readonly kind: "resetPassword"; readonly id: string; readonly label: string }
   | { readonly kind: "deleteRole"; readonly id: string; readonly label: string }
-  | { readonly kind: "revokeKey"; readonly id: string; readonly label: string }
   | { readonly kind: "deletePancake" };
 
 export function confirmCopy(target: ConfirmTarget): { readonly title: string; readonly message: string; readonly confirmLabel: string } {
@@ -15,8 +14,6 @@ export function confirmCopy(target: ConfirmTarget): { readonly title: string; re
       return { title: "Đặt lại mật khẩu?", message: `Hệ thống sẽ phát hành mã đặt lại mật khẩu cho ${target.label}.`, confirmLabel: "Đặt lại" };
     case "deleteRole":
       return { title: "Xóa vai trò?", message: `Vai trò "${target.label}" sẽ bị xóa vĩnh viễn.`, confirmLabel: "Xóa" };
-    case "revokeKey":
-      return { title: "Thu hồi khóa tích hợp?", message: `Khóa "${target.label}" sẽ ngừng hoạt động ngay lập tức.`, confirmLabel: "Thu hồi" };
     case "deletePancake":
       return { title: "Ngắt kết nối Pancake?", message: "Cấu hình Pancake hiện tại sẽ bị xóa.", confirmLabel: "Ngắt kết nối" };
   }
@@ -34,16 +31,6 @@ export const DEFAULT_PANCAKE_FORM = {
   isActive: false,
 };
 export type PancakeForm = typeof DEFAULT_PANCAKE_FORM;
-
-export const DEFAULT_BRANDING_FORM = {
-  brandName: "",
-  logoUrl: "",
-  primaryColor: "#d32f2f",
-  accentColor: "#f59e0b",
-  supportName: "",
-  widgetGreeting: "",
-};
-export type BrandingForm = typeof DEFAULT_BRANDING_FORM;
 
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—";
@@ -73,13 +60,6 @@ export function adminFormErrorMessage(error: unknown): string {
   const data = isAxiosError(error) ? error.response?.data : null;
   if (Array.isArray(data) && data.every((item) => typeof item === "string")) return data.join("\n");
   return errorMessage(error);
-}
-
-export function parseScopes(value: string): readonly string[] {
-  return value
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 export function roleTone(role: Role): StatusTone {

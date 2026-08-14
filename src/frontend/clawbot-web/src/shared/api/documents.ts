@@ -139,3 +139,13 @@ export async function generateDocumentKit(payload: GenerateDocumentKitPayload): 
 export function documentDownloadUrl(id: string): string {
   return `/api/docs/${id}/download`;
 }
+
+/**
+ * Tải PDF qua apiClient để interceptor gắn Bearer token. Không dùng trực tiếp `fileUrl` hay đặt
+ * đường dẫn này vào <a href>/<iframe src>: điều hướng thuần của trình duyệt không mang token, và
+ * `/generated-docs/...` không được host nào phục vụ nên rơi vào SPA fallback rồi báo "404 Not Found".
+ */
+export async function fetchGeneratedDocumentBlob(id: string): Promise<Blob> {
+  const res = await apiClient.get<Blob>(documentDownloadUrl(id), { responseType: "blob" });
+  return res.data;
+}

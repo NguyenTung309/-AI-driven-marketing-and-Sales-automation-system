@@ -1,4 +1,3 @@
-// Stitch design system branding defaults: primaryColor: "#d32f2f"
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/shared/auth/authStore";
@@ -15,23 +14,19 @@ import {
 } from "@/shared/ui";
 import {
   createAdminUser,
-  createApiKey,
   createRole,
   deletePancakeConfig,
   deleteRole,
   getPancakeConfig,
   getPancakeWebhookUrl,
   getSimpleUserList,
-  getTenantBranding,
   listAdminUsers,
-  listApiKeys,
   listAuditLogs,
   listPermissions,
   listRolePermissions,
   listRoles,
   listSystemLogs,
   resetAdminUserPassword,
-  revokeApiKey,
   setAdminUserActive,
   setRolePermissions,
   unlinkInboxMember,
@@ -39,13 +34,10 @@ import {
   updateInboxMember,
   updatePancakeChannel,
   updatePancakeConfig,
-  updateTenantBranding,
   updateRole,
   type AdminUser,
-  type ApiKeyItem,
   type PancakeChannelInfo,
   type AuditLog,
-  type CreatedApiKey,
   type PagedResponse,
   type Permission,
   type Role,
@@ -57,9 +49,7 @@ import {
 import { AdminAuditTab } from "./AdminAuditTab";
 import { AdminIntegrationsTab } from "./AdminIntegrationsTab";
 import { AdminJobsTab } from "./AdminJobsTab";
-import { AdminKeyModal } from "./AdminKeyModal";
 import { AdminPancakeChannelModal, type PancakeChannelTarget } from "./AdminPancakeChannelModal";
-import { AdminKeysTab } from "./AdminKeysTab";
 import { AdminRoleModal, type RoleModalMode } from "./AdminRoleModal";
 import { AdminRolesTab } from "./AdminRolesTab";
 import { AdminSystemLogsTab } from "./AdminSystemLogsTab";
@@ -67,23 +57,19 @@ import { AdminUserModal, type UserModalMode } from "./AdminUserModal";
 import { AdminUsersTab } from "./AdminUsersTab";
 import {
   confirmCopy,
-  DEFAULT_BRANDING_FORM,
   DEFAULT_PANCAKE_FORM,
   errorMessage,
-  parseScopes,
-  type AdminKeyFormState,
   type AdminRoleFormState,
   type AdminUserFormState,
   type ConfirmTarget,
 } from "./adminHelpers";
 import { MetricTile, TabButton } from "./adminUi";
 
-type AdminTab = "users" | "roles" | "keys" | "integrations" | "errors" | "audit" | "jobs";
+type AdminTab = "users" | "roles" | "integrations" | "errors" | "audit" | "jobs";
 
 const EMPTY_USERS: readonly AdminUser[] = [];
 const EMPTY_ROLES: readonly Role[] = [];
 const EMPTY_PERMISSIONS: readonly Permission[] = [];
-const EMPTY_KEYS: readonly ApiKeyItem[] = [];
 const EMPTY_AUDIT_LOGS: readonly AuditLog[] = [];
 const EMPTY_SYSTEM_LOGS: readonly SystemLogEntry[] = [];
 const EMPTY_SIMPLE_USERS: readonly SimpleUser[] = [];
@@ -128,10 +114,6 @@ export default function AdminConsolePage() {
   const [roleForm, setRoleForm] = useState<AdminRoleFormState>({ name: "", description: "" });
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
   const [permissionDraft, setPermissionDraft] = useState<{ readonly roleId: string; readonly ids: readonly string[] } | null>(null);
-  const [keyModalOpen, setKeyModalOpen] = useState(false);
-  const [keyForm, setKeyForm] = useState<AdminKeyFormState>({ name: "", scopes: "admin.system", expiresAt: "" });
-  const [createdKey, setCreatedKey] = useState<CreatedApiKey | null>(null);
-  const [brandingDraft, setBrandingDraft] = useState<Partial<typeof DEFAULT_BRANDING_FORM>>({});
   const [pancakeDraft, setPancakeDraft] = useState<Partial<typeof DEFAULT_PANCAKE_FORM>>({});
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
 
@@ -161,16 +143,6 @@ export default function AdminConsolePage() {
     queryKey: ["admin", "users-simple"],
     queryFn: getSimpleUserList,
     enabled: Boolean(channelTarget) && canManageInboxOwners,
-  });
-  const apiKeysQuery = useQuery({
-    queryKey: ["admin", "api-keys"],
-    queryFn: listApiKeys,
-    enabled: canManageUsers,
-  });
-  const brandingQuery = useQuery({
-    queryKey: ["admin", "tenant-branding"],
-    queryFn: getTenantBranding,
-    enabled: tab === "integrations",
   });
   const pancakeQuery = useQuery({
     queryKey: ["admin", "pancake-config"],
@@ -229,7 +201,6 @@ export default function AdminConsolePage() {
   const roles = rolesQuery.data ?? EMPTY_ROLES;
   const permissions = permissionsQuery.data ?? EMPTY_PERMISSIONS;
   const ownerOptions = ownerOptionsQuery.data ?? EMPTY_SIMPLE_USERS;
-  const apiKeys = apiKeysQuery.data ?? EMPTY_KEYS;
   const auditLogs = auditList.items.length ? auditList.items : EMPTY_AUDIT_LOGS;
   const systemLogs = systemLogsList.items.length ? systemLogsList.items : EMPTY_SYSTEM_LOGS;
   const effectiveSelectedRoleId = selectedRoleId ?? roles[0]?.id ?? null;
@@ -241,7 +212,6 @@ export default function AdminConsolePage() {
   const rolePermissionRows = Array.isArray(rolePermissionsQuery.data) ? rolePermissionsQuery.data : EMPTY_PERMISSIONS;
   const selectedRole = roles.find((role) => role.id === effectiveSelectedRoleId) ?? null;
   const activeUsers = users.filter((user) => user.isActive).length;
-  const activeKeys = apiKeys.filter((key) => !key.revokedAt).length;
   const pancakeStatusKnown = pancakeQuery.isFetched;
   const pancakeStatusText = pancakeStatusKnown ? (pancakeQuery.data?.isActive ? "Kết nối" : "Chưa bật") : "Chưa kiểm tra";
   const pancakeStatusTone: StatusTone = pancakeStatusKnown ? (pancakeQuery.data?.isActive ? "success" : "warning") : "neutral";
@@ -249,8 +219,6 @@ export default function AdminConsolePage() {
     usersQuery.error ??
     rolesQuery.error ??
     permissionsQuery.error ??
-    apiKeysQuery.error ??
-    brandingQuery.error ??
     pancakeQuery.error ??
     webhookQuery.error ??
     auditQuery.error ??
@@ -291,24 +259,6 @@ export default function AdminConsolePage() {
     };
   }, [pancakeQuery.data]);
   const pancakeForm = useMemo(() => ({ ...pancakeBaseForm, ...pancakeDraft }), [pancakeBaseForm, pancakeDraft]);
-  const brandingBaseForm = useMemo(() => {
-    const branding = brandingQuery.data;
-    return {
-      ...DEFAULT_BRANDING_FORM,
-      ...(branding
-        ? {
-            brandName: branding.brandName,
-            logoUrl: branding.logoUrl ?? "",
-            primaryColor: branding.primaryColor,
-            accentColor: branding.accentColor,
-            supportName: branding.supportName,
-            widgetGreeting: branding.widgetGreeting,
-          }
-        : {}),
-    };
-  }, [brandingQuery.data]);
-  const brandingForm = useMemo(() => ({ ...brandingBaseForm, ...brandingDraft }), [brandingBaseForm, brandingDraft]);
-
   const invalidateAdmin = () => {
     void queryClient.invalidateQueries({ queryKey: ["admin"] });
   };
@@ -430,46 +380,6 @@ export default function AdminConsolePage() {
     },
   });
 
-  const keyMutation = useMutation({
-    mutationFn: () =>
-      createApiKey({
-        name: keyForm.name.trim(),
-        scopes: parseScopes(keyForm.scopes),
-        expiresAt: keyForm.expiresAt ? `${keyForm.expiresAt}T23:59:59+07:00` : null,
-      }),
-    onSuccess: (key) => {
-      setCreatedKey(key);
-      setKeyModalOpen(false);
-      setKeyForm({ name: "", scopes: "admin.system", expiresAt: "" });
-      invalidateAdmin();
-    },
-  });
-
-  const revokeKeyMutation = useMutation({
-    mutationFn: revokeApiKey,
-    onSuccess: () => {
-      setNotice("Đã thu hồi khóa tích hợp.");
-      invalidateAdmin();
-    },
-  });
-
-  const brandingMutation = useMutation({
-    mutationFn: () =>
-      updateTenantBranding({
-        brandName: brandingForm.brandName.trim() || null,
-        logoUrl: brandingForm.logoUrl.trim() || null,
-        primaryColor: brandingForm.primaryColor.trim(),
-        accentColor: brandingForm.accentColor.trim(),
-        supportName: brandingForm.supportName.trim() || null,
-        widgetGreeting: brandingForm.widgetGreeting.trim() || null,
-      }),
-    onSuccess: () => {
-      setNotice("Đã lưu thương hiệu đơn vị.");
-      setBrandingDraft({});
-      invalidateAdmin();
-    },
-  });
-
   const pancakeMutation = useMutation({
     mutationFn: () =>
       updatePancakeConfig({
@@ -508,9 +418,6 @@ export default function AdminConsolePage() {
       case "deleteRole":
         deleteRoleMutation.mutate(confirmTarget.id, { onSuccess: () => setConfirmTarget(null) });
         break;
-      case "revokeKey":
-        revokeKeyMutation.mutate(confirmTarget.id, { onSuccess: () => setConfirmTarget(null) });
-        break;
       case "deletePancake":
         deletePancakeMutation.mutate(undefined, { onSuccess: () => setConfirmTarget(null) });
         break;
@@ -522,9 +429,7 @@ export default function AdminConsolePage() {
       ? resetPasswordMutation.isPending
       : confirmTarget?.kind === "deleteRole"
         ? deleteRoleMutation.isPending
-        : confirmTarget?.kind === "revokeKey"
-          ? revokeKeyMutation.isPending
-          : confirmTarget?.kind === "deletePancake"
+        : confirmTarget?.kind === "deletePancake"
             ? deletePancakeMutation.isPending
             : false;
 
@@ -612,9 +517,6 @@ export default function AdminConsolePage() {
     roleMutation.isPending ||
     deleteRoleMutation.isPending ||
     permissionsMutation.isPending ||
-    keyMutation.isPending ||
-    revokeKeyMutation.isPending ||
-    brandingMutation.isPending ||
     pancakeMutation.isPending ||
     deletePancakeMutation.isPending;
 
@@ -625,7 +527,7 @@ export default function AdminConsolePage() {
           <div>
             <h1 className="text-headline-md text-secondary">Hệ thống & phân quyền</h1>
             <p className="mt-1 text-body-md text-on-surface-variant">
-              Quản trị người dùng, vai trò, khóa tích hợp và kết nối Pancake cho đơn vị hiện tại.
+              Quản trị người dùng, vai trò và kết nối Pancake cho đơn vị hiện tại.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -649,10 +551,9 @@ export default function AdminConsolePage() {
         </div>
       ) : null}
 
-      <section className="mb-gutter grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
+      <section className="mb-gutter grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-3">
         <MetricTile icon="group" label="Người dùng hoạt động" value={`${activeUsers}/${users.length}`} tone="success" />
         <MetricTile icon="admin_panel_settings" label="Vai trò" value={`${roles.length}`} tone="neutral" />
-        <MetricTile icon="vpn_key" label="Khóa tích hợp hoạt động" value={`${activeKeys}`} tone={activeKeys ? "success" : "warning"} />
         <MetricTile icon="hub" label="Pancake" value={pancakeStatusText} tone={pancakeStatusTone} />
       </section>
 
@@ -661,7 +562,6 @@ export default function AdminConsolePage() {
         {canManageUsers ? (
           <>
             <TabButton active={tab === "roles"} icon="admin_panel_settings" label="Phân quyền" onClick={() => setTab("roles")} />
-            <TabButton active={tab === "keys"} icon="vpn_key" label="Khóa tích hợp" onClick={() => setTab("keys")} />
             <TabButton active={tab === "integrations"} icon="hub" label="Tích hợp" onClick={() => setTab("integrations")} />
             <TabButton active={tab === "jobs"} icon="schedule" label="Tác vụ tự động" onClick={() => setTab("jobs")} />
           </>
@@ -718,24 +618,8 @@ export default function AdminConsolePage() {
         />
       ) : null}
 
-      {tab === "keys" ? (
-        <AdminKeysTab
-          apiKeys={apiKeys}
-          createdKey={createdKey}
-          onOpenCreateKey={() => setKeyModalOpen(true)}
-          onRevokeKey={(key) => setConfirmTarget({ kind: "revokeKey", id: key.id, label: key.name })}
-          revokeKeyPending={revokeKeyMutation.isPending}
-        />
-      ) : null}
-
       {tab === "integrations" ? (
         <AdminIntegrationsTab
-          brandingForm={brandingForm}
-          onUpdateBrandingForm={(patch) => setBrandingDraft((current) => ({ ...current, ...patch }))}
-          brandingMutationError={brandingMutation.error}
-          brandingMutationPending={brandingMutation.isPending}
-          brandingFetching={brandingQuery.isFetching}
-          onSubmitBranding={() => brandingMutation.mutate()}
           pancakeForm={pancakeForm}
           onUpdatePancakeForm={(patch) => setPancakeDraft((current) => ({ ...current, ...patch }))}
           pancakeData={pancakeQuery.data}
@@ -843,16 +727,6 @@ export default function AdminConsolePage() {
         error={roleMutation.error}
         onClose={() => setRoleModal(null)}
         onSubmit={() => roleMutation.mutate()}
-      />
-
-      <AdminKeyModal
-        open={keyModalOpen}
-        keyForm={keyForm}
-        onChange={(patch) => setKeyForm({ ...keyForm, ...patch })}
-        pending={keyMutation.isPending}
-        error={keyMutation.error}
-        onClose={() => setKeyModalOpen(false)}
-        onSubmit={() => keyMutation.mutate()}
       />
 
       <ConfirmDialog
