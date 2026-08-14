@@ -2,25 +2,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as signalR from "@microsoft/signalr";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { getRealtimeAccessToken } from "@/shared/api/client";
-import type {
-  ConversationCursorPage,
-  ConversationListItem,
-  ConversationDetail,
-  ConversationListResponse,
-  InboxConversationEvent,
-  InboxMessage,
-  InboxMessageEvent,
-  InboxMessageStatusEvent,
-  InboxTypingEvent,
+import {
+  CONVERSATION_COUNTS_QUERY_KEY,
+  type ConversationCursorPage,
+  type ConversationListItem,
+  type ConversationDetail,
+  type ConversationListResponse,
+  type InboxConversationEvent,
+  type InboxMessage,
+  type InboxMessageEvent,
+  type InboxMessageStatusEvent,
+  type InboxTypingEvent,
 } from "@/shared/api/inbox";
+import {
+  filtersFromQueryKey,
+  reconcileConversationList,
+  type ConversationListCache,
+} from "./inboxRealtimeCache";
 
 // Phòng mất frame typing:false (relay/Redis rớt): gRPC auto-reply deadline 100s + margin.
 const TYPING_EXPIRE_MS = 120_000;
 
-type ConversationListCache =
-  | InfiniteData<ConversationCursorPage | ConversationListResponse>
-  | ConversationListResponse
-  | ConversationCursorPage;
+const CONVERSATIONS_QUERY_KEY = ["inbox", "conversations"] as const;
 
 function patchConversationItems(
   items: readonly ConversationListItem[],
@@ -148,12 +151,36 @@ export function useInboxRealtime(enabled: boolean) {
         });
       }
 
-      queryClient.setQueriesData<ConversationListCache>({ queryKey: ["inbox", "conversations"] }, (old) =>
-        patchConversationListCache(old, evt.conversationId, {
-          lastMessageAt: evt.sentAt,
-          lastMessagePreview: evt.content,
-        }),
-      );
+      // Tin nhắn giả (nhắc hội thoại treo) không được ghi vào DB nên không đụng tới danh sách.
+      if (evt.isSynthetic) return;
+
+      // Tin thường: vá + đẩy lên đầu ngay trong cache. Chỉ gọi lại server khi danh sách
+      // đang tải chưa có hội thoại này, hoặc trạng thái đổi làm nó ra/vào bộ lọc.
+      let needsListRefresh = false;
+      let needsCountsRefresh = false;
+      for (const query of queryClient.getQueryCache().findAll({ queryKey: CONVERSATIONS_QUERY_KEY })) {
+        const result = reconcileConversationList(
+          query.state.data as ConversationListCache | undefined,
+          evt,
+          filtersFromQueryKey(query.queryKey),
+        );
+        if (result.cache !== query.state.data) {
+          queryClient.setQueryData(query.queryKey, result.cache);
+        }
+        // Vắng mặt: có thể là hội thoại mới, phải hỏi server mới có đủ tên khách/inbox.
+        // Đổi trạng thái: hội thoại vừa ra/vào bộ lọc nên số đếm và các tab khác đã lệch.
+        if (result.needsRefresh || result.statusChanged) {
+          needsListRefresh = true;
+          needsCountsRefresh = true;
+        }
+      }
+
+      if (needsListRefresh) {
+        void queryClient.invalidateQueries({ queryKey: CONVERSATIONS_QUERY_KEY });
+      }
+      if (needsCountsRefresh) {
+        void queryClient.invalidateQueries({ queryKey: CONVERSATION_COUNTS_QUERY_KEY });
+      }
     });
 
     connection.on("messageStatus", (evt: InboxMessageStatusEvent) => {
@@ -179,6 +206,7 @@ export function useInboxRealtime(enabled: boolean) {
         exact: true,
       });
       void queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
+      void queryClient.invalidateQueries({ queryKey: CONVERSATION_COUNTS_QUERY_KEY });
 
       queryClient.setQueriesData<ConversationListCache>({ queryKey: ["inbox", "conversations"] }, (old) =>
         patchConversationListCache(old, evt.conversationId, {

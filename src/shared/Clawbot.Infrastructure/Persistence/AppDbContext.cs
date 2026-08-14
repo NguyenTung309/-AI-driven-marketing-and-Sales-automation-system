@@ -15,6 +15,7 @@ using Clawbot.Domain.Integrations;
 using Clawbot.Domain.KnowledgeBase;
 using Clawbot.Domain.Leads;
 using Clawbot.Domain.Llm;
+using Clawbot.Domain.Jobs;
 using Clawbot.Domain.Notifications;
 using Clawbot.Domain.Observability;
 using Clawbot.Domain.SaleAssist;
@@ -48,6 +49,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<Auth.RefreshToken> RefreshTokens => Set<Auth.RefreshToken>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<Clawbot.Domain.Jobs.BackgroundJob> BackgroundJobs => Set<Clawbot.Domain.Jobs.BackgroundJob>();
+    public DbSet<RecurringJobExecution> RecurringJobExecutions => Set<RecurringJobExecution>();
+    public DbSet<RecurringJobExecutionAttempt> RecurringJobExecutionAttempts => Set<RecurringJobExecutionAttempt>();
     public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
     public DbSet<Clawbot.Domain.Notifications.PushSubscription> PushSubscriptions => Set<Clawbot.Domain.Notifications.PushSubscription>();
 

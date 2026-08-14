@@ -136,10 +136,22 @@ public static class DocumentsEndpoints
         if (string.IsNullOrWhiteSpace(body.TemplateCode))
             return Results.BadRequest(new { error = "templateCode required" });
 
+        var deliveryTarget = DocumentDeliveryTargetValidator.Validate(
+            body.SentVia,
+            body.ContactId,
+            body.RecipientEmail);
+        if (!deliveryTarget.IsValid)
+            return Results.BadRequest(new { error = deliveryTarget.Error });
+
         var jobId = await jobs.LaunchAsync(
             DocsGenerateJobHandler.JobType,
             $"Sinh tài liệu {body.TemplateCode.Trim()}",
-            new DocsGenerateJobPayload(body.TemplateCode.Trim(), body.ContactId, body.Vars, body.SentVia),
+            new DocsGenerateJobPayload(
+                body.TemplateCode.Trim(),
+                body.ContactId,
+                body.Vars,
+                body.SentVia,
+                deliveryTarget.RecipientEmail),
             CurrentUserId(http),
             ct: ct).ConfigureAwait(false);
 
@@ -156,6 +168,13 @@ public static class DocumentsEndpoints
         CancellationToken ct)
     {
         _ = tenants.Require();
+        var deliveryTarget = DocumentDeliveryTargetValidator.Validate(
+            body.SentVia,
+            body.ContactId,
+            body.RecipientEmail);
+        if (!deliveryTarget.IsValid)
+            return Results.BadRequest(new { error = deliveryTarget.Error });
+
         var templateCodes = NormalizeKitTemplateCodes(body.TemplateCodes);
         if (templateCodes.Length == 0)
         {
@@ -173,7 +192,12 @@ public static class DocumentsEndpoints
         var jobId = await jobs.LaunchAsync(
             DocsKitJobHandler.JobType,
             $"Sinh bộ {templateCodes.Length} tài liệu",
-            new DocsKitJobPayload(templateCodes, body.ContactId, body.Vars, body.SentVia),
+            new DocsKitJobPayload(
+                templateCodes,
+                body.ContactId,
+                body.Vars,
+                body.SentVia,
+                deliveryTarget.RecipientEmail),
             CurrentUserId(http),
             ct: ct).ConfigureAwait(false);
 
@@ -226,6 +250,7 @@ public static class DocumentsEndpoints
         Guid? contactId,
         IReadOnlyDictionary<string, string>? vars,
         string? sentVia,
+        string? recipientEmail,
         DocsAgent.DocsAgentClient grpc,
         DocumentDeliveryService delivery,
         CancellationToken ct)
@@ -248,9 +273,12 @@ public static class DocumentsEndpoints
 
         if (!string.IsNullOrWhiteSpace(sentVia))
         {
-            var delivered = await delivery.TrySendAsync(tenantId, documentId, sentVia, ct).ConfigureAwait(false);
+            var delivered = await delivery
+                .TrySendAsync(tenantId, documentId, sentVia, recipientEmail, ct).ConfigureAwait(false);
+            // Thông báo hiện thẳng lên UI nên phải nói được người dùng cần làm gì, không dùng câu kỹ thuật.
             if (!delivered)
-                throw new InvalidOperationException($"Document {documentId} was generated but could not be delivered via {sentVia}.");
+                throw new InvalidOperationException(
+                    "Đã tạo tài liệu nhưng chưa gửi được. Kiểm tra lại email người nhận, hoặc tải tài liệu ở Thư viện rồi gửi thủ công.");
         }
 
         return new GenerateDocumentResponse(documentId, resp.FileUrl, resp.FileHash, resp.SizeBytes, resp.LatencyMs);

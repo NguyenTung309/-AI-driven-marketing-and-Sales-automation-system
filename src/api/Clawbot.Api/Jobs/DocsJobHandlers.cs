@@ -7,17 +7,20 @@ using Clawbot.SharedKernel.Jobs;
 
 namespace Clawbot.Api.Jobs;
 
+// RecipientEmail nullable + đứng cuối: payload của job cũ đang nằm trong hàng đợi vẫn deserialize được.
 public sealed record DocsGenerateJobPayload(
     string TemplateCode,
     Guid? ContactId,
     IReadOnlyDictionary<string, string>? Vars,
-    string? SentVia);
+    string? SentVia,
+    string? RecipientEmail = null);
 
 public sealed record DocsKitJobPayload(
     IReadOnlyList<string> TemplateCodes,
     Guid? ContactId,
     IReadOnlyDictionary<string, string>? Vars,
-    string? SentVia);
+    string? SentVia,
+    string? RecipientEmail = null);
 
 // Sinh 1 tài liệu bằng DocsAgent.
 public sealed class DocsGenerateJobHandler(
@@ -35,7 +38,7 @@ public sealed class DocsGenerateJobHandler(
 
         var doc = await DocumentsEndpoints.GenerateOneAsync(
             ctx.TenantId, payload.TemplateCode, payload.ContactId, payload.Vars, payload.SentVia,
-            grpc, delivery, ct).ConfigureAwait(false);
+            payload.RecipientEmail, grpc, delivery, ct).ConfigureAwait(false);
 
         return new JobResult("/documents", $"Đã sinh tài liệu {payload.TemplateCode} ({doc.SizeBytes} bytes).");
     }
@@ -70,7 +73,7 @@ public sealed class DocsKitJobHandler(
             {
                 var doc = await DocumentsEndpoints.GenerateOneAsync(
                     ctx.TenantId, code, payload.ContactId, payload.Vars, payload.SentVia,
-                    grpc, delivery, ct).ConfigureAwait(false);
+                    payload.RecipientEmail, grpc, delivery, ct).ConfigureAwait(false);
                 totalBytes += doc.SizeBytes;
                 made++;
             }

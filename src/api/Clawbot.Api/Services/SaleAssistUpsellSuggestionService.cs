@@ -21,15 +21,20 @@ public sealed class SaleAssistUpsellSuggestionService(
     // nên service này chỉ được gọi trên HTTP path đã resolve tenant. tenantId chỉ dùng cho query.
     public async Task<SaleAssistUpsellSuggestionsResponse> GetSuggestionsAsync(
         Guid tenantId,
+        IReadOnlyCollection<Guid> inboxIds,
         int take = 5,
         CancellationToken ct = default)
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("tenantId required", nameof(tenantId));
+        ArgumentNullException.ThrowIfNull(inboxIds);
+
+        var leadQuery = _db.Leads.IgnoreQueryFilters()
+            .Where(l => l.TenantId == tenantId && l.Stage == "hot" && l.DeletedAt == null)
+            .ApplyInboxScope(_db, tenantId, inboxIds);
 
         var limit = Math.Clamp(take, 1, 50);
-        var leads = await _db.Leads.IgnoreQueryFilters()
-            .Where(l => l.TenantId == tenantId && l.Stage == "hot" && l.DeletedAt == null)
+        var leads = await leadQuery
             .OrderByDescending(l => l.Score)
             .ThenByDescending(l => l.LastActivityAt)
             .Take(limit)
@@ -46,17 +51,23 @@ public sealed class SaleAssistUpsellSuggestionService(
             .ToList();
 
         var contacts = await _db.Contacts.IgnoreQueryFilters()
-            .Where(c => contactIds.Contains(c.Id))
+            .Where(c =>
+                c.TenantId == tenantId &&
+                c.DeletedAt == null &&
+                contactIds.Contains(c.Id))
             .Select(c => new { c.Id, c.DisplayName, c.Phone })
             .ToDictionaryAsync(c => c.Id, c => new SaleAssistHotLeadContactDto(c.DisplayName, c.Phone), ct)
             .ConfigureAwait(false);
 
-        var latestConversations = await _db.Conversations.IgnoreQueryFilters()
+        var conversationQuery = _db.Conversations.IgnoreQueryFilters()
             .Where(c =>
                 c.TenantId == tenantId &&
                 c.ContactId.HasValue &&
                 contactIds.Contains(c.ContactId.Value) &&
                 c.DeletedAt == null)
+            .ApplyInboxScope(inboxIds);
+
+        var latestConversations = await conversationQuery
             .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
             .Select(c => new { c.Id, ContactId = c.ContactId!.Value, LastMessageAt = c.LastMessageAt ?? c.CreatedAt })
             .ToListAsync(ct).ConfigureAwait(false);

@@ -432,8 +432,12 @@ public static partial class LlmConfigsEndpoints
             return "invalid_provider";
         if (string.IsNullOrWhiteSpace(modelId) || modelId.Trim().Length > 128)
             return "invalid_model_id";
-        if (!string.IsNullOrWhiteSpace(baseUrl) && !IsAllowedBaseUrl(baseUrl.Trim(), allowPrivateBaseUrls))
-            return "invalid_base_url";
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+        {
+            var verdict = LlmBaseUrlGuard.CheckBaseUrl(baseUrl.Trim(), allowPrivateBaseUrls);
+            if (!verdict.IsAllowed())
+                return verdict.ToErrorCode();
+        }
         if (inputRate is < 0m || outputRate is < 0m)
             return "invalid_rate";
         if (timeoutSeconds is < 1 or > MaxTimeoutSeconds)

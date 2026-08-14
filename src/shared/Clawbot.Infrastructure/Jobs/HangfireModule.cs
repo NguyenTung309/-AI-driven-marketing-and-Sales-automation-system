@@ -80,7 +80,15 @@ public static class HangfireModule
         services.AddScoped<AutoSummaryJob>();
         services.AddScoped<CommentAutoReplyJob>();
         services.AddScoped<HealthCheckJob>();
-                services.AddScoped<DripSequenceJob>();
+        services.AddScoped<IRecurringJobExecutor, HealthCheckRecurringExecutor>();
+        services.AddScoped<RecurringJobDefinitionRegistry>();
+        services.AddScoped<RecurringJobDispatcher>();
+        services.AddScoped<HealthCheckRecurringJob>();
+        services.AddScoped<IRecurringJobExecutionFailureNotifier, RecurringJobExecutionFailureNotifier>();
+        services.AddScoped<RecurringJobExecutionFailureFinalizer>();
+        services.AddScoped<IRecurringJobExecutionHangfireStateReader, HangfireRecurringJobExecutionHangfireStateReader>();
+        services.AddScoped<RecurringJobExecutionFailureReconciliationJob>();
+        services.AddScoped<DripSequenceJob>();
         services.AddScoped<IIdleEscalationRecipientResolver, SalesLeadIdleEscalationRecipientResolver>();
         services.AddScoped<IdleConversationAlertJob>();
         // Sale gửi tay -> AI nhường tạm; job này bật lại + trả lời tin khách treo khi hết cửa sổ.
@@ -246,11 +254,16 @@ public static class HangfireModule
         // kích hoạt rồi fail vì không còn type. Phải xoá tường minh khi deploy bản này.
         foreach (var removed in RemovedRecurringJobs)
             recurring.RemoveIfExists(removed);
-        recurring.AddOrUpdate<HealthCheckJob>(
-            "health-check",
+        recurring.AddOrUpdate<HealthCheckRecurringJob>(
+            RecurringJobDefinitions.HealthCheck,
+            "default",
+            j => j.RunScheduledAsync(null!, CancellationToken.None),
+            Cron.Hourly);
+        recurring.AddOrUpdate<RecurringJobExecutionFailureReconciliationJob>(
+            "recurring-execution-failure-reconcile",
             "default",
             j => j.RunAsync(CancellationToken.None),
-            Cron.Hourly);
+            "* * * * *");
         recurring.AddOrUpdate<DripSequenceJob>(
             "drip-sequence-sender",
             "default",

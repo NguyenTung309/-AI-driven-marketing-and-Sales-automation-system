@@ -123,6 +123,8 @@ message RunScheduleResponse {
   string session_id = 2;
   google.protobuf.Timestamp next_run_at = 3;
   google.protobuf.Timestamp last_run_at = 4;
+  // Durable AgentScheduleRun identity. Present only when the manual request started a run.
+  string run_id = 5;
 }
 
 message SessionResponse {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Modal, StatusPill, ToggleSwitch } from "@/shared/ui";
 import { toUserFriendlyError } from "@/shared/utils/userText";
@@ -8,6 +8,7 @@ import {
   createQuickReply,
   deleteQuickReply,
   generateSaleAssistDraft,
+  getSaleAssistConversationSummary,
   getSaleAssistDailySummary,
   getSaleAssistUpsell,
   getSaleAssistUpsellSuggestions,
@@ -41,11 +42,6 @@ interface DraftState {
   readonly text: string;
 }
 
-interface SummaryState {
-  readonly conversationId: string;
-  readonly response: SaleAssistSummaryResponse;
-}
-
 interface QuickReplyFormState {
   readonly code: string;
   readonly category: string;
@@ -75,6 +71,10 @@ const EMPTY_QUICK_REPLY: QuickReplyFormState = {
 
 function errorMessage(error: unknown): string {
   return toUserFriendlyError(error, "Không xử lý được thao tác hỗ trợ bán hàng. Vui lòng thử lại.");
+}
+
+function summaryQueryKey(conversationId: string): readonly [string, string, string] {
+  return ["sale-assist", "summary", conversationId];
 }
 
 function actionLabel(action: string | null | undefined): string {
@@ -248,7 +248,11 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
     onError: (error) => onNotify?.(toUserFriendlyError(error), "error"),
   });
   const [draftState, setDraftState] = useState<DraftState | null>(null);
-  const [summaryState, setSummaryState] = useState<SummaryState | null>(null);
+  // Job chạy ngầm: nhớ hội thoại lúc BẤM nút, vì người dùng có thể sang hội thoại khác trước khi job xong.
+  // Đọc conversationId hiện tại trong onResult sẽ gán kết quả của hội thoại này vào hội thoại kia.
+  const summaryConversationIdRef = useRef<string | null>(null);
+  const draftConversationIdRef = useRef<string | null>(null);
+  const upsellConversationIdRef = useRef<string | null>(null);
   const [dialogState, setDialogState] = useState<QuickReplyDialogState | null>(null);
 
   const quickRepliesQuery = useQuery({
@@ -261,6 +265,14 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
     queryFn: getSaleAssistDailySummary,
     staleTime: 60_000,
   });
+  const persistedSummaryQuery = useQuery({
+    queryKey: conversationId
+      ? summaryQueryKey(conversationId)
+      : ["sale-assist", "summary", "none"],
+    queryFn: () => getSaleAssistConversationSummary(conversationId as string),
+    enabled: Boolean(conversationId),
+    staleTime: 60_000,
+  });
   // 3 việc LLM (upsell / nháp / tóm tắt) chạy ngầm qua job — thấy được ở "Việc đang chạy", huỷ được.
   // Kết quả đổ thẳng vào panel (job không bắn thông báo: sale đang ngồi nhìn màn hình chờ).
   // Upsell chỉ chạy khi sale bấm nút: mỗi lượt là 1 vòng RAG + 1 lượt Claude, tự chạy theo hội thoại
@@ -269,9 +281,14 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
   const upsellRun = useJobRun<SaleAssistUpsellResponse>({
     isImmediateResult: isSaleAssistUpsellResult,
     onResult: (response) => {
-      if (!conversationId || !isUpsell(response)) return;
+      const startedConversationId = upsellConversationIdRef.current;
+      upsellConversationIdRef.current = null;
+      if (!startedConversationId || !isUpsell(response)) return;
       // Nhớ theo hội thoại: click sang hội thoại khác rồi quay lại vẫn thấy kết quả cũ, không chạy lại.
-      setUpsellCache((old) => ({ ...old, [conversationId]: response }));
+      setUpsellCache((old) => ({ ...old, [startedConversationId]: response }));
+    },
+    onError: () => {
+      upsellConversationIdRef.current = null;
     },
   });
   // Backend chỉ đọc cache DB (không gọi LLM đồng bộ); item pending nghĩa là job đang sinh
@@ -289,17 +306,34 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
 
   const draftRun = useJobRun<SaleAssistDraftResponse>({
     onResult: (response) => {
-      if (!conversationId) return;
-      setDraftState({ conversationId, response, text: response.draftText ?? "" });
+      const startedConversationId = draftConversationIdRef.current;
+      draftConversationIdRef.current = null;
+      if (!startedConversationId) return;
+      setDraftState({
+        conversationId: startedConversationId,
+        response,
+        text: response.draftText ?? "",
+      });
       onNotify?.("AI đã tạo bản nháp, đang chờ sale duyệt.", "success");
+    },
+    onError: () => {
+      draftConversationIdRef.current = null;
     },
   });
 
   const summaryRun = useJobRun<SaleAssistSummaryResponse>({
     onResult: (response) => {
-      if (!conversationId) return;
-      setSummaryState({ conversationId, response });
+      const completedConversationId = summaryConversationIdRef.current;
+      summaryConversationIdRef.current = null;
+      if (!completedConversationId) return;
+      queryClient.setQueryData(
+        summaryQueryKey(completedConversationId),
+        response,
+      );
       onNotify?.("Đã cập nhật tóm tắt hội thoại.", "success");
+    },
+    onError: () => {
+      summaryConversationIdRef.current = null;
     },
   });
 
@@ -330,7 +364,7 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
   });
 
   const activeDraft = draftState?.conversationId === conversationId ? draftState : null;
-  const activeSummary = summaryState?.conversationId === conversationId ? summaryState : null;
+  const activeSummary = persistedSummaryQuery.data ?? null;
   const quickReplies = useMemo(
     () => (Array.isArray(quickRepliesQuery.data) ? quickRepliesQuery.data : []),
     [quickRepliesQuery.data]
@@ -341,7 +375,12 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
   );
   const busySavingQuickReply = createMutation.isPending || updateMutation.isPending;
   const dialogError = createMutation.error ?? updateMutation.error;
-  const activeError = draftRun.error ?? summaryRun.error ?? upsellRun.error ?? quickRepliesQuery.error;
+  const activeError =
+    draftRun.error ??
+    summaryRun.error ??
+    persistedSummaryQuery.error ??
+    upsellRun.error ??
+    quickRepliesQuery.error;
   const summary = isDailySummary(dailySummaryQuery.data) ? dailySummaryQuery.data : null;
   const upsell = conversationId ? upsellCache[conversationId] ?? null : null;
   const upsellSuggestions = isUpsellSuggestions(upsellSuggestionsQuery.data) ? upsellSuggestionsQuery.data : null;
@@ -397,24 +436,30 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
         </div>
 
         {summary ? (
-          <div className="mb-4 grid grid-cols-2 gap-2">
-            <div className="rounded border border-outline bg-surface p-2">
-              <p className="text-mono-status text-on-surface-variant">Lead mới</p>
-              <p className="text-telemetry-data text-primary">{summary.new_leads}</p>
+          <>
+            {/* 3 ô đầu đếm trong ngày (mốc 00:00 giờ VN) và theo inbox được phép xem; Hot lead không theo ngày. */}
+            <div className="mb-1 grid grid-cols-2 gap-2">
+              <div className="rounded border border-outline bg-surface p-2">
+                <p className="text-mono-status text-on-surface-variant">Lead mới hôm nay</p>
+                <p className="text-telemetry-data text-primary">{summary.new_leads}</p>
+              </div>
+              <div className="rounded border border-outline bg-surface p-2">
+                <p className="text-mono-status text-on-surface-variant">Hot lead đang có</p>
+                <p className="text-telemetry-data text-warning">{summary.hot_leads}</p>
+              </div>
+              <div className="rounded border border-outline bg-surface p-2">
+                <p className="text-mono-status text-on-surface-variant">Hội thoại hôm nay</p>
+                <p className="text-telemetry-data text-secondary">{summary.conversations}</p>
+              </div>
+              <div className="rounded border border-outline bg-surface p-2">
+                <p className="text-mono-status text-on-surface-variant">Tin đã gửi hôm nay</p>
+                <p className="text-telemetry-data text-success">{summary.messages_sent}</p>
+              </div>
             </div>
-            <div className="rounded border border-outline bg-surface p-2">
-              <p className="text-mono-status text-on-surface-variant">Hot lead</p>
-              <p className="text-telemetry-data text-warning">{summary.hot_leads}</p>
-            </div>
-            <div className="rounded border border-outline bg-surface p-2">
-              <p className="text-mono-status text-on-surface-variant">Hội thoại</p>
-              <p className="text-telemetry-data text-secondary">{summary.conversations}</p>
-            </div>
-            <div className="rounded border border-outline bg-surface p-2">
-              <p className="text-mono-status text-on-surface-variant">Đã gửi</p>
-              <p className="text-telemetry-data text-success">{summary.messages_sent}</p>
-            </div>
-          </div>
+            <p className="mb-4 text-label-sm text-on-surface-variant">
+              Trong các inbox bạn được phép xem, tính từ 00:00 hôm nay (giờ VN). Hot lead là tổng lead đang ở giai đoạn "hot".
+            </p>
+          </>
         ) : null}
 
         {activeError ? <Alert tone="error">{errorMessage(activeError)}</Alert> : null}
@@ -423,7 +468,9 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
           <Button
             type="button"
             onClick={() => {
-              if (conversationId) void draftRun.start(() => generateSaleAssistDraft(conversationId));
+              if (!conversationId) return;
+              draftConversationIdRef.current = conversationId;
+              void draftRun.start(() => generateSaleAssistDraft(conversationId));
             }}
             disabled={!conversationId || draftRun.running}
           >
@@ -434,7 +481,9 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
             type="button"
             variant="outline"
             onClick={() => {
-              if (conversationId) void summaryRun.start(() => summarizeSaleAssistConversation(conversationId));
+              if (!conversationId) return;
+              summaryConversationIdRef.current = conversationId;
+              void summaryRun.start(() => summarizeSaleAssistConversation(conversationId));
             }}
             disabled={!conversationId || summaryRun.running}
           >
@@ -446,7 +495,9 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
             variant="outline"
             className="sm:col-span-2"
             onClick={() => {
-              if (conversationId) void upsellRun.start(() => getSaleAssistUpsell(conversationId));
+              if (!conversationId) return;
+              upsellConversationIdRef.current = conversationId;
+              void upsellRun.start(() => getSaleAssistUpsell(conversationId));
             }}
             disabled={!conversationId || upsellRun.running}
           >
@@ -503,9 +554,9 @@ export function SaleAssistPanel({ conversationId, platform, onUseDraft, onNotify
           <div className="mt-4 rounded-lg border border-outline bg-surface p-3">
             <div className="mb-2 flex items-center justify-between">
               <p className="text-label-caps uppercase text-secondary">Tóm tắt hội thoại</p>
-              <span className="text-label-sm text-on-surface-variant">{responseSpeedLabel(activeSummary.response.latencyMs)}</span>
+              <span className="text-label-sm text-on-surface-variant">{responseSpeedLabel(activeSummary.latencyMs)}</span>
             </div>
-            <p className="text-body-md text-on-surface">{activeSummary.response.summary}</p>
+            <p className="text-body-md text-on-surface">{activeSummary.summary}</p>
           </div>
         ) : null}
       </Card>

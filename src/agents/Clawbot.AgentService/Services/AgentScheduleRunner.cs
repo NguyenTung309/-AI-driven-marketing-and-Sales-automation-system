@@ -34,6 +34,7 @@ public sealed partial class AgentScheduleRunner(
 
     public sealed record ManualRunResult(
         string Status,
+        Guid? RunId = null,
         Guid? SessionId = null,
         DateTimeOffset? NextRunAt = null,
         DateTimeOffset? LastRunAt = null);
@@ -191,7 +192,7 @@ public sealed partial class AgentScheduleRunner(
         }
 
         QueueContinuation(run.Id);
-        return new ManualRunResult("started", session?.Id, nextRunAt, now);
+        return new ManualRunResult("started", run.Id, session?.Id, nextRunAt, now);
     }
 
     private void QueueContinuation(Guid runId)

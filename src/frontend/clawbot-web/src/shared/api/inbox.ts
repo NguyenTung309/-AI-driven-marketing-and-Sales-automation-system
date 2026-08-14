@@ -142,7 +142,10 @@ export interface InboxMessageEvent {
   readonly senderAvatarUrl?: string | null;
   readonly attachmentUrl?: string | null;
   readonly inboxId?: string | null;
+  readonly assignedTo?: string | null;
   readonly isSynthetic?: boolean;
+  /** Trạng thái hội thoại sau khi ghi tin nhắn; thiếu = server cũ chưa gửi kèm. */
+  readonly conversationStatus?: ConversationStatus | null;
 }
 
 export interface ListConversationsParams {
@@ -158,11 +161,40 @@ export interface ListConversationsParams {
   readonly pageSize?: number;
 }
 
+export const CONVERSATION_COUNTS_QUERY_KEY = [
+  "inbox",
+  "conversation-counts",
+] as const;
+
+export interface ConversationCountFilters {
+  readonly inboxId?: string;
+  readonly platform?: string;
+  readonly q?: string;
+}
+
+export interface ConversationCounts {
+  readonly total: number;
+  readonly open: number;
+  readonly escalated: number;
+  readonly resolved: number;
+  readonly mine: number;
+}
+
 export async function listConversations(
   params?: ListConversationsParams,
 ): Promise<ConversationCursorPage | ConversationListResponse> {
   const res = await apiClient.get<ConversationCursorPage | ConversationListResponse>(
     "/api/inbox/conversations",
+    { params },
+  );
+  return res.data;
+}
+
+export async function getConversationCounts(
+  params?: ConversationCountFilters,
+): Promise<ConversationCounts> {
+  const res = await apiClient.get<ConversationCounts>(
+    "/api/inbox/conversations/counts",
     { params },
   );
   return res.data;

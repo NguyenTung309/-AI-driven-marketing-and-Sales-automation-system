@@ -321,8 +321,12 @@ public static partial class EmbeddingConfigsEndpoints
         if (normalizedProvider == "hash") return null;
         if (string.IsNullOrWhiteSpace(modelId) || modelId.Trim().Length > 128) return "invalid_model_id";
         if (isCreate && string.IsNullOrWhiteSpace(apiKey)) return "api_key_required";
-        if (!string.IsNullOrWhiteSpace(baseUrl) && !LlmBaseUrlGuard.IsAllowedBaseUrl(baseUrl.Trim(), allowPrivateBaseUrls))
-            return "invalid_base_url";
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+        {
+            var verdict = LlmBaseUrlGuard.CheckBaseUrl(baseUrl.Trim(), allowPrivateBaseUrls);
+            if (!verdict.IsAllowed())
+                return verdict.ToErrorCode();
+        }
         return null;
     }
 

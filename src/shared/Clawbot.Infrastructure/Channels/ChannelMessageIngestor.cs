@@ -122,7 +122,8 @@ public sealed partial class ChannelMessageIngestor(
             AssignedTo: conversation.AssignedTo,
             SenderDisplayName: msg.SenderDisplayName,
             SenderAvatarUrl: msg.SenderAvatarUrl,
-            InboxId: conversation.InboxId), ct).ConfigureAwait(false);
+            InboxId: conversation.InboxId,
+            ConversationStatus: conversation.Status), ct).ConfigureAwait(false);
 
         return new IngestResult(conversation.Id, msg.Id, false);
     }

@@ -517,6 +517,13 @@ export async function listConnectedPancakePages(): Promise<readonly ConnectedPan
   return res.data.items;
 }
 
+export interface AdminRecurringExecutionSummary {
+  readonly id: string;
+  readonly status: RecurringExecutionStatus;
+  readonly requestedAt: string;
+  readonly finishedAt: string | null;
+}
+
 export interface AdminRecurringJob {
   readonly id: string;
   readonly cron: string;
@@ -526,6 +533,8 @@ export interface AdminRecurringJob {
   readonly lastState?: string | null;
   readonly agent?: string | null;
   readonly description?: string | null;
+  readonly canTriggerManually: boolean;
+  readonly latestExecution?: AdminRecurringExecutionSummary | null;
 }
 
 export interface AdminScheduleJob {
@@ -552,8 +561,130 @@ export async function getAdminJobs(): Promise<AdminJobsResponse> {
   return res.data;
 }
 
-export async function triggerAdminRecurringJob(id: string): Promise<void> {
-  await apiClient.post(`/api/admin/jobs/recurring/${encodeURIComponent(id)}/trigger`);
+export type RecurringExecutionStatus =
+  | "requested"
+  | "queued"
+  | "running"
+  | "retrying"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "skipped"
+  | "enqueue_failed";
+
+export interface RecurringExecutionAcceptedResponse {
+  readonly definitionId: string;
+  readonly trackingId: string;
+  readonly status: RecurringExecutionStatus;
+  readonly statusUrl: string;
+}
+
+export interface AdminRecurringExecution {
+  readonly id: string;
+  readonly definitionId: string;
+  readonly source: "scheduled" | "manual" | "manual_retry";
+  readonly retryOfExecutionId: string | null;
+  readonly status: RecurringExecutionStatus;
+  readonly requestedAt: string;
+  readonly enqueuedAt: string | null;
+  readonly startedAt: string | null;
+  readonly finishedAt: string | null;
+  readonly progressPercent: number;
+  readonly progressNote: string | null;
+  readonly resultSummary: string | null;
+  readonly resultLink: string | null;
+  readonly error: string | null;
+}
+
+export interface AdminRecurringExecutionAttempt {
+  readonly id: string;
+  readonly attemptNumber: number;
+  readonly retryCount: number;
+  readonly status: string;
+  readonly hangfireBackgroundJobId: string;
+  readonly workerId: string | null;
+  readonly startedAt: string;
+  readonly finishedAt: string | null;
+  readonly error: string | null;
+}
+
+export interface AdminRecurringExecutionAttemptPage {
+  readonly items: readonly AdminRecurringExecutionAttempt[];
+  readonly nextCursor: string | null;
+  readonly total: number | null;
+}
+
+export interface AdminRecurringExecutionPage {
+  readonly items: readonly AdminRecurringExecutionSummary[];
+  readonly nextCursor: string | null;
+  readonly total: number | null;
+}
+
+export interface AgentScheduleRunAcceptedResponse {
+  readonly runId: string;
+  readonly status: string;
+  readonly statusUrl: string;
+  readonly sessionId: string | null;
+  readonly nextRunAt: string | null;
+  readonly lastRunAt: string | null;
+}
+
+export interface AgentScheduleRun {
+  readonly id: string;
+  readonly scheduleId: string;
+  readonly sessionId: string | null;
+  readonly status: string;
+  readonly error: string | null;
+  readonly startedAt: string;
+  readonly lastHeartbeatAt: string | null;
+  readonly finishedAt: string | null;
+}
+
+export async function triggerAdminRecurringJob(id: string): Promise<RecurringExecutionAcceptedResponse> {
+  const res = await apiClient.post<RecurringExecutionAcceptedResponse>(
+    `/api/admin/jobs/recurring/${encodeURIComponent(id)}/trigger`,
+    undefined,
+    { headers: { "Idempotency-Key": crypto.randomUUID() } },
+  );
+  return res.data;
+}
+
+export async function getAdminRecurringExecution(id: string): Promise<AdminRecurringExecution> {
+  const res = await apiClient.get<AdminRecurringExecution>(
+    `/api/admin/jobs/executions/${encodeURIComponent(id)}`,
+  );
+  return res.data;
+}
+
+export async function getAdminRecurringExecutions(
+  definitionId: string,
+  cursor?: string | null,
+): Promise<AdminRecurringExecutionPage> {
+  const res = await apiClient.get<AdminRecurringExecutionPage>(
+    `/api/admin/jobs/recurring/${encodeURIComponent(definitionId)}/executions`,
+    { params: cursor ? { cursor } : undefined },
+  );
+  return res.data;
+}
+
+export async function getAdminRecurringExecutionAttempts(
+  id: string,
+  cursor?: string | null,
+): Promise<AdminRecurringExecutionAttemptPage> {
+  const res = await apiClient.get<AdminRecurringExecutionAttemptPage>(
+    `/api/admin/jobs/executions/${encodeURIComponent(id)}/attempts`,
+    { params: cursor ? { cursor } : undefined },
+  );
+  return res.data;
+}
+
+export async function retryAdminRecurringExecution(id: string): Promise<RecurringExecutionAcceptedResponse> {
+  const res = await apiClient.post<RecurringExecutionAcceptedResponse>(
+    `/api/admin/jobs/executions/${encodeURIComponent(id)}/retry`,
+    undefined,
+    { headers: { "Idempotency-Key": crypto.randomUUID() } },
+  );
+  return res.data;
 }
 
 export async function pauseAdminScheduleJob(id: string): Promise<void> {
@@ -564,8 +695,18 @@ export async function activateAdminScheduleJob(id: string): Promise<void> {
   await apiClient.post(`/api/admin/jobs/schedules/${encodeURIComponent(id)}/activate`);
 }
 
-export async function runAdminScheduleJobNow(id: string): Promise<void> {
-  await apiClient.post(`/api/admin/jobs/schedules/${encodeURIComponent(id)}/run-now`);
+export async function runAdminScheduleJobNow(id: string): Promise<AgentScheduleRunAcceptedResponse> {
+  const res = await apiClient.post<AgentScheduleRunAcceptedResponse>(
+    `/api/admin/jobs/schedules/${encodeURIComponent(id)}/run-now`,
+  );
+  return res.data;
+}
+
+export async function getAdminScheduleRun(id: string): Promise<AgentScheduleRun> {
+  const res = await apiClient.get<AgentScheduleRun>(
+    `/api/admin/jobs/schedule-runs/${encodeURIComponent(id)}`,
+  );
+  return res.data;
 }
 
 export type SocialChannelProvider = "zalo" | "instagram";

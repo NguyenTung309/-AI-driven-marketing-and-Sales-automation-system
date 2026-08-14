@@ -5,8 +5,8 @@ using Clawbot.Agents.Core.Skills;
 using Clawbot.Api.Auth;
 using Clawbot.Api.Background;
 using Clawbot.Api.Endpoints;
-using Clawbot.Api.Hubs;
 using Clawbot.Api.Health;
+using Clawbot.Api.Hubs;
 using Clawbot.Api.Middleware;
 using Clawbot.Api.Services;
 using Clawbot.Application;
@@ -16,6 +16,7 @@ using Clawbot.Infrastructure.Identity;
 using Clawbot.Infrastructure.Jobs;
 using Clawbot.Infrastructure.Notifications;
 using Clawbot.Infrastructure.Observability;
+using Clawbot.Infrastructure.Security;
 using Clawbot.SharedKernel.Content;
 using Clawbot.SharedKernel.Demo;
 using Clawbot.SharedKernel.Inbox;
@@ -193,6 +194,7 @@ builder.Services.AddScoped<ContactDataExportService>();
 builder.Services.AddScoped<ConversationExportService>();
 builder.Services.AddScoped<InboxSearchService>();
 builder.Services.AddScoped<IUserInboxResolver, UserInboxResolver>();
+builder.Services.AddScoped<ILeadScopeResolver, LeadScopeResolver>();
 builder.Services.AddScoped<KbTestRunnerService>();
 builder.Services.AddScoped<KbTestingOrchestrator>();
 builder.Services.AddScoped<KbAutoClassifyService>();
@@ -225,14 +227,9 @@ AgentServiceTransportSecurity.ValidateConfiguration(
     builder.Environment.IsDevelopment(),
     builder.Environment.IsProduction());
 var agentServiceGrpcHandlerFactory = new AgentServiceGrpcHandlerFactory(agentServiceTls);
-builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.SaleAssist.SaleAssistAgent.SaleAssistAgentClient>(o =>
-{
-    o.Address = agentServiceUrl;
-}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<AgentServiceClientAuthInterceptor>();
-builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Docs.DocsAgent.DocsAgentClient>(o =>
-{
-    o.Address = agentServiceUrl;
-}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<AgentServiceClientAuthInterceptor>();
+builder.Services.AddApiAgentServiceGrpcClients(
+    agentServiceUrl,
+    agentServiceGrpcHandlerFactory);
 
 // SPEC-12: Demo mode services
 var demoOpts = builder.Configuration.GetSection(DemoOptions.Section).Get<DemoOptions>() ?? new DemoOptions();
@@ -253,29 +250,6 @@ if (demoOpts.Mode)
         builder.Services.AddHostedService<PancakePollingService>();
     }
 }
-
-// gRPC agent clients (shared by demo and production modes)
-builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Content.ContentAgent.ContentAgentClient>(o =>
-{
-    o.Address = agentServiceUrl;
-}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<AgentServiceClientAuthInterceptor>();
-builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Research.ResearchAgent.ResearchAgentClient>(o =>
-{
-    o.Address = agentServiceUrl;
-}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<AgentServiceClientAuthInterceptor>();
-builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Lead.LeadAgent.LeadAgentClient>(o =>
-{
-    o.Address = agentServiceUrl;
-}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<AgentServiceClientAuthInterceptor>();
-builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Report.ReportAgent.ReportAgentClient>(o =>
-{
-    o.Address = agentServiceUrl;
-}).ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<AgentServiceClientAuthInterceptor>();
-builder.Services.AddGrpcClient<Clawbot.Agents.Contracts.Orchestrator.Orchestrator.OrchestratorClient>(o =>
-{
-    o.Address = agentServiceUrl;
-})
-    .ConfigurePrimaryHttpMessageHandler(_ => agentServiceGrpcHandlerFactory.Create()).AddInterceptor<OrchestratorServiceAuthInterceptor>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -457,6 +431,8 @@ app.MapHangfireDashboard("/hangfire", new DashboardOptions
 GlobalJobFilters.Filters.Add(new Clawbot.Infrastructure.Jobs.JobFailureNotificationFilter(
     app.Services.GetRequiredService<IServiceScopeFactory>(),
     app.Services.GetRequiredService<ILogger<Clawbot.Infrastructure.Jobs.JobFailureNotificationFilter>>()));
+GlobalJobFilters.Filters.Add(new Clawbot.Infrastructure.Jobs.RecurringJobExecutionFailureFilter(
+    app.Services.GetRequiredService<ILogger<Clawbot.Infrastructure.Jobs.RecurringJobExecutionFailureFilter>>()));
 // Passive candidate: leave the recurring schedule exactly as the promoted release left it. An
 // unpromoted release must not rewrite shared schedule state that a rollback would not undo.
 if (!Clawbot.Infrastructure.Hosting.ServiceStartupMode.IsPassive(builder.Configuration))

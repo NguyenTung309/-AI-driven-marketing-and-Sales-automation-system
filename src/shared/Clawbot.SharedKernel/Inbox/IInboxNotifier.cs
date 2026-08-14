@@ -20,7 +20,10 @@ public sealed record InboxMessageEvent(
     string? SenderDisplayName = null,
     string? SenderAvatarUrl = null,
     Guid? InboxId = null,
-    bool IsSynthetic = false);
+    bool IsSynthetic = false,
+    // Trạng thái hội thoại SAU khi ghi tin nhắn. FE dùng để biết hội thoại vừa được mở lại
+    // (resolved/snoozed -> open) mà không phải gọi lại API. Null = producer cũ chưa gửi kèm.
+    string? ConversationStatus = null);
 
 public sealed record InboxMessageStatusEvent(
     Guid ConversationId,

@@ -203,6 +203,43 @@ export function formFieldsFor(template: DocumentTemplate | null): readonly Templ
     .map(fieldFromKey);
 }
 
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const VN_DATE = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/;
+
+/**
+ * Chuẩn hóa về yyyy-MM-dd cho <input type="date">.
+ * Ô ngày của trình duyệt vứt bỏ mọi giá trị sai định dạng mà không báo gì, nên giá trị mẫu kiểu
+ * "20/09/2026" hoặc dữ liệu mẫu cũ sẽ làm ô trống trơn — nhìn như nhập xong không lưu được.
+ */
+export function toDateInputValue(value: string): string {
+  const raw = value.trim();
+  if (!raw) return "";
+  if (ISO_DATE.test(raw)) return raw;
+  const vn = VN_DATE.exec(raw);
+  if (!vn) return "";
+  const [, day, month, year] = vn;
+  return `${year}-${month!.padStart(2, "0")}-${day!.padStart(2, "0")}`;
+}
+
+/** Ngày trong tài liệu gửi khách viết theo dd/MM/yyyy, không để lộ dạng ISO của ô nhập. */
+export function formatDateForDocument(value: string): string {
+  const iso = ISO_DATE.exec(value.trim());
+  if (!iso) return value;
+  const [, year, month, day] = iso;
+  return `${day}/${month}/${year}`;
+}
+
+/** Đổi giá trị của các trường kiểu ngày sang dạng người Việt đọc, dùng cho cả xem trước lẫn lúc gửi API. */
+export function formatVarsForDocument(
+  fields: readonly TemplateField[],
+  vars: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const dateKeys = new Set(fields.filter((item) => item.type === "date").map((item) => item.key));
+  return Object.fromEntries(
+    Object.entries(vars).map(([key, value]) => [key, dateKeys.has(key) ? formatDateForDocument(value) : value]),
+  );
+}
+
 export function applyVars(body: string, vars: Readonly<Record<string, string>>): string {
   return body.replace(PLACEHOLDER_PATTERN, (match, key: string) => {
     const value = vars[key];
