@@ -146,8 +146,11 @@ require_running_container() {
 }
 
 preflight_http_port() {
+  # Cả hai vế phải cùng độ dài ID: `docker compose ps -q` trả ID đầy đủ 64 ký tự còn
+  # `docker ps -q` trả bản rút gọn 12 ký tự, nên so sánh chuỗi sẽ không bao giờ khớp và
+  # chính container web của release lại bị coi là container lạ đang giữ cổng.
   current_web_container=$(docker compose --env-file "$compose_env" -f "$compose_file" ps -q web 2>/dev/null || true)
-  port_containers=$(docker ps -q --filter "publish=$http_port")
+  port_containers=$(docker ps -q --no-trunc --filter "publish=$http_port")
 
   if [ -n "$port_containers" ]; then
     while IFS= read -r port_container; do
