@@ -1,3 +1,4 @@
+using Clawbot.Agents.Core.Docs;
 using Clawbot.Api.Services;
 using Clawbot.Application.Abstractions;
 using Clawbot.Domain.Contacts;
@@ -16,6 +17,8 @@ public sealed class DocumentDeliveryServiceTests
 {
     private static readonly DateTimeOffset Now =
         new(2026, 8, 14, 8, 0, 0, TimeSpan.Zero);
+
+    private static readonly byte[] PdfBytes = [0x25, 0x50, 0x44, 0x46];
 
     [Fact]
     public async Task TrySendAsync_UsesDirectRecipientBeforeContactEmail()
@@ -52,6 +55,7 @@ public sealed class DocumentDeliveryServiceTests
             "direct@example.com",
             Arg.Any<string>(),
             Arg.Any<string>(),
+            Arg.Is<IReadOnlyList<EmailAttachment>>(a => a.Count == 1),
             Arg.Any<CancellationToken>());
         document.SentVia.Should().Be("email");
         document.SentAt.Should().Be(Now);
@@ -92,6 +96,7 @@ public sealed class DocumentDeliveryServiceTests
             "contact@example.com",
             Arg.Any<string>(),
             Arg.Any<string>(),
+            Arg.Any<IReadOnlyList<EmailAttachment>>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -149,6 +154,7 @@ public sealed class DocumentDeliveryServiceTests
                 "direct@example.com",
                 Arg.Any<string>(),
                 Arg.Any<string>(),
+                Arg.Any<IReadOnlyList<EmailAttachment>>(),
                 Arg.Any<CancellationToken>())
             .Returns(Task.FromException(new InvalidOperationException("smtp_failed")));
         var service = CreateService(db, email);
@@ -169,8 +175,24 @@ public sealed class DocumentDeliveryServiceTests
 
     private static DocumentDeliveryService CreateService(
         AppDbContext db,
-        IEmailSender email) =>
-        new(db, email, Array.Empty<IChannelAdapter>(), new FixedClock(Now));
+        IEmailSender email,
+        IDocumentStorage? storage = null) =>
+        new(db,
+            email,
+            Array.Empty<IChannelAdapter>(),
+            storage ?? CreateStorage(),
+            new DocsStorageOptions(),
+            new FixedClock(Now));
+
+    // FileUrl trong test là key nội bộ "/generated-docs/..." nên service đi nhánh đính kèm — storage
+    // phải trả được bytes, nếu không mọi test email sẽ rơi vào nhánh fallback link.
+    private static IDocumentStorage CreateStorage()
+    {
+        var storage = Substitute.For<IDocumentStorage>();
+        storage.ReadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(PdfBytes);
+        return storage;
+    }
 
     private static AppDbContext CreateDb(Guid tenantId)
     {
