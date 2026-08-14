@@ -5,6 +5,7 @@ using Clawbot.Domain.Content;
 using Clawbot.Domain.Security;
 using Clawbot.Domain.Tenants;
 using Clawbot.Infrastructure.Content;
+using Clawbot.Infrastructure.Integrations.Meta;
 using Clawbot.Infrastructure.Persistence;
 using Clawbot.SharedKernel.Time;
 using Microsoft.EntityFrameworkCore;
@@ -151,7 +152,8 @@ public sealed class ContentReviewCoordinator(
     IContentPublishingApprovalPolicyResolver policyResolver,
     IClock clock,
     IContentAutoScheduler? autoScheduler = null,
-    IContentRefiner? refiner = null) : IContentReviewCoordinator
+    IContentRefiner? refiner = null,
+    IMetaIntegrationService? metaIntegrations = null) : IContentReviewCoordinator
 {
     private const string StartedAction = "content.agent_review.started";
     private const string CompletedAction = "content.agent_review.completed";
@@ -163,6 +165,7 @@ public sealed class ContentReviewCoordinator(
 
     private readonly IContentAutoScheduler? _autoScheduler = autoScheduler;
     private readonly IContentRefiner? _refiner = refiner;
+    private readonly IMetaIntegrationService? _metaIntegrations = metaIntegrations;
 
     public async Task ProcessAsync(
         Guid tenantId,
@@ -1039,11 +1042,33 @@ public sealed class ContentReviewCoordinator(
         if (_autoScheduler is null)
             return;
 
-        // Facebook target may be null → held intent at golden time (design: missing target still persists intent).
+        // Tự động lấy Facebook Page mặc định để không bị kẹt "Đang giữ / auto_schedule_target_missing"
+        // khi người dùng đã cấu hình chính sách tự động phát hành.
+        Guid? publishTargetId = null;
+        string? providerTargetId = null;
+        if (_metaIntegrations is not null
+            && string.Equals(item.Platform, "facebook", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var pages = await _metaIntegrations
+                    .GetPublishablePagesAsync(item.TenantId, cancellationToken)
+                    .ConfigureAwait(false);
+                var page = pages.FirstOrDefault(x => x.IsDefault) ?? (pages.Count > 0 ? pages[0] : null);
+                if (page is not null)
+                    publishTargetId = page.Id;
+            }
+            catch
+            {
+                // Meta tạm thời không sẵn sàng — giữ publishTargetId null, schedule sẽ held và người dùng xếp lại tay.
+            }
+        }
+
         await _autoScheduler.CreateIntentAsync(
             item,
-            publishTargetId: null,
+            publishTargetId: publishTargetId,
             at,
+            providerTargetId: providerTargetId,
             cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 

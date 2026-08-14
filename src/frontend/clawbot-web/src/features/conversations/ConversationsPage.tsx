@@ -1006,8 +1006,6 @@ export default function ConversationsPage() {
     return String(value ?? 0);
   };
   const openCount = countLabel(countsQuery.data?.open);
-  const escalatedCount = countLabel(countsQuery.data?.escalated);
-  const mineCount = countLabel(countsQuery.data?.mine);
 
   return (
     <AppShell title="Hội thoại đa kênh" noPadding>
@@ -1028,14 +1026,6 @@ export default function ConversationsPage() {
           <span className="inline-flex items-baseline gap-1">
             <span className="text-body-md font-bold leading-none text-primary">{openCount}</span>
             <span className="text-on-surface-variant">Đang mở</span>
-          </span>
-          <span className="inline-flex items-baseline gap-1">
-            <span className="text-body-md font-bold leading-none text-warning">{escalatedCount}</span>
-            <span className="text-on-surface-variant">Cần hỗ trợ</span>
-          </span>
-          <span className="inline-flex items-baseline gap-1">
-            <span className="text-body-md font-bold leading-none text-tertiary">{mineCount}</span>
-            <span className="text-on-surface-variant">Của tôi</span>
           </span>
           <StatusPill
             tone={conversationsQuery.isError || countsQuery.isError ? "error" : "success"}
