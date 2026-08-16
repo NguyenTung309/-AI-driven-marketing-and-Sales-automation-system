@@ -76,15 +76,19 @@ public static partial class RbacSeeder
         ("system:config", [Admin]),
         ("system.logs", [Admin]),
         ("admin:inboxes", [Admin]),
+        ("admin:sale-manage", []),
+        ("admin:integration", [Admin]),
+        ("admin:jobs-hangfires", [Admin]),
     ];
 
     // RBAC_Redesign: ads đã bị gỡ khỏi ma trận phân quyền của mọi role (kể cả Admin).
+    // admin.system đổi tên thành admin:users-manage.
     // Seeder vốn chỉ biết thêm nên phải dọn cả link + permission đã seed ở DB cũ.
     // List<T>, khong phai string[]: EF Core dung interpreter (Expression.Compile(preferInterpretation: true))
     // de evaluate closure nay truoc khi parameterize query, va tren .NET 8.0.29 hien tai viec goi
     // Contains() tren mot array field qua closure lam interpreter crash (TypeLoadException voi
     // ReadOnlySpan<string> generic argument). List<T>.Contains() khong di qua code path do.
-    private static readonly List<string> DeprecatedPermissions = ["ads:read", "ads:write", "ads.read", "ads.manage"];
+    private static readonly List<string> DeprecatedPermissions = ["ads:read", "ads:write", "ads.read", "ads.manage", "admin.system"];
 
     private static readonly (string Code, string DisplayName, string AgentType)[] DefaultAgents =
     [
@@ -113,7 +117,7 @@ public static partial class RbacSeeder
             "content.read", "content.write", "content.approve",
             "docs.generate",
             "analytics.read",
-            "admin.system", "admin.audit", "system.logs",
+            "admin:users-manage", "admin.audit", "system.logs",
         ],
         [Sale] =
         [

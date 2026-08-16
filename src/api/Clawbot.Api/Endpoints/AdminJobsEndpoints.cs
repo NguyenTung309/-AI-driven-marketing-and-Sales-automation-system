@@ -129,10 +129,20 @@ public static class AdminJobsEndpoints
         grp.MapGet("/executions/{id:guid}/attempts", GetRecurringExecutionAttemptsAsync).RequirePermission("system:config");
         grp.MapPost("/executions/{id:guid}/retry", RetryRecurringExecutionAsync).RequirePermission("system:config");
         grp.MapGet("/schedule-runs/{id:guid}", GetScheduleRunAsync).RequirePermission("system:config");
+        grp.MapPost("/backfill-kpi", TriggerKpiBackfillAsync).RequirePermission("system:config");
         grp.MapPost("/schedules/{id:guid}/pause", PauseScheduleAsync).RequirePermission("system:config");
         grp.MapPost("/schedules/{id:guid}/activate", ActivateScheduleAsync).RequirePermission("system:config");
         grp.MapPost("/schedules/{id:guid}/run-now", RunScheduleNowAsync).RequirePermission("system:config");
         return app;
+    }
+
+    private static IResult TriggerKpiBackfillAsync(
+        [Microsoft.AspNetCore.Mvc.FromQuery] int? days,
+        IBackgroundJobClient backgroundJobs)
+    {
+        var backfillDays = days ?? 30;
+        backgroundJobs.Enqueue<Clawbot.Infrastructure.Jobs.DailyKpiRollupJob>(job => job.RunBackfillAsync(backfillDays, CancellationToken.None));
+        return Results.Accepted("/api/admin/jobs", new { status = "queued", action = "backfill", days = backfillDays });
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, ITenantAccessor tenants, CancellationToken ct)

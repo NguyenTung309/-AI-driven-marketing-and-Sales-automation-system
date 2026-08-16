@@ -57,9 +57,9 @@ public static class AdminUsersEndpoints
         grp.MapGet("/", ListAsync);
         grp.MapPost("/", CreateAsync);
         grp.MapPut("/{id:guid}", UpdateAsync);
-        grp.MapPost("/{id:guid}/disable", DisableAsync).RequirePermission("admin.system");
-        grp.MapPost("/{id:guid}/enable", EnableAsync).RequirePermission("admin.system");
-        grp.MapPost("/{id:guid}/reset-password", ResetPasswordAsync).RequirePermission("admin.system");
+        grp.MapPost("/{id:guid}/disable", DisableAsync);
+        grp.MapPost("/{id:guid}/enable", EnableAsync);
+        grp.MapPost("/{id:guid}/reset-password", ResetPasswordAsync);
 
         return grp;
     }
@@ -83,11 +83,14 @@ public static class AdminUsersEndpoints
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
     {
-        if (!await HasAnyPermissionAsync(principal, permissions, ct, "admin.system", "users:pancake-token:manage"))
+        if (!await HasAnyPermissionAsync(principal, permissions, ct, "admin:users-manage", "admin:sale-manage", "users:pancake-token:manage"))
             return Results.Forbid();
 
-        // Role assignments disclose broader authorization metadata, so only system administrators receive them.
-        var includeRoles = await HasPermissionAsync(principal, permissions, "admin.system", ct);
+        var isSystemAdmin = await HasPermissionAsync(principal, permissions, "admin:users-manage", ct);
+        var isSaleAdmin = await HasPermissionAsync(principal, permissions, "admin:sale-manage", ct);
+        var includeRoles = isSystemAdmin || isSaleAdmin;
+        var onlySale = !isSystemAdmin && isSaleAdmin;
+
         var usersPage = await QueryUsersAsync(
             db,
             tenants.Require().TenantId,
@@ -95,6 +98,7 @@ public static class AdminUsersEndpoints
             page,
             pageSize,
             includeRoles,
+            onlySale,
             ct);
 
         return Results.Ok(usersPage);
@@ -107,12 +111,19 @@ public static class AdminUsersEndpoints
         int page,
         int pageSize,
         bool includeRoles,
+        bool onlySale,
         CancellationToken ct)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
 
         var query = db.Users.Where(u => u.TenantId == tenantId);
+        if (onlySale)
+        {
+            var saleRoleId = await db.Roles.Where(r => r.Name == RbacSeeder.Sale).Select(r => r.Id).FirstOrDefaultAsync(ct);
+            query = query.Where(u => db.UserRoles.Any(ur => ur.UserId == u.Id && ur.RoleId == saleRoleId));
+        }
+
         if (!string.IsNullOrWhiteSpace(queryText))
             query = query.Where(u => u.Email!.Contains(queryText) || u.DisplayName.Contains(queryText));
 
@@ -210,8 +221,17 @@ public static class AdminUsersEndpoints
         IPermissionResolver permissions,
         CancellationToken ct)
     {
-        if (!await HasPermissionAsync(principal, permissions, "admin.system", ct))
+        var isSystemAdmin = await HasPermissionAsync(principal, permissions, "admin:users-manage", ct);
+        var isSaleAdmin = await HasPermissionAsync(principal, permissions, "admin:sale-manage", ct);
+
+        if (!isSystemAdmin && !isSaleAdmin)
             return Results.Forbid();
+
+        if (!isSystemAdmin && isSaleAdmin)
+        {
+            if (req.Roles is null || req.Roles.Length == 0 || req.Roles.Any(r => r != RbacSeeder.Sale))
+                return Results.Forbid();
+        }
 
         var tenantId = tenants.Require().TenantId;
         var canManageToken = await HasPermissionAsync(principal, permissions, "users:pancake-token:manage", ct);
@@ -355,9 +375,22 @@ public static class AdminUsersEndpoints
         var user = await FindInTenantAsync(users, tenants, id);
         if (user is null) return Results.NotFound();
 
+        var isSystemAdmin = await HasPermissionAsync(principal, permissions, "admin:users-manage", ct);
+        var isSaleAdmin = await HasPermissionAsync(principal, permissions, "admin:sale-manage", ct);
+
         var hasUserChange = req.DisplayName is not null || req.IsActive is not null || req.Roles is not null;
-        if (hasUserChange && !await HasPermissionAsync(principal, permissions, "admin.system", ct))
-            return Results.Forbid();
+        if (hasUserChange)
+        {
+            if (!isSystemAdmin && !isSaleAdmin) return Results.Forbid();
+            if (!isSystemAdmin && isSaleAdmin)
+            {
+                var isTargetSale = await users.IsInRoleAsync(user, RbacSeeder.Sale);
+                if (!isTargetSale) return Results.Forbid();
+
+                if (req.Roles is not null && req.Roles.Any(r => r != RbacSeeder.Sale))
+                    return Results.Forbid();
+            }
+        }
 
         var hasTokenChange = !string.IsNullOrWhiteSpace(req.PancakeAccessToken)
             || !string.IsNullOrWhiteSpace(req.PancakePageId)
@@ -409,29 +442,50 @@ public static class AdminUsersEndpoints
         return Results.NoContent();
     }
 
-    private static Task<IResult> DisableAsync(Guid id, UserManager<AppUser> users, ITenantAccessor tenants) => SetActiveAsync(id, false, users, tenants);
-    private static Task<IResult> EnableAsync(Guid id, UserManager<AppUser> users, ITenantAccessor tenants) => SetActiveAsync(id, true, users, tenants);
+    private static Task<IResult> DisableAsync(Guid id, UserManager<AppUser> users, ITenantAccessor tenants, ClaimsPrincipal principal, IPermissionResolver permissions, CancellationToken ct) => SetActiveAsync(id, false, users, tenants, principal, permissions, ct);
+    private static Task<IResult> EnableAsync(Guid id, UserManager<AppUser> users, ITenantAccessor tenants, ClaimsPrincipal principal, IPermissionResolver permissions, CancellationToken ct) => SetActiveAsync(id, true, users, tenants, principal, permissions, ct);
 
-    private static async Task<IResult> SetActiveAsync(Guid id, bool active, UserManager<AppUser> users, ITenantAccessor tenants)
+    private static async Task<IResult> SetActiveAsync(Guid id, bool active, UserManager<AppUser> users, ITenantAccessor tenants, ClaimsPrincipal principal, IPermissionResolver permissions, CancellationToken ct)
     {
         var user = await FindInTenantAsync(users, tenants, id);
         if (user is null) return Results.NotFound();
+
+        var isSystemAdmin = await HasPermissionAsync(principal, permissions, "admin:users-manage", ct);
+        var isSaleAdmin = await HasPermissionAsync(principal, permissions, "admin:sale-manage", ct);
+
+        if (!isSystemAdmin && !isSaleAdmin) return Results.Forbid();
+        if (!isSystemAdmin && isSaleAdmin)
+        {
+            var isTargetSale = await users.IsInRoleAsync(user, RbacSeeder.Sale);
+            if (!isTargetSale) return Results.Forbid();
+        }
+
         user.IsActive = active;
         await users.SetLockoutEndDateAsync(user, active ? null : DateTimeOffset.MaxValue);
         await users.UpdateAsync(user);
         return Results.Ok(new { user.Id, user.IsActive });
     }
 
-    private static async Task<IResult> ResetPasswordAsync(Guid id, UserManager<AppUser> users, IEmailSender email, ITenantAccessor tenants)
+    private static async Task<IResult> ResetPasswordAsync(Guid id, UserManager<AppUser> users, IEmailSender email, ITenantAccessor tenants, ClaimsPrincipal principal, IPermissionResolver permissions, CancellationToken ct)
     {
         var user = await FindInTenantAsync(users, tenants, id);
         if (user is null) return Results.NotFound();
+
+        var isSystemAdmin = await HasPermissionAsync(principal, permissions, "admin:users-manage", ct);
+        var isSaleAdmin = await HasPermissionAsync(principal, permissions, "admin:sale-manage", ct);
+
+        if (!isSystemAdmin && !isSaleAdmin) return Results.Forbid();
+        if (!isSystemAdmin && isSaleAdmin)
+        {
+            var isTargetSale = await users.IsInRoleAsync(user, RbacSeeder.Sale);
+            if (!isTargetSale) return Results.Forbid();
+        }
 
         var token = await users.GeneratePasswordResetTokenAsync(user);
         if (!string.IsNullOrWhiteSpace(user.Email))
         {
             await email.SendAsync(user.Email, "Đặt lại mật khẩu Học Bá Admin",
-                $"Quản trị viên đã yêu cầu đặt lại mật khẩu. Mã đặt lại: {token}");
+                $"Quản trị viên đã yêu cầu đặt lại mật khẩu. Mã đặt lại: {token}", ct);
         }
         return Results.Ok(new { message = "Reset token issued (emailed if SMTP configured)." });
     }

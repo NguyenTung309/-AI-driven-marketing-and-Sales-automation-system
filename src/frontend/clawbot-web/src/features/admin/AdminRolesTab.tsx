@@ -82,7 +82,7 @@ export function AdminRolesTab({
                   <td className="px-4 py-4"><StatusPill tone={roleTone(role)}>{role.isSystem ? "Hệ thống" : "Tùy chỉnh"}</StatusPill></td>
                   <td className="px-4 py-4">
                     <div className="flex justify-end gap-2">
-                      <Button type="button" size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); onEditRole(role); }} disabled={role.isSystem}>
+                      <Button type="button" size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); onEditRole(role); }}>
                         <span aria-hidden="true" className="material-symbols-outlined text-[18px]">edit</span>
                       </Button>
                       <Button

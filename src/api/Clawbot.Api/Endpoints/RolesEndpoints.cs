@@ -1,4 +1,4 @@
-﻿using Clawbot.Api.Auth;
+using Clawbot.Api.Auth;
 using Clawbot.Api.Contracts.Security;
 using Clawbot.Api.Middleware;
 using Clawbot.Domain.Security;
@@ -71,7 +71,6 @@ var roles = app.MapGroup("/api/rbac/roles").RequirePermission("rbac:manage").Req
         var tenantId = tenants.Require().TenantId;
         var role = await db.RbacRoles.FirstOrDefaultAsync(r => r.Id == id && r.TenantId == tenantId, ct);
         if (role is null) return Results.NotFound();
-        if (role.IsSystem) return Results.Forbid();
 
         var entry = db.Entry(role);
         entry.Property("Name").CurrentValue = req.Name;

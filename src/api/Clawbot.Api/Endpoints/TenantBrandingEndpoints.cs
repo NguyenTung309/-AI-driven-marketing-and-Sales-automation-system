@@ -11,7 +11,7 @@ public static class TenantBrandingEndpoints
     public static IEndpointRouteBuilder MapTenantBranding(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/admin/tenant/branding")
-            .RequirePermission("admin.system")
+            .RequirePermission("system:config")
             .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
 
         group.MapGet("/", GetAsync);
