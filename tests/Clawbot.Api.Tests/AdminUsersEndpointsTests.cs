@@ -40,6 +40,7 @@ public sealed class AdminUsersEndpointsTests
             page: 1,
             pageSize: 50,
             includeRoles: true,
+            onlySale: false,
             CancellationToken.None);
 
         // Assert
@@ -75,6 +76,7 @@ public sealed class AdminUsersEndpointsTests
             page: 1,
             pageSize: 50,
             includeRoles: true,
+            onlySale: false,
             CancellationToken.None);
 
         // Assert
@@ -102,6 +104,7 @@ public sealed class AdminUsersEndpointsTests
             page: 1,
             pageSize: 50,
             includeRoles: false,
+            onlySale: false,
             CancellationToken.None);
 
         // Assert

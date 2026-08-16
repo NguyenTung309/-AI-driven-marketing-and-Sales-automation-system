@@ -77,12 +77,30 @@ const EMPTY_SIMPLE_USERS: readonly SimpleUser[] = [];
 export default function AdminConsolePage() {
   const queryClient = useQueryClient();
   const authPermissions = useAuthStore((s) => s.permissions);
-  const canManageUsers = authPermissions.includes("admin.system");
+  const canManageUsers = authPermissions.includes("admin:users-manage");
+  const canManageSales = authPermissions.includes("admin:sale-manage");
+  const canViewUsersTab = canManageUsers || canManageSales;
   const canManagePancakeToken = canManageUsers || authPermissions.includes("users:pancake-token:manage");
   const canManageInboxOwners = authPermissions.includes("admin:inboxes");
   // Must match BE gate (system.logs only) — do not open the tab on legacy admin.* alone.
   const canViewSystemLogs = authPermissions.includes("system.logs");
-  const [tab, setTab] = useState<AdminTab>("users");
+  const canManageRoles = authPermissions.includes("rbac:manage");
+  const canManageIntegrations = authPermissions.includes("admin:integration");
+  const canViewJobs = authPermissions.includes("admin:jobs-hangfires");
+
+  const defaultTab: AdminTab = canViewUsersTab
+    ? "users"
+    : canManageIntegrations
+      ? "integrations"
+      : canManageRoles
+        ? "roles"
+        : canViewJobs
+          ? "jobs"
+          : canViewSystemLogs
+            ? "errors"
+            : "users";
+
+  const [tab, setTab] = useState<AdminTab>(defaultTab);
   const [search, setSearch] = useState("");
   const [auditAction, setAuditAction] = useState("");
   const [auditResourceType, setAuditResourceType] = useState("");
@@ -132,12 +150,12 @@ export default function AdminConsolePage() {
   const rolesQuery = useQuery({
     queryKey: ["admin", "roles"],
     queryFn: listRoles,
-    enabled: canManageUsers,
+    enabled: canViewUsersTab || canManageRoles,
   });
   const permissionsQuery = useQuery({
     queryKey: ["admin", "permissions"],
     queryFn: listPermissions,
-    enabled: canManageUsers,
+    enabled: canManageRoles,
   });
   const ownerOptionsQuery = useQuery({
     queryKey: ["admin", "users-simple"],
@@ -207,7 +225,7 @@ export default function AdminConsolePage() {
   const rolePermissionsQuery = useQuery({
     queryKey: ["admin", "role-permissions", effectiveSelectedRoleId],
     queryFn: () => listRolePermissions(effectiveSelectedRoleId!),
-    enabled: canManageUsers && tab === "roles" && Boolean(effectiveSelectedRoleId),
+    enabled: canManageRoles && tab === "roles" && Boolean(effectiveSelectedRoleId),
   });
   const rolePermissionRows = Array.isArray(rolePermissionsQuery.data) ? rolePermissionsQuery.data : EMPTY_PERMISSIONS;
   const selectedRole = roles.find((role) => role.id === effectiveSelectedRoleId) ?? null;
@@ -558,13 +576,17 @@ export default function AdminConsolePage() {
       </section>
 
       <div className="mb-gutter flex flex-wrap border-b border-outline">
-        <TabButton active={tab === "users"} icon="group" label="Người dùng" onClick={() => setTab("users")} />
-        {canManageUsers ? (
-          <>
-            <TabButton active={tab === "roles"} icon="admin_panel_settings" label="Phân quyền" onClick={() => setTab("roles")} />
-            <TabButton active={tab === "integrations"} icon="hub" label="Tích hợp" onClick={() => setTab("integrations")} />
-            <TabButton active={tab === "jobs"} icon="schedule" label="Tác vụ tự động" onClick={() => setTab("jobs")} />
-          </>
+        {canViewUsersTab ? (
+          <TabButton active={tab === "users"} icon="group" label="Người dùng" onClick={() => setTab("users")} />
+        ) : null}
+        {canManageRoles ? (
+          <TabButton active={tab === "roles"} icon="admin_panel_settings" label="Phân quyền" onClick={() => setTab("roles")} />
+        ) : null}
+        {canManageIntegrations ? (
+          <TabButton active={tab === "integrations"} icon="hub" label="Tích hợp" onClick={() => setTab("integrations")} />
+        ) : null}
+        {canViewJobs ? (
+          <TabButton active={tab === "jobs"} icon="schedule" label="Tác vụ tự động" onClick={() => setTab("jobs")} />
         ) : null}
         {canViewSystemLogs ? (
           <>
@@ -574,7 +596,7 @@ export default function AdminConsolePage() {
         ) : null}
       </div>
 
-      {tab === "users" ? (
+      {tab === "users" && canViewUsersTab ? (
         <>
           <AdminUsersTab
             users={users}
@@ -599,7 +621,7 @@ export default function AdminConsolePage() {
         </>
       ) : null}
 
-      {tab === "roles" ? (
+      {tab === "roles" && canManageRoles ? (
         <AdminRolesTab
           roles={roles}
           effectiveSelectedRoleId={effectiveSelectedRoleId}
@@ -618,7 +640,7 @@ export default function AdminConsolePage() {
         />
       ) : null}
 
-      {tab === "integrations" ? (
+      {tab === "integrations" && canManageIntegrations ? (
         <AdminIntegrationsTab
           pancakeForm={pancakeForm}
           onUpdatePancakeForm={(patch) => setPancakeDraft((current) => ({ ...current, ...patch }))}
@@ -635,7 +657,7 @@ export default function AdminConsolePage() {
         />
       ) : null}
 
-      {tab === "errors" ? (
+      {tab === "errors" && canViewSystemLogs ? (
         <>
           <AdminSystemLogsTab
             logs={systemLogs}
@@ -663,7 +685,7 @@ export default function AdminConsolePage() {
         </>
       ) : null}
 
-      {tab === "audit" ? (
+      {tab === "audit" && canViewSystemLogs ? (
         <>
           <AdminAuditTab
             auditLogs={auditLogs}
@@ -680,7 +702,7 @@ export default function AdminConsolePage() {
         </>
       ) : null}
 
-      {tab === "jobs" ? <AdminJobsTab /> : null}
+      {tab === "jobs" && canViewJobs ? <AdminJobsTab /> : null}
 
       <AdminUserModal
         mode={userModal}

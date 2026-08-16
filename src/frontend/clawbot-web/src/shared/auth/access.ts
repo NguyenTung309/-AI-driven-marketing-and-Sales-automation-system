@@ -26,10 +26,10 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   "/orchestration": ["orchestration:view"],
   "/llm-providers": ["llm-configs:manage"],
   "/kb": ["kb:read"],
-  "/system": ["system:config", "admin.system"],
+  "/system": ["system:config", "admin:users-manage", "admin:sale-manage", "rbac:manage", "admin:integration", "admin:jobs-hangfires", "system.logs"],
   "/logs": ["system.logs", "admin.audit"],
   "/tokens": ["api-keys:manage", "users:pancake-token:manage"],
-  "/prompts": ["system:config", "admin.system"],
+  "/prompts": ["system:config", "admin:users-manage"],
   "/profile": [],
 };
 
