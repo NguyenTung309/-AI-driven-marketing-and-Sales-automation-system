@@ -10,9 +10,10 @@ interface RequireAuthProps {
 export function RequireAuth({ children }: RequireAuthProps) {
   const token = useAuthStore((s) => s.accessToken);
   const role = useAuthStore((s) => s.role);
+  const permissions = useAuthStore((s) => s.permissions); // Extract permissions
   const { pathname } = useLocation();
   if (!token) return <Navigate to="/login" replace />;
   // Fail-open khi role chưa load được (/auth/me lỗi) — backend vẫn enforce quyền thật.
-  if (role != null && !canAccessRoute(role, pathname)) return <Navigate to="/" replace />;
+  if (role != null && !canAccessRoute(permissions, role, pathname)) return <Navigate to="/" replace />;
   return children;
 }
