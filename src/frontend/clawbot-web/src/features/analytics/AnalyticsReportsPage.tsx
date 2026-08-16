@@ -427,7 +427,7 @@ function AgentTable({ agents, costs }: { readonly agents: readonly AgentPerforma
               <th className="px-4 py-3 font-bold">Tên Agent</th>
               <th className="px-4 py-3 font-bold">Tổng tác vụ</th>
               <th className="px-4 py-3 font-bold">Xử lý TB</th>
-              <th className="px-4 py-3 font-bold">Chất lượng</th>
+              {/* <th className="px-4 py-3 font-bold">Chất lượng</th> */}
               <th className="px-4 py-3 font-bold">Lượng dùng AI</th>
               <th className="px-4 py-3 font-bold">Tỉ lệ lỗi</th>
             </tr>
@@ -446,7 +446,7 @@ function AgentTable({ agents, costs }: { readonly agents: readonly AgentPerforma
                   </td>
                   <td className="px-4 py-4 align-top font-mono text-mono-status text-secondary">{formatNumber(agent.sessions)}</td>
                   <td className="px-4 py-4 align-top font-mono text-mono-status text-secondary">{formatPct(agent.completionRate * 100)}</td>
-                  <td className="px-4 py-4 align-top">
+                  {/* <td className="px-4 py-4 align-top">
                     <div className="font-mono text-mono-status text-secondary">
                       {agent.qualitySamples ? formatPct(agent.qualityPassRate * 100) : "—"}
                     </div>
@@ -457,7 +457,7 @@ function AgentTable({ agents, costs }: { readonly agents: readonly AgentPerforma
                           }`
                         : "Chưa có mẫu đánh giá"}
                     </div>
-                  </td>
+                  </td> */}
                   <td className="px-4 py-4 align-top text-body-md text-secondary">
                     {cost ? `${formatNumber(cost.inputTokens + cost.outputTokens)} lượt dùng · ${formatUsd(cost.usd)}` : `${formatNumber(agent.traceCount)} sự kiện`}
                   </td>
@@ -608,7 +608,7 @@ export default function AnalyticsReportsPage() {
   // dung `rows` tho — dong "all" da bang tong cac dong platform that nen cong ca hai se dem trung x2.
   const agg = aggregate(visibleRows);
   const automationRate = rate(agg.repliedDms, agg.dms);
-  const replyRate = rate(agg.replies, agg.dms);
+  // const replyRate = rate(agg.replies, agg.dms);
   const conversionRate = rate(agg.conversions, agg.leads);
   const apiError = omnichannelQuery.error ?? deltaQuery.error ?? funnelQuery.error ?? agentsQuery.error ?? costsQuery.error;
   const qualitySamples = agents.reduce((sum, agent) => sum + agent.qualitySamples, 0);
@@ -631,13 +631,13 @@ export default function AnalyticsReportsPage() {
       meta: deltaText(deltaFor(deltas, "repliedDms")),
       tone: deltaTone(deltaFor(deltas, "repliedDms")),
     },
-    {
-      icon: "timer",
-      label: "Thời gian phản hồi",
-      value: agg.avgResponseTimeSec == null ? "—" : `${agg.avgResponseTimeSec.toFixed(1)} giây`,
-      meta: "Trung bình trong kỳ",
-      tone: "success" as StatusTone,
-    },
+    // {
+    //   icon: "timer",
+    //   label: "Thời gian phản hồi",
+    //   value: agg.avgResponseTimeSec == null ? "—" : `${agg.avgResponseTimeSec.toFixed(1)} giây`,
+    //   meta: "Trung bình trong kỳ",
+    //   tone: "success" as StatusTone,
+    // },
   ];
 
   return (
@@ -713,13 +713,13 @@ export default function AnalyticsReportsPage() {
       {safeTab === "agent" ? (
         <div className="space-y-gutter">
           <section className="grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
+            {/* <MetricCard
               icon="fact_check"
               label="Chất lượng trung bình"
               value={averageQualityPassRate == null ? "—" : formatPct(averageQualityPassRate * 100)}
               meta={qualitySamples ? `${formatNumber(qualitySamples)} mẫu đánh giá` : "Chưa có mẫu đánh giá"}
               tone={averageQualityPassRate == null ? "neutral" : averageQualityPassRate >= 0.85 ? "success" : "warning"}
-            />
+            /> */}
             <MetricCard icon="speed" label="Tác vụ hoàn tất" value={formatNumber(agents.reduce((sum, agent) => sum + agent.completedSessions, 0))} meta="Đã xử lý xong" tone="success" />
             <MetricCard icon="toll" label="Chi phí AI" value={formatUsd(costs.reduce((sum, cost) => sum + cost.usd, 0))} meta="Theo sổ chi phí" tone="warning" />
             <MetricCard icon="bug_report" label="Sự kiện vận hành" value={formatNumber(agents.reduce((sum, agent) => sum + agent.traceCount, 0))} meta="Từ các agent" tone="neutral" />
@@ -736,7 +736,7 @@ export default function AnalyticsReportsPage() {
           <section className="grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard icon="person_add" label="Lead" value={formatNumber(agg.leads)} meta={deltaText(deltaFor(deltas, "leads"))} tone={deltaTone(deltaFor(deltas, "leads"))} />
             <MetricCard icon="moving" label="Chuyển đổi" value={formatNumber(agg.conversions)} meta={formatPct(conversionRate)} tone="success" />
-            <MetricCard icon="forum" label="Tỷ lệ phản hồi" value={formatPct(replyRate)} meta="phản hồi / tin nhắn" tone="success" />
+            <MetricCard icon="forum" label="Tỷ lệ phản hồi" value={formatPct(automationRate)} meta="phản hồi / tin nhắn" tone="success" />
           </section>
           <section className="grid grid-cols-1 gap-gutter xl:grid-cols-[minmax(0,1fr)_380px]">
             <ForecastCard points={forecast} />
