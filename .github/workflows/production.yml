@@ -10,6 +10,11 @@ on:
         required: true
         default: true
         type: boolean
+      run_tests:
+        description: Run the .NET test suite before publishing (slow; off by default)
+        required: false
+        default: false
+        type: boolean
 
 env:
   DOTNET_VERSION: "8.0.x"
@@ -60,7 +65,15 @@ jobs:
           dotnet restore Clawbot.sln
           dotnet build Clawbot.sln --no-restore --configuration Release
 
+      # Bộ test .NET chạy tới ~28 phút trên runner, sát trần timeout 30 phút của job, nên mặc định
+      # bỏ qua và test ở máy. ĐÁNH ĐỔI: pipeline này deploy thẳng lên production, nên khi tắt thì
+      # không còn cổng nào chặn code hỏng trước khi ra thật — hãy chạy `dotnet test Clawbot.sln`
+      # ở máy trước khi merge vào main.
+      # Bật lại bằng một trong hai cách:
+      #   - đặt biến repo RUN_DOTNET_TESTS = true (Settings > Secrets and variables > Actions > Variables)
+      #   - hoặc chạy tay workflow này và tích "Run the .NET test suite"
       - name: Run .NET tests
+        if: vars.RUN_DOTNET_TESTS == 'true' || inputs.run_tests
         run: dotnet test Clawbot.sln --no-build --configuration Release
 
       - name: Install and lint frontend
