@@ -1,197 +1,310 @@
-"""Kiem tra format sheet Unit Test (5.1) so voi sheet mau methodName1.
+"""So sanh FORMAT giua file mau .xls va file ket qua .xls (bo qua noi dung).
 
-Sheet 5.1 la ma tran ngang nen khong dung duoc compare_format.py (von so theo
-dong). O day anh xa CA dong lan cot cua sheet ket qua ve sheet mau:
+Doi ung compare_format.py nhung cho file BIFF8 (.xls): openpyxl khong doc duoc
+.xls nen phai dung xlrd voi formatting_info=True.
 
-- dong: 1..7 va 4 dong Result anh xa 1:1; trong tung band, dong dau va dong cuoi
-  anh xa 1:1, cac dong giua anh xa ve dong giua cuoi cung cua band mau
-- cot: cac cot truoc cot cuoi anh xa 1:1, cot cuoi anh xa ve cot cuoi cua mau,
-  cac cot chen them anh xa ve cot giap bien cua mau
+Trong BIFF8, moi o tro toi mot ban ghi XF (eXtended Format) gom font + fill +
+border + alignment + number format. CHU Y: chi so XF chi la con tro vao bang
+style RIENG cua tung file; Excel/COM don lai bang nay khi luu nen hai o co dinh
+dang Y HET van co chi so khac nhau giua hai file. Vi vay phai PHAN GIAI chi so
+XF thanh chu ky dinh dang (numfmt + font + align + border + fill) roi so sanh
+chu ky, khong so sanh chi so tho.
 
-Khi kich thuoc trung mau, anh xa tro thanh 1:1 -> phep so tro thanh so TUNG O,
-day la phep kiem chat nhat (dung cho ban replica).
+So sanh nhung gi (giong compare_format.py):
+  1. danh sach sheet
+  2. merge o vung header
+  3. XF (style) tung o vung header: khop tuyet doi
+  4. XF dong du lieu: moi dong du lieu ket qua phai khop MOT trong cac XF ma
+     sheet mau dang dung cho cot do (nhom vs case tach rieng)
+  5. do rong / an cua cot
+  6. chieu cao / an cua dong vung header
 
-    python scripts/testdoc/compare_unit.py --base "docs/test/Report5.1_Unit Test.xlsx" \
-        --target out.xlsx --pair methodName1=IsAllowedBaseUrl
+Cach dung:
+  python compare_unit.py --base "docs/test/Report-5.1_Unit Test.xls" \
+      --target out.xls --pair "ModuleName1=ModuleName1" \
+      --header-rows 11 --data-row 12 --same-name
 """
 
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import sys
 
-import openpyxl
-from openpyxl.utils import get_column_letter
-
-from compare_format import (cell_style_key, column_key, raw_row_dims, size_equal,
-                            style_diff)
-
-WIDTH_TOL = 0.02
+import xlrd
 
 
-@dataclasses.dataclass(frozen=True)
-class Layout:
-    last_col: int
-    bands: tuple[tuple[int, int], ...]
-    result_row: int
-    max_row: int
-    max_col: int
+def col_letter(index0: int) -> str:
+    """0-indexed -> ten cot (0=A)."""
+    name, index = "", index0 + 1
+    while index > 0:
+        index, rem = divmod(index - 1, 26)
+        name = chr(65 + rem) + name
+    return name
 
 
-def read_layout(ws) -> Layout:
-    merged = next((m for m in ws.merged_cells.ranges
-                   if m.min_row == 3 and m.min_col == 3), None)
-    if merged is None:
-        raise ValueError(f"{ws.title}: khong thay merge 'Test requirement' o C3")
-    starts, result_row = [], None
-    for row in range(8, 500):
-        label = str(ws.cell(row, 1).value or "").strip().lower()
-        if label == "result":
-            result_row = row
-            break
-        if label:
-            starts.append(row)
-    if result_row is None or not starts:
-        raise ValueError(f"{ws.title}: thieu dong 'Result' hoac band dieu kien")
-    bands = tuple((start, (starts[i + 1] if i + 1 < len(starts) else result_row) - 1)
-                  for i, start in enumerate(starts))
-    return Layout(last_col=merged.max_col, bands=bands, result_row=result_row,
-                  max_row=result_row + 4, max_col=merged.max_col)
+def cell_value(sheet, r: int, c: int):
+    if r >= sheet.nrows or c >= sheet.ncols:
+        return ""
+    v = sheet.cell_value(r, c)
+    return v if v not in (None,) else ""
 
 
-def row_map(base: Layout, target: Layout) -> dict[int, int]:
-    mapping = {row: row for row in range(1, 8)}
-    for index, (start, end) in enumerate(target.bands):
-        if index >= len(base.bands):
-            raise ValueError(f"ket qua co {len(target.bands)} band, mau chi co {len(base.bands)}")
-        base_start, base_end = base.bands[index]
-        # Dong giu lai tu mau phai giong CHINH NO (anh xa 1:1); chi dong chen
-        # them moi doi chieu voi dong mau (dong giua cuoi cung cua band).
-        for offset in range(end - start):
-            mapping[start + offset] = min(base_start + offset, base_end - 1)
-        mapping[end] = base_end  # dong cuoi mang vien duoi cua band
-    for offset in range(5):
-        mapping[target.result_row + offset] = base.result_row + offset
-    return mapping
+def is_group_row(sheet, r: int, span_cols=(1, 2, 3, 4)) -> bool:
+    """Dong nhom (ten method): chi co gia tri o cot A."""
+    if cell_value(sheet, r, 0) in (None, ""):
+        return False
+    return all(cell_value(sheet, r, c) in (None, "") for c in span_cols)
 
 
-def col_map(base: Layout, target: Layout) -> dict[int, int]:
-    if target.last_col == base.last_col:
-        return {col: col for col in range(1, target.max_col + 1)}
-    mapping = {col: col for col in range(1, base.last_col)}
-    for col in range(base.last_col, target.last_col):
-        mapping[col] = base.last_col - 1  # cot chen them -> cot giap bien cua mau
-    mapping[target.last_col] = base.last_col
-    return mapping
+def data_rows(sheet, data_row0: int, limit: int = 2000) -> list[int]:
+    rows = []
+    for r in range(data_row0, min(sheet.nrows, data_row0 + limit)):
+        if cell_value(sheet, r, 0) not in (None, ""):
+            rows.append(r)
+    return rows
 
 
-def dv_map(ws) -> dict[tuple[int, int], str]:
-    rules: dict[tuple[int, int], str] = {}
-    for rule in ws.data_validations.dataValidation:
-        for chunk in rule.sqref.ranges:
-            for row in range(chunk.min_row, chunk.max_row + 1):
-                for col in range(chunk.min_col, chunk.max_col + 1):
-                    rules[(row, col)] = str(rule.formula1)
-    return rules
+def xf_at(sheet, r: int, c: int):
+    if r >= sheet.nrows or c >= sheet.ncols:
+        return None
+    return sheet.cell_xf_index(r, c)
 
 
-def merge_set(ws, rmap: dict, cmap: dict, max_row: int) -> set:
-    mapped = set()
-    for rng in ws.merged_cells.ranges:
-        if rng.min_row > max_row:
+def xf_sig(book, xfi):
+    """Phan giai chi so XF thanh chu ky dinh dang co the bam (hashable).
+
+    Chi so XF chi co nghia trong noi bo tung file; phai quy ve thuoc tinh
+    dinh dang thuc su (numfmt + font + align + border + fill) de so sanh
+    giua hai file.
+    """
+    if xfi is None:
+        return None
+    xf = book.xf_list[xfi]
+    font = book.font_list[xf.font_index]
+    fmt = book.format_map.get(xf.format_key)
+    al = xf.alignment
+    br = xf.border
+    bg = xf.background
+
+    def norm_black(idx):
+        # 8 = den tuong minh trong palette, 64 = "automatic" (mac dinh he thong,
+        # hien thi den). Hai gia tri render giong het nhau -> quy ve 1 chuan.
+        return 64 if idx in (0, 8, 64) else idx
+
+    return (
+        fmt.format_str if fmt else None,
+        (font.name, font.height, font.weight, font.italic,
+         font.underline_type, font.colour_index, font.struck_out),
+        (al.hor_align, al.vert_align, al.text_wrapped, al.rotation, al.indent_level),
+        (br.top_line_style, br.bottom_line_style, br.left_line_style, br.right_line_style,
+         norm_black(br.top_colour_index), norm_black(br.bottom_colour_index),
+         norm_black(br.left_colour_index), norm_black(br.right_colour_index)),
+        (bg.fill_pattern, bg.pattern_colour_index, bg.background_colour_index),
+    )
+
+
+def is_date_fmt(fmt_str) -> bool:
+    if not fmt_str:
+        return False
+    low = fmt_str.lower()
+    return any(tok in low for tok in ("yy", "mm/", "/mm", "dd", "mmm"))
+
+
+def sig_matches(base_sig, target_sig) -> bool:
+    """Chu ky khop, chi bo qua rieng khac biet number format ngay thang.
+
+    O cot Test date cua mau con TRONG nen mang numfmt General; khi dien ngay
+    that Excel bat buoc gan number format ngay -> khac numfmt o day la dung y
+    mau chu khong phai lech format. Moi thanh phan con lai (font, vien, can le,
+    to nen) van phai khop tuyet doi.
+    """
+    if base_sig == target_sig:
+        return True
+    if base_sig is None or target_sig is None:
+        return False
+    if base_sig[1:] != target_sig[1:]:
+        return False
+    return is_date_fmt(target_sig[0]) and (
+        base_sig[0] in (None, "General") or is_date_fmt(base_sig[0]))
+
+
+def colinfo(sheet, max_col: int):
+    """{cot: (do rong, an)} - width don vi 1/256 ky tu, None neu khong dat rieng."""
+    out = {}
+    for c in range(max_col):
+        info = sheet.colinfo_map.get(c)
+        if info is None:
+            out[c] = (None, False)
+        else:
+            out[c] = (info.width, bool(info.hidden))
+    return out
+
+
+def rowinfo(sheet, rows):
+    out = {}
+    for r in rows:
+        info = sheet.rowinfo_map.get(r)
+        if info is None:
+            out[r] = (None, False)
+        else:
+            # height_mismatch=1 nghia la chieu cao do Excel tu tinh (khong phai
+            # nguoi dat tay) -> khong tinh la format khac.
+            custom = not getattr(info, "height_mismatch", 0)
+            out[r] = (info.height if custom else None, bool(info.hidden))
+    return out
+
+
+def merges_in_rows(sheet, max_row0: int) -> set:
+    out = set()
+    for (rlo, rhi, clo, chi) in sheet.merged_cells:
+        if rhi <= max_row0 + 1:
+            out.add((rlo, rhi, clo, chi))
+    return out
+
+
+def size_equal(a, b, tol: float) -> bool:
+    (a_size, a_hidden), (b_size, b_hidden) = a, b
+    if bool(a_hidden) != bool(b_hidden):
+        return False
+    if a_size is None or b_size is None:
+        return a_size == b_size
+    return abs(float(a_size) - float(b_size)) <= tol
+
+
+def compare_sheet(base_wb, target_wb, base, target, header_rows: int, data_row: int,
+                  max_data_rows: int, size_tol: float) -> list[str]:
+    diffs = []
+    tag = f"{base.name} -> {target.name}"
+    header0 = range(header_rows)              # 0-indexed dong header
+    data_row0 = data_row - 1
+    max_col = max(base.ncols, target.ncols, 20)  # it nhat toi cot T (nguon dropdown)
+
+    def bsig(r, c):
+        return xf_sig(base_wb, xf_at(base, r, c))
+
+    def tsig(r, c):
+        return xf_sig(target_wb, xf_at(target, r, c))
+
+    # 2. merge vung header
+    b_merge = merges_in_rows(base, header_rows - 1)
+    t_merge = merges_in_rows(target, header_rows - 1)
+    for missing in sorted(b_merge - t_merge):
+        diffs.append(f"[{tag}] thieu merge {missing}")
+    for extra in sorted(t_merge - b_merge):
+        diffs.append(f"[{tag}] merge thua {extra}")
+
+    # 3. chu ky dinh dang vung header - khop tuyet doi
+    for r in header0:
+        for c in range(max_col):
+            if bsig(r, c) != tsig(r, c):
+                diffs.append(
+                    f"[{tag}] style {col_letter(c)}{r + 1}: "
+                    f"mau={bsig(r, c)} ket_qua={tsig(r, c)}"
+                )
+
+    # 4. chu ky dong du lieu - moi cot chap nhan cac bien the cua mau
+    protos = {c: set() for c in range(max_col)}
+    group_protos = set()
+    for r in data_rows(base, data_row0, limit=40):
+        if is_group_row(base, r):
+            group_protos.add(bsig(r, 0))
             continue
-        try:
-            mapped.add((rmap[rng.min_row], cmap[rng.min_col],
-                        rmap[rng.max_row], cmap[rng.max_col]))
-        except KeyError:
-            mapped.add(("ngoai vung", str(rng)))
-    return mapped
+        for c in range(max_col):
+            protos[c].add(bsig(r, c))
+    for c in protos:
+        if not protos[c]:
+            protos[c].add(bsig(data_row0, c))
 
+    checked = 0
+    for r in data_rows(target, data_row0):
+        checked += 1
+        if checked > max_data_rows:
+            break
+        if is_group_row(target, r):
+            sig = tsig(r, 0)
+            if group_protos and sig not in group_protos:
+                diffs.append(
+                    f"[{tag}] style dong nhom A{r + 1}: khac chu ky nhom"
+                )
+            continue
+        for c in range(max_col):
+            sig = tsig(r, c)
+            if sig not in protos[c] and not any(sig_matches(p, sig) for p in protos[c]):
+                diffs.append(
+                    f"[{tag}] style dong du lieu {col_letter(c)}{r + 1}: khac chu ky cot"
+                )
 
-def compare_cells(base_ws, target_ws, rmap, cmap, target: Layout, diffs: list) -> None:
-    base_dv, target_dv = dv_map(base_ws), dv_map(target_ws)
-    for row in range(1, target.max_row + 1):
-        for col in range(1, target.max_col + 1):
-            base_row, base_col = rmap[row], cmap[col]
-            addr = f"{get_column_letter(col)}{row}"
-            proto = f"{get_column_letter(base_col)}{base_row}"
-            problems = style_diff(cell_style_key(base_ws.cell(base_row, base_col)),
-                                  cell_style_key(target_ws.cell(row, col)),
-                                  allow_date_numfmt=True)
-            if problems:
-                diffs.append(f"o {addr} (mau {proto}): {', '.join(problems)}")
-            if base_dv.get((base_row, base_col)) != target_dv.get((row, col)):
-                diffs.append(f"o {addr} (mau {proto}): data validation "
-                             f"{base_dv.get((base_row, base_col))!r} -> "
-                             f"{target_dv.get((row, col))!r}")
+    # 5. cot
+    b_cols, t_cols = colinfo(base, max_col), colinfo(target, max_col)
+    for c in range(max_col):
+        if not size_equal(b_cols[c], t_cols[c], size_tol * 256):
+            diffs.append(f"[{tag}] cot {col_letter(c)}: mau={b_cols[c]} ket_qua={t_cols[c]}")
 
+    # 6. dong vung header
+    b_rows, t_rows = rowinfo(base, header0), rowinfo(target, header0)
+    for r in header0:
+        if not size_equal(b_rows[r], t_rows[r], size_tol * 20):
+            diffs.append(f"[{tag}] dong {r + 1}: mau={b_rows[r]} ket_qua={t_rows[r]}")
 
-def compare_sheet(base_ws, target_ws, base_dims, target_dims) -> list[str]:
-    base, target = read_layout(base_ws), read_layout(target_ws)
-    rmap, cmap = row_map(base, target), col_map(base, target)
-    diffs: list[str] = []
-
-    compare_cells(base_ws, target_ws, rmap, cmap, target, diffs)
-
-    base_rows, target_rows = base_dims.get(base_ws.title, {}), target_dims.get(target_ws.title, {})
-    for row in range(1, target.max_row + 1):
-        want, got = base_rows.get(rmap[row], (None, False)), target_rows.get(row, (None, False))
-        if not size_equal(want, got, 0.5):
-            diffs.append(f"dong {row} (mau {rmap[row]}): chieu cao/an {want} -> {got}")
-
-    base_cols, target_cols = column_key(base_ws, base.max_col), column_key(target_ws, target.max_col)
-    for col in range(1, target.max_col + 1):
-        letter, proto = get_column_letter(col), get_column_letter(cmap[col])
-        want, got = base_cols[proto], target_cols[letter]
-        if not size_equal(want, got, WIDTH_TOL):
-            diffs.append(f"cot {letter} (mau {proto}): rong/an {want} -> {got}")
-
-    base_merges = merge_set(base_ws, {r: r for r in range(1, base.max_row + 1)},
-                            {c: c for c in range(1, base.max_col + 1)}, base.max_row)
-    # Mau co mot merge le D17:E17 nam giua band Condition. Khi band ngan hon mau,
-    # dong 17 khong con ton tai nen khong the doi hoi merge do - bo qua cac merge
-    # cua mau nam tren dong ma ket qua khong con anh xa toi.
-    reachable = set(rmap.values())
-    base_merges = {item for item in base_merges if item[0] in reachable}
-    target_merges = merge_set(target_ws, rmap, cmap, target.max_row)
-    for missing in sorted(base_merges - target_merges, key=str):
-        diffs.append(f"thieu merge {missing}")
-    for extra in sorted(target_merges - base_merges, key=str):
-        diffs.append(f"thua merge {extra}")
-
-    if base_ws.freeze_panes != target_ws.freeze_panes:
-        diffs.append(f"freeze panes {base_ws.freeze_panes} -> {target_ws.freeze_panes}")
     return diffs
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description="So format sheet Unit Test voi sheet mau")
+def main():
+    ap = argparse.ArgumentParser(description="So sanh format .xls giua mau va ket qua (xlrd)")
     ap.add_argument("--base", required=True)
     ap.add_argument("--target", required=True)
-    ap.add_argument("--pair", action="append", required=True,
-                    help="sheet_mau=sheet_ket_qua (lap lai duoc)")
-    ap.add_argument("--limit", type=int, default=40)
+    ap.add_argument("--pair", action="append", default=[], help='"sheet mau=sheet ket qua"')
+    ap.add_argument("--same-name", action="store_true")
+    ap.add_argument("--header-rows", type=int, default=11)
+    ap.add_argument("--data-row", type=int, default=12)
+    ap.add_argument("--max-data-rows", type=int, default=400)
+    ap.add_argument("--size-tol", type=float, default=0.35)
     args = ap.parse_args()
 
-    base_wb = openpyxl.load_workbook(args.base)
-    target_wb = openpyxl.load_workbook(args.target)
-    base_dims, target_dims = raw_row_dims(args.base), raw_row_dims(args.target)
+    base_wb = xlrd.open_workbook(args.base, formatting_info=True)
+    target_wb = xlrd.open_workbook(args.target, formatting_info=True)
+    base_names = base_wb.sheet_names()
+    target_names = target_wb.sheet_names()
 
-    total = 0
-    for pair in args.pair:
-        base_name, target_name = pair.split("=", 1)
-        diffs = compare_sheet(base_wb[base_name], target_wb[target_name], base_dims, target_dims)
-        total += len(diffs)
-        print(f"== {base_name} -> {target_name}: {len(diffs)} khac biet")
-        for line in diffs[:args.limit]:
-            print(f"   {line}")
-        if len(diffs) > args.limit:
-            print(f"   ... con {len(diffs) - args.limit} dong nua")
+    pairs = []
+    for item in args.pair:
+        if "=" not in item:
+            print(f"--pair sai dinh dang: {item}", file=sys.stderr)
+            return 2
+        b, t = item.split("=", 1)
+        pairs.append((b.strip(), t.strip()))
+    if args.same_name:
+        for name in base_names:
+            if name in target_names and (name, name) not in pairs:
+                pairs.append((name, name))
 
-    print("\nFORMAT KHOP 100% - khong co khac biet" if total == 0
-          else f"\nCON {total} KHAC BIET FORMAT")
-    return 0 if total == 0 else 1
+    diffs = []
+    for base_name, target_name in pairs:
+        if base_name not in base_names:
+            diffs.append(f"[mau] khong co sheet {base_name!r}")
+            continue
+        if target_name not in target_names:
+            diffs.append(f"[ket qua] khong co sheet {target_name!r}")
+            continue
+        diffs += compare_sheet(
+            base_wb, target_wb,
+            base_wb.sheet_by_name(base_name),
+            target_wb.sheet_by_name(target_name),
+            args.header_rows, args.data_row, args.max_data_rows, args.size_tol,
+        )
+
+    print(f"Cap sheet so sanh: {len(pairs)}")
+    for b, t in pairs:
+        print(f"  {b} -> {t}")
+    if diffs:
+        print(f"\nKHAC BIET FORMAT: {len(diffs)}")
+        for line in diffs[:200]:
+            print("  " + line)
+        if len(diffs) > 200:
+            print(f"  ... con {len(diffs) - 200} dong nua")
+    else:
+        print("\nFORMAT KHOP 100% - khong co khac biet")
+    return 1 if diffs else 0
 
 
 if __name__ == "__main__":

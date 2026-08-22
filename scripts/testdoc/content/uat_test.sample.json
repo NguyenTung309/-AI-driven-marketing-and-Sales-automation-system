@@ -1,0 +1,310 @@
+{
+  "sheets": {
+    "UAT": {
+      "rows": [
+        [
+          "SC-01",
+          "BF-01",
+          "Tenant onboarding and first sign in",
+          "System admin + Tenant admin",
+          "1. The system admin creates a new tenant and its first administrator account.\n2. The tenant administrator signs in and changes the temporary password.\n3. The tenant administrator opens the settings page and reviews the default roles.\n4. The tenant administrator invites one sale user and one content editor.",
+          "A new customer can be brought onto the platform end to end in one working session, with each invited member able to sign in and see only the pages their role allows.",
+          "Critical",
+          "Pass",
+          "Session on 2026-08-19. The whole set-up took about twenty minutes. The product owner asked for the invitation email to state which role was granted."
+        ],
+        [
+          "SC-02",
+          "BF-01",
+          "Connect a language model provider and a messaging channel",
+          "Tenant admin",
+          "1. The tenant administrator opens the model settings and saves a provider key.\n2. The administrator runs the built in connection check.\n3. The administrator connects one messaging page as an inbox.\n4. The administrator sends one test message from an external account and watches it arrive.",
+          "The customer can wire up their own provider and their own page without help from support, and can tell immediately whether the connection works.",
+          "Critical",
+          "Pass",
+          "Session on 2026-08-19. The connection check was described as the most useful part; the business user found the page connection wording clear."
+        ],
+        [
+          "SC-03",
+          "BF-02",
+          "Automatic reply to an incoming customer question",
+          "Customer (external) + Sale",
+          "1. An external customer sends a question to the connected page.\n2. The conversation appears in the shared inbox within a few seconds.\n3. The assistant answers using the knowledge base.\n4. The sale user reads the exchange and confirms the answer is on topic.",
+          "Routine questions are answered without a human, the reply reflects the knowledge the customer uploaded, and every exchange stays visible to the sale team.",
+          "Critical",
+          "Pass",
+          "Session on 2026-08-19. Eight of nine questions were answered correctly; the ninth was outside the uploaded material and the assistant declined, which the business user accepted."
+        ],
+        [
+          "SC-04",
+          "BF-02",
+          "Human takeover pauses the assistant and resumes it later",
+          "Sale + Customer (external)",
+          "1. While the assistant is handling a conversation, the sale user sends a manual reply.\n2. The sale user confirms the assistant stopped replying.\n3. The sale user waits for the configured idle period without sending anything.\n4. A new customer message arrives after that period.",
+          "A sale user can step into any conversation at any moment, and the assistant comes back on its own once the human stops, with no message left unanswered.",
+          "Critical",
+          "Pass",
+          "Session on 2026-08-19. The sale team asked for a visible countdown showing when the assistant will take over again; logged as an enhancement, not a defect."
+        ],
+        [
+          "SC-05",
+          "BF-04",
+          "Lead capture, assignment and lifecycle update",
+          "Sale + Sale manager",
+          "1. A customer conversation reaches the point where contact details are given.\n2. A lead record is created and assigned to the sale user who owns that inbox.\n3. The sale user moves the lead through the pipeline stages.\n4. The sale manager opens the pipeline view and reviews the totals.",
+          "Every qualified conversation becomes a tracked lead with one clear owner, and the manager can see the state of the pipeline without asking the team.",
+          "High",
+          "Pass",
+          "Session on 2026-08-19. The manager confirmed the pipeline totals matched the manual count kept in the team spreadsheet."
+        ],
+        [
+          "SC-06",
+          "BF-04",
+          "Sale users only see the leads they are responsible for",
+          "Two sale users",
+          "1. Two sale users are attached to two different inboxes.\n2. Each user signs in and opens the lead list.\n3. Each user opens one lead detail page and tries the identifier of a lead from the other inbox.",
+          "Sale users work in their own book of business, and a customer record is never shown to a colleague who is not entitled to it.",
+          "High",
+          "Pass",
+          "Session on 2026-08-19. Each user saw only their own leads and the direct identifier of a colleague lead was refused."
+        ],
+        [
+          "SC-07",
+          "BF-05",
+          "Content draft, review and publication",
+          "Content editor + Approver",
+          "1. The content editor asks for a draft on a chosen topic.\n2. The draft is produced as a background job and appears in the drafts list.\n3. The editor edits the draft and sends it for review.\n4. The approver accepts it and the article is published to the connected page.",
+          "A marketing article can be produced, reviewed by a person and published from one place, and nothing reaches the public page without an explicit approval.",
+          "High",
+          "Pass",
+          "Session on 2026-08-20. The editor asked to see the review comments next to the text rather than in a separate panel."
+        ],
+        [
+          "SC-08",
+          "BF-05",
+          "Scheduled publication at the planned time",
+          "Content editor",
+          "1. The content editor schedules an approved article for a future slot.\n2. The editor checks the calendar entry.\n3. The editor waits for the slot to pass.\n4. The editor opens the published article and the delivery report.",
+          "Planned marketing work runs on its own timetable, and the team can see afterwards whether each planned item actually went out.",
+          "Medium",
+          "Pass",
+          "Session on 2026-08-20. The article went out within the planned slot and the delivery report matched the published article."
+        ],
+        [
+          "SC-09",
+          "BF-03",
+          "Recovery after a dependency outage",
+          "Tenant admin",
+          "1. While traffic is flowing, an infrastructure dependency is stopped on purpose.\n2. The administrator opens the system health page and the error log tab.\n3. The dependency is started again.\n4. The administrator replays the affected work from the job centre.",
+          "A temporary outage is visible, understandable and recoverable by the customer team, and no customer message is silently lost.",
+          "High",
+          "Partial",
+          "Session on 2026-08-20. No message was lost and the replay worked, but the administrator could not tell from the error text which dependency was down and needed help from the engineer present."
+        ],
+        [
+          "SC-10",
+          "BF-03",
+          "Knowledge base update takes effect for the assistant",
+          "Tenant admin + Customer (external)",
+          "1. The administrator uploads a document with a new price list.\n2. The administrator deploys the knowledge version and waits for indexing.\n3. An external customer asks about the new price.\n4. The administrator opens the accuracy report for that knowledge version.",
+          "When the business changes, the customer can update what the assistant knows on their own, and can prove the change took effect before trusting it.",
+          "Critical",
+          "Pass",
+          "Session on 2026-08-20. The new price appeared in the answer after the deployment finished and the accuracy report reflected the new version."
+        ],
+        [
+          "SC-11",
+          "BF-01",
+          "Spend visibility and ceiling",
+          "Tenant admin",
+          "1. The administrator opens the cost page after a day of traffic.\n2. The administrator compares the reported spend with the provider console.\n3. The administrator lowers the ceiling below the current spend.\n4. A new assistant session is started.",
+          "The customer always knows what the platform is costing them and can cap it, so a runaway session cannot produce a surprise invoice.",
+          "High",
+          "Partial",
+          "Session on 2026-08-20. The ceiling stopped the new session as expected, but the reported spend was lower than the provider console for one model because that provider returns no usage figures and the amount is estimated."
+        ],
+        [
+          "SC-12",
+          "BF-02",
+          "Notifications reach the right people",
+          "Sale + Tenant admin",
+          "1. A conversation is escalated to a human.\n2. The sale user who owns the inbox watches the notification area.\n3. A background job fails on purpose.\n4. The administrator watches the notification area and the job centre.",
+          "The people who need to act are told without watching the screen, and each alert points straight at the item that needs attention.",
+          "Medium",
+          "Pass",
+          "Session on 2026-08-20. Both alerts arrived within a few seconds and each one opened the right item when clicked."
+        ],
+        [
+          "SC-13",
+          "BF-03",
+          "Document upload and indexing is visible to the editor",
+          "Content editor",
+          "1. The editor uploads a five megabyte PDF to the knowledge base and watches the job centre.\n2. The editor searches the knowledge base for a phrase from the document.\n3. The editor asks the assistant a question answered by the uploaded document.",
+          "The editor can upload on their own, can tell when indexing is done and can prove the new knowledge is reachable before trusting it.",
+          "High",
+          "Pass",
+          "Session on 2026-08-20. The job centre showed progress and the probe question was answered from the new document after indexing."
+        ],
+        [
+          "SC-14",
+          "BF-04",
+          "Bulk import of contacts as leads",
+          "Tenant admin",
+          "1. The administrator imports a CSV of twenty contacts.\n2. The administrator opens the lead list and checks the imported count.\n3. The administrator opens one imported contact and edits its phone number.",
+          "Twenty contacts are imported without stopping at row ten, each appears as a lead and the edit is saved.",
+          "Medium",
+          "Pass",
+          "Session on 2026-08-20. Import finished in under thirty seconds and the edit persisted."
+        ],
+        [
+          "SC-15",
+          "BF-02",
+          "Sale sees only own inbox and own leads",
+          "Two sale users",
+          "1. Two sale users are attached to two different inboxes.\n2. Each user signs in and opens the inbox and the lead list.\n3. Each user tries the identifier of a lead owned by the other inbox.",
+          "Each user sees only their own inbox and own leads; the cross identifier is refused with 403 or 404.",
+          "High",
+          "Pass",
+          "Session on 2026-08-20. Cross access was refused and neither user could guess the other inbox by enumeration."
+        ],
+        [
+          "SC-16",
+          "BF-05",
+          "Content repurpose from Facebook article to TikTok brief",
+          "Content editor",
+          "1. The editor opens a published Facebook article.\n2. The editor triggers repurpose for TikTok.\n3. The editor reviews the generated TikTok draft.",
+          "Repurpose creates a new draft for the target platform; the original article is unchanged.",
+          "Medium",
+          "Pass",
+          "Session on 2026-08-20. The new draft appeared within sixty seconds and the original status was unchanged."
+        ],
+        [
+          "SC-17",
+          "BF-01",
+          "Invite team member and set role",
+          "Tenant admin",
+          "1. The administrator invites a new member with the sale role.\n2. The new member accepts the invite and signs in.\n3. The new member opens a restricted page and checks the navigation.",
+          "Invitation produces a working account with the requested role and the navigation shows only the pages allowed for that role.",
+          "High",
+          "Pass",
+          "Session on 2026-08-20. The new member could sign in immediately and the finance page was hidden as expected."
+        ],
+        [
+          "SC-18",
+          "BF-04",
+          "Stage progression is visible and auditable",
+          "Sale manager",
+          "1. The sale user moves a lead from cold to warm with a reason.\n2. The sale manager opens the lead and checks the stage history.\n3. The manager exports the stage history to CSV.",
+          "Each stage change records who did it, when and why; the export contains the same entries.",
+          "Medium",
+          "Pass",
+          "Session on 2026-08-20. The history showed three entries and the export matched the on screen list."
+        ],
+        [
+          "SC-19",
+          "BF-06",
+          "Personalized quote generated and sent from a live conversation",
+          "Sale",
+          "1. The sale user opens a conversation where a package was discussed.\n2. The sale user clicks Generate Quote.\n3. The sale user sends the ready PDF through the same channel.\n4. The sale user opens the document library and finds it under the contact.",
+          "A quote reaches the customer inside the same conversation in under a minute, and the sale team can always find what was sent to whom.",
+          "High",
+          "Pass",
+          "Session on 2026-08-20. The PDF was ready in under thirty seconds and appeared correctly in the document library."
+        ],
+        [
+          "SC-20",
+          "BF-06",
+          "Weekly report reaches the manager on schedule",
+          "Sale manager",
+          "1. The manager configures a weekly KPI report schedule.\n2. The manager waits for the scheduled time.\n3. The manager opens the delivered report and compares it with the live dashboard.",
+          "The manager receives a report without asking anyone for it, and the numbers match what the dashboard shows live.",
+          "Medium",
+          "Pass",
+          "Session on 2026-08-20. The report arrived within the scheduled window and the totals matched exactly."
+        ],
+        [
+          "SC-21",
+          "BF-07",
+          "New role and API key provisioned for an integration partner",
+          "Tenant admin",
+          "1. The administrator creates a read-only role for a reporting integration.\n2. The administrator issues an API key under that role.\n3. The administrator tests the key against a read endpoint and a write endpoint.\n4. The administrator revokes the key once the integration test is done.",
+          "An external integration can be given exactly the access it needs, proven safe before real use, and cut off cleanly afterward.",
+          "High",
+          "Pass",
+          "Session on 2026-08-20. The write attempt was refused as expected and the key stopped working immediately after revocation."
+        ],
+        [
+          "SC-22",
+          "BF-08",
+          "Analytics review across five channels for the week",
+          "PM",
+          "1. The PM opens the omnichannel analytics dashboard for the past seven days.\n2. The PM compares channel totals against the exported CSV.\n3. The PM drills into the channel with the lowest conversion.",
+          "The PM can see which channel is underperforming and trust the numbers enough to act on them in the same sitting.",
+          "Medium",
+          "Pass",
+          "Session on 2026-08-20. The drill-down for the underperforming channel matched the summary total exactly."
+        ]
+      ]
+    },
+    "Exploratory": {
+      "rows": [
+        [
+          "2026-08-19",
+          "Product owner",
+          "BF-02 / Shared inbox screen",
+          "With more than forty open conversations the list keeps its own scroll position when returning from a detail page, but the unread marker only refreshes after a manual reload. The business user expected the marker to clear on its own.",
+          "Minor",
+          null
+        ],
+        [
+          "2026-08-20",
+          "Sales team lead",
+          "BF-04 / Lead detail screen",
+          "The pipeline stage can be changed from the detail page without recording a reason, while the same change from the list page asks for one. The team lead wants the reason to be required in both places so the pipeline history stays complete.",
+          "Major",
+          "DEF-203"
+        ],
+        [
+          "2026-08-20",
+          "Product owner",
+          "BF-05 / Content calendar",
+          "The calendar jumps two weeks forward when the month has five weeks, but the event dots stay on the correct day. The business user expects the viewport to follow the dots.",
+          "Minor",
+          null
+        ],
+        [
+          "2026-08-20",
+          "QA2",
+          "BF-02 / Mobile inbox",
+          "On a 375 pixel viewport the quick reply bar covers the last message in the thread. Manual scroll reveals it but the expectation is that new messages remain visible.",
+          "Major",
+          "DEF-204"
+        ],
+        [
+          "2026-08-20",
+          "QA1",
+          "BF-01 / Settings navigation",
+          "The sidebar highlights the wrong section after using the browser back button from the branding page. Refresh fixes it, so the defect is in client side routing rather than data.",
+          "Minor",
+          null
+        ],
+        [
+          "2026-08-20",
+          "QA1",
+          "BF-06 / Document library",
+          "Re-sending a previously generated quote creates a second document row identical to the first instead of reusing it, which makes the library noisy after a few resends. Not a defect on its own, logged for the product owner to decide.",
+          "Minor",
+          null
+        ],
+        [
+          "2026-08-20",
+          "Tenant admin (pilot)",
+          "BF-07 / Role editor",
+          "Removing the last permission from a custom role is allowed and leaves the role with an empty permission set silently, rather than warning that any user on it will see almost nothing.",
+          "Major",
+          "DEF-205"
+        ]
+      ]
+    }
+  }
+}

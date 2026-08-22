@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/shared/layout/AppShell";
+import { MarketingPerformanceTab } from "./MarketingPerformanceTab";
 import { canUseFeature } from "@/shared/auth/access";
 import { useRole } from "@/shared/auth/authStore";
 import { Alert, Button, Card, Modal, StatusPill, type StatusTone } from "@/shared/ui";
@@ -22,8 +23,8 @@ import {
   type OmniChannelRow,
 } from "@/shared/api/analytics";
 
-type RangePreset = "7d" | "30d";
-type ReportTab = "overview" | "agent" | "lead";
+type RangePreset = "7d" | "30d" | "90d";
+type ReportTab = "overview" | "agent" | "lead" | "marketing";
 type ExportFormat = "csv" | "pdf";
 
 interface DateRange {
@@ -53,10 +54,13 @@ function isoDate(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
 
+// API hiệu quả bài đăng chặn tối đa 90 ngày, nên mốc dài nhất ở đây cũng dừng ở 90.
+const RANGE_PRESET_DAYS: Record<RangePreset, number> = { "7d": 7, "30d": 30, "90d": 90 };
+
 function buildRange(preset: RangePreset): DateRange {
   const to = new Date();
   const from = new Date(to);
-  from.setDate(to.getDate() - (preset === "30d" ? 29 : 6));
+  from.setDate(to.getDate() - (RANGE_PRESET_DAYS[preset] - 1));
   return { from: isoDate(from), to: isoDate(to) };
 }
 
@@ -553,6 +557,7 @@ export default function AnalyticsReportsPage() {
     ["overview", "Báo cáo Hội thoại"],
     ...(canSeeAgentTab ? ([["agent", "Hiệu suất Agent"]] as const) : []),
     ["lead", "Chuyển đổi Lead"],
+    ["marketing", "Hiệu quả Marketing"],
   ];
   // Không bao giờ render một tab đã bị ẩn (ví dụ role về sau khi state đã trỏ vào "agent").
   const safeTab: ReportTab = visibleTabs.some(([value]) => value === tab) ? tab : "overview";
@@ -659,6 +664,7 @@ export default function AnalyticsReportsPage() {
             >
               <option value="7d">Tuần này</option>
               <option value="30d">30 ngày</option>
+              <option value="90d">90 ngày</option>
             </select>
             <select
               className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
@@ -729,6 +735,10 @@ export default function AnalyticsReportsPage() {
             <AgentRadar agents={agents} />
           </section>
         </div>
+      ) : null}
+
+      {safeTab === "marketing" ? (
+        <MarketingPerformanceTab days={RANGE_PRESET_DAYS[rangePreset]} />
       ) : null}
 
       {safeTab === "lead" ? (

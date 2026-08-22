@@ -91,7 +91,7 @@ public sealed partial class MetaEngagementSyncJob(
                         objectId,
                         new Dictionary<string, string?>
                         {
-                            ["fields"] = "likes.summary(true),comments.summary(true)",
+                            ["fields"] = FacebookEngagementFields,
                         },
                         credential.PageAccessToken,
                         ct).ConfigureAwait(false);
@@ -103,7 +103,18 @@ public sealed partial class MetaEngagementSyncJob(
                         continue;
                     }
 
-                    schedule.SetEngagement(likes, comments, now);
+                    var reactions = ReadFacebookReactions(doc.RootElement);
+                    schedule.SetFacebookEngagement(
+                        likes,
+                        comments,
+                        reactions.Total,
+                        reactions.Love,
+                        reactions.Haha,
+                        reactions.Wow,
+                        reactions.Sad,
+                        reactions.Angry,
+                        reactions.Care,
+                        now);
                     synced++;
                     LogSynced(logger, schedule.Id, platform, objectId, likes.Value, comments.Value);
                     continue;
@@ -216,7 +227,7 @@ public sealed partial class MetaEngagementSyncJob(
 
     // FB permalink is https://www.facebook.com/{post_id}; post_id (pageid_storyid) is the tail segment.
     // Legacy rows use this fallback; new rows use ContentSchedule.ExternalPostId.
-    internal static string? ExtractPostId(string? postUrl)
+    public static string? ExtractPostId(string? postUrl)
     {
         if (string.IsNullOrWhiteSpace(postUrl))
             return null;
@@ -226,16 +237,47 @@ public sealed partial class MetaEngagementSyncJob(
         return IsSafeGraphObjectId(tail) && tail.Contains('_', StringComparison.Ordinal) ? tail : null;
     }
 
-    internal static bool IsSafeGraphObjectId(string? objectId) =>
+    public static bool IsSafeGraphObjectId(string? objectId) =>
         !string.IsNullOrWhiteSpace(objectId)
         && objectId.Length <= ContentSchedule.MaxExternalPostIdLength
         && objectId.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
 
-    internal static string ExtractPageId(string postId)
+    public static string ExtractPageId(string postId)
     {
         var separator = postId.IndexOf('_', StringComparison.Ordinal);
         return separator > 0 ? postId[..separator] : postId;
     }
+
+    // Edge "likes" chi dem reaction LIKE; tong moi loai nam o edge "reactions".
+    // Moi loai duoc alias rieng (limit(0) de khong keo ve danh sach nguoi tha reaction).
+    internal const string FacebookEngagementFields =
+        "likes.summary(true),comments.summary(true),reactions.summary(true)"
+        + ",reactions.type(LOVE).limit(0).summary(total_count).as(love)"
+        + ",reactions.type(HAHA).limit(0).summary(total_count).as(haha)"
+        + ",reactions.type(WOW).limit(0).summary(total_count).as(wow)"
+        + ",reactions.type(SAD).limit(0).summary(total_count).as(sad)"
+        + ",reactions.type(ANGRY).limit(0).summary(total_count).as(angry)"
+        + ",reactions.type(CARE).limit(0).summary(total_count).as(care)";
+
+    internal readonly record struct FacebookReactionBreakdown(
+        int? Total,
+        int? Love,
+        int? Haha,
+        int? Wow,
+        int? Sad,
+        int? Angry,
+        int? Care);
+
+    // Thieu edge => null chu khong phai 0: bai dong bo truoc khi co reaction khong duoc bao la "0 cam xuc".
+    internal static FacebookReactionBreakdown ReadFacebookReactions(JsonElement root) =>
+        new(
+            ReadSummaryTotal(root, "reactions"),
+            ReadSummaryTotal(root, "love"),
+            ReadSummaryTotal(root, "haha"),
+            ReadSummaryTotal(root, "wow"),
+            ReadSummaryTotal(root, "sad"),
+            ReadSummaryTotal(root, "angry"),
+            ReadSummaryTotal(root, "care"));
 
     internal static (int? Likes, int? Comments) ReadCounts(JsonElement root) =>
         ReadFacebookCounts(root);

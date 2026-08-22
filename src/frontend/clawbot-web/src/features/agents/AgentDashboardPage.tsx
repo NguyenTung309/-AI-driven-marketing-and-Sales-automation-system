@@ -79,7 +79,7 @@ const FAILURE_POLICY_OPTIONS: readonly {
   readonly label: string;
   readonly hint: string;
 }[] = [
-  { key: "pause", icon: "pause_circle", label: "Dừng chờ người sửa", hint: "Khuyên dùng — giữ nguyên các bước đã xong, bạn sửa kết quả bước lỗi rồi chạy tiếp. Không tốn thêm chi phí AI." },
+  { key: "pause", icon: "pause_circle", label: "Dừng chờ người Duyệt", hint: "Khuyên dùng — dừng sau từng bước hoàn tất để bạn duyệt hoặc sửa nội dung trước khi chạy tiếp." },
   { key: "replan", icon: "autorenew", label: "AI lập lại kế hoạch", hint: "AI tự nghĩ kế hoạch mới và chạy lại từ đầu. Tốn thêm một lượt lập kế hoạch cộng chi phí chạy lại mọi bước." },
   { key: "fail", icon: "stop_circle", label: "Dừng hẳn phiên", hint: "Đánh hỏng cả phiên ngay khi có bước lỗi. Dùng khi kết quả nửa vời không có giá trị." },
 ];

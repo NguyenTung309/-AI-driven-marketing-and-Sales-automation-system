@@ -1,0 +1,129 @@
+{
+  "_doc": [
+    "DU LIEU BIA CO Y - khong bao gio duoc giao khach.",
+    "Doi chung am cho phan 5.2 / 5.3 cua cong T3: chay tren file nay PHAI do.",
+    "4 dau hieu bia nhet vao: 8 TC cung mot ngay o vong 1, 100% Passed vong 1,",
+    "vong 3 con Pending het, va mot ca vong 1 Passed -> vong 2 Failed ma khong",
+    "mot dong ghi chu nao giai thich."
+  ],
+  "cover": {
+    "project_name": "Fabricated",
+    "project_code": "FAKE",
+    "creator": "<Creator>",
+    "issue_date": "2026-08-20",
+    "version": "0.0",
+    "changes": []
+  },
+  "environment": "Fabricated environment",
+  "sheets": [
+    {
+      "sheet": "Ghost Feature",
+      "name": "A feature nobody tested",
+      "requirement": "Nothing real",
+      "precondition": "None",
+      "scenarios": [
+        {
+          "group": "Ghost group",
+          "cases": [
+            {
+              "id": "TC-FAKE-001",
+              "description": "Fabricated case 1",
+              "procedure": "1. Do nothing.",
+              "expected": "Nothing happens.",
+              "precondition": "None",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Failed", "date": "2026-08-20", "tester": "QA1"},
+              "round3": {"result": "Pending", "date": null, "tester": ""},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "TC-FAKE-002",
+              "description": "Fabricated case 2",
+              "procedure": "1. Do nothing.",
+              "expected": "Nothing happens.",
+              "precondition": "None",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round3": {"result": "Pending", "date": null, "tester": ""},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "TC-FAKE-003",
+              "description": "Fabricated case 3",
+              "procedure": "1. Do nothing.",
+              "expected": "Nothing happens.",
+              "precondition": "None",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round3": {"result": "Pending", "date": null, "tester": ""},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "TC-FAKE-004",
+              "description": "Fabricated case 4",
+              "procedure": "1. Do nothing.",
+              "expected": "Nothing happens.",
+              "precondition": "None",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round3": {"result": "Pending", "date": null, "tester": ""},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "TC-FAKE-005",
+              "description": "Fabricated case 5",
+              "procedure": "1. Do nothing.",
+              "expected": "Nothing happens.",
+              "precondition": "None",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round3": {"result": "Pending", "date": null, "tester": ""},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "TC-FAKE-006",
+              "description": "Fabricated case 6",
+              "procedure": "1. Do nothing.",
+              "expected": "Nothing happens.",
+              "precondition": "None",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round3": {"result": "Pending", "date": null, "tester": ""},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "TC-FAKE-007",
+              "description": "Fabricated case 7",
+              "procedure": "1. Do nothing.",
+              "expected": "Nothing happens.",
+              "precondition": "None",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round3": {"result": "Pending", "date": null, "tester": ""},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "TC-FAKE-008",
+              "description": "Fabricated case 8",
+              "procedure": "1. Do nothing.",
+              "expected": "Nothing happens.",
+              "precondition": "None",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round3": {"result": "Pending", "date": null, "tester": ""},
+              "defect": "",
+              "note": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

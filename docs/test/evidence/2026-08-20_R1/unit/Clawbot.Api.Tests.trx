@@ -1,0 +1,626 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="3a4d7ebc-861e-4939-a355-3c919ac98943" name="AdminDatVo@VOTHANHDATPC 2026-08-20 22:49:29" runUser="VOTHANHDATPC\AdminDatVo" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-08-20T22:49:29.0596633+07:00" queuing="2026-08-20T22:49:29.0596636+07:00" start="2026-08-20T22:46:22.5197401+07:00" finish="2026-08-20T22:49:29.0662408+07:00" />
+  <TestSettings name="default" id="5e0937ed-abb0-43a1-999b-1daa653d2697">
+    <Deployment runDeploymentRoot="AdminDatVo_VOTHANHDATPC_2026-08-20_22_49_29" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="dcff604e-1930-40cd-ba06-38bc1b2582e2" testId="b83691f4-dfa7-ab5c-3b80-a0b908d83c2f" testName="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.AddClawbotRateLimiting_RegistersRateLimiterOptions" computerName="VOTHANHDATPC" duration="00:00:00.0013152" startTime="2026-08-20T22:49:28.9480441+07:00" endTime="2026-08-20T22:49:28.9480441+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="dcff604e-1930-40cd-ba06-38bc1b2582e2" />
+    <UnitTestResult executionId="e3c5ee59-8bf2-4d6d-949b-59f1f51d7db5" testId="f661e8ee-8283-fe99-eb67-3555038a776d" testName="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.PolicyNames_AreStableStrings" computerName="VOTHANHDATPC" duration="00:00:00.0001971" startTime="2026-08-20T22:49:28.9478890+07:00" endTime="2026-08-20T22:49:28.9478891+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e3c5ee59-8bf2-4d6d-949b-59f1f51d7db5" />
+    <UnitTestResult executionId="04e6e673-a4eb-47e2-af49-db050d0fea02" testId="4a979ebf-ed99-20f2-87b6-4e81d75915fc" testName="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.PolicyHeader_FormatsPolicyAndLimit(policy: &quot;general&quot;, permit: 300, expected: &quot;general:300/min&quot;)" computerName="VOTHANHDATPC" duration="00:00:00.0000945" startTime="2026-08-20T22:49:28.9479348+07:00" endTime="2026-08-20T22:49:28.9479348+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="04e6e673-a4eb-47e2-af49-db050d0fea02" />
+    <UnitTestResult executionId="1843ec0d-069f-4bba-aa6a-667e10ff59d7" testId="38092c13-e9d6-6de3-9af9-cdd9ac6f3a0b" testName="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.PolicyHeader_UsesInvariantCultureForNumbers" computerName="VOTHANHDATPC" duration="00:00:00.0021042" startTime="2026-08-20T22:49:28.9475049+07:00" endTime="2026-08-20T22:49:28.9475050+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1843ec0d-069f-4bba-aa6a-667e10ff59d7" />
+    <UnitTestResult executionId="1d1e2415-b605-4626-81bd-1c95f0e20be7" testId="7b705c06-ae7d-4cf2-4483-04d69e392a36" testName="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.AddClawbotRateLimiting_ReturnsSameCollectionForChaining" computerName="VOTHANHDATPC" duration="00:00:00.0075440" startTime="2026-08-20T22:49:28.9444923+07:00" endTime="2026-08-20T22:49:28.9445144+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1d1e2415-b605-4626-81bd-1c95f0e20be7" />
+    <UnitTestResult executionId="8afb9fe2-2e2f-45a9-8644-5cf1934fc63b" testId="b8d1a98c-7ace-ebe5-d569-f047a244c0cf" testName="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.PolicyHeader_FormatsPolicyAndLimit(policy: &quot;auth&quot;, permit: 30, expected: &quot;auth:30/min&quot;)" computerName="VOTHANHDATPC" duration="00:00:00.0000054" startTime="2026-08-20T22:49:28.9479791+07:00" endTime="2026-08-20T22:49:28.9479792+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="8afb9fe2-2e2f-45a9-8644-5cf1934fc63b" />
+    <UnitTestResult executionId="76253c55-d10d-4732-8d07-725b1086132b" testId="0c418733-b983-5187-24e2-b87a6ab2056f" testName="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.PolicyHeader_FormatsPolicyAndLimit(policy: &quot;upload&quot;, permit: 20, expected: &quot;upload:20/min&quot;)" computerName="VOTHANHDATPC" duration="00:00:00.0002055" startTime="2026-08-20T22:49:28.9479562+07:00" endTime="2026-08-20T22:49:28.9479562+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="76253c55-d10d-4732-8d07-725b1086132b" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.PolicyHeader_FormatsPolicyAndLimit(policy: &quot;auth&quot;, permit: 30, expected: &quot;auth:30/min&quot;)" storage="d:\clawbot\tests\clawbot.api.tests\bin\debug\net8.0\clawbot.api.tests.dll" id="b8d1a98c-7ace-ebe5-d569-f047a244c0cf">
+      <Execution id="8afb9fe2-2e2f-45a9-8644-5cf1934fc63b" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Api.Tests\bin\Debug\net8.0\Clawbot.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests" name="PolicyHeader_FormatsPolicyAndLimit" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.PolicyHeader_FormatsPolicyAndLimit(policy: &quot;upload&quot;, permit: 20, expected: &quot;upload:20/min&quot;)" storage="d:\clawbot\tests\clawbot.api.tests\bin\debug\net8.0\clawbot.api.tests.dll" id="0c418733-b983-5187-24e2-b87a6ab2056f">
+      <Execution id="76253c55-d10d-4732-8d07-725b1086132b" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Api.Tests\bin\Debug\net8.0\Clawbot.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests" name="PolicyHeader_FormatsPolicyAndLimit" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.PolicyHeader_UsesInvariantCultureForNumbers" storage="d:\clawbot\tests\clawbot.api.tests\bin\debug\net8.0\clawbot.api.tests.dll" id="38092c13-e9d6-6de3-9af9-cdd9ac6f3a0b">
+      <Execution id="1843ec0d-069f-4bba-aa6a-667e10ff59d7" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Api.Tests\bin\Debug\net8.0\Clawbot.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests" name="PolicyHeader_UsesInvariantCultureForNumbers" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.AddClawbotRateLimiting_ReturnsSameCollectionForChaining" storage="d:\clawbot\tests\clawbot.api.tests\bin\debug\net8.0\clawbot.api.tests.dll" id="7b705c06-ae7d-4cf2-4483-04d69e392a36">
+      <Execution id="1d1e2415-b605-4626-81bd-1c95f0e20be7" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Api.Tests\bin\Debug\net8.0\Clawbot.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests" name="AddClawbotRateLimiting_ReturnsSameCollectionForChaining" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.AddClawbotRateLimiting_RegistersRateLimiterOptions" storage="d:\clawbot\tests\clawbot.api.tests\bin\debug\net8.0\clawbot.api.tests.dll" id="b83691f4-dfa7-ab5c-3b80-a0b908d83c2f">
+      <Execution id="dcff604e-1930-40cd-ba06-38bc1b2582e2" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Api.Tests\bin\Debug\net8.0\Clawbot.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests" name="AddClawbotRateLimiting_RegistersRateLimiterOptions" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.PolicyHeader_FormatsPolicyAndLimit(policy: &quot;general&quot;, permit: 300, expected: &quot;general:300/min&quot;)" storage="d:\clawbot\tests\clawbot.api.tests\bin\debug\net8.0\clawbot.api.tests.dll" id="4a979ebf-ed99-20f2-87b6-4e81d75915fc">
+      <Execution id="04e6e673-a4eb-47e2-af49-db050d0fea02" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Api.Tests\bin\Debug\net8.0\Clawbot.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests" name="PolicyHeader_FormatsPolicyAndLimit" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests.PolicyNames_AreStableStrings" storage="d:\clawbot\tests\clawbot.api.tests\bin\debug\net8.0\clawbot.api.tests.dll" id="f661e8ee-8283-fe99-eb67-3555038a776d">
+      <Execution id="e3c5ee59-8bf2-4d6d-949b-59f1f51d7db5" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Api.Tests\bin\Debug\net8.0\Clawbot.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Api.Tests.Middleware.RateLimitingExtensionsTests" name="PolicyNames_AreStableStrings" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="b83691f4-dfa7-ab5c-3b80-a0b908d83c2f" executionId="dcff604e-1930-40cd-ba06-38bc1b2582e2" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f661e8ee-8283-fe99-eb67-3555038a776d" executionId="e3c5ee59-8bf2-4d6d-949b-59f1f51d7db5" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4a979ebf-ed99-20f2-87b6-4e81d75915fc" executionId="04e6e673-a4eb-47e2-af49-db050d0fea02" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="38092c13-e9d6-6de3-9af9-cdd9ac6f3a0b" executionId="1843ec0d-069f-4bba-aa6a-667e10ff59d7" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7b705c06-ae7d-4cf2-4483-04d69e392a36" executionId="1d1e2415-b605-4626-81bd-1c95f0e20be7" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="b8d1a98c-7ace-ebe5-d569-f047a244c0cf" executionId="8afb9fe2-2e2f-45a9-8644-5cf1934fc63b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0c418733-b983-5187-24e2-b87a6ab2056f" executionId="76253c55-d10d-4732-8d07-725b1086132b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="7" executed="7" passed="7" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 8.0.26)&#xD;
+[xUnit.net 00:00:00.14]   Discovering: Clawbot.Api.Tests&#xD;
+[22:46:38 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 1, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=1,Free=32766,Min=6,Max=32767), POOL: (Threads=5,QueuedItems=0,CompletedItems=101,Timers=11), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:46:44 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 2, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=1,Free=32766,Min=6,Max=32767), POOL: (Threads=5,QueuedItems=0,CompletedItems=146,Timers=11), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:46:49 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 3, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=2,Free=32765,Min=6,Max=32767), POOL: (Threads=5,QueuedItems=0,CompletedItems=177,Timers=9), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:46:54 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 4, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=3,Free=32764,Min=6,Max=32767), POOL: (Threads=5,QueuedItems=0,CompletedItems=210,Timers=9), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:46:59 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 5, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=3,Free=32764,Min=6,Max=32767), POOL: (Threads=5,QueuedItems=0,CompletedItems=246,Timers=10), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:47:05 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 6, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=3,Free=32764,Min=6,Max=32767), POOL: (Threads=5,QueuedItems=0,CompletedItems=285,Timers=9), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:47:09 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:47:11 ERR] BackgroundService failed&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 1, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=2,Free=32765,Min=6,Max=32767), POOL: (Threads=7,QueuedItems=0,CompletedItems=546,Timers=19), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisNotificationRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisNotificationRelay.cs:line 25&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:47:11 ERR] BackgroundService failed&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=3,Free=32764,Min=6,Max=32767), POOL: (Threads=7,QueuedItems=1,CompletedItems=546,Timers=19), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisInboxEventRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisInboxEventRelay.cs:line 24&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:47:11 FTL] The HostOptions.BackgroundServiceExceptionBehavior is configured to StopHost. A BackgroundService has thrown an unhandled exception, and the IHost instance is stopping. To avoid this behavior, configure this to Ignore; however the BackgroundService will not be restarted.&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 1, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=2,Free=32765,Min=6,Max=32767), POOL: (Threads=7,QueuedItems=0,CompletedItems=546,Timers=19), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisNotificationRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisNotificationRelay.cs:line 25&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:47:11 FTL] The HostOptions.BackgroundServiceExceptionBehavior is configured to StopHost. A BackgroundService has thrown an unhandled exception, and the IHost instance is stopping. To avoid this behavior, configure this to Ignore; however the BackgroundService will not be restarted.&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=3,Free=32764,Min=6,Max=32767), POOL: (Threads=7,QueuedItems=1,CompletedItems=546,Timers=19), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisInboxEventRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisInboxEventRelay.cs:line 24&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:47:11 WRN] Failed to stop bus: rabbitmq://localhost/VOTHANHDATPC_testhost_bus_cynoyy8p3ayx9bcsbdxx7w1jyh?temporary=true (Not Started)&#xD;
+[22:47:20 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:47:24 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 1, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=3,Free=32764,Min=6,Max=32767), POOL: (Threads=7,QueuedItems=0,CompletedItems=978,Timers=16), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:47:29 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 2, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=3,Free=32764,Min=6,Max=32767), POOL: (Threads=7,QueuedItems=0,CompletedItems=1130,Timers=12), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:47:34 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 3, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=3,Free=32764,Min=6,Max=32767), POOL: (Threads=6,QueuedItems=0,CompletedItems=1287,Timers=13), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:47:35 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:47:39 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 4, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=3,Free=32764,Min=6,Max=32767), POOL: (Threads=6,QueuedItems=1,CompletedItems=1455,Timers=14), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:47:45 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 5, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=4,Free=32763,Min=6,Max=32767), POOL: (Threads=6,QueuedItems=0,CompletedItems=1638,Timers=12), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:47:51 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 6, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=3,Free=32764,Min=6,Max=32767), POOL: (Threads=6,QueuedItems=1,CompletedItems=1809,Timers=12), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:47:55 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:47:56 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:47:57 ERR] BackgroundService failed&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=4,Free=32763,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=2247,Timers=22), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisInboxEventRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisInboxEventRelay.cs:line 24&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:47:57 ERR] BackgroundService failed&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 1, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=2,Free=32765,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=2247,Timers=22), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisNotificationRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisNotificationRelay.cs:line 25&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:47:57 FTL] The HostOptions.BackgroundServiceExceptionBehavior is configured to StopHost. A BackgroundService has thrown an unhandled exception, and the IHost instance is stopping. To avoid this behavior, configure this to Ignore; however the BackgroundService will not be restarted.&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=4,Free=32763,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=2247,Timers=22), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisInboxEventRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisInboxEventRelay.cs:line 24&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:47:57 FTL] The HostOptions.BackgroundServiceExceptionBehavior is configured to StopHost. A BackgroundService has thrown an unhandled exception, and the IHost instance is stopping. To avoid this behavior, configure this to Ignore; however the BackgroundService will not be restarted.&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 1, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=2,Free=32765,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=2247,Timers=22), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisNotificationRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisNotificationRelay.cs:line 25&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:47:57 WRN] Failed to stop bus: rabbitmq://localhost/VOTHANHDATPC_testhost_bus_cynoyy8p3ayx9rq5bdxx7wurdm?temporary=true (Not Started)&#xD;
+[22:48:06 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:48:10 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 1, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=1,Free=32766,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=2922,Timers=19), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:48:16 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 2, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=4,Free=32763,Min=6,Max=32767), POOL: (Threads=6,QueuedItems=0,CompletedItems=3222,Timers=17), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:48:19 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:48:21 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 3, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=1,Free=32766,Min=6,Max=32767), POOL: (Threads=6,QueuedItems=0,CompletedItems=3495,Timers=17), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:48:25 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:48:26 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 4, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=3,Free=32764,Min=6,Max=32767), POOL: (Threads=6,QueuedItems=1,CompletedItems=3764,Timers=19), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:48:31 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 5, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=1,Free=32766,Min=6,Max=32767), POOL: (Threads=6,QueuedItems=0,CompletedItems=4011,Timers=18), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:48:36 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 6, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=2,Free=32765,Min=6,Max=32767), POOL: (Threads=6,QueuedItems=0,CompletedItems=4258,Timers=15), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:48:40 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:48:41 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:48:42 ERR] BackgroundService failed&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 1, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=2,Free=32765,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=4811,Timers=27), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisNotificationRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisNotificationRelay.cs:line 25&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:48:42 ERR] BackgroundService failed&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=4,Free=32763,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=4811,Timers=27), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisInboxEventRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisInboxEventRelay.cs:line 24&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:48:42 FTL] The HostOptions.BackgroundServiceExceptionBehavior is configured to StopHost. A BackgroundService has thrown an unhandled exception, and the IHost instance is stopping. To avoid this behavior, configure this to Ignore; however the BackgroundService will not be restarted.&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=4,Free=32763,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=4811,Timers=27), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisInboxEventRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisInboxEventRelay.cs:line 24&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:48:42 FTL] The HostOptions.BackgroundServiceExceptionBehavior is configured to StopHost. A BackgroundService has thrown an unhandled exception, and the IHost instance is stopping. To avoid this behavior, configure this to Ignore; however the BackgroundService will not be restarted.&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 1, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=2,Free=32765,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=4811,Timers=27), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisNotificationRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisNotificationRelay.cs:line 25&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:48:42 WRN] Failed to stop bus: rabbitmq://localhost/VOTHANHDATPC_testhost_bus_cynoyy8p3ayx6yk3bdxx7wu9ni?temporary=true (Not Started)&#xD;
+[22:48:51 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:48:55 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 1, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=1,Free=32766,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=5789,Timers=22), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:49:00 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 2, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=5,Free=32762,Min=6,Max=32767), POOL: (Threads=7,QueuedItems=1,CompletedItems=6154,Timers=19), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:49:00 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:49:04 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:49:06 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 3, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=1,Free=32766,Min=6,Max=32767), POOL: (Threads=6,QueuedItems=0,CompletedItems=6632,Timers=22), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:49:11 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 4, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=2,Free=32765,Min=6,Max=32767), POOL: (Threads=6,QueuedItems=0,CompletedItems=6985,Timers=20), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:49:16 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:49:17 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Idle, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 5, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=3,Free=32764,Min=6,Max=32767), POOL: (Threads=6,QueuedItems=0,CompletedItems=7437,Timers=20), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:49:22 WRN] PermissionResolver: Redis unavailable, falling back to DB (The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=DEL, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 6, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=4,Free=32763,Min=6,Max=32767), POOL: (Threads=6,QueuedItems=0,CompletedItems=7792,Timers=21), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts))&#xD;
+[22:49:24 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:49:26 WRN] Connection Failed: rabbitmq://localhost/&#xD;
+RabbitMQ.Client.Exceptions.BrokerUnreachableException: None of the specified endpoints were reachable&#xD;
+ ---&gt; System.AggregateException: One or more errors occurred. (Connection failed)&#xD;
+ ---&gt; RabbitMQ.Client.Exceptions.ConnectFailureException: Connection failed&#xD;
+ ---&gt; System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)&#xD;
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)&#xD;
+   at System.Threading.Tasks.ValueTask.ValueTaskSourceAsTask.&lt;&gt;c.&lt;.cctor&gt;b__4_0(Object state)&#xD;
+--- End of stack trace from previous location ---&#xD;
+   at RabbitMQ.Client.TcpClientAdapter.ConnectAsync(String host, Int32 port)&#xD;
+   at RabbitMQ.Client.Impl.TaskExtensions.TimeoutAfter(Task task, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectOrFail(ITcpClient socket, AmqpTcpEndpoint endpoint, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingAddressFamily(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout, AddressFamily family)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler.ConnectUsingIPv4(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan timeout)&#xD;
+   at RabbitMQ.Client.Impl.SocketFrameHandler..ctor(AmqpTcpEndpoint endpoint, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.Framing.Impl.IProtocolExtensions.CreateFrameHandler(IProtocol protocol, AmqpTcpEndpoint endpoint, ArrayPool`1 pool, Func`2 socketFactory, TimeSpan connectionTimeout, TimeSpan readTimeout, TimeSpan writeTimeout)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateFrameHandler(AmqpTcpEndpoint endpoint)&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.EndpointResolverExtensions.SelectOne[T](IEndpointResolver resolver, Func`2 selector)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IEndpointResolver endpointResolver, String clientProvidedName)&#xD;
+   at RabbitMQ.Client.ConnectionFactory.CreateConnection(IList`1 hostnames, String clientProvidedName)&#xD;
+   at MassTransit.RabbitMqTransport.ConnectionContextFactory.CreateConnection(ISupervisor supervisor) in /_/src/Transports/MassTransit.RabbitMqTransport/RabbitMqTransport/ConnectionContextFactory.cs:line 85&#xD;
+[22:49:28 ERR] BackgroundService failed&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=4,Free=32763,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=8476,Timers=29), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisInboxEventRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisInboxEventRelay.cs:line 24&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:49:28 ERR] BackgroundService failed&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 1, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=2,Free=32765,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=8476,Timers=29), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisNotificationRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisNotificationRelay.cs:line 25&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:49:28 FTL] The HostOptions.BackgroundServiceExceptionBehavior is configured to StopHost. A BackgroundService has thrown an unhandled exception, and the IHost instance is stopping. To avoid this behavior, configure this to Ignore; however the BackgroundService will not be restarted.&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 0, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=4,Free=32763,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=8476,Timers=29), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisInboxEventRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisInboxEventRelay.cs:line 24&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:49:28 FTL] The HostOptions.BackgroundServiceExceptionBehavior is configured to StopHost. A BackgroundService has thrown an unhandled exception, and the IHost instance is stopping. To avoid this behavior, configure this to Ignore; however the BackgroundService will not be restarted.&#xD;
+StackExchange.Redis.RedisConnectionException: The message timed out in the backlog attempting to send because no connection became available (5000ms) - Last Connection Exception: It was not possible to connect to the redis server(s). ConnectTimeout, command=SUBSCRIBE, timeout: 5000, inst: 0, qu: 1, qs: 0, aw: False, bw: CheckingForTimeout, rs: NotStarted, ws: Initializing, in: 0, last-in: 0, cur-in: 0, sync-ops: 0, async-ops: 8, serverEndpoint: localhost:6379, conn-sec: n/a, aoc: 0, mc: 1/1/0, mgr: 10 of 10 available, clientName: VOTHANHDATPC(SE.Redis-v2.8.16.12844), IOCP: (Busy=0,Free=1000,Min=1,Max=1000), WORKER: (Busy=2,Free=32765,Min=6,Max=32767), POOL: (Threads=8,QueuedItems=0,CompletedItems=8476,Timers=29), v: 2.8.16.12844 (Please take a look at this article for some common client-side issues that can cause timeouts: https://stackexchange.github.io/StackExchange.Redis/Timeouts)&#xD;
+ ---&gt; StackExchange.Redis.RedisConnectionException: It was not possible to connect to the redis server(s). ConnectTimeout&#xD;
+   --- End of inner exception stack trace ---&#xD;
+   at Clawbot.Api.Hubs.RedisNotificationRelay.ExecuteAsync(CancellationToken stoppingToken) in D:\Clawbot\src\api\Clawbot.Api\Hubs\RedisNotificationRelay.cs:line 25&#xD;
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)&#xD;
+[22:49:28 WRN] Failed to stop bus: rabbitmq://localhost/VOTHANHDATPC_testhost_bus_cynoyy8p3ayx9ugpbdxx7ww4g6?temporary=true (Not Started)&#xD;
+[xUnit.net 00:03:05.91]   Discovered:  Clawbot.Api.Tests&#xD;
+[xUnit.net 00:03:05.92]   Starting:    Clawbot.Api.Tests&#xD;
+[xUnit.net 00:03:05.99]   Finished:    Clawbot.Api.Tests&#xD;
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

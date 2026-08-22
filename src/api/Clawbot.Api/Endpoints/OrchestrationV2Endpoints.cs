@@ -20,7 +20,7 @@ namespace Clawbot.Api.Endpoints;
 
 public sealed record OrchestrationV2RunRequest(string Goal, string? Source = null, bool DryRun = false);
 // LlmConfigId: null = keep current binding, Guid.Empty = unbind, value = bind (validated against the tenant's llm_configs).
-public sealed record OrchestrationV2AgentRequest(string Code, string DisplayName, string AgentType, string PersonaPrompt, bool IsOrchestratable = true, string? KbModuleCode = null, string? AllowedToolsJson = null, string? InputSchemaJson = null, Guid? LlmConfigId = null);
+public sealed record OrchestrationV2AgentRequest(string Code, string DisplayName, string AgentType, string PersonaPrompt, bool IsOrchestratable = true, string? KbModuleCode = null, string? AllowedToolsJson = null, string? InputSchemaJson = null, Guid? LlmConfigId = null, string? SystemPrompt = null);
 public sealed record OrchestrationV2ScheduleRequest(string Name, string GoalTemplate, string Cadence, string TimezoneId, DateTimeOffset? NextRunAt = null, bool RequiresApproval = false, string TriggerType = "cadence", string? EventKey = null);
 public sealed record OrchestrationV2ControlRequest(string Action, string? Etag = null);
 public sealed record OrchestrationV2UpdatePlanRequest(string PlanJson, string? Etag = null);
@@ -31,7 +31,7 @@ public sealed record OrchestrationV2InterveneTaskRequest(
     bool RerunDownstream = false,
     string? Etag = null);
 
-public sealed record OrchestrationV2AgentDto(Guid Id, string Code, string DisplayName, string AgentType, bool IsOrchestratable, int Version, string? KbModuleCode, string AllowedToolsJson = "[]", string InputSchemaJson = "{}", string PersonaPrompt = "", Guid? LlmConfigId = null);
+public sealed record OrchestrationV2AgentDto(Guid Id, string Code, string DisplayName, string AgentType, bool IsOrchestratable, int Version, string? KbModuleCode, string AllowedToolsJson = "[]", string InputSchemaJson = "{}", string PersonaPrompt = "", Guid? LlmConfigId = null, string? SystemPrompt = null);
 public sealed record OrchestrationV2ScheduleDto(
     Guid Id,
     string Name,
@@ -435,7 +435,7 @@ public static partial class OrchestrationV2Endpoints
         var agents = await db.AgentDefinitions.IgnoreQueryFilters().AsNoTracking()
             .Where(a => a.TenantId == tenant.TenantId && a.DeletedAt == null)
             .OrderBy(a => a.Code)
-            .Select(a => new OrchestrationV2AgentDto(a.Id, a.Code, a.DisplayName, a.AgentType, a.IsOrchestratable, a.Version, a.KbModuleCode, a.AllowedToolsJson, a.InputSchemaJson, a.PersonaPrompt, a.LlmConfigId))
+            .Select(a => new OrchestrationV2AgentDto(a.Id, a.Code, a.DisplayName, a.AgentType, a.IsOrchestratable, a.Version, a.KbModuleCode, a.AllowedToolsJson, a.InputSchemaJson, a.PersonaPrompt, a.LlmConfigId, a.SystemPrompt))
             .ToListAsync(ct).ConfigureAwait(false);
         return Results.Ok(new { items = agents });
     }
@@ -484,8 +484,10 @@ public static partial class OrchestrationV2Endpoints
             : (body.LlmConfigId == Guid.Empty ? null : body.LlmConfigId);
         existing.UpdateDefinition(body.DisplayName, body.AgentType, body.PersonaPrompt, allowedTools, inputSchema,
             existing.OutputSchemaJson, existing.MemoryScope, llmConfigId, body.IsOrchestratable, clock.UtcNow, body.KbModuleCode);
+        if (body.SystemPrompt is not null)
+            existing.SetSystemPrompt(body.SystemPrompt, clock.UtcNow);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return Results.Ok(new OrchestrationV2AgentDto(existing.Id, existing.Code, existing.DisplayName, existing.AgentType, existing.IsOrchestratable, existing.Version, existing.KbModuleCode, existing.AllowedToolsJson, existing.InputSchemaJson, existing.PersonaPrompt, existing.LlmConfigId));
+        return Results.Ok(new OrchestrationV2AgentDto(existing.Id, existing.Code, existing.DisplayName, existing.AgentType, existing.IsOrchestratable, existing.Version, existing.KbModuleCode, existing.AllowedToolsJson, existing.InputSchemaJson, existing.PersonaPrompt, existing.LlmConfigId, existing.SystemPrompt));
     }
 
     // ponytail: validate JSON shape without a schema lib; allowedTools must be a JSON array, inputSchema a JSON object.

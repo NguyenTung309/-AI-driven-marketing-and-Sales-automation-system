@@ -92,8 +92,16 @@ public static class DependencyInjection
 
         // Chuỗi rỗng không phải null nên `??` không đỡ được: appsettings đã xoá secret để lại ""
         // và Connect("") throw, kéo sập mọi scope chạm RAG (review nội dung, lịch agent, orchestrator).
+        // AbortOnConnectFail=false: Redis chết lúc boot KHÔNG được kéo sập host — runtime đã chịu lỗi
+        // Redis (PermissionResolver fallback DB, relay bắt RedisException) theo NFR-02; multiplexer tự
+        // reconnect nền. Nếu bật abort (mặc định) thì Connect() ném đồng bộ, chết ngay lúc dựng host.
         services.AddSingleton<IConnectionMultiplexer>(_ =>
-            ConnectionMultiplexer.Connect(FallbackWhenBlank(cfg.GetConnectionString("Redis"), "localhost:6379")));
+        {
+            var options = ConfigurationOptions.Parse(
+                FallbackWhenBlank(cfg.GetConnectionString("Redis"), "localhost:6379"));
+            options.AbortOnConnectFail = false;
+            return ConnectionMultiplexer.Connect(options);
+        });
 
         // SPEC-11 auth services: refresh-token rotation + runtime permission resolution.
         // PostConfigure forces the timing from AuthPolicy so appsettings cannot drift it.

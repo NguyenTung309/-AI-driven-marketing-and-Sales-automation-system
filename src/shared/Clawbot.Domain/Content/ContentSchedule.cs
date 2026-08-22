@@ -48,8 +48,18 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
     // Last publisher/job reason (retry, fail, hold, stale). Null when healthy pending or successfully posted.
     public string? LastError { get; private set; }
     // Engagement counts fetched back from the platform after publishing. Timestamp is the last Graph attempt.
+    // LikeCount giu nguyen nghia cu: chi reaction loai LIKE cua Facebook (va like cua Instagram).
+    // Doi thang no sang tong reaction se lam so nhay vot va lech voi du lieu da dong bo truoc do,
+    // nen tong + tung loai duoc luu rieng.
     public int? LikeCount { get; private set; }
     public int? CommentCount { get; private set; }
+    public int? ReactionsTotal { get; private set; }
+    public int? ReactionLove { get; private set; }
+    public int? ReactionHaha { get; private set; }
+    public int? ReactionWow { get; private set; }
+    public int? ReactionSad { get; private set; }
+    public int? ReactionAngry { get; private set; }
+    public int? ReactionCare { get; private set; }
     public DateTimeOffset? EngagementSyncedAt { get; private set; }
     public DateTimeOffset? MetaCommentsSyncedAt { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
@@ -305,6 +315,34 @@ public sealed class ContentSchedule : AggregateRoot<Guid>, ITenantOwned
     {
         LikeCount = likeCount;
         CommentCount = commentCount;
+        EngagementSyncedAt = at;
+        UpdatedAt = at;
+    }
+
+    /// <summary>
+    /// Ghi nhan day du reaction Facebook. Instagram khong co phan loai reaction nen chi goi SetEngagement.
+    /// </summary>
+    public void SetFacebookEngagement(
+        int? likeCount,
+        int? commentCount,
+        int? reactionsTotal,
+        int? love,
+        int? haha,
+        int? wow,
+        int? sad,
+        int? angry,
+        int? care,
+        DateTimeOffset at)
+    {
+        LikeCount = likeCount;
+        CommentCount = commentCount;
+        ReactionsTotal = reactionsTotal;
+        ReactionLove = love;
+        ReactionHaha = haha;
+        ReactionWow = wow;
+        ReactionSad = sad;
+        ReactionAngry = angry;
+        ReactionCare = care;
         EngagementSyncedAt = at;
         UpdatedAt = at;
     }

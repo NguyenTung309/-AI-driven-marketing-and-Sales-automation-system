@@ -297,11 +297,11 @@ export interface TenantOrchestrationSettings {
   readonly idleAlertMinutes: number;
   /** Lead im lặng quá N ngày → lost; 0 = tắt. */
   readonly leadLostAfterDays: number;
-  /** Một bước điều phối lỗi thì làm gì: pause (chờ người sửa) | replan (AI lập lại) | fail (dừng hẳn). */
+  /** Chính sách điều phối: pause (dừng sau bước hoàn tất chờ duyệt) | replan (AI lập lại khi lỗi) | fail (dừng hẳn). */
   readonly orchestratorFailurePolicy: OrchestratorFailurePolicy;
 }
 
-/** Mặc định "pause": dừng tại bước lỗi để người sửa, thay vì để orchestrator lập lại kế hoạch (tốn LLM). */
+/** Mặc định "pause": review output sau mỗi bước hoàn tất; task lỗi vẫn đi qua replan. */
 export type OrchestratorFailurePolicy = "pause" | "replan" | "fail";
 
 export interface TenantOrchestrationUpdateResult {

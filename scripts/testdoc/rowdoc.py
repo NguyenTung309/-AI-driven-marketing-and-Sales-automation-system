@@ -53,28 +53,32 @@ class RowDocProfile:
     stat_issue_date: str               # o Issue Date tren sheet Test Statistics
     stat_round_row: int                # dong Round lam nguon so lieu cho Statistics
     tc_index_float: bool               # 5.2 danh so 1.0 / 2.0, 5.3 danh so 1 / 2
-    data_start: int = 11
-    last_col: str = "O"
-    clear_col: str = "R"               # xoa den het cot an R khi don dong
+    data_start: int = 12               # mau moi: dong nhom o 11, case dau o 12
+    last_col: str = "P"                # mau moi: O=Defect IDs, P=Note
+    defect_col: str = "O"
+    clear_col: str = "S"               # mau moi: cot DV an chuyen R -> S
     group_cols: tuple[str, ...] = ("B", "C", "D", "E")
     tc_start: int = 9
     stat_start: int = 11
+    # sheet co dinh KHONG phai data-sheet (khong clone, khong xoa): vd SecurityTest cua 5.2
+    extra_keep_sheets: tuple[str, ...] = ()
 
 
 PROFILES = {
     "system": RowDocProfile(
-        template="docs/test/Report5.3_System Test.xlsx",
+        template="docs/test/Report-5.3_System Test_FRs.xlsx",
         source_sheet="Workflow Name1",
         stat_issue_date="H5",
         stat_round_row=6,
         tc_index_float=False,
     ),
     "integration": RowDocProfile(
-        template="docs/test/Report5.2_Integration Test.xlsx",
-        source_sheet="Login & Authentication",
-        stat_issue_date="G5",
-        stat_round_row=8,
+        template="docs/test/Report-5.2_Integration Test.xlsx",
+        source_sheet="Feature Name1",
+        stat_issue_date="H5",
+        stat_round_row=6,
         tc_index_float=True,
+        extra_keep_sheets=("SecurityTest",),
     ),
 }
 
@@ -267,6 +271,9 @@ def fill_data_sheet(app, ws, sheet: dict, profile: RowDocProfile) -> int:
             else:
                 ws.Range(f"{date_col}{row}").ClearContents()
             xl.set_text(ws, f"{tester_col}{row}", data.get("tester", ""))
+        # Vong test Failed ma cot Defect IDs bo trong la loi doc bao cao: nguoi
+        # cham khong lan ra duoc loi da di dau.
+        xl.set_text(ws, f"{profile.defect_col}{row}", payload.get("defect", ""))
         xl.set_text(ws, f"{profile.last_col}{row}", payload.get("note", ""))
     return case_count
 
@@ -371,11 +378,12 @@ def build(profile: RowDocProfile, content_path: str, out_path: str, round_row: i
     if len(set(sheet_names)) != len(sheet_names):
         raise ValueError("ten sheet bi trung sau khi cat con 31 ky tu")
 
+    keep = set(KEEP_SHEETS) | set(profile.extra_keep_sheets)
     with xl.workbook_from_template(profile.template, out_path) as (app, wb):
         template_sheets = [
             wb.Worksheets(i + 1).Name
             for i in range(wb.Worksheets.Count)
-            if wb.Worksheets(i + 1).Name not in KEEP_SHEETS
+            if wb.Worksheets(i + 1).Name not in keep
         ]
         if profile.source_sheet not in template_sheets:
             raise ValueError(f"mau khong co sheet nguon {profile.source_sheet!r}")

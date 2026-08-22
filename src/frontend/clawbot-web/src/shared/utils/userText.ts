@@ -126,7 +126,8 @@ export function operationalPhaseLabel(value: string | null | undefined): string 
   if (normalized === "dependency_blocked") return "Chờ phụ thuộc";
   if (normalized === "planning_failed") return "Lập kế hoạch thất bại";
   if (normalized === "replan") return "Lập lại kế hoạch";
-  // Can thiệp tay thay cho lập lại kế hoạch: phiên dừng tại bước lỗi, người dùng sửa/chạy lại/bỏ qua.
+  // Review gate: phiên dừng sau task hoàn tất để người dùng duyệt hoặc sửa trước khi chạy tiếp.
+  if (normalized === "awaiting_approval") return "Chờ bạn duyệt";
   if (normalized === "awaiting_intervention") return "Chờ bạn xử lý";
   if (normalized === "task_edited") return "Người dùng sửa kết quả";
   if (normalized === "task_retry") return "Cho chạy lại bước";

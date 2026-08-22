@@ -462,6 +462,8 @@ public sealed class AgentDefinitionConfiguration : IEntityTypeConfiguration<Agen
         builder.Property(x => x.DisplayName).HasMaxLength(256).IsRequired();
         builder.Property(x => x.AgentType).HasMaxLength(32).IsRequired();
         builder.Property(x => x.PersonaPrompt).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(x => x.SystemPrompt).HasColumnName("system_prompt").HasColumnType("nvarchar(max)");
+        builder.Property(x => x.SystemPromptVersion).HasColumnName("system_prompt_version");
         builder.Property(x => x.AllowedToolsJson).HasColumnType("nvarchar(max)").IsRequired();
         builder.Property(x => x.InputSchemaJson).HasColumnType("nvarchar(max)").IsRequired();
         builder.Property(x => x.OutputSchemaJson).HasColumnType("nvarchar(max)").IsRequired();
@@ -671,6 +673,13 @@ public sealed class ContentScheduleConfiguration : IEntityTypeConfiguration<Cont
             .HasMaxLength(ContentSchedule.MaxExternalPostIdLength);
         builder.Property(x => x.ProviderTargetId).HasColumnName("provider_target_id").HasMaxLength(128);
         builder.Property(x => x.MetaCommentsSyncedAt).HasColumnName("meta_comments_synced_at");
+        builder.Property(x => x.ReactionsTotal).HasColumnName("reactions_total");
+        builder.Property(x => x.ReactionLove).HasColumnName("reaction_love");
+        builder.Property(x => x.ReactionHaha).HasColumnName("reaction_haha");
+        builder.Property(x => x.ReactionWow).HasColumnName("reaction_wow");
+        builder.Property(x => x.ReactionSad).HasColumnName("reaction_sad");
+        builder.Property(x => x.ReactionAngry).HasColumnName("reaction_angry");
+        builder.Property(x => x.ReactionCare).HasColumnName("reaction_care");
         builder.Property(x => x.LastError).HasColumnName("last_error").HasMaxLength(ContentSchedule.MaxLastErrorLength);
         builder.Property(x => x.LastErrorCode).HasMaxLength(128);
         builder.Property(x => x.RetryCount).HasColumnName("retry_count");
