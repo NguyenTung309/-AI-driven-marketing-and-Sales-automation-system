@@ -5,7 +5,11 @@ const ADMIN = {
   email: process.env.E2E_ADMIN_EMAIL ?? "admin@clawbot.local",
   password: process.env.E2E_ADMIN_PASSWORD ?? "Admin@12345",
 };
-const ADMIN_PERMISSIONS = ["admin.system", "system:config"];
+// AdminConsolePage gates the "Tích hợp" tab on the fine-grained "admin:integration" permission
+// since a12294c (2026-08-16) split the old coarse "admin.system" check apart. This fixture kept
+// granting the pre-split permissions, so the tab button never rendered and every flow here timed
+// out waiting to click it.
+const ADMIN_PERMISSIONS = ["admin:integration", "system:config"];
 const INITIAL_USER_ID = "17841400000000000";
 const REPLACEMENT_USER_ID = "17841400000000001";
 const SECRET_TOKEN = "instagram-standalone-e2e-secret";
