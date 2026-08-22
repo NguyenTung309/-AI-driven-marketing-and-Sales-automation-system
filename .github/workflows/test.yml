@@ -46,11 +46,19 @@ jobs:
       - name: Build
         run: dotnet build Clawbot.sln --no-restore --configuration Release
 
-      # Xem ghi chú ở production.yml: bộ test .NET bị bỏ qua mặc định vì quá chậm trên runner.
+      # Xem ghi chú ở production.yml: Api.Tests một mình chiếm 96% thời gian chạy test, nên nó là
+      # phần duy nhất bị đưa sang diện chạy theo yêu cầu. Phần còn lại chỉ tốn vài chục giây.
+      - name: Test (fast projects)
+        run: |
+          for proj in tests/*/*.csproj; do
+            case "$proj" in *Clawbot.Api.Tests*) continue ;; esac
+            dotnet test "$proj" --no-build --configuration Release
+          done
+
       # Bật bằng biến repo RUN_DOTNET_TESTS = true, hoặc chạy tay workflow và tích "Run the .NET test suite".
-      - name: Test
+      - name: Test (API integration, slow)
         if: vars.RUN_DOTNET_TESTS == 'true' || inputs.run_tests
-        run: dotnet test Clawbot.sln --no-build --configuration Release
+        run: dotnet test tests/Clawbot.Api.Tests/Clawbot.Api.Tests.csproj --no-build --configuration Release
 
       - name: Frontend Install
         working-directory: src/frontend/clawbot-web
