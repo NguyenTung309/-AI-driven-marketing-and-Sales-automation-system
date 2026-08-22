@@ -1,6 +1,11 @@
 import { apiClient } from "./client";
 
-export type ReportKind = "snapshot" | "anomaly" | "forecast";
+export type ReportKind =
+  | "snapshot"
+  | "anomaly"
+  | "forecast"
+  | "content_snapshot"
+  | "content_funnel";
 export type ReportColumnType = "text" | "number" | "date";
 export type ReportExportFormat = "csv" | "xlsx" | "pdf";
 

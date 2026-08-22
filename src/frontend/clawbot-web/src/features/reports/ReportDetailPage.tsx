@@ -23,12 +23,16 @@ const KIND_LABEL: Record<ReportKind, string> = {
   snapshot: "Tổng hợp KPI",
   anomaly: "Phát hiện bất thường",
   forecast: "Dự báo",
+  content_snapshot: "Hiệu suất nội dung",
+  content_funnel: "Phễu duyệt nội dung",
 };
 
 const KIND_TONE: Record<ReportKind, StatusTone> = {
   snapshot: "neutral",
   anomaly: "warning",
   forecast: "success",
+  content_snapshot: "neutral",
+  content_funnel: "neutral",
 };
 
 interface TableRow {

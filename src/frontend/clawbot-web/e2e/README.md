@@ -29,6 +29,18 @@ npm run test:e2e:all        # both suites
 3. Manual “Đổi lịch” dialog for approved item posts `scheduledAt: null` (golden)
 4. Calendar “Xếp thử đăng lại” re-queues Hangfire only (no browser provider call)
 
+### Report-content suite (`run-report-content-mock.mjs`)
+
+`npm run test:e2e:report-content` — báo cáo marketing do report-agent chốt (`/reports/{id}`):
+
+1. `content_snapshot` hiện nhãn "Hiệu suất nội dung", không rơi về chuỗi thô
+2. Bảng đúng bộ cột nội dung và **không** còn cột KPI sale (Lead / Chuyển đổi)
+3. Số liệu định dạng vi-VN (`1.234`)
+4. Nút Tải Excel gọi đúng `/api/reports/{id}/export?format=xlsx`
+5. `content_funnel` hiện nhãn "Phễu duyệt nội dung" với cột trạng thái quy trình
+
+Header bảng bị CSS `uppercase` nên assert theo text của `<th>`, không theo accessible name.
+
 ## Live stack
 
 Start full stack (or keep Vite + start API/Gateway/AgentService like `run-all.bat`):
