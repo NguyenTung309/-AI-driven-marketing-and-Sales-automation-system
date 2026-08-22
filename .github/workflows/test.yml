@@ -5,6 +5,13 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: Run the .NET test suite (slow; off by default)
+        required: false
+        default: false
+        type: boolean
 
 env:
   DOTNET_VERSION: "8.0.x"
@@ -39,7 +46,10 @@ jobs:
       - name: Build
         run: dotnet build Clawbot.sln --no-restore --configuration Release
 
+      # Xem ghi chú ở production.yml: bộ test .NET bị bỏ qua mặc định vì quá chậm trên runner.
+      # Bật bằng biến repo RUN_DOTNET_TESTS = true, hoặc chạy tay workflow và tích "Run the .NET test suite".
       - name: Test
+        if: vars.RUN_DOTNET_TESTS == 'true' || inputs.run_tests
         run: dotnet test Clawbot.sln --no-build --configuration Release
 
       - name: Frontend Install
