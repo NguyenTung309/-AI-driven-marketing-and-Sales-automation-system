@@ -433,6 +433,8 @@ public static partial class DevDataSeeder
     /// <summary>
     /// Seeds the V2 orchestration sub-agent definitions for the default tenant so "Lập kế hoạch"
     /// has a catalog to plan over. Idempotent: inserts only the codes that are missing.
+    /// Repair (tool grants + seeded prompt pack) runs for every tenant that already has the row —
+    /// a customer tenant must receive a corrected prompt without being provisioned agents it never had.
     /// </summary>
     public static async Task SeedAgentDefinitionsAsync(IServiceProvider services, CancellationToken ct = default)
     {
@@ -440,36 +442,65 @@ public static partial class DevDataSeeder
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("DevDataSeeder");
 
-        var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == TenantSlug, ct);
-        if (tenant is null)
-            return;
+        var defaultTenantId = await db.Tenants.AsNoTracking()
+            .Where(tenant => tenant.Slug == TenantSlug)
+            .Select(tenant => (Guid?)tenant.Id)
+            .FirstOrDefaultAsync(ct);
 
-        // Tracked (no AsNoTracking) so we can repair stale tool grants on existing rows, not just insert missing ones.
+        // Tracked (no AsNoTracking) so we can repair existing rows, not just insert missing ones.
         var existing = await db.AgentDefinitions
             .IgnoreQueryFilters()
-            .Where(a => a.TenantId == tenant.Id)
             .ToListAsync(ct);
-        var byCode = existing.ToDictionary(a => a.Code, StringComparer.OrdinalIgnoreCase);
 
         var changed = 0;
         var now = DateTimeOffset.UtcNow;
-        foreach (var (code, displayName, agentType, persona, allowedToolsJson) in OrchestratorAgents)
+        var catalogByCode = OrchestratorAgents.ToDictionary(agent => agent.Code, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var definition in existing)
         {
-            if (byCode.TryGetValue(code, out var def))
-            {
-                // Repair: a code seeded before tools were assigned (or before a grant changed) never received the
-                // tools otherwise — the loop used to skip existing rows entirely, leaving them text-only.
-                if (!string.Equals(def.AllowedToolsJson, allowedToolsJson, StringComparison.Ordinal))
-                {
-                    def.SetAllowedTools(allowedToolsJson, now);
-                    changed++;
-                }
+            if (!catalogByCode.TryGetValue(definition.Code, out var catalog))
                 continue;
+
+            // A code seeded before tools were assigned (or before a grant changed) otherwise stays text-only.
+            if (!string.Equals(definition.AllowedToolsJson, catalog.AllowedToolsJson, StringComparison.Ordinal))
+            {
+                definition.SetAllowedTools(catalog.AllowedToolsJson, now);
+                changed++;
             }
-            db.AgentDefinitions.Add(AgentDefinition.Create(
-                tenant.Id, code, displayName, agentType, persona, now,
-                allowedToolsJson: allowedToolsJson, memoryScope: "session", isOrchestratable: true));
-            changed++;
+
+            // A prompt edited by the tenant carries no seed version and is never overwritten.
+            if (definition.CanRefreshSeededSystemPrompt(Clawbot.Agents.Core.AgentPromptPacks.PromptPackVersion))
+            {
+                definition.SetSeededSystemPrompt(
+                    Clawbot.Agents.Core.AgentPromptPacks.For(definition.Code),
+                    Clawbot.Agents.Core.AgentPromptPacks.PromptPackVersion,
+                    now);
+                changed++;
+            }
+        }
+
+        if (defaultTenantId is { } tenantId)
+        {
+            var seededCodes = existing
+                .Where(definition => definition.TenantId == tenantId)
+                .Select(definition => definition.Code)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (code, displayName, agentType, persona, allowedToolsJson) in OrchestratorAgents)
+            {
+                if (seededCodes.Contains(code))
+                    continue;
+
+                var created = AgentDefinition.Create(
+                    tenantId, code, displayName, agentType, persona, now,
+                    allowedToolsJson: allowedToolsJson, memoryScope: "session", isOrchestratable: true);
+                created.SetSeededSystemPrompt(
+                    Clawbot.Agents.Core.AgentPromptPacks.For(code),
+                    Clawbot.Agents.Core.AgentPromptPacks.PromptPackVersion,
+                    now);
+                db.AgentDefinitions.Add(created);
+                changed++;
+            }
         }
 
         if (changed == 0) return;

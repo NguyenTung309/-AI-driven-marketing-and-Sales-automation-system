@@ -573,6 +573,43 @@ export interface PostPerformanceTopPost {
   readonly likes: number | null;
   readonly comments: number | null;
   readonly total: number | null;
+  /** Trang/tài khoản đã đăng bài — dialog xem bài hiển thị để biết cần quyền của page nào. */
+  readonly metaAssetId?: string | null;
+  readonly targetName?: string | null;
+  readonly engagementSyncedAt?: string | null;
+  /** Tổng mọi loại reaction. `likes` chỉ là loại LIKE nên luôn nhỏ hơn hoặc bằng số này. */
+  readonly reactionsTotal?: number | null;
+  readonly reactionLove?: number | null;
+  readonly reactionHaha?: number | null;
+  readonly reactionWow?: number | null;
+  readonly reactionSad?: number | null;
+  readonly reactionAngry?: number | null;
+  readonly reactionCare?: number | null;
+}
+
+export interface PostComment {
+  readonly id: string;
+  readonly authorName: string;
+  readonly message: string;
+  readonly createdAt: string | null;
+  readonly likeCount: number;
+  readonly replyCount: number;
+}
+
+export interface PostCommentsResponse {
+  readonly scheduleId: string;
+  readonly items: readonly PostComment[];
+  readonly totalCount: number;
+  readonly isTruncated: boolean;
+  /** null = lấy được; khác null là mã lý do (no_page_credential, graph_unavailable...). */
+  readonly unavailableReason: string | null;
+}
+
+export async function getScheduleComments(scheduleId: string): Promise<PostCommentsResponse> {
+  const res = await apiClient.get<PostCommentsResponse>(
+    `/api/content/schedules/${encodeURIComponent(scheduleId)}/comments`,
+  );
+  return res.data;
 }
 
 export interface PostPerformanceResponse {

@@ -1,0 +1,190 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="d1abc0bd-1f66-40ed-b0a0-294fff88cd6b" name="AdminDatVo@VOTHANHDATPC 2026-08-20 23:05:11" runUser="VOTHANHDATPC\AdminDatVo" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-08-20T23:05:11.2245062+07:00" queuing="2026-08-20T23:05:11.2245066+07:00" start="2026-08-20T23:05:10.5493553+07:00" finish="2026-08-20T23:05:11.2979988+07:00" />
+  <TestSettings name="default" id="29d55e3b-861d-492b-90af-39f2f55a9e39">
+    <Deployment runDeploymentRoot="AdminDatVo_VOTHANHDATPC_2026-08-20_23_05_11" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="145b04a9-22d1-4c8e-b11a-7afc015c73f4" testId="2fae2014-497b-aec2-75ca-8341fac38a62" testName="Clawbot.Application.Tests.Common.AuditBehaviorTests.Handle_HandlerThrows_LogsAndRethrows" computerName="VOTHANHDATPC" duration="00:00:00.0085662" startTime="2026-08-20T23:05:11.2010424+07:00" endTime="2026-08-20T23:05:11.2010424+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="145b04a9-22d1-4c8e-b11a-7afc015c73f4" />
+    <UnitTestResult executionId="44cf2aa6-8882-41ca-b3a6-ea05d83b423e" testId="fe72b1b7-012c-e33d-ecc3-a7e66900824e" testName="Clawbot.Application.Tests.Common.LoggingBehaviorTests.Handle_PropagatesHandlerException" computerName="VOTHANHDATPC" duration="00:00:00.0395182" startTime="2026-08-20T23:05:11.2009913+07:00" endTime="2026-08-20T23:05:11.2009914+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="44cf2aa6-8882-41ca-b3a6-ea05d83b423e" />
+    <UnitTestResult executionId="d4a133b1-d790-41ea-ab27-a5a0cfe14759" testId="5f477cc9-9161-0fce-e669-ff7da048cdd7" testName="Clawbot.Application.Tests.Common.AppErrorTests.Equality_SameCodeAndMessage_AreEqual" computerName="VOTHANHDATPC" duration="00:00:00.0004578" startTime="2026-08-20T23:05:11.2009408+07:00" endTime="2026-08-20T23:05:11.2009408+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d4a133b1-d790-41ea-ab27-a5a0cfe14759" />
+    <UnitTestResult executionId="f7afba56-1ce0-4824-ae6e-a106f8a2f4e1" testId="90cf62fd-c79f-87b0-4b04-1cb8bda385e6" testName="Clawbot.Application.Tests.Conversations.IngestIncomingMessageHandlerTests.Handle_ExistingConversation_AppendsWithoutCreating" computerName="VOTHANHDATPC" duration="00:00:00.0030093" startTime="2026-08-20T23:05:11.1656907+07:00" endTime="2026-08-20T23:05:11.1656910+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f7afba56-1ce0-4824-ae6e-a106f8a2f4e1" />
+    <UnitTestResult executionId="0b9df132-f5c5-46c2-b05e-807cf610df96" testId="38b69906-d0d6-3216-046c-9cd5f35a149e" testName="Clawbot.Application.Tests.Common.ResultTests.Failure_CarriesErrorAndDefaultValue" computerName="VOTHANHDATPC" duration="00:00:00.0015257" startTime="2026-08-20T23:05:11.1989315+07:00" endTime="2026-08-20T23:05:11.1989315+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0b9df132-f5c5-46c2-b05e-807cf610df96" />
+    <UnitTestResult executionId="9ef126c4-847f-4b3f-8d48-4f5219717fd5" testId="75e77c9f-0038-966e-6079-67f0787fa2c3" testName="Clawbot.Application.Tests.DependencyInjectionTests.AddApplication_ReturnsSameCollectionForChaining" computerName="VOTHANHDATPC" duration="00:00:00.0004434" startTime="2026-08-20T23:05:11.1988973+07:00" endTime="2026-08-20T23:05:11.1988973+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9ef126c4-847f-4b3f-8d48-4f5219717fd5" />
+    <UnitTestResult executionId="2a41ca7d-9e49-434e-be0d-32692468e11f" testId="fc385714-de4b-a56b-d9e9-41910c4ad288" testName="Clawbot.Application.Tests.Conversations.OpenConversationHandlerTests.Handle_AddsConversationAndSaves" computerName="VOTHANHDATPC" duration="00:00:00.0258684" startTime="2026-08-20T23:05:11.1642392+07:00" endTime="2026-08-20T23:05:11.1642393+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="2a41ca7d-9e49-434e-be0d-32692468e11f" />
+    <UnitTestResult executionId="f1ffc84e-1ae5-48b7-a429-c73c2630cf03" testId="f9d86426-3786-3558-9be5-7aad1654ae35" testName="Clawbot.Application.Tests.Common.LoggingBehaviorTests.Handle_ReturnsNextResponse" computerName="VOTHANHDATPC" duration="00:00:00.0005509" startTime="2026-08-20T23:05:11.2010214+07:00" endTime="2026-08-20T23:05:11.2010214+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f1ffc84e-1ae5-48b7-a429-c73c2630cf03" />
+    <UnitTestResult executionId="64d022b8-08f3-49ee-a382-1111152179a8" testId="23aa654e-0526-bfa3-9018-5149d4e6a3ed" testName="Clawbot.Application.Tests.DependencyInjectionTests.AddApplication_BehaviorsAreTransient" computerName="VOTHANHDATPC" duration="00:00:00.0042953" startTime="2026-08-20T23:05:11.1987240+07:00" endTime="2026-08-20T23:05:11.1987242+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="64d022b8-08f3-49ee-a382-1111152179a8" />
+    <UnitTestResult executionId="42c0775e-3168-40a6-a922-22dc2a17df16" testId="17f543bb-4942-eda6-092a-3c0cfa64ccb9" testName="Clawbot.Application.Tests.Common.AppErrorTests.Conflict_UsesConflictCode" computerName="VOTHANHDATPC" duration="00:00:00.0001332" startTime="2026-08-20T23:05:11.2009706+07:00" endTime="2026-08-20T23:05:11.2009706+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="42c0775e-3168-40a6-a922-22dc2a17df16" />
+    <UnitTestResult executionId="448a782b-1b3b-4bf3-8190-4df2bcf5bc67" testId="e07edc03-d1ce-8445-22fa-8f3a260237b6" testName="Clawbot.Application.Tests.Common.AppErrorTests.None_IsEmptyCodeAndMessage" computerName="VOTHANHDATPC" duration="00:00:00.0002032" startTime="2026-08-20T23:05:11.2008591+07:00" endTime="2026-08-20T23:05:11.2008592+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="448a782b-1b3b-4bf3-8190-4df2bcf5bc67" />
+    <UnitTestResult executionId="c82fcb73-ca25-42e0-ad56-ae73cd3f10fc" testId="07bfe874-06b4-a456-0013-0f45d25e7e57" testName="Clawbot.Application.Tests.Common.AppErrorTests.Validation_UsesValidationCode" computerName="VOTHANHDATPC" duration="00:00:00.0002187" startTime="2026-08-20T23:05:11.1991199+07:00" endTime="2026-08-20T23:05:11.1991200+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c82fcb73-ca25-42e0-ad56-ae73cd3f10fc" />
+    <UnitTestResult executionId="93d55d75-e8ec-44cd-b8f9-65518af59abe" testId="5ae59aeb-7e7c-3cee-39a7-27537232af1f" testName="Clawbot.Application.Tests.Common.ValidationBehaviorTests.Handle_ValidatorFails_ThrowsAndSkipsNext" computerName="VOTHANHDATPC" duration="00:00:00.0037154" startTime="2026-08-20T23:05:11.2392091+07:00" endTime="2026-08-20T23:05:11.2392097+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="93d55d75-e8ec-44cd-b8f9-65518af59abe" />
+    <UnitTestResult executionId="171547a3-2698-4c8a-af4d-d21cbadaa875" testId="ccd3eaa0-1412-47be-1071-49f79251779f" testName="Clawbot.Application.Tests.Conversations.IngestIncomingMessageHandlerTests.Handle_NoExistingConversation_OpensOneAndAppends" computerName="VOTHANHDATPC" duration="00:00:00.0250688" startTime="2026-08-20T23:05:11.1644865+07:00" endTime="2026-08-20T23:05:11.1644866+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="171547a3-2698-4c8a-af4d-d21cbadaa875" />
+    <UnitTestResult executionId="d3b4681f-e5f9-48bb-927d-9f539ad7fb36" testId="24c352a9-7de1-8164-2ea4-977a78571742" testName="Clawbot.Application.Tests.DependencyInjectionTests.AddApplication_RegistersMediatorAndHandlers" computerName="VOTHANHDATPC" duration="00:00:00.0018297" startTime="2026-08-20T23:05:11.1990625+07:00" endTime="2026-08-20T23:05:11.1990626+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d3b4681f-e5f9-48bb-927d-9f539ad7fb36" />
+    <UnitTestResult executionId="ff27e79a-3738-4757-a867-bae221996bc7" testId="60d56be9-666d-3248-e796-6f9b6121aef2" testName="Clawbot.Application.Tests.Common.ResultTests.Failure_ReferenceType_ValueIsNull" computerName="VOTHANHDATPC" duration="00:00:00.0005359" startTime="2026-08-20T23:05:11.1989723+07:00" endTime="2026-08-20T23:05:11.1989724+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="ff27e79a-3738-4757-a867-bae221996bc7" />
+    <UnitTestResult executionId="e8def41b-3a23-4d94-8b9a-216174ce6141" testId="353d1c89-db4d-0887-b7a7-ee7ba649bb66" testName="Clawbot.Application.Tests.Common.AuditBehaviorTests.Handle_ReturnsNextResponse" computerName="VOTHANHDATPC" duration="00:00:00.0006222" startTime="2026-08-20T23:05:11.2011019+07:00" endTime="2026-08-20T23:05:11.2011019+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e8def41b-3a23-4d94-8b9a-216174ce6141" />
+    <UnitTestResult executionId="b220a60c-9706-48e4-a541-09767b670bc8" testId="7da32c41-afa0-5d52-20f0-ebeecc27f41b" testName="Clawbot.Application.Tests.Common.ResultTests.Success_CarriesValueAndNoError" computerName="VOTHANHDATPC" duration="00:00:00.0001751" startTime="2026-08-20T23:05:11.1990176+07:00" endTime="2026-08-20T23:05:11.1990176+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b220a60c-9706-48e4-a541-09767b670bc8" />
+    <UnitTestResult executionId="0b47a3cd-86fb-4ef2-b95d-c65f3ce86f61" testId="5d833a13-b933-2aa8-7f86-27febba591c3" testName="Clawbot.Application.Tests.Common.ValidationBehaviorTests.Handle_AllValidatorsPass_CallsNext" computerName="VOTHANHDATPC" duration="00:00:00.0006437" startTime="2026-08-20T23:05:11.2404420+07:00" endTime="2026-08-20T23:05:11.2404420+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0b47a3cd-86fb-4ef2-b95d-c65f3ce86f61" />
+    <UnitTestResult executionId="c122e9fe-f0fc-48fe-82fa-3ca9b979c030" testId="4505ee8a-0d88-67ff-2362-dc7d056d01f8" testName="Clawbot.Application.Tests.Common.AuditBehaviorTests.Handle_NullNext_Throws" computerName="VOTHANHDATPC" duration="00:00:00.0069651" startTime="2026-08-20T23:05:11.2010725+07:00" endTime="2026-08-20T23:05:11.2010726+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c122e9fe-f0fc-48fe-82fa-3ca9b979c030" />
+    <UnitTestResult executionId="1c2d71c9-a654-49cb-9f9c-9c34845fa4bf" testId="6b775184-0570-c31d-20cc-d72b108cc315" testName="Clawbot.Application.Tests.DependencyInjectionTests.AddApplication_RegistersAllThreePipelineBehaviors" computerName="VOTHANHDATPC" duration="00:00:00.0243360" startTime="2026-08-20T23:05:11.1621499+07:00" endTime="2026-08-20T23:05:11.1621701+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1c2d71c9-a654-49cb-9f9c-9c34845fa4bf" />
+    <UnitTestResult executionId="e9a92879-4913-429b-9731-df6f4f9cf4b5" testId="7e4720f1-2b41-daa7-624d-45de610eb456" testName="Clawbot.Application.Tests.Common.ResultTests.Success_NullValue_IsStillSuccess" computerName="VOTHANHDATPC" duration="00:00:00.0002006" startTime="2026-08-20T23:05:11.1990481+07:00" endTime="2026-08-20T23:05:11.1990482+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e9a92879-4913-429b-9731-df6f4f9cf4b5" />
+    <UnitTestResult executionId="0fde7680-a6d1-4828-b9a7-375a96da6afa" testId="662c2347-a1a6-eee0-f276-2e04344910f8" testName="Clawbot.Application.Tests.Conversations.IngestIncomingMessageHandlerTests.Handle_AppendsInboundContactMessage" computerName="VOTHANHDATPC" duration="00:00:00.0007665" startTime="2026-08-20T23:05:11.1653235+07:00" endTime="2026-08-20T23:05:11.1653236+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0fde7680-a6d1-4828-b9a7-375a96da6afa" />
+    <UnitTestResult executionId="44887d42-43c3-4259-a459-c47da32bcbc9" testId="be1fcc35-c568-c017-e4eb-3d19f0d675c1" testName="Clawbot.Application.Tests.Common.AppErrorTests.NotFound_UsesNotFoundCode" computerName="VOTHANHDATPC" duration="00:00:00.0001163" startTime="2026-08-20T23:05:11.2009058+07:00" endTime="2026-08-20T23:05:11.2009059+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="44887d42-43c3-4259-a459-c47da32bcbc9" />
+    <UnitTestResult executionId="2742bcd6-cdfa-4696-8a5d-8663056357c8" testId="b52686de-5929-adb2-18aa-a685b8a9da65" testName="Clawbot.Application.Tests.Common.ValidationBehaviorTests.Handle_MultipleValidators_AggregatesAllFailures" computerName="VOTHANHDATPC" duration="00:00:00.1004231" startTime="2026-08-20T23:05:11.2353936+07:00" endTime="2026-08-20T23:05:11.2353947+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="2742bcd6-cdfa-4696-8a5d-8663056357c8" />
+    <UnitTestResult executionId="5790c31e-2bfb-4eba-bfd0-c856cf1650fe" testId="ddd87dae-008c-ad91-92cb-cfea604e8c08" testName="Clawbot.Application.Tests.DependencyInjectionTests.AddApplication_BehaviorOrder_LoggingThenValidationThenAudit" computerName="VOTHANHDATPC" duration="00:00:00.0157041" startTime="2026-08-20T23:05:11.2011223+07:00" endTime="2026-08-20T23:05:11.2011223+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5790c31e-2bfb-4eba-bfd0-c856cf1650fe" />
+    <UnitTestResult executionId="5894fec2-7d5d-42e2-bbbf-6f119f2a90db" testId="9d823980-6652-bd25-bf2b-016625f39c37" testName="Clawbot.Application.Tests.Common.ValidationBehaviorTests.Handle_NoValidators_CallsNext" computerName="VOTHANHDATPC" duration="00:00:00.0005039" startTime="2026-08-20T23:05:11.2397568+07:00" endTime="2026-08-20T23:05:11.2397568+07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5894fec2-7d5d-42e2-bbbf-6f119f2a90db" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="Clawbot.Application.Tests.Common.ValidationBehaviorTests.Handle_ValidatorFails_ThrowsAndSkipsNext" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="5ae59aeb-7e7c-3cee-39a7-27537232af1f">
+      <Execution id="93d55d75-e8ec-44cd-b8f9-65518af59abe" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.ValidationBehaviorTests" name="Handle_ValidatorFails_ThrowsAndSkipsNext" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.ResultTests.Success_CarriesValueAndNoError" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="7da32c41-afa0-5d52-20f0-ebeecc27f41b">
+      <Execution id="b220a60c-9706-48e4-a541-09767b670bc8" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.ResultTests" name="Success_CarriesValueAndNoError" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.LoggingBehaviorTests.Handle_ReturnsNextResponse" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="f9d86426-3786-3558-9be5-7aad1654ae35">
+      <Execution id="f1ffc84e-1ae5-48b7-a429-c73c2630cf03" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.LoggingBehaviorTests" name="Handle_ReturnsNextResponse" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.ResultTests.Success_NullValue_IsStillSuccess" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="7e4720f1-2b41-daa7-624d-45de610eb456">
+      <Execution id="e9a92879-4913-429b-9731-df6f4f9cf4b5" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.ResultTests" name="Success_NullValue_IsStillSuccess" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.ResultTests.Failure_CarriesErrorAndDefaultValue" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="38b69906-d0d6-3216-046c-9cd5f35a149e">
+      <Execution id="0b9df132-f5c5-46c2-b05e-807cf610df96" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.ResultTests" name="Failure_CarriesErrorAndDefaultValue" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.AppErrorTests.Validation_UsesValidationCode" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="07bfe874-06b4-a456-0013-0f45d25e7e57">
+      <Execution id="c82fcb73-ca25-42e0-ad56-ae73cd3f10fc" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.AppErrorTests" name="Validation_UsesValidationCode" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.AppErrorTests.None_IsEmptyCodeAndMessage" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="e07edc03-d1ce-8445-22fa-8f3a260237b6">
+      <Execution id="448a782b-1b3b-4bf3-8190-4df2bcf5bc67" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.AppErrorTests" name="None_IsEmptyCodeAndMessage" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.LoggingBehaviorTests.Handle_PropagatesHandlerException" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="fe72b1b7-012c-e33d-ecc3-a7e66900824e">
+      <Execution id="44cf2aa6-8882-41ca-b3a6-ea05d83b423e" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.LoggingBehaviorTests" name="Handle_PropagatesHandlerException" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.AppErrorTests.NotFound_UsesNotFoundCode" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="be1fcc35-c568-c017-e4eb-3d19f0d675c1">
+      <Execution id="44887d42-43c3-4259-a459-c47da32bcbc9" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.AppErrorTests" name="NotFound_UsesNotFoundCode" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.AuditBehaviorTests.Handle_ReturnsNextResponse" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="353d1c89-db4d-0887-b7a7-ee7ba649bb66">
+      <Execution id="e8def41b-3a23-4d94-8b9a-216174ce6141" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.AuditBehaviorTests" name="Handle_ReturnsNextResponse" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.ResultTests.Failure_ReferenceType_ValueIsNull" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="60d56be9-666d-3248-e796-6f9b6121aef2">
+      <Execution id="ff27e79a-3738-4757-a867-bae221996bc7" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.ResultTests" name="Failure_ReferenceType_ValueIsNull" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Conversations.OpenConversationHandlerTests.Handle_AddsConversationAndSaves" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="fc385714-de4b-a56b-d9e9-41910c4ad288">
+      <Execution id="2a41ca7d-9e49-434e-be0d-32692468e11f" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Conversations.OpenConversationHandlerTests" name="Handle_AddsConversationAndSaves" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.ValidationBehaviorTests.Handle_AllValidatorsPass_CallsNext" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="5d833a13-b933-2aa8-7f86-27febba591c3">
+      <Execution id="0b47a3cd-86fb-4ef2-b95d-c65f3ce86f61" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.ValidationBehaviorTests" name="Handle_AllValidatorsPass_CallsNext" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.DependencyInjectionTests.AddApplication_BehaviorOrder_LoggingThenValidationThenAudit" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="ddd87dae-008c-ad91-92cb-cfea604e8c08">
+      <Execution id="5790c31e-2bfb-4eba-bfd0-c856cf1650fe" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.DependencyInjectionTests" name="AddApplication_BehaviorOrder_LoggingThenValidationThenAudit" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.AuditBehaviorTests.Handle_NullNext_Throws" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="4505ee8a-0d88-67ff-2362-dc7d056d01f8">
+      <Execution id="c122e9fe-f0fc-48fe-82fa-3ca9b979c030" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.AuditBehaviorTests" name="Handle_NullNext_Throws" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Conversations.IngestIncomingMessageHandlerTests.Handle_ExistingConversation_AppendsWithoutCreating" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="90cf62fd-c79f-87b0-4b04-1cb8bda385e6">
+      <Execution id="f7afba56-1ce0-4824-ae6e-a106f8a2f4e1" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Conversations.IngestIncomingMessageHandlerTests" name="Handle_ExistingConversation_AppendsWithoutCreating" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.DependencyInjectionTests.AddApplication_BehaviorsAreTransient" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="23aa654e-0526-bfa3-9018-5149d4e6a3ed">
+      <Execution id="64d022b8-08f3-49ee-a382-1111152179a8" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.DependencyInjectionTests" name="AddApplication_BehaviorsAreTransient" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.AuditBehaviorTests.Handle_HandlerThrows_LogsAndRethrows" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="2fae2014-497b-aec2-75ca-8341fac38a62">
+      <Execution id="145b04a9-22d1-4c8e-b11a-7afc015c73f4" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.AuditBehaviorTests" name="Handle_HandlerThrows_LogsAndRethrows" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.ValidationBehaviorTests.Handle_NoValidators_CallsNext" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="9d823980-6652-bd25-bf2b-016625f39c37">
+      <Execution id="5894fec2-7d5d-42e2-bbbf-6f119f2a90db" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.ValidationBehaviorTests" name="Handle_NoValidators_CallsNext" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.AppErrorTests.Conflict_UsesConflictCode" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="17f543bb-4942-eda6-092a-3c0cfa64ccb9">
+      <Execution id="42c0775e-3168-40a6-a922-22dc2a17df16" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.AppErrorTests" name="Conflict_UsesConflictCode" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Conversations.IngestIncomingMessageHandlerTests.Handle_NoExistingConversation_OpensOneAndAppends" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="ccd3eaa0-1412-47be-1071-49f79251779f">
+      <Execution id="171547a3-2698-4c8a-af4d-d21cbadaa875" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Conversations.IngestIncomingMessageHandlerTests" name="Handle_NoExistingConversation_OpensOneAndAppends" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.DependencyInjectionTests.AddApplication_RegistersAllThreePipelineBehaviors" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="6b775184-0570-c31d-20cc-d72b108cc315">
+      <Execution id="1c2d71c9-a654-49cb-9f9c-9c34845fa4bf" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.DependencyInjectionTests" name="AddApplication_RegistersAllThreePipelineBehaviors" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.DependencyInjectionTests.AddApplication_RegistersMediatorAndHandlers" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="24c352a9-7de1-8164-2ea4-977a78571742">
+      <Execution id="d3b4681f-e5f9-48bb-927d-9f539ad7fb36" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.DependencyInjectionTests" name="AddApplication_RegistersMediatorAndHandlers" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.AppErrorTests.Equality_SameCodeAndMessage_AreEqual" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="5f477cc9-9161-0fce-e669-ff7da048cdd7">
+      <Execution id="d4a133b1-d790-41ea-ab27-a5a0cfe14759" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.AppErrorTests" name="Equality_SameCodeAndMessage_AreEqual" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Conversations.IngestIncomingMessageHandlerTests.Handle_AppendsInboundContactMessage" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="662c2347-a1a6-eee0-f276-2e04344910f8">
+      <Execution id="0fde7680-a6d1-4828-b9a7-375a96da6afa" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Conversations.IngestIncomingMessageHandlerTests" name="Handle_AppendsInboundContactMessage" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.Common.ValidationBehaviorTests.Handle_MultipleValidators_AggregatesAllFailures" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="b52686de-5929-adb2-18aa-a685b8a9da65">
+      <Execution id="2742bcd6-cdfa-4696-8a5d-8663056357c8" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.Common.ValidationBehaviorTests" name="Handle_MultipleValidators_AggregatesAllFailures" />
+    </UnitTest>
+    <UnitTest name="Clawbot.Application.Tests.DependencyInjectionTests.AddApplication_ReturnsSameCollectionForChaining" storage="d:\clawbot\tests\clawbot.application.tests\bin\debug\net8.0\clawbot.application.tests.dll" id="75e77c9f-0038-966e-6079-67f0787fa2c3">
+      <Execution id="9ef126c4-847f-4b3f-8d48-4f5219717fd5" />
+      <TestMethod codeBase="D:\Clawbot\tests\Clawbot.Application.Tests\bin\Debug\net8.0\Clawbot.Application.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Clawbot.Application.Tests.DependencyInjectionTests" name="AddApplication_ReturnsSameCollectionForChaining" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="2fae2014-497b-aec2-75ca-8341fac38a62" executionId="145b04a9-22d1-4c8e-b11a-7afc015c73f4" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="fe72b1b7-012c-e33d-ecc3-a7e66900824e" executionId="44cf2aa6-8882-41ca-b3a6-ea05d83b423e" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="5f477cc9-9161-0fce-e669-ff7da048cdd7" executionId="d4a133b1-d790-41ea-ab27-a5a0cfe14759" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="90cf62fd-c79f-87b0-4b04-1cb8bda385e6" executionId="f7afba56-1ce0-4824-ae6e-a106f8a2f4e1" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="38b69906-d0d6-3216-046c-9cd5f35a149e" executionId="0b9df132-f5c5-46c2-b05e-807cf610df96" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="75e77c9f-0038-966e-6079-67f0787fa2c3" executionId="9ef126c4-847f-4b3f-8d48-4f5219717fd5" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="fc385714-de4b-a56b-d9e9-41910c4ad288" executionId="2a41ca7d-9e49-434e-be0d-32692468e11f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f9d86426-3786-3558-9be5-7aad1654ae35" executionId="f1ffc84e-1ae5-48b7-a429-c73c2630cf03" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="23aa654e-0526-bfa3-9018-5149d4e6a3ed" executionId="64d022b8-08f3-49ee-a382-1111152179a8" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="17f543bb-4942-eda6-092a-3c0cfa64ccb9" executionId="42c0775e-3168-40a6-a922-22dc2a17df16" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="e07edc03-d1ce-8445-22fa-8f3a260237b6" executionId="448a782b-1b3b-4bf3-8190-4df2bcf5bc67" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="07bfe874-06b4-a456-0013-0f45d25e7e57" executionId="c82fcb73-ca25-42e0-ad56-ae73cd3f10fc" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="5ae59aeb-7e7c-3cee-39a7-27537232af1f" executionId="93d55d75-e8ec-44cd-b8f9-65518af59abe" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="ccd3eaa0-1412-47be-1071-49f79251779f" executionId="171547a3-2698-4c8a-af4d-d21cbadaa875" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="24c352a9-7de1-8164-2ea4-977a78571742" executionId="d3b4681f-e5f9-48bb-927d-9f539ad7fb36" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="60d56be9-666d-3248-e796-6f9b6121aef2" executionId="ff27e79a-3738-4757-a867-bae221996bc7" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="353d1c89-db4d-0887-b7a7-ee7ba649bb66" executionId="e8def41b-3a23-4d94-8b9a-216174ce6141" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7da32c41-afa0-5d52-20f0-ebeecc27f41b" executionId="b220a60c-9706-48e4-a541-09767b670bc8" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="5d833a13-b933-2aa8-7f86-27febba591c3" executionId="0b47a3cd-86fb-4ef2-b95d-c65f3ce86f61" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4505ee8a-0d88-67ff-2362-dc7d056d01f8" executionId="c122e9fe-f0fc-48fe-82fa-3ca9b979c030" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6b775184-0570-c31d-20cc-d72b108cc315" executionId="1c2d71c9-a654-49cb-9f9c-9c34845fa4bf" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7e4720f1-2b41-daa7-624d-45de610eb456" executionId="e9a92879-4913-429b-9731-df6f4f9cf4b5" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="662c2347-a1a6-eee0-f276-2e04344910f8" executionId="0fde7680-a6d1-4828-b9a7-375a96da6afa" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="be1fcc35-c568-c017-e4eb-3d19f0d675c1" executionId="44887d42-43c3-4259-a459-c47da32bcbc9" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="b52686de-5929-adb2-18aa-a685b8a9da65" executionId="2742bcd6-cdfa-4696-8a5d-8663056357c8" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="ddd87dae-008c-ad91-92cb-cfea604e8c08" executionId="5790c31e-2bfb-4eba-bfd0-c856cf1650fe" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9d823980-6652-bd25-bf2b-016625f39c37" executionId="5894fec2-7d5d-42e2-bbbf-6f119f2a90db" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="27" executed="27" passed="27" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 8.0.26)&#xD;
+[xUnit.net 00:00:00.09]   Discovering: Clawbot.Application.Tests&#xD;
+[xUnit.net 00:00:00.12]   Discovered:  Clawbot.Application.Tests&#xD;
+[xUnit.net 00:00:00.13]   Starting:    Clawbot.Application.Tests&#xD;
+[xUnit.net 00:00:00.27]   Finished:    Clawbot.Application.Tests&#xD;
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

@@ -259,11 +259,32 @@ def is_group_row(ws, row, span_cols=(2, 3, 4, 5)):
     return all(ws.cell(row, c).value in (None, "") for c in span_cols)
 
 
+def blank_formatted_rows(ws, data_row, limit=40):
+    """Dong cua mau da ke san vien nhung chua co chu.
+
+    Mau 5.4/5.5 dung HAI bien the cho vung du lieu: dong vi du (in nghieng,
+    chu xam - y la "thay toi di") va dong trong da ke vien san cho du lieu
+    that. Neu chi lay style tu dong CO CHU thi bo nghiem thu se bat moi dong
+    du lieu that phai in nghieng xam nhu dong vi du, tuc bat sai y mau.
+    """
+    rows = []
+    for r in range(data_row, min(ws.max_row, data_row + limit) + 1):
+        cell = ws.cell(r, 1)
+        if cell.value not in (None, ""):
+            continue
+        border = cell.border
+        if any(getattr(getattr(border, side, None), "style", None)
+               for side in ("left", "right", "top", "bottom")):
+            rows.append(r)
+    return rows
+
+
 def style_prototypes(ws, data_row, max_col, limit=40):
-    """Bo style hop le cho tung cot, lay tu cac dong du lieu cua sheet mau.
+    """Bo style hop le cho tung cot, lay tu vung du lieu cua sheet mau.
 
     Mau co the dung nhieu bien the style cho cac dong vi du khac nhau, nen
-    chap nhan bat ky bien the nao xuat hien trong mau.
+    chap nhan bat ky bien the nao xuat hien trong mau - ke ca bien the nam o
+    cac dong trong da ke vien san (xem blank_formatted_rows).
     """
     protos = {c: [] for c in range(1, max_col + 1)}
     for r in data_rows_of(ws, data_row, limit=limit):
@@ -271,9 +292,14 @@ def style_prototypes(ws, data_row, max_col, limit=40):
             continue
         for c in range(1, max_col + 1):
             protos[c].append(cell_style_key(ws.cell(r, c)))
-    for c, items in protos.items():
-        if not items:
-            protos[c] = [cell_style_key(ws.cell(data_row, c))]
+    # Dong mau goc luon la mot bien the hop le, ke ca voi sheet khong co dong
+    # du lieu nao khac de lay mau (vi du Cover).
+    for c in protos:
+        protos[c].append(cell_style_key(ws.cell(data_row, c)))
+    # THEM (khong thay the) bien the "dong trong da ke vien san" cua mau.
+    for r in blank_formatted_rows(ws, data_row, limit=limit):
+        for c in range(1, max_col + 1):
+            protos[c].append(cell_style_key(ws.cell(r, c)))
     return protos
 
 

@@ -16,13 +16,14 @@ public sealed record AutonomousRunResult(string Status, string? Reason, int Roun
     public static AutonomousRunResult Failed(string reason, int rounds) => new("failed", reason, rounds);
     public static AutonomousRunResult Cancelled(int rounds) => new("cancelled", null, rounds);
 
-    // Task lỗi + chính sách "pause": phiên dừng lại chờ người sửa output thay vì đốt LLM cho một plan mới.
+    // Chính sách "pause": phiên dừng sau một bước hoàn tất để chờ người duyệt hoặc sửa output.
     public static AutonomousRunResult AwaitingIntervention(int rounds) =>
-        new("paused", "awaiting_intervention", rounds);
+        new("paused", "awaiting_approval", rounds);
 }
 
-// Chính sách khi một task fail. Replan sinh plan MỚI HOÀN TOÀN (mọi task về pending, output cũ bị vứt),
-// nên mỗi vòng replan nhân chi phí lên gần bằng một lần chạy đầy đủ. Mặc định vì thế là dừng chờ người.
+// Chính sách khi task hoàn tất hoặc lỗi. "pause" dừng sau từng task hoàn tất để người duyệt/sửa;
+// task lỗi vẫn replan. Replan sinh plan MỚI HOÀN TOÀN (mọi task về pending, output cũ bị vứt),
+// nên mỗi vòng replan nhân chi phí lên gần bằng một lần chạy đầy đủ.
 public static class OrchestratorFailurePolicies
 {
     public const string Pause = "pause";

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -18,6 +18,8 @@ import { useJobWatcher } from "@/features/jobs/useJobWatcher";
 import { TrendSettingsDialog } from "./TrendSettingsDialog";
 import { ContentPublishingPolicyControl } from "./ContentPublishingPolicyControl";
 import { PostPerformancePanel } from "./PostPerformancePanel";
+import { ContentAssetImage } from "@/shared/content/ContentAssetImage";
+import { assetsSummary, firstImageAsset, parseAssets } from "@/shared/content/assets";
 import { platformClasses } from "@/shared/theme/colors";
 import { contentErrorMessage, toUserFriendlyError } from "@/shared/utils/userText";
 import {
@@ -29,7 +31,6 @@ import {
   generateContentItems,
   getContentCalendar,
   getContentChainMetrics,
-  getContentAssetBlob,
   getContentItem,
   getContentItemHooks,
   getContentPublishTargets,
@@ -81,13 +82,6 @@ interface ScheduleMutationVariables {
   readonly session: number;
   readonly mode: ScheduleMode;
   readonly payload: ScheduleContentItemPayload;
-}
-
-interface ContentAsset {
-  readonly type?: string;
-  readonly url?: string;
-  readonly fileName?: string;
-  readonly contentType?: string;
 }
 
 interface EditorDraft {
@@ -352,58 +346,6 @@ function isInstagramTargetReselectionError(error: unknown): boolean {
 function errorMessage(error: unknown): string {
   if (isInstagramTargetReselectionError(error)) return INSTAGRAM_TARGET_RESELECTION_GUIDANCE;
   return toUserFriendlyError(error, "Không xử lý được thao tác nội dung. Vui lòng thử lại.");
-}
-
-function parseAssets(value: string): readonly ContentAsset[] {
-  if (!value || value === "[]") return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is ContentAsset => typeof item === "object" && item !== null && "url" in item);
-  } catch {
-    return [];
-  }
-}
-
-function assetsSummary(value: string): string {
-  const count = parseAssets(value).length;
-  return count ? `${count} tệp đính kèm` : "Chưa có tệp đính kèm";
-}
-
-function firstImageAsset(value: string): ContentAsset | null {
-  return parseAssets(value).find((asset) => asset.url && (!asset.type || asset.type === "image")) ?? null;
-}
-
-function ContentAssetImage({ alt, className, url }: { readonly alt: string; readonly className: string; readonly url: string }) {
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  const requiresAuthenticatedFetch = url.startsWith("/api/");
-
-  useEffect(() => {
-    if (!requiresAuthenticatedFetch) return undefined;
-
-    let active = true;
-    let nextObjectUrl: string | null = null;
-    void getContentAssetBlob(url)
-      .then((blob) => {
-        if (!active) return;
-        nextObjectUrl = URL.createObjectURL(blob);
-        setObjectUrl(nextObjectUrl);
-        setFailed(false);
-      })
-      .catch(() => {
-        if (active) setFailed(true);
-      });
-    return () => {
-      active = false;
-      if (nextObjectUrl) URL.revokeObjectURL(nextObjectUrl);
-    };
-  }, [requiresAuthenticatedFetch, url]);
-
-  const displayUrl = requiresAuthenticatedFetch ? objectUrl : url;
-  if (requiresAuthenticatedFetch && failed) return <div className={`${className} flex items-center justify-center bg-surface text-label-sm text-on-surface-variant`}>Không tải được ảnh.</div>;
-  if (!displayUrl) return <div className={`${className} animate-pulse bg-surface`} aria-label="Đang tải ảnh" />;
-  return <img className={className} src={displayUrl} alt={alt} />;
 }
 
 function groupCalendar(items: readonly ContentCalendarItem[]) {

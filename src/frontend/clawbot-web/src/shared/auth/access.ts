@@ -5,8 +5,6 @@ import { useAuthStore, useRole } from "./authStore";
 // Đây chỉ là ẩn/hiện UI — backend vẫn enforce quyền thật trên API.
 export type AppRole = "Admin" | "SalesLead" | "QA" | "Sale" | "Marketer" | "Viewer";
 
-const ALL: readonly AppRole[] = ["Admin", "SalesLead", "QA", "Sale", "Marketer", "Viewer"];
-
 // Route (prefix) → danh sách các mã quyền hợp lệ (chỉ cần có 1 trong số này là vào được).
 // Nếu mảng rỗng [] có nghĩa là mọi role đều có thể truy cập mà không cần quyền cụ thể.
 // Được map dựa theo file src/shared/Clawbot.Infrastructure/Identity/RbacSeeder.cs

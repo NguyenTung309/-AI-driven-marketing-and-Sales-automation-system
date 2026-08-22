@@ -1,0 +1,131 @@
+{
+  "_doc": [
+    "DU LIEU BIA CO Y - khong bao gio duoc giao khach.",
+    "Day la doi chung am cua cong T3 (check_evidence.py): chay tren file nay",
+    "PHAI do. Neu mot ngay nao do no xanh, cong T3 da hong va moi ket qua xanh",
+    "tren noi dung that deu vo nghia.",
+    "3 dau hieu bia co tinh nhet vao: khong khai evidence, 8 UTCID cung mot ngay,",
+    "100% Passed va khong mot defect nao."
+  ],
+  "cover": {
+    "project_name": "Fabricated",
+    "project_code": "FAKE",
+    "creator": "<Creator>",
+    "issue_date": "2026-08-20",
+    "version": "0.0",
+    "changes": []
+  },
+  "environment": "Fabricated environment",
+  "modules": [
+    {
+      "sheet": "GhostModule",
+      "module": "Clawbot.Nowhere",
+      "description": "A module that no test ever touched",
+      "precondition": "None",
+      "methods": [
+        {
+          "method": "GhostService.DoSomething",
+          "requirement": "Nothing real",
+          "cases": [
+            {
+              "id": "UTCID01",
+              "precondition": "None",
+              "input": "a = 1",
+              "expected": "Return: true",
+              "type": "Normal",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Pending"},
+              "round3": {"result": "Pending"},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "UTCID02",
+              "precondition": "None",
+              "input": "a = 2",
+              "expected": "Return: true",
+              "type": "Normal",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Pending"},
+              "round3": {"result": "Pending"},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "UTCID03",
+              "precondition": "None",
+              "input": "a = 3",
+              "expected": "Return: true",
+              "type": "Normal",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Pending"},
+              "round3": {"result": "Pending"},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "UTCID04",
+              "precondition": "None",
+              "input": "a = 4",
+              "expected": "Return: true",
+              "type": "Normal",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Pending"},
+              "round3": {"result": "Pending"},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "UTCID05",
+              "precondition": "None",
+              "input": "a = 5",
+              "expected": "Return: true",
+              "type": "Normal",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Pending"},
+              "round3": {"result": "Pending"},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "UTCID06",
+              "precondition": "None",
+              "input": "a = 6",
+              "expected": "Return: true",
+              "type": "Normal",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Pending"},
+              "round3": {"result": "Pending"},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "UTCID07",
+              "precondition": "None",
+              "input": "a = 7",
+              "expected": "Return: true",
+              "type": "Normal",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Pending"},
+              "round3": {"result": "Pending"},
+              "defect": "",
+              "note": ""
+            },
+            {
+              "id": "UTCID08",
+              "precondition": "None",
+              "input": "a = 8",
+              "expected": "Return: true",
+              "type": "Normal",
+              "round1": {"result": "Passed", "date": "2026-08-20", "tester": "QA1"},
+              "round2": {"result": "Pending"},
+              "round3": {"result": "Pending"},
+              "defect": "",
+              "note": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

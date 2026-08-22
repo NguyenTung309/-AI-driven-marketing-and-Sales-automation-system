@@ -390,11 +390,12 @@ internal sealed class GenericLlmAgentWorker(
 
     private string BuildSystemPrompt(IReadOnlyList<RagChunk> chunks, string? roleInstruction = null)
     {
-        var sb = new StringBuilder(definition.Description.Length + 512);
+        var agentPrompt = EffectiveAgentPrompt();
+        var sb = new StringBuilder(agentPrompt.Length + (roleInstruction?.Length ?? 0) + 640);
         sb.AppendLine(AgentPromptDefaults.BaseGuardrail);
         sb.AppendLine();
-        // Orchestrator co the "nan" persona rieng cho task nay; khong co thi dung mo ta cua agent definition.
-        sb.AppendLine(string.IsNullOrWhiteSpace(roleInstruction) ? definition.Description.Trim() : roleInstruction.Trim());
+        sb.AppendLine(agentPrompt);
+        AppendRoleInstruction(sb, roleInstruction);
         sb.AppendLine();
         sb.AppendLine("You are a data-defined ClawBot sub-agent. Complete only the delegated task. Return concise, directly usable output.");
 
@@ -404,10 +405,12 @@ internal sealed class GenericLlmAgentWorker(
 
     private string BuildReActSystemPrompt(IReadOnlyList<RagChunk> chunks, IReadOnlyList<IAgentTool> tools, string? roleInstruction = null)
     {
-        var sb = new StringBuilder(definition.Description.Length + 768);
+        var agentPrompt = EffectiveAgentPrompt();
+        var sb = new StringBuilder(agentPrompt.Length + (roleInstruction?.Length ?? 0) + 896);
         sb.AppendLine(AgentPromptDefaults.BackOfficeGuardrail);
         sb.AppendLine();
-        sb.AppendLine(string.IsNullOrWhiteSpace(roleInstruction) ? definition.Description.Trim() : roleInstruction.Trim());
+        sb.AppendLine(agentPrompt);
+        AppendRoleInstruction(sb, roleInstruction);
         sb.AppendLine();
         sb.AppendLine("You are a data-defined ClawBot sub-agent. Complete the delegated task by acting on the system through tools.");
         sb.AppendLine("To call a tool, reply with ONLY a JSON action on one line: {\"tool\":\"<name>\",\"args\":{<keys>}}.");
@@ -434,6 +437,21 @@ internal sealed class GenericLlmAgentWorker(
 
         AppendRagSnippets(sb, chunks);
         return sb.ToString();
+    }
+
+    private string EffectiveAgentPrompt() =>
+        string.IsNullOrWhiteSpace(definition.SystemPrompt)
+            ? definition.Description.Trim()
+            : definition.SystemPrompt.Trim();
+
+    private static void AppendRoleInstruction(StringBuilder sb, string? roleInstruction)
+    {
+        if (string.IsNullOrWhiteSpace(roleInstruction))
+            return;
+
+        sb.AppendLine();
+        sb.AppendLine("# Nhiệm vụ cụ thể trong kế hoạch lần này");
+        sb.AppendLine(roleInstruction.Trim());
     }
 
     private static void AppendRagSnippets(StringBuilder sb, IReadOnlyList<RagChunk> chunks)

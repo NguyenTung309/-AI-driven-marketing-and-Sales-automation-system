@@ -133,8 +133,8 @@ public sealed partial class AutonomousRunSink(
         return true;
     }
 
-    // EARS[WHEN an orchestration task fails AND the tenant failure policy is "pause"
-    // THE SYSTEM SHALL park the run in paused and notify the initiator instead of re-planning]
+    // EARS[WHEN an orchestration task completes AND the tenant failure policy is "pause"
+    // THE SYSTEM SHALL park the run in paused and notify the initiator to approve or amend that result]
     public async Task PauseForInterventionAsync(
         Guid tenantId,
         Guid sessionId,
@@ -144,7 +144,12 @@ public sealed partial class AutonomousRunSink(
         DateTimeOffset at,
         CancellationToken ct = default)
     {
+        var awaitingApproval = string.Equals(reason, "task_completed_awaiting_approval", StringComparison.Ordinal);
         var redactedReason = await RedactAsync(reason, ct).ConfigureAwait(false);
+        var tracePhase = awaitingApproval ? "awaiting_approval" : "awaiting_intervention";
+        var traceMessage = awaitingApproval
+            ? "Bước đã hoàn tất và đang chờ bạn duyệt hoặc sửa nội dung trước khi chạy bước tiếp theo."
+            : $"Đã tạm dừng để bạn xử lý: {redactedReason}.";
         AgentSession pausedSession;
 
         await using var transaction = await _db.Database
@@ -159,12 +164,7 @@ public sealed partial class AutonomousRunSink(
             if (session.Status is not (AgentSessionStatuses.Running or AgentSessionStatuses.PauseRequested))
                 throw new OrchestrationSessionNotRunningException();
 
-            session.AppendTrace(
-                taskId ?? string.Empty,
-                "orchestrator",
-                "awaiting_intervention",
-                $"Bước lỗi: {redactedReason}. Đã tạm dừng để bạn xử lý — chưa tốn thêm chi phí lập kế hoạch lại.",
-                at);
+            session.AppendTrace(taskId ?? string.Empty, "orchestrator", tracePhase, traceMessage, at);
             session.PauseForIntervention();
 
             await _db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -179,9 +179,13 @@ public sealed partial class AutonomousRunSink(
         }
 
         PublishRunEvent(tenantId, sessionId);
-        await NotifyAsync(pausedSession, "orchestration_intervention", "Orchestration chờ bạn xử lý",
-            Severity: "warning",
-            Body: $"Mục tiêu \"{pausedSession.Goal}\" đã tạm dừng ở một bước lỗi ({redactedReason}). Bạn có thể sửa kết quả bước đó rồi chạy tiếp.",
+        var title = awaitingApproval ? "Orchestration chờ bạn duyệt" : "Orchestration chờ bạn xử lý";
+        var body = awaitingApproval
+            ? $"Mục tiêu \"{pausedSession.Goal}\" đã hoàn tất một bước và đang chờ bạn duyệt hoặc sửa nội dung trước khi chạy tiếp."
+            : $"Mục tiêu \"{pausedSession.Goal}\" đã tạm dừng để xử lý: {redactedReason}.";
+        await NotifyAsync(pausedSession, "orchestration_intervention", title,
+            Severity: awaitingApproval ? "info" : "warning",
+            Body: body,
             Link: $"/agents/runs/{pausedSession.Id}", ct).ConfigureAwait(false);
     }
 

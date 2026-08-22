@@ -179,7 +179,34 @@ public sealed record ContentPostPerformanceTopPostDto(
     DateTimeOffset PostedAt,
     int? Likes,
     int? Comments,
-    long? Total);
+    long? Total,
+    // Dialog xem bài trong app cần biết bài đã lên trang nào và số tương tác cũ tới mức nào.
+    Guid? MetaAssetId = null,
+    string? TargetName = null,
+    DateTimeOffset? EngagementSyncedAt = null,
+    // Tong moi loai reaction (Likes chi la loai LIKE). null = chua dong bo sau khi co tinh nang nay.
+    int? ReactionsTotal = null,
+    int? ReactionLove = null,
+    int? ReactionHaha = null,
+    int? ReactionWow = null,
+    int? ReactionSad = null,
+    int? ReactionAngry = null,
+    int? ReactionCare = null);
+
+public sealed record ContentPostCommentDto(
+    string Id,
+    string AuthorName,
+    string Message,
+    DateTimeOffset? CreatedAt,
+    int LikeCount,
+    int ReplyCount);
+
+public sealed record ContentPostCommentsResponse(
+    Guid ScheduleId,
+    IReadOnlyList<ContentPostCommentDto> Items,
+    int TotalCount,
+    bool IsTruncated,
+    string? UnavailableReason);
 
 public sealed record ContentPostPerformanceResponse(
     int WindowDays,

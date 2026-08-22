@@ -179,7 +179,12 @@ public static class PromptsEndpoints
 
         var config = ReadRuntimeConfig(agent.ConfigJson);
         config.Provider = NormalizeText(request.Provider, config.Provider, maxLength: 64);
-        config.SystemPrompt = (request.SystemPrompt ?? config.SystemPrompt).Trim();
+        if (request.SystemPrompt is not null)
+        {
+            config.SystemPrompt = request.SystemPrompt.Trim();
+            // A user change must never be mistaken for a default pack during a later startup repair.
+            config.SystemPromptVersion = null;
+        }
         config.Temperature = request.Temperature.HasValue ? Math.Clamp(request.Temperature.Value, 0, 2) : config.Temperature;
         config.MaxTokens = request.MaxTokens.HasValue ? Math.Clamp(request.MaxTokens.Value, 128, 32000) : config.MaxTokens;
 
@@ -354,6 +359,8 @@ public static class PromptsEndpoints
     {
         public string Provider { get; set; } = "claude";
         public string SystemPrompt { get; set; } = string.Empty;
+        // Đặt bởi seeder khi ghi prompt mặc định; user sửa tay -> null để lần seed sau không ghi đè.
+        public int? SystemPromptVersion { get; set; }
         public double Temperature { get; set; } = 0.4;
         public int MaxTokens { get; set; } = 2048;
         public AgentTokenQuotaConfig TokenQuota { get; set; } = new();

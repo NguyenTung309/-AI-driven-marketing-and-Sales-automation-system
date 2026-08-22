@@ -28,6 +28,10 @@ public sealed class ReportArtifact : Entity<Guid>, ITenantOwned
     public const string KindSnapshot = "snapshot";
     public const string KindAnomaly = "anomaly";
     public const string KindForecast = "forecast";
+    // Hai loại dưới đây phục vụ nghiệp vụ marketing: số liệu lấy từ nội dung đã đăng và pipeline
+    // duyệt bài, KHÔNG lấy từ kpi_daily (bảng chỉ có chỉ số sale: lead/DM/phản hồi/chuyển đổi).
+    public const string KindContentSnapshot = "content_snapshot";
+    public const string KindContentFunnel = "content_funnel";
 
     public Guid TenantId { get; private set; }
     public string Kind { get; private set; } = string.Empty;

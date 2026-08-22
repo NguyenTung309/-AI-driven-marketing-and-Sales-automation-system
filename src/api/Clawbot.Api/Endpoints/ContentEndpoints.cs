@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Json;
@@ -90,6 +91,8 @@ public static class ContentEndpoints
         // P5 §6: dashboard vận hành chuỗi sinh nội dung (fallback rate, gate fail/step, token/độ trễ, review approve).
         grp.MapGet("/chain-metrics", ChainMetricsAsync).RequirePermission("content:read");
         grp.MapGet("/post-performance", PostPerformanceAsync).RequirePermission("content:read");
+        // Xem binh luan ngay trong app: goi thang Graph, khong luu DB (tranh om PII nguoi binh luan).
+        grp.MapGet("/schedules/{id:guid}/comments", ScheduleCommentsAsync).RequirePermission("content:read");
         grp.MapGet("/calendar", CalendarAsync).RequirePermission("content:read");
         grp.MapGet("/publish-targets", PublishTargetsAsync).RequirePermission("content:read");
         grp.MapDelete("/schedule/{id:guid}", DeleteScheduleAsync).RequirePermission("content:write");
@@ -981,6 +984,136 @@ public static class ContentEndpoints
         return values[Math.Clamp(rank, 0, values.Count - 1)];
     }
 
+    private const int MaxPostComments = 25;
+
+    // Binh luan cua bai dang KHONG duoc luu trong he thong (conversations khong tro ve bai dang),
+    // nen phai hoi Graph tai thoi diem mo dialog. Khong ghi xuong DB => khong phat sinh retention PII.
+    private static async Task<IResult> ScheduleCommentsAsync(
+        Guid id,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        IMetaIntegrationService meta,
+        IMetaGraphClient graph,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var tenantId = tenants.Require().TenantId;
+        var schedule = await db.ContentSchedules.AsNoTracking()
+            .FirstOrDefaultAsync(row => row.Id == id && row.TenantId == tenantId, ct)
+            .ConfigureAwait(false);
+        if (schedule is null)
+            return Error(http, StatusCodes.Status404NotFound, "content.schedule_not_found", "Schedule not found.");
+
+        if (!string.Equals(schedule.Platform, "facebook", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Ok(new ContentPostCommentsResponse(
+                id, [], 0, false, "platform_not_supported"));
+        }
+
+        var objectId = MetaEngagementSyncJob.IsSafeGraphObjectId(schedule.ExternalPostId)
+            ? schedule.ExternalPostId
+            : MetaEngagementSyncJob.ExtractPostId(schedule.PostUrl);
+        if (string.IsNullOrWhiteSpace(objectId))
+            return Results.Ok(new ContentPostCommentsResponse(id, [], 0, false, "post_id_unavailable"));
+
+        var credential = schedule.MetaAssetId.HasValue
+            ? await meta.ResolvePageForEngagementAsync(tenantId, schedule.MetaAssetId, ct).ConfigureAwait(false)
+            : await meta.ResolvePageForEngagementByExternalIdAsync(
+                tenantId,
+                MetaEngagementSyncJob.ExtractPageId(objectId),
+                ct).ConfigureAwait(false);
+        if (credential is null)
+            return Results.Ok(new ContentPostCommentsResponse(id, [], 0, false, "no_page_credential"));
+
+        try
+        {
+            using var doc = await graph.GetAsync(
+                tenantId,
+                $"{objectId}/comments",
+                new Dictionary<string, string?>
+                {
+                    ["fields"] = "id,from{name},message,created_time,like_count,comment_count",
+                    ["order"] = "reverse_chronological",
+                    ["limit"] = MaxPostComments.ToString(CultureInfo.InvariantCulture),
+                    ["summary"] = "true",
+                },
+                credential.PageAccessToken,
+                ct).ConfigureAwait(false);
+
+            var items = ParsePostComments(doc.RootElement);
+            var total = ReadCommentSummaryTotal(doc.RootElement) ?? items.Count;
+            return Results.Ok(new ContentPostCommentsResponse(
+                id, items, total, total > items.Count, null));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Graph loi (token het han, page mat quyen...) khong duoc lam vo dialog.
+            return Results.Ok(new ContentPostCommentsResponse(id, [], 0, false, "graph_unavailable"));
+        }
+    }
+
+    private static List<ContentPostCommentDto> ParsePostComments(JsonElement root)
+    {
+        var items = new List<ContentPostCommentDto>();
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("data", out var data)
+            || data.ValueKind != JsonValueKind.Array)
+        {
+            return items;
+        }
+
+        foreach (var node in data.EnumerateArray())
+        {
+            if (node.ValueKind != JsonValueKind.Object)
+                continue;
+            var commentId = node.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String
+                ? idEl.GetString()
+                : null;
+            if (string.IsNullOrWhiteSpace(commentId))
+                continue;
+
+            var author = node.TryGetProperty("from", out var fromEl)
+                && fromEl.ValueKind == JsonValueKind.Object
+                && fromEl.TryGetProperty("name", out var nameEl)
+                && nameEl.ValueKind == JsonValueKind.String
+                ? nameEl.GetString()
+                : null;
+            var message = node.TryGetProperty("message", out var messageEl) && messageEl.ValueKind == JsonValueKind.String
+                ? messageEl.GetString()
+                : null;
+            DateTimeOffset? createdAt = node.TryGetProperty("created_time", out var createdEl)
+                && createdEl.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(createdEl.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
+                ? parsed
+                : null;
+
+            items.Add(new ContentPostCommentDto(
+                commentId!,
+                string.IsNullOrWhiteSpace(author) ? "Người dùng Facebook" : author!,
+                message ?? string.Empty,
+                createdAt,
+                ReadIntProperty(node, "like_count") ?? 0,
+                ReadIntProperty(node, "comment_count") ?? 0));
+        }
+
+        return items;
+    }
+
+    private static int? ReadCommentSummaryTotal(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Object
+        && root.TryGetProperty("summary", out var summary)
+        && summary.ValueKind == JsonValueKind.Object
+        && summary.TryGetProperty("total_count", out var total)
+        && total.TryGetInt32(out var value)
+        && value >= 0
+            ? value
+            : null;
+
+    private static int? ReadIntProperty(JsonElement node, string name) =>
+        node.TryGetProperty(name, out var element) && element.TryGetInt32(out var value) && value >= 0
+            ? value
+            : null;
+
     private static async Task<IResult> PostPerformanceAsync(
         AppDbContext db,
         ITenantAccessor tenants,
@@ -1156,6 +1289,15 @@ public static class ContentEndpoints
                 schedule.ContentItemId,
                 schedule.Platform,
                 schedule.PostUrl,
+                schedule.MetaAssetId,
+                schedule.EngagementSyncedAt,
+                schedule.ReactionsTotal,
+                schedule.ReactionLove,
+                schedule.ReactionHaha,
+                schedule.ReactionWow,
+                schedule.ReactionSad,
+                schedule.ReactionAngry,
+                schedule.ReactionCare,
                 PostedAt = schedule.PostedAt!.Value,
                 schedule.LikeCount,
                 schedule.CommentCount,
@@ -1169,6 +1311,15 @@ public static class ContentEndpoints
             .ThenBy(row => row.Id)
             .Take(10)
             .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var topAssetIds = topRows
+            .Where(row => row.MetaAssetId.HasValue)
+            .Select(row => row.MetaAssetId!.Value)
+            .Distinct()
+            .ToArray();
+        var topAssetNames = await db.MetaAssets.AsNoTracking()
+            .Where(asset => topAssetIds.Contains(asset.Id))
+            .ToDictionaryAsync(asset => asset.Id, asset => asset.Name, ct)
             .ConfigureAwait(false);
         var topItemIds = topRows.Select(row => row.ContentItemId).Distinct().ToArray();
         var itemBodies = await db.ContentItems.AsNoTracking()
@@ -1186,7 +1337,21 @@ public static class ContentEndpoints
                 row.PostedAt,
                 row.LikeCount,
                 row.CommentCount,
-                row.Total))
+                row.Total,
+                row.MetaAssetId,
+                row.MetaAssetId is null
+                    ? "Không xác định Page"
+                    : topAssetNames.TryGetValue(row.MetaAssetId.Value, out var topName)
+                        ? topName
+                        : row.MetaAssetId.Value.ToString(),
+                row.EngagementSyncedAt,
+                row.ReactionsTotal,
+                row.ReactionLove,
+                row.ReactionHaha,
+                row.ReactionWow,
+                row.ReactionSad,
+                row.ReactionAngry,
+                row.ReactionCare))
             .ToList();
 
         return new ContentPostPerformanceResponse(
@@ -1435,7 +1600,10 @@ public static class ContentEndpoints
             return Error(http, StatusCodes.Status400BadRequest, "content.calendar_range_invalid", "to must be after from.");
 
         var schedules = await db.ContentSchedules.AsNoTracking()
-            .Where(s => s.ScheduledAt >= fromValue && s.ScheduledAt < toValue)
+            .Where(s => s.ScheduledAt >= fromValue
+                && s.ScheduledAt < toValue
+                && s.Status != ContentSchedule.StatusPosted
+                && s.Status != ContentSchedule.StatusCanceled)
             .OrderBy(s => s.ScheduledAt)
             .ToListAsync(ct).ConfigureAwait(false);
         if (schedules.Count == 0)
@@ -2131,7 +2299,9 @@ public static class ContentEndpoints
         IReadOnlyList<ContentSchedule> schedules,
         IReadOnlyDictionary<Guid, ContentItem> itemsById) =>
         schedules
-            .Where(s => itemsById.ContainsKey(s.ContentItemId))
+            .Where(s => s.Status is not (ContentSchedule.StatusPosted or ContentSchedule.StatusCanceled)
+                && itemsById.TryGetValue(s.ContentItemId, out var item)
+                && !string.Equals(item.Status, "published", StringComparison.OrdinalIgnoreCase))
             .Select(s =>
             {
                 var item = itemsById[s.ContentItemId];

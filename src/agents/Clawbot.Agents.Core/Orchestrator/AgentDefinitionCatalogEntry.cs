@@ -13,7 +13,8 @@ public sealed record AgentDefinitionCatalogEntry(
     string InputSchemaJson,
     bool Orchestratable,
     string? KbModuleCode,
-    string AllowedToolsJson = "[]")
+    string AllowedToolsJson = "[]",
+    string? SystemPrompt = null)
 {
     public AgentCatalogEntry ToPlannerEntry() => new(Code, ShortName, DisplayName, AgentType, Description, InputSchemaJson, Orchestratable);
 }

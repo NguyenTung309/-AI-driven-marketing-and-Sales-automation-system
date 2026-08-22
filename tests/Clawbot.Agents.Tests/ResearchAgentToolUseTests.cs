@@ -86,6 +86,50 @@ public sealed class ResearchAgentToolUseTests
     }
 
     [Fact]
+    public async Task TextOnlyWorker_PreservesAgentPersonaWhenTaskHasRoleInstruction()
+    {
+        // Arrange
+        var chatClient = Substitute.For<IClaudeChatClient>();
+        string? systemPrompt = null;
+        chatClient.CompleteAsync(
+                Arg.Do<string>(prompt => systemPrompt = prompt),
+                Arg.Any<IReadOnlyList<ChatTurn>>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(Reply("Đã hoàn thành.")));
+        var definition = new AgentDefinitionCatalogEntry(
+            Guid.NewGuid(),
+            "content-agent",
+            "content",
+            "Content Agent",
+            "content",
+            "PERMANENT_AGENT_PERSONA",
+            "{}",
+            true,
+            null,
+            "[]");
+        var worker = new GenericLlmAgentWorker(
+            definition,
+            Substitute.For<IRagRetriever>(),
+            chatClient,
+            new OrchestratorCostGuard(Substitute.For<ILlmCostTracker>()),
+            Substitute.For<ILlmCallScope>());
+        var task = new AgentTask(
+            "task-prompt",
+            "content-agent",
+            "Viết nội dung",
+            new Dictionary<string, string> { ["tenant_id"] = Guid.NewGuid().ToString("D") },
+            RoleInstruction: "TASK_SPECIFIC_ROLE_INSTRUCTION");
+
+        // Act
+        await worker.ExecuteAsync(task, CancellationToken.None);
+
+        // Assert
+        systemPrompt.Should().Contain("PERMANENT_AGENT_PERSONA");
+        systemPrompt.Should().Contain("TASK_SPECIFIC_ROLE_INSTRUCTION");
+    }
+
+    [Fact]
     public void BackOfficeGuardrail_RequiresToolUseWithoutCustomerHandoff()
     {
         AgentPromptDefaults.BackOfficeGuardrail.Should().Contain("gọi tool");
@@ -100,6 +144,59 @@ public sealed class ResearchAgentToolUseTests
 
         metadata["research-agent"].Description.Should().Contain("Không lọc theo ngày");
         metadata["web.search"].Description.Should().Contain("nội dung mới theo ngày");
+    }
+
+    [Fact]
+    public async Task ReActWorker_PreservesAgentPersonaWhenTaskHasRoleInstruction()
+    {
+        // Arrange
+        var chatClient = Substitute.For<IClaudeChatClient>();
+        var replies = new Queue<ClaudeReply>([
+            Reply("{\"tool\":\"research-agent\",\"args\":{}}"),
+            Reply("Đã hoàn thành."),
+        ]);
+        string? systemPrompt = null;
+        chatClient.CompleteAsync(
+                Arg.Do<string>(prompt => systemPrompt ??= prompt),
+                Arg.Any<IReadOnlyList<ChatTurn>>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromResult(replies.Dequeue()));
+        var tool = CreateTool(ToolResult.Ok("{}"));
+        var definition = new AgentDefinitionCatalogEntry(
+            Guid.NewGuid(),
+            "research-agent",
+            "research",
+            "Research",
+            "research",
+            "PERMANENT_AGENT_PERSONA",
+            "{}",
+            true,
+            null,
+            "[\"research-agent\"]");
+        var worker = new GenericLlmAgentWorker(
+            definition,
+            Substitute.For<IRagRetriever>(),
+            chatClient,
+            new OrchestratorCostGuard(Substitute.For<ILlmCostTracker>()),
+            Substitute.For<ILlmCallScope>(),
+            new ToolRegistry([tool]));
+        var task = new AgentTask(
+            "task-react-prompt",
+            "research-agent",
+            "Nghiên cứu",
+            new Dictionary<string, string> { ["tenant_id"] = Guid.NewGuid().ToString("D") },
+            RoleInstruction: "TASK_SPECIFIC_ROLE_INSTRUCTION");
+
+        // Act
+        var result = await worker.ExecuteAsync(task, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        systemPrompt.Should().Contain("PERMANENT_AGENT_PERSONA");
+        systemPrompt.Should().Contain("TASK_SPECIFIC_ROLE_INSTRUCTION");
+        systemPrompt!.IndexOf("PERMANENT_AGENT_PERSONA", StringComparison.Ordinal)
+            .Should().BeLessThan(systemPrompt.IndexOf("TASK_SPECIFIC_ROLE_INSTRUCTION", StringComparison.Ordinal));
     }
 
     [Fact]

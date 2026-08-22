@@ -1,0 +1,66 @@
+{
+  "sheets": {
+    "Security": {
+      "rows": [
+        [
+          "TC-SEC-001",
+          "File đính kèm chỉ truy cập qua endpoint có auth",
+          "Customer (other)",
+          "File của order id=2 (thuộc customer_01)",
+          "GET trực tiếp đường dẫn file (đoán URL) với session customer_02",
+          "HTTP 403 hoặc 404 — không trả về file",
+          "Critical",
+          "Not Run",
+          null,
+          "Spot-check toàn hệ thống, không gắn 1 controller"
+        ],
+        [
+          "TC-SEC-002",
+          "Toàn bộ business flow chạy qua HTTPS (nếu áp dụng)",
+          "(N/A)",
+          "Môi trường staging có HTTPS",
+          "Thực hiện BF-01 end-to-end qua HTTPS",
+          "Không có cảnh báo mixed-content; mọi request là HTTPS",
+          "Medium",
+          "Not Run",
+          null,
+          null
+        ]
+      ]
+    },
+    "Performance": {
+      "rows": [
+        [
+          "TC-PERF-001",
+          "Trang chủ / dashboard load dưới tải bình thường (1 user)",
+          "Manual (browser DevTools)",
+          "< 2 giây",
+          null,
+          "Not Run",
+          null,
+          "Quan sát thủ công trong dev environment (v1)"
+        ],
+        [
+          "TC-PERF-002",
+          "Upload file 5MB hoàn tất",
+          "Manual (browser DevTools)",
+          "< 10 giây",
+          null,
+          "Not Run",
+          null,
+          null
+        ],
+        [
+          "TC-PERF-003",
+          "Hệ thống ổn định với N user đồng thời",
+          "k6 (nếu có) / Manual",
+          "≥ N user, error rate < 1%",
+          null,
+          "Not Run",
+          null,
+          "Formal load test có thể deferred sang v2 — ghi rõ ở Test Plan Out of Scope"
+        ]
+      ]
+    }
+  }
+}
