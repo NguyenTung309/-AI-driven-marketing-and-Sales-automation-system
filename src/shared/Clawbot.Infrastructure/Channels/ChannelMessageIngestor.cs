@@ -143,6 +143,13 @@ public sealed partial class ChannelMessageIngestor(
             ? cid
             : ExtractCustomerExternalId(message.Channel, message.ExternalThreadId);
 
+        // Doi tac hoi thoai la nhom (Pancake bao qua is_group cua conv.From) — dung de loai nhom khoi dem Lead.
+        // Fallback: Pancake tu sinh id nhom Zalo dang "...:pzl_g_<pageId>_<id>" (ca nhan la "pzl_u_") —
+        // phong khi adapter nao do khong gan duoc metadata is_group.
+        var isGroup = (message.Metadata.TryGetValue("is_group", out var isGroupRaw)
+                && string.Equals(isGroupRaw, "true", StringComparison.OrdinalIgnoreCase))
+            || message.ExternalThreadId.Contains(":pzl_g_", StringComparison.Ordinal);
+
         // Contact cua hoi thoai (list ben trai) chi nhan name/avatar tu conversation_* (doi tac hoi thoai:
         // nhom hoac khach) — khong bao gio tu sender cua tung tin nhan, tranh ghi de boi admin/AI/thanh vien nhom.
         var hasConversationName = message.Metadata.TryGetValue("conversation_name", out var convName) && !string.IsNullOrWhiteSpace(convName);
@@ -170,17 +177,27 @@ public sealed partial class ChannelMessageIngestor(
         var inboxId = await ResolveInboxIdAsync(tenantId, message, ct).ConfigureAwait(false);
         if (existing is not null)
         {
+            var needsSave = false;
             // Self-heal: hoi thoai tao truoc khi co inbox (inbox_id NULL) duoc gan lai khi co tin moi;
             // auto-owner lead va filter theo kenh deu can inbox_id nay.
             if (existing.InboxId is null && inboxId is { } resolvedInboxId)
             {
                 existing.SetInboxId(resolvedInboxId);
-                await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+                needsSave = true;
             }
+            // Self-heal mot chieu: hoi thoai tao truoc khi biet la nhom duoc danh dau lai khi
+            // Pancake xac nhan is_group; khong bao gio go lai neu tin sau thieu co.
+            if (isGroup && !existing.IsGroup)
+            {
+                existing.MarkGroup();
+                needsSave = true;
+            }
+            if (needsSave)
+                await _db.SaveChangesAsync(ct).ConfigureAwait(false);
             return existing;
         }
 
-        var conv = Conversation.Open(tenantId, message.Channel, message.ExternalThreadId, _clock.UtcNow, contact?.Id, inboxId);
+        var conv = Conversation.Open(tenantId, message.Channel, message.ExternalThreadId, _clock.UtcNow, contact?.Id, inboxId, isGroup);
         _db.Conversations.Add(conv);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
         return conv;

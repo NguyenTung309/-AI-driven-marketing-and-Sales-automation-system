@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Clawbot.Domain.Contacts;
+using Clawbot.Domain.Conversations;
 using Clawbot.Domain.Leads;
 using Clawbot.Infrastructure.Persistence;
 using FluentAssertions;
@@ -101,6 +102,32 @@ public sealed class LeadsEndpointsTests : IClassFixture<ApiTestFactory>
             new Uri("/api/leads?owner=unassigned", UriKind.Relative));
         unassigned.GetProperty("items").EnumerateArray()
             .Should().OnlyContain(i => i.GetProperty("ownerUserId").ValueKind == JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task List_ExcludesLeads_FromGroupConversations()
+    {
+        var client = await _factory.CreateAuthenticatedClientAsync();
+        var tenantId = await GetAdminTenantIdAsync();
+        var (_, personalLeadId) = await SeedLeadAsync(tenantId, source: "zalo");
+        var (groupContactId, groupLeadId) = await SeedLeadAsync(tenantId, source: "zalo");
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            // Hoi thoai nhom (nhieu thanh vien) gan voi contact cua groupLeadId — khong phai 1 khach ca nhan.
+            var groupConversation = Conversation.Open(
+                tenantId, "zalo", $"group-{Guid.NewGuid():N}", DateTimeOffset.UtcNow, groupContactId, isGroup: true);
+            db.Conversations.Add(groupConversation);
+            await db.SaveChangesAsync();
+        }
+
+        var body = await client.GetFromJsonAsync<JsonElement>(new Uri("/api/leads?pageSize=200", UriKind.Relative));
+
+        var ids = body.GetProperty("items").EnumerateArray()
+            .Select(i => Guid.Parse(i.GetProperty("id").GetString()!)).ToList();
+        ids.Should().Contain(personalLeadId, "hội thoại cá nhân vẫn tính Lead");
+        ids.Should().NotContain(groupLeadId, "hội thoại nhóm không được tính Lead");
     }
 
     // ------------------------------------------------------------------

@@ -156,18 +156,36 @@ public sealed class ContentReviewer(
             {
                 var config = await _llmConfigResolver.ResolveAsync(tenantId, AgentCode, ct)
                     .ConfigureAwait(false);
-                var client = _reviewClientFactory.Create(config);
-                var envelope = await client.CompleteTextAsync(
-                    ReviewPromptPart.TrustedSystem(system),
-                    [ReviewPromptPart.UntrustedText(user)],
-                    ct).ConfigureAwait(false);
-                await RecordEnvelopeCostAsync(tenantId, envelope, ct).ConfigureAwait(false);
-                var outcome = StrictContentReviewOutcomeParser.Parse(envelope);
-                if (!outcome.IsAccepted)
-                    return new ContentReviewResult(
-                        ContentReviewResult.NeedsHuman,
-                        outcome.ErrorCode ?? "review_parse_failed");
-                return ToLegacyResult(outcome);
+
+                async Task<ContentReviewResult> RunTextAsync(ResolvedLlmConfig cfg)
+                {
+                    var client = _reviewClientFactory.Create(cfg);
+                    var envelope = await client.CompleteTextAsync(
+                        ReviewPromptPart.TrustedSystem(system),
+                        [ReviewPromptPart.UntrustedText(user)],
+                        ct).ConfigureAwait(false);
+                    await RecordEnvelopeCostAsync(tenantId, envelope, ct).ConfigureAwait(false);
+                    var outcome = StrictContentReviewOutcomeParser.Parse(envelope);
+                    if (!outcome.IsAccepted)
+                        return new ContentReviewResult(
+                            ContentReviewResult.NeedsHuman,
+                            outcome.ErrorCode ?? "review_parse_failed");
+                    return ToLegacyResult(outcome);
+                }
+
+                try
+                {
+                    return await RunTextAsync(config).ConfigureAwait(false);
+                }
+                catch (LlmModelUnavailableException)
+                {
+                    // Fallback 1 lần về model gốc của config khi provider chốt hết kênh cho model override.
+                    if (string.IsNullOrWhiteSpace(config.ConfigModelId)
+                        || string.Equals(config.ConfigModelId, config.Model, StringComparison.Ordinal))
+                        throw;
+                    return await RunTextAsync(config with { Model = config.ConfigModelId })
+                        .ConfigureAwait(false);
+                }
             }
 
             var reply = await _claude.CompleteAsync(system, Array.Empty<ChatTurn>(), user, ct)
@@ -178,6 +196,10 @@ public sealed class ContentReviewer(
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             return new ContentReviewResult(ContentReviewResult.NeedsHuman, "review_timeout");
+        }
+        catch (LlmModelUnavailableException ex)
+        {
+            return new ContentReviewResult(ContentReviewResult.NeedsHuman, ex.Message);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -236,10 +258,6 @@ public sealed class ContentReviewer(
             using var _ = _llmScope.Begin(tenantId, AgentCode);
             var config = await _llmConfigResolver.ResolveAsync(tenantId, AgentCode, ct)
                 .ConfigureAwait(false);
-            var capability = _visionResolver.ResolveFromConfig(
-                config.Provider,
-                config.Model,
-                config.SupportsVision);
 
             var evidence = await RetrieveEvidenceAsync(tenantId, body, ct).ConfigureAwait(false);
             var memory = await LoadUntrustedMemoryAsync(tenantId, ct).ConfigureAwait(false);
@@ -253,83 +271,117 @@ public sealed class ContentReviewer(
                     "suspicious_embedded_instructions");
             }
 
-            var client = _reviewClientFactory.Create(config);
-
-            if (capability == LlmVisionCapability.Unavailable || _assetReader is null)
+            // Vision capability phụ thuộc model nên tính trong RunAsync (model có thể đổi khi retry).
+            async Task<ContentItemReviewOutcome> RunAsync(ResolvedLlmConfig cfg)
             {
-                return await CompleteTextOnlyAsync(
-                    client,
-                    tenantId,
-                    platform,
-                    body,
-                    evidence,
-                    memory,
-                    imageStatus: ContentItem.ImageReviewStatusSkippedUnsupported,
-                    ct).ConfigureAwait(false);
-            }
+                var cap = _visionResolver.ResolveFromConfig(cfg.Provider, cfg.Model, cfg.SupportsVision);
+                var cli = _reviewClientFactory.Create(cfg);
 
-            // available or unknown → attempt vision when assets exist.
-            IReadOnlyList<ContentAssetBytes> assets;
-            try
-            {
-                var stats = await _assetReader.ListReadyAsync(tenantId, contentItemId, ct)
-                    .ConfigureAwait(false);
-                if (stats.Count == 0)
+                if (cap == LlmVisionCapability.Unavailable || _assetReader is null)
                 {
                     return await CompleteTextOnlyAsync(
-                        client,
+                        cli,
                         tenantId,
                         platform,
                         body,
                         evidence,
                         memory,
-                        imageStatus: ContentItem.ImageReviewStatusNotApplicable,
+                        imageStatus: ContentItem.ImageReviewStatusSkippedUnsupported,
                         ct).ConfigureAwait(false);
                 }
 
-                var loaded = new List<ContentAssetBytes>(stats.Count);
-                foreach (var stat in stats)
+                // available or unknown → attempt vision when assets exist.
+                // Chỉ bọc try/catch quanh việc ĐỌC asset (DB + storage) — lệnh gọi LLM thật
+                // (CompleteTextOnlyAsync/CompleteVisionAsync) phải nằm NGOÀI khối này, nếu không
+                // LlmModelUnavailableException ném từ đó bị nuốt thành "content_asset_read_failed"
+                // và fallback model ở caller không bao giờ được kích hoạt (bug 2026-08-23).
+                IReadOnlyList<ContentAssetBytes> assets;
+                try
                 {
-                    loaded.Add(await _assetReader.ReadAsync(
-                        tenantId, contentItemId, stat.AssetId, ct).ConfigureAwait(false));
+                    var stats = await _assetReader.ListReadyAsync(tenantId, contentItemId, ct)
+                        .ConfigureAwait(false);
+                    if (stats.Count == 0)
+                    {
+                        return await CompleteTextOnlyAsync(
+                            cli,
+                            tenantId,
+                            platform,
+                            body,
+                            evidence,
+                            memory,
+                            imageStatus: ContentItem.ImageReviewStatusNotApplicable,
+                            ct).ConfigureAwait(false);
+                    }
+
+                    var loaded = new List<ContentAssetBytes>(stats.Count);
+                    foreach (var stat in stats)
+                    {
+                        loaded.Add(await _assetReader.ReadAsync(
+                            tenantId, contentItemId, stat.AssetId, ct).ConfigureAwait(false));
+                    }
+
+                    assets = loaded;
+                }
+                catch (LlmModelUnavailableException)
+                {
+                    // Không phải lỗi đọc asset — cho nổi lên để caller fallback model.
+                    throw;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    return FailedOutcome("content_asset_read_failed");
                 }
 
-                assets = loaded;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                return FailedOutcome("content_asset_read_failed");
+                try
+                {
+                    return await CompleteVisionAsync(
+                        cli,
+                        tenantId,
+                        platform,
+                        body,
+                        evidence,
+                        memory,
+                        assets,
+                        ct).ConfigureAwait(false);
+                }
+                catch (VisionUnsupportedException) when (cap == LlmVisionCapability.Unknown)
+                {
+                    // Typed unsupported → mandatory text fallback; other errors stay fail-closed.
+                    return await CompleteTextOnlyAsync(
+                        cli,
+                        tenantId,
+                        platform,
+                        body,
+                        evidence,
+                        memory,
+                        imageStatus: ContentItem.ImageReviewStatusSkippedUnsupported,
+                        ct).ConfigureAwait(false);
+                }
             }
 
             try
             {
-                return await CompleteVisionAsync(
-                    client,
-                    tenantId,
-                    platform,
-                    body,
-                    evidence,
-                    memory,
-                    assets,
-                    ct).ConfigureAwait(false);
+                return await RunAsync(config).ConfigureAwait(false);
             }
-            catch (VisionUnsupportedException) when (capability == LlmVisionCapability.Unknown)
+            catch (LlmModelUnavailableException)
             {
-                // Typed unsupported → mandatory text fallback; other errors stay fail-closed.
-                return await CompleteTextOnlyAsync(
-                    client,
-                    tenantId,
-                    platform,
-                    body,
-                    evidence,
-                    memory,
-                    imageStatus: ContentItem.ImageReviewStatusSkippedUnsupported,
-                    ct).ConfigureAwait(false);
+                // Model override trên binding bị provider chốt hết kênh -> thử đúng 1 lần với model
+                // gốc khai trên LlmConfig thay vì fail cả phiên review (bug 2026-08-23).
+                if (string.IsNullOrWhiteSpace(config.ConfigModelId)
+                    || string.Equals(config.ConfigModelId, config.Model, StringComparison.Ordinal))
+                    throw;
+                var retryConfig = config with { Model = config.ConfigModelId };
+                return await RunAsync(retryConfig).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             return FailedOutcome("review_timeout");
+        }
+        catch (LlmModelUnavailableException ex)
+        {
+            // Hết cơ hội fallback: báo lỗi cấp model rõ ràng thay vì mã chung chung.
+            return FailedOutcome(ex.Message);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

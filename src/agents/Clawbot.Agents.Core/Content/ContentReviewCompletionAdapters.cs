@@ -214,6 +214,8 @@ public sealed class OpenAiChatContentReviewClient : IContentReviewCompletionClie
         {
             if (IsVisionUnsupportedHttp(response.StatusCode, body))
                 throw new VisionUnsupportedException("provider_vision_unsupported");
+            OpenAiChatContentReviewClientHelpers.ThrowIfModelUnavailable(
+                response.StatusCode, body, _config.Model);
             return Incomplete(
                 rawText: string.Empty,
                 finishReason: string.Empty,
@@ -554,6 +556,8 @@ public sealed class AnthropicContentReviewClient : IContentReviewCompletionClien
         {
             if (OpenAiChatContentReviewClientHelpers.IsVisionUnsupportedHttp(response.StatusCode, body))
                 throw new VisionUnsupportedException("provider_vision_unsupported");
+            OpenAiChatContentReviewClientHelpers.ThrowIfModelUnavailable(
+                response.StatusCode, body, _config.Model);
             return Incomplete(string.Empty, string.Empty, requestedPartIds, sentPartIds);
         }
 
@@ -667,6 +671,17 @@ file static class OpenAiChatContentReviewClientHelpers
                 || lower.Contains("vision", StringComparison.Ordinal)
                 || lower.Contains("content_type", StringComparison.Ordinal)
                 || lower.Contains("modalit", StringComparison.Ordinal));
+    }
+
+    // Lỗi cấp model phải ném typed exception để caller fallback về model config, KHÔNG nuốt vào
+    // envelope Incomplete (bug 2026-08-23: model override chết -> review kẹt "review_terminal_incomplete").
+    public static void ThrowIfModelUnavailable(System.Net.HttpStatusCode status, string body, string model)
+    {
+        if ((int)status is 404 or 503 && LlmModelAvailability.IsUnavailable(body))
+            throw new LlmModelUnavailableException(
+                detail: body,
+                statusCode: (int)status,
+                model: model);
     }
 }
 
@@ -821,6 +836,8 @@ public sealed class OpenAiResponsesContentReviewClient : IContentReviewCompletio
         {
             if (OpenAiChatContentReviewClientHelpers.IsVisionUnsupportedHttp(response.StatusCode, body))
                 throw new VisionUnsupportedException("provider_vision_unsupported");
+            OpenAiChatContentReviewClientHelpers.ThrowIfModelUnavailable(
+                response.StatusCode, body, _config.Model);
             return Incomplete(string.Empty, string.Empty, requestedPartIds, sentPartIds);
         }
 

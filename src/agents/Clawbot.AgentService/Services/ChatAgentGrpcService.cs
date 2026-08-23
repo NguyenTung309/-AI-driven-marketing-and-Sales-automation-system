@@ -301,6 +301,9 @@ public sealed partial class ChatAgentGrpcService(
     {
         if (conversation?.ContactId is not { } contactId || string.IsNullOrWhiteSpace(userText))
             return;
+        // Hoi thoai nhom (nhieu thanh vien) khong phai 1 khach ca nhan — khong cham diem/tao Lead.
+        if (conversation.IsGroup)
+            return;
 
         try
         {

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -266,6 +266,34 @@ function agentReviewLabel(status: string | null | undefined): string {
   return "Agent: chưa review";
 }
 
+// Mã hệ thống (không phải câu giải thích của LLM) khi review không chạy được hoặc bị chặn trước khi
+// tới bước LLM chấm — dịch sang tiếng Việt để không hiện mã thô ra màn hình. Câu do LLM tự viết (verdict
+// "reason") thì giữ nguyên, không qua bảng này.
+const AGENT_REVIEW_REASON_LABELS: Record<string, string> = {
+  reviewer_unavailable: "Chưa cấu hình agent duyệt bài (reviewer-agent) cho tài khoản này.",
+  reviewer_independence: "Agent duyệt đang trùng với agent đã viết bài — cần agent khác để duyệt độc lập.",
+  reviewer_not_configured: "Agent duyệt bài chưa được cấu hình.",
+  reviewer_error: "Agent duyệt gặp lỗi kỹ thuật (không gọi được mô hình AI), chưa có kết quả duyệt thật.",
+  content_review_attempt_limit_reached: "Đã thử duyệt tối đa số lần cho phép, cần người duyệt thủ công.",
+  empty_content: "Nội dung bài viết đang trống.",
+  suspicious_embedded_instructions: "Nội dung hoặc dữ liệu tham chiếu chứa chỉ dẫn đáng ngờ, cần người kiểm tra lại.",
+  review_timeout: "Agent duyệt xử lý quá lâu và bị hủy giữa chừng.",
+};
+
+function agentReviewReasonLabel(reason: string | null | undefined): string | null {
+  const trimmed = reason?.trim();
+  if (!trimmed) return null;
+  const mapped = AGENT_REVIEW_REASON_LABELS[trimmed];
+  if (mapped) return mapped;
+  // Mã hệ thống khác chưa có bản dịch riêng (vd review_parse_failed, review_refused...): vẫn báo rõ
+  // đây là lỗi hệ thống thay vì hiện mã trần trụi, kèm mã gốc để báo hỗ trợ kỹ thuật.
+  if (/^[a-z0-9_]+$/.test(trimmed) && !trimmed.includes(" ")) {
+    return `Agent duyệt gặp sự cố kỹ thuật (mã: ${trimmed}).`;
+  }
+  // Không khớp pattern mã hệ thống -> coi là câu giải thích tự do LLM đã viết, hiển thị nguyên văn.
+  return trimmed;
+}
+
 function publishingApprovalLabel(status: string | null | undefined): string {
   const value = normalize(status);
   if (value === "approved") return "Phát hành: đã duyệt";
@@ -309,10 +337,27 @@ function toInputDate(value: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function toInputTime(value: Date): string {
+  const hours = String(value.getHours()).padStart(2, "0");
+  const minutes = String(value.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
 function defaultScheduleDate(): string {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   return toInputDate(tomorrow);
+}
+
+// Lịch đang hiệu lực của 1 bài — dùng để nạp lại dialog "Đổi lịch" và hiển thị giờ đăng thật trên panel.
+function findActiveSchedule(
+  calendarItems: readonly ContentCalendarItem[],
+  contentItemId: string,
+): ContentCalendarItem | null {
+  return calendarItems.find((schedule) =>
+    schedule.contentItemId === contentItemId
+    && (normalize(schedule.status) === "pending" || normalize(schedule.status) === "held"),
+  ) ?? null;
 }
 
 function buildCalendarRange(): { readonly from: string; readonly to: string } {
@@ -879,6 +924,7 @@ function HookSwitcher({ item, disabled }: { readonly item: ContentItem; readonly
 
 function QueueEditor({
   item,
+  schedule,
   body,
   assetsJson,
   saving,
@@ -898,6 +944,7 @@ function QueueEditor({
   onDelete,
 }: {
   readonly item: ContentItem | null;
+  readonly schedule: ContentCalendarItem | null;
   readonly body: string;
   readonly assetsJson: string;
   readonly saving: boolean;
@@ -934,7 +981,7 @@ function QueueEditor({
   const canApprove = Boolean(item.canApprove) && canApprovePerm && !bodyDirty;
   const canReject = Boolean(item.canReject ?? item.canApprove) && canApprovePerm;
   const canRetryReview = Boolean(item.canRetryReview) && canWritePerm;
-  const reviewReason = item.agentReview?.reason?.trim() || null;
+  const reviewReason = agentReviewReasonLabel(item.agentReview?.reason);
   const approvalReason =
     item.publishingApproval?.reason?.trim()
     || item.publishingApproval?.requirementReason?.trim()
@@ -954,6 +1001,11 @@ function QueueEditor({
             <StatusPill tone={workflowTone(item.workflowState, item.status)}>
               {workflowLabel(item.workflowState, item.status)}
             </StatusPill>
+            {schedule ? (
+              <StatusPill tone="neutral">
+                Đăng lúc {formatDateTime(schedule.scheduledAt)}
+              </StatusPill>
+            ) : null}
             <StatusPill tone="neutral">{agentReviewLabel(item.agentReview?.status)}</StatusPill>
             <StatusPill tone="neutral">{publishingApprovalLabel(item.publishingApproval?.status)}</StatusPill>
           </div>
@@ -1537,6 +1589,12 @@ export default function ContentWorkspacePage() {
   const [rejectItem, setRejectItem] = useState<ContentItem | null>(null);
   const [rejectReason, setRejectReason] = useState("Từ chối trong màn hình quản lý nội dung");
   const [notice, setNotice] = useState<NoticeState | null>(null);
+  const noticeRef = useRef<HTMLDivElement | null>(null);
+  // Trang dài (queue + editor + calendar...) nên banner thông báo ở đầu trang dễ bị khuất khi người
+  // dùng đang cuộn sâu (vd vừa đổi lịch trong panel bài viết) — tự cuộn tới để giống 1 toast thật sự.
+  useEffect(() => {
+    if (notice) noticeRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [notice]);
 
   const briefsQuery = useQuery({ queryKey: ["content", "briefs"], queryFn: () => listContentBriefs() });
   const queueList = useInfiniteList<ContentItem, ContentQueueResponse>({
@@ -1984,10 +2042,7 @@ export default function ContentWorkspacePage() {
   }
 
   function openScheduleDialog(item: ContentItem) {
-    const activeSchedule = calendarItems.find((schedule) =>
-      schedule.contentItemId === item.id
-      && (normalize(schedule.status) === "pending" || normalize(schedule.status) === "held"),
-    );
+    const activeSchedule = findActiveSchedule(calendarItems, item.id);
     const isExistingSchedule = Boolean(activeSchedule)
       || normalize(item.status) === "scheduled"
       || normalize(item.workflowState) === "scheduled";
@@ -1996,7 +2051,16 @@ export default function ContentWorkspacePage() {
     activeScheduleDialogSessionRef.current = session;
     setActiveScheduleDialogSession(session);
     scheduleMutation.reset();
-    resetScheduleDialogInputs();
+    // Bug 2026-08-23: reset luôn về "Chọn giờ vàng" bất kể bài đã có lịch cụ thể — mở lại dialog để đổi
+    // lịch làm mất thời điểm riêng vừa cấu hình. Bài đã có scheduledAt hợp lệ thì nạp lại làm "specific".
+    const existingScheduledAt = activeSchedule?.scheduledAt ? new Date(activeSchedule.scheduledAt) : null;
+    if (existingScheduledAt && !Number.isNaN(existingScheduledAt.getTime())) {
+      setScheduleMode("specific");
+      setScheduleDate(toInputDate(existingScheduledAt));
+      setScheduleTime(toInputTime(existingScheduledAt));
+    } else {
+      resetScheduleDialogInputs();
+    }
     setScheduleTarget({
       isExistingSchedule,
       originalMetaAssetId: activeSchedule?.metaAssetId ?? null,
@@ -2063,7 +2127,7 @@ export default function ContentWorkspacePage() {
       </section>
 
       {notice ? (
-        <div className="mb-gutter">
+        <div className="mb-gutter" ref={noticeRef}>
           <Alert tone={notice.tone}>{notice.message}</Alert>
         </div>
       ) : null}
@@ -2207,6 +2271,7 @@ export default function ContentWorkspacePage() {
                   <QueueEditor
                     key={selectedItem?.id ?? "empty"}
                     item={selectedItem}
+                    schedule={selectedItem ? findActiveSchedule(calendarItems, selectedItem.id) : null}
                     body={editorBody}
                     assetsJson={editorAssets}
                     saving={updateItemMutation.isPending}
@@ -2314,8 +2379,8 @@ export default function ContentWorkspacePage() {
           <p className="text-body-sm text-on-surface-variant">
             Agent review chưa đạt (non-pass/error). Cần lý do override để duyệt phát hành revision {itemRevision(overrideItem)}.
           </p>
-          {overrideItem.agentReview?.reason ? (
-            <Alert tone="warning">Lý do agent: {overrideItem.agentReview.reason}</Alert>
+          {agentReviewReasonLabel(overrideItem.agentReview?.reason) ? (
+            <Alert tone="warning">Lý do agent: {agentReviewReasonLabel(overrideItem.agentReview?.reason)}</Alert>
           ) : null}
           <label className="block">
             <span className="mb-1 block text-label-caps uppercase text-secondary">Lý do override</span>
