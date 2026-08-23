@@ -201,7 +201,8 @@ public static partial class LlmConfigsEndpoints
             apiKey = encryptor.Decrypt(row.ApiKeyEncrypted);
             var resolved = new ResolvedLlmConfig(
                 row.Provider, row.ModelId, apiKey, row.BaseUrl,
-                row.InputUsdPer1M, row.OutputUsdPer1M, row.TimeoutSeconds, row.MaxOutputTokens);
+                row.InputUsdPer1M, row.OutputUsdPer1M, row.TimeoutSeconds, row.MaxOutputTokens,
+                ConfigModelId: row.ModelId);
             var client = factory.Create(resolved);
             await client.CompleteAsync("You are a connection test. Reply with 'ok'.", Array.Empty<ChatTurn>(), "ping", ct)
                 .ConfigureAwait(false);

@@ -78,7 +78,8 @@ public sealed partial class LlmConfigResolver(
 
         // D2: compiled agents may override the config model. Data-defined agents use LlmConfig.ModelId.
         // Khi fallback: bỏ model override của binding gốc — model đó đi kèm provider cũ, có thể không
-        // tồn tại trên config fallback.
+        // tồn tại trên config fallback. ConfigModelId giữ model chuẩn của config để caller retry
+        // khi provider chốt lỗi cấp model (model override cũ chết, model config còn sống).
         var effectiveModel = fellBack || string.IsNullOrWhiteSpace(agent?.Model) ? cfg.ModelId : agent!.Model;
         string apiKey;
         try
@@ -103,7 +104,8 @@ public sealed partial class LlmConfigResolver(
             cfg.MaxOutputTokens,
             ConfigId: cfg.Id,
             ConfigUpdatedAt: cfg.UpdatedAt,
-            SupportsVision: cfg.SupportsVision);
+            SupportsVision: cfg.SupportsVision,
+            ConfigModelId: cfg.ModelId);
     }
 
     // Đơn giá NULL -> client LLM âm thầm dùng mặc định 3.00/15.00 USD/1M (giá Claude). Áp giá đó cho
