@@ -779,7 +779,10 @@ public sealed class ContentReviewCoordinator(
                 result.ImageReviewStatus,
                 result.ReviewedImageCount,
                 execution.ReviewerAgentId,
-                result.ReasonCode,
+                // Bug 2026-08-23: item.AgentReviewReason (hiển thị "Lý do agent review" ở FE) từng nhận
+                // ReasonCode (mã cố định "agent_non_pass"/"passed") thay vì Reason — câu giải thích thật
+                // của reviewer LLM (field "reason" trong JSON verdict) bị bỏ qua, người dùng chỉ thấy mã.
+                string.IsNullOrWhiteSpace(result.Reason) ? result.ReasonCode : result.Reason,
                 completedAt);
             item.RecordReviewPolicySnapshot(
                 task.ContentRevision,
