@@ -165,6 +165,10 @@ builder.Services.AddSingleton<Clawbot.Agents.Core.Content.IContentReviewCompleti
 builder.Services.AddScoped<Clawbot.Agents.Core.Content.ContentReviewer>();
 builder.Services.AddScoped<Clawbot.AgentService.Services.IContentReviewExecutor,
     Clawbot.AgentService.Services.ContentReviewExecutor>();
+// Nhật ký phiên duyệt nội dung -> agent_sessions/agent_traces để theo dõi được ở /agents/runs.
+// Singleton: tự mở scope DB riêng mỗi lần ghi để không dính transaction/ChangeTracker của review.
+builder.Services.AddSingleton<Clawbot.AgentService.Services.IContentReviewSessionRecorder,
+    Clawbot.AgentService.Services.ContentReviewSessionRecorder>();
 builder.Services.AddScoped<Clawbot.AgentService.Services.IContentReviewCoordinator,
     Clawbot.AgentService.Services.ContentReviewCoordinator>();
 // Refine (P6, §4.7): reviewer reject => chạy lại L3+L4 kèm lý do, sửa bài tại chỗ, chấm lại đúng 1 vòng.

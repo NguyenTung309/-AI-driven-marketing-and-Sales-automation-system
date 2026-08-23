@@ -153,7 +153,9 @@ public sealed class ContentReviewCoordinator(
     IClock clock,
     IContentAutoScheduler? autoScheduler = null,
     IContentRefiner? refiner = null,
-    IMetaIntegrationService? metaIntegrations = null) : IContentReviewCoordinator
+    IMetaIntegrationService? metaIntegrations = null,
+    // Nhật ký phiên cho màn /agents/runs — tuỳ chọn để test cũ dựng coordinator không phải khai thêm.
+    IContentReviewSessionRecorder? sessionRecorder = null) : IContentReviewCoordinator
 {
     private const string StartedAction = "content.agent_review.started";
     private const string CompletedAction = "content.agent_review.completed";
@@ -166,6 +168,7 @@ public sealed class ContentReviewCoordinator(
     private readonly IContentAutoScheduler? _autoScheduler = autoScheduler;
     private readonly IContentRefiner? _refiner = refiner;
     private readonly IMetaIntegrationService? _metaIntegrations = metaIntegrations;
+    private readonly IContentReviewSessionRecorder? _sessionRecorder = sessionRecorder;
 
     public async Task ProcessAsync(
         Guid tenantId,
@@ -180,7 +183,22 @@ public sealed class ContentReviewCoordinator(
         if (execution is null)
             return;
 
+        // Nhật ký chỉ mở SAU khi claim thành công: các lượt bị bỏ (mất lease, bài đổi revision, hoãn vì
+        // orchestration) không phải "phiên chạy" nên không tạo rác ở màn /agents/runs.
+        var sessionId = _sessionRecorder is null
+            ? null
+            : await _sessionRecorder.StartAsync(
+                tenantId,
+                execution.Request.ContentItemId,
+                execution.ReviewerAgentId,
+                execution.Request.Platform,
+                execution.Request.Body,
+                execution.Request.ExpectedRevision,
+                execution.ReviewCycle,
+                cancellationToken);
+
         var result = await RunReviewAsync(execution, cancellationToken);
+        await TraceResultAsync(sessionId, "review", result, cancellationToken);
 
         // Refine (P6, §4.7): reviewer reject kèm lý do máy đọc được + bài có L1/L2 đã lưu + chưa refine vòng nào
         // => chạy lại L3+L4 với lý do reject, sửa body TẠI CHỖ (giữ revision, review vẫn running), rồi chấm lại
@@ -190,12 +208,27 @@ public sealed class ContentReviewCoordinator(
             var refined = await TryApplyRefineAsync(execution, result, leaseToken, cancellationToken);
             if (refined is not null)
             {
+                await TraceAsync(
+                    sessionId,
+                    "refine",
+                    "Bài bị từ chối, đã sửa lại nội dung theo góp ý và chấm lại lần cuối.",
+                    cancellationToken);
                 execution = refined;
                 result = await RunReviewAsync(execution, cancellationToken);
+                await TraceResultAsync(sessionId, "review_after_refine", result, cancellationToken);
             }
         }
 
         await CompleteAsync(execution, leaseToken, result, cancellationToken);
+
+        if (_sessionRecorder is not null)
+        {
+            await _sessionRecorder.FinishAsync(
+                sessionId,
+                result.ReviewStatus,
+                string.IsNullOrWhiteSpace(result.Reason) ? result.ReasonCode : result.Reason,
+                cancellationToken);
+        }
     }
 
     private async Task<ContentReviewExecutionResult> RunReviewAsync(
@@ -459,7 +492,8 @@ public sealed class ContentReviewCoordinator(
                     item.ChainPlanJson,
                     item.ChainOutlineJson),
                 reviewer.Id,
-                item.RowVersion.ToArray());
+                item.RowVersion.ToArray(),
+                task.ReviewCycle);
         }
         catch (DbUpdateException)
         {
@@ -1159,9 +1193,32 @@ public sealed class ContentReviewCoordinator(
     private static string EventKey(Guid taskId, int reviewCycle, string transition) =>
         $"content-review:{taskId:N}:cycle:{reviewCycle}:{transition}";
 
+    private async Task TraceAsync(
+        Guid? sessionId,
+        string phase,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        if (_sessionRecorder is null || sessionId is null)
+            return;
+
+        await _sessionRecorder.TraceAsync(sessionId, phase, message, cancellationToken);
+    }
+
+    private Task TraceResultAsync(
+        Guid? sessionId,
+        string phase,
+        ContentReviewExecutionResult result,
+        CancellationToken cancellationToken)
+    {
+        var detail = string.IsNullOrWhiteSpace(result.Reason) ? result.ReasonCode : result.Reason;
+        return TraceAsync(sessionId, phase, $"[{result.ReviewStatus}] {detail}", cancellationToken);
+    }
+
     private sealed record ClaimedExecution(
         Guid TaskId,
         ContentReviewExecutionRequest Request,
         Guid ReviewerAgentId,
-        byte[] ItemRowVersion);
+        byte[] ItemRowVersion,
+        int ReviewCycle);
 }
