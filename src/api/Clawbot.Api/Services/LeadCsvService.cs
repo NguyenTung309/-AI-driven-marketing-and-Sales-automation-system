@@ -23,6 +23,8 @@ public sealed class LeadCsvService(AppDbContext db, IClock clock)
     {
         var leads = await _db.Leads.IgnoreQueryFilters()
             .Where(l => l.TenantId == tenantId && l.DeletedAt == null)
+            // Doi tac la nhom (nhieu thanh vien) khong phai 1 khach tiem nang — khop voi danh sach tren trang.
+            .Where(l => !_db.Conversations.Any(c => c.ContactId == l.ContactId && c.IsGroup))
             .ApplyLeadScope(scope ?? LeadScope.All, _db)
             .OrderByDescending(l => l.Score)
             .ThenByDescending(l => l.LastActivityAt ?? l.CreatedAt)

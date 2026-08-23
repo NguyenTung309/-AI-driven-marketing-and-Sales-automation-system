@@ -26,6 +26,9 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? DeletedAt { get; private set; }
     public byte[]? RowVersion { get; private set; }
+    // Doi tac hoi thoai la nhom Zalo/FB (nhieu thanh vien), khong phai 1 khach ca nhan.
+    // Duoc set tu cờ is_group cua kenh (Pancake) khi ingest — dung de loai nhom khoi dem/cham Lead.
+    public bool IsGroup { get; private set; }
 
     public IReadOnlyCollection<Message> Messages => _messages.AsReadOnly();
 
@@ -37,7 +40,8 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
         string externalThreadId,
         DateTimeOffset createdAt,
         Guid? contactId = null,
-        Guid? inboxId = null) =>
+        Guid? inboxId = null,
+        bool isGroup = false) =>
         new()
         {
             Id = Guid.NewGuid(),
@@ -47,9 +51,14 @@ public sealed class Conversation : AggregateRoot<Guid>, ITenantOwned
             ExternalThreadId = externalThreadId,
             CreatedAt = createdAt,
             InboxId = inboxId,
+            IsGroup = isGroup,
         };
 
     public void SetInboxId(Guid inboxId) => InboxId = inboxId;
+
+    // Self-heal mot chieu: chi bat len khi kenh xac nhan la nhom, khong bao gio tat lai
+    // (tin sau thieu co is_group khong duoc xoa mat trang thai nhom da biet).
+    public void MarkGroup() => IsGroup = true;
 
     public void Assign(Guid userId) => AssignedTo = userId;
 

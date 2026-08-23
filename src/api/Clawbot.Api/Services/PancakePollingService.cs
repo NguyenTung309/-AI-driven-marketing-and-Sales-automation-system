@@ -264,6 +264,11 @@ public sealed partial class PancakePollingService : BackgroundService
         var resp = JsonSerializer.Deserialize<PancakeConversationsResponse>(json, JsonOpts);
         if (resp?.Success == false || resp?.Conversations is null) return false;
 
+        // Vet hoi thoai nhom da ton tai truoc khi co Conversation.IsGroup (2026-08-23): list API luon
+        // tra conv.From.IsGroup du hoi thoai co tin moi hay khong, nen backfill ngay tai day thay vi
+        // cho tu ChannelMessageIngestor (chi chay khi co tin moi -> nhom im lang khong bao gio duoc vet).
+        await BackfillGroupFlagsAsync(resp.Conversations, pageId, platform, tenantId, ct).ConfigureAwait(false);
+
         var convIndex = 0;
         foreach (var conv in resp.Conversations)
         {
@@ -417,6 +422,36 @@ public sealed partial class PancakePollingService : BackgroundService
 
         return ok;
     }
+
+    // Backfill Conversation.IsGroup tu list API cho hoi thoai da ton tai truoc khi co cot nay, hoac
+    // hoi thoai nhom im lang (khong co tin moi de tu qua nhanh ChannelMessageIngestor). An toan de
+    // goi moi vong poll: chi update hang co is_group=false trong DB nhung Pancake bao IsGroup=true.
+    private async Task BackfillGroupFlagsAsync(
+        PancakeConversation[] conversations, string pageId, string platform, Guid? tenantId, CancellationToken ct)
+    {
+        var groupThreadIds = conversations
+            .Where(c => c.From?.IsGroup == true && !string.IsNullOrEmpty(c.Id))
+            .Select(c => $"{pageId}:{c.Id}")
+            .ToList();
+        if (groupThreadIds.Count == 0) return;
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<Clawbot.Infrastructure.Persistence.AppDbContext>();
+        var resolvedTenantId = tenantId
+            ?? await scope.ServiceProvider.GetRequiredService<Clawbot.SharedKernel.Multitenancy.ITenantResolver>()
+                .ResolveTenantIdAsync(ct).ConfigureAwait(false);
+
+        var staleGroups = await db.Conversations
+            .IgnoreQueryFilters()
+            .Where(c => c.TenantId == resolvedTenantId && c.Platform == platform
+                && groupThreadIds.Contains(c.ExternalThreadId) && !c.IsGroup)
+            .ToListAsync(ct).ConfigureAwait(false);
+        if (staleGroups.Count == 0) return;
+
+        foreach (var c in staleGroups) c.MarkGroup();
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
     internal sealed record PancakeSenderMapResult(
         string ExternalUserId,
         IReadOnlyDictionary<string, string> Metadata);

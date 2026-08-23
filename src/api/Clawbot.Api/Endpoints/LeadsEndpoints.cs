@@ -94,6 +94,8 @@ public static class LeadsEndpoints
         var scope = await scopes.GetScopeAsync(http.User, ct).ConfigureAwait(false);
 
         var query = db.Leads.AsNoTracking().Where(l => l.DeletedAt == null).ApplyLeadScope(scope, db);
+        // Doi tac la nhom (nhieu thanh vien) khong phai 1 khach tiem nang — khong tinh vao danh sach/dem Lead.
+        query = query.Where(l => !db.Conversations.Any(c => c.ContactId == l.ContactId && c.IsGroup));
         if (!string.IsNullOrEmpty(stage)) query = query.Where(l => l.Stage == stage);
         if (!string.IsNullOrWhiteSpace(source) && !string.Equals(source, "all", StringComparison.OrdinalIgnoreCase))
             query = query.Where(l => l.SourcePlatform == source);
@@ -553,6 +555,7 @@ public static class LeadsEndpoints
         var dailyCounts = await db.Leads
             .IgnoreQueryFilters()
             .Where(l => l.TenantId == tenantId && l.CreatedAt >= since)
+            .Where(l => !db.Conversations.Any(c => c.ContactId == l.ContactId && c.IsGroup))
             .ApplyLeadScope(scope, db)
             .GroupBy(l => l.CreatedAt.Date)
             .Select(g => new { Date = g.Key, Count = g.Count() })
