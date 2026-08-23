@@ -9,42 +9,58 @@ using NSubstitute;
 
 namespace Clawbot.Agents.Tests.Orchestrator;
 
-// Chi phí vận hành: một task lỗi KHÔNG được kéo theo một lượt lập kế hoạch mới + chạy lại từ đầu.
-// Mặc định phải là dừng lại chờ người sửa đúng bước lỗi.
+// Chính sách "pause" nay là review gate: mỗi bước hoàn tất phải chờ người duyệt/sửa trước khi
+// output trở thành input của bước sau. Task lỗi vẫn để AI lập kế hoạch lại.
 public sealed class OrchestratorFailurePolicyTests
 {
     private static readonly Guid TenantId = Guid.NewGuid();
     private static readonly Guid SessionId = Guid.NewGuid();
 
     [Fact]
-    public async Task FailedTask_PausesForInterventionInsteadOfReplanning()
+    public async Task Pause_PausesAfterEachCompletedNonFinalTask()
     {
-        var harness = new Harness(FailingAgent("worker", "quota_exhausted"));
+        var harness = new Harness(SucceedingAgent("worker", "output t1"));
+        var plan = PlanOf(
+            Task("t1", "worker"),
+            Task("t2", "worker", dependsOn: ["t1"]));
 
-        var result = await harness.RunAsync(PlanOf(Task("t1", "worker")));
+        var result = await harness.RunAsync(plan);
 
         result.Status.Should().Be("paused");
-        result.Reason.Should().Be("awaiting_intervention");
+        result.Reason.Should().Be("awaiting_approval");
+        harness.LastPersistedPlan!.Tasks.Should().ContainSingle(task => task.Id == "t1" && task.Status == "completed");
+        harness.LastPersistedPlan.Tasks.Should().ContainSingle(task => task.Id == "t2" && task.Status == "pending");
         await harness.Sink.Received(1).PauseForInterventionAsync(
-            TenantId, SessionId, "t1", "quota_exhausted", Arg.Any<int>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
-        await harness.Planner.DidNotReceiveWithAnyArgs().ReplanAsync(default, default!, default!, default!, default);
+            TenantId, SessionId, "t1", "task_completed_awaiting_approval", Arg.Any<int>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task FailedTask_PersistsThePlanBeforePausing()
+    public async Task Pause_DoesNotPauseAfterFinalTask()
     {
-        // PersistPlanAsync tự bỏ qua khi phiên không còn Running, nên ghi sau khi pause là mất output/error
-        // của chính bước vừa lỗi — đúng thứ người dùng cần đọc để sửa.
+        var harness = new Harness(SucceedingAgent("worker", "output t1"));
+
+        var result = await harness.RunAsync(PlanOf(Task("t1", "worker")));
+
+        result.Status.Should().Be("completed");
+        await harness.Sink.DidNotReceiveWithAnyArgs().PauseForInterventionAsync(
+            default, default, default!, default!, default, default, default);
+    }
+
+    [Fact]
+    public async Task Pause_FailedTask_TriggersReplanInsteadOfWaitingForIntervention()
+    {
         var harness = new Harness(FailingAgent("worker", "quota_exhausted"));
-        var persistedBeforePause = false;
-        harness.Sink
-            .When(sink => sink.PauseForInterventionAsync(
-                Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()))
-            .Do(_ => persistedBeforePause = harness.LastPersistedPlan?.Tasks.Any(t => t.Status == "failed") == true);
+        harness.Planner
+            .ReplanAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<IReadOnlyList<AgentCatalogEntry>>(), Arg.Any<IReadOnlyList<OrchestrationPlanTask>>(), Arg.Any<CancellationToken>())
+            .Returns(PlanOf(Task("t1", "worker")));
 
-        await harness.RunAsync(PlanOf(Task("t1", "worker")));
+        var result = await harness.RunAsync(PlanOf(Task("t1", "worker")));
 
-        persistedBeforePause.Should().BeTrue();
+        result.Status.Should().Be("failed");
+        result.Reason.Should().Be("max_rounds");
+        await harness.Planner.ReceivedWithAnyArgs(1).ReplanAsync(default, default!, default!, default!, default);
+        await harness.Sink.DidNotReceiveWithAnyArgs().PauseForInterventionAsync(
+            default, default, default!, default!, default, default, default);
     }
 
     [Fact]
@@ -108,15 +124,19 @@ public sealed class OrchestratorFailurePolicyTests
     }
 
     [Fact]
-    public async Task ManualRunFromASchedule_StillPausesForIntervention()
+    public async Task ManualRunFromASchedule_ReplansFailedTaskInsteadOfWaitingForAnEdit()
     {
-        // AgentScheduleRunner gắn source "manual" cho lần bấm chạy tay từ màn lịch — có người đang ngồi đó.
+        // AgentScheduleRunner gắn source "manual" cho lần bấm chạy tay từ màn lịch. "pause" ở đây là
+        // review gate cho kết quả thành công, không phải bắt người dùng tự tạo lại output của task lỗi.
         var harness = new Harness(FailingAgent("worker", "quota_exhausted"), source: "manual");
+        harness.Planner
+            .ReplanAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<IReadOnlyList<AgentCatalogEntry>>(), Arg.Any<IReadOnlyList<OrchestrationPlanTask>>(), Arg.Any<CancellationToken>())
+            .Returns(PlanOf(Task("t1", "worker")));
 
         var result = await harness.RunAsync(PlanOf(Task("t1", "worker")));
 
-        result.Status.Should().Be("paused");
-        await harness.Planner.DidNotReceiveWithAnyArgs().ReplanAsync(default, default!, default!, default!, default);
+        result.Reason.Should().Be("max_rounds");
+        await harness.Planner.ReceivedWithAnyArgs(1).ReplanAsync(default, default!, default!, default!, default);
     }
 
     [Fact]

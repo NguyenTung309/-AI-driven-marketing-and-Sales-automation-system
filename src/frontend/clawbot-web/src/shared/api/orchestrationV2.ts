@@ -9,7 +9,10 @@ export interface OrchestrationV2Agent {
   readonly isOrchestratable: boolean;
   readonly version: number;
   readonly kbModuleCode?: string | null;
+  /** Compact capability description used by the orchestration planner. */
   readonly personaPrompt?: string;
+  /** Full runtime prompt; immutable platform guardrails are composed server-side. */
+  readonly systemPrompt?: string | null;
   // SPEC-16 P1-7: tool allow-list + input schema for the ReAct worker.
   readonly allowedToolsJson?: string;
   readonly inputSchemaJson?: string;
@@ -144,6 +147,8 @@ export async function upsertOrchestrationV2Agent(payload: {
   readonly inputSchemaJson?: string;
   /** null/omit = giữ binding hiện tại; Guid rỗng = gỡ bind; giá trị = bind LLM config. */
   readonly llmConfigId?: string | null;
+  /** Omit to preserve an existing system prompt; null clears a tenant customization. */
+  readonly systemPrompt?: string | null;
 }): Promise<OrchestrationV2Agent> {
   const res = await apiClient.post<OrchestrationV2Agent>("/api/orchestration/v2/agents", payload);
   return res.data;

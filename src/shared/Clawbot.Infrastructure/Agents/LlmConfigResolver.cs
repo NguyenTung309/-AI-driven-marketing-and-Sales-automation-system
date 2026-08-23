@@ -32,10 +32,11 @@ public sealed partial class LlmConfigResolver(
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+        var normalizedAgentCode = Clawbot.Agents.Core.AgentPromptPacks.NormalizeCode(agentCode);
         var agent = await db.AgentConfigs
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(a => a.TenantId == tenantId && a.Code == agentCode && a.DeletedAt == null)
+            .Where(a => a.TenantId == tenantId && a.Code == normalizedAgentCode && a.DeletedAt == null)
             .Select(a => new { a.LlmConfigId, a.Model })
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 

@@ -30,6 +30,9 @@
     <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\IOrchestratorCallerAuthorizer.cs" Link="Services\IOrchestratorCallerAuthorizer.cs" />
     <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\IOrchestratorPermissionResolver.cs" Link="Services\IOrchestratorPermissionResolver.cs" />
     <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\ITenantTrendScanner.cs" Link="Services\ITenantTrendScanner.cs" />
+    <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\ReportAgentRunner.cs" Link="Services\ReportAgentRunner.cs" />
+    <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\LeadAgentRunner.cs" Link="Services\LeadAgentRunner.cs" />
+    <Compile Include="..\..\src\agents\Clawbot.AgentService\Services\OrchestrationAgentAdapters.cs" Link="Services\OrchestrationAgentAdapters.cs" />
   </ItemGroup>
 
   <ItemGroup>

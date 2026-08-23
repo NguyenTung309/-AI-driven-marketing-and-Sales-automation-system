@@ -29,6 +29,7 @@ public sealed class AgentDefinitionCatalog(AppDbContext db, ITenantAccessor tena
                 d.DisplayName,
                 d.AgentType,
                 d.PersonaPrompt,
+                d.SystemPrompt,
                 d.InputSchemaJson,
                 d.IsOrchestratable,
                 d.KbModuleCode,
@@ -52,7 +53,7 @@ public sealed class AgentDefinitionCatalog(AppDbContext db, ITenantAccessor tena
         var boundCodes = new HashSet<string>(agentBoundCodes, StringComparer.OrdinalIgnoreCase);
 
         return rows
-            .Where(d => d.LlmConfigId != null || boundCodes.Contains(d.Code))
+            .Where(d => d.LlmConfigId != null || boundCodes.Contains(Clawbot.Agents.Core.AgentPromptPacks.NormalizeCode(d.Code)))
             .Select(d => new AgentDefinitionCatalogEntry(
                 d.Id,
                 d.Code,
@@ -63,7 +64,9 @@ public sealed class AgentDefinitionCatalog(AppDbContext db, ITenantAccessor tena
                 string.IsNullOrWhiteSpace(d.InputSchemaJson) ? "{}" : d.InputSchemaJson,
                 d.IsOrchestratable,
                 string.IsNullOrWhiteSpace(d.KbModuleCode) ? null : d.KbModuleCode,
-                string.IsNullOrWhiteSpace(d.AllowedToolsJson) ? "[]" : d.AllowedToolsJson))
+                string.IsNullOrWhiteSpace(d.AllowedToolsJson) ? "[]" : d.AllowedToolsJson,
+                // Prompt chạy thật; rỗng thì worker lùi về PersonaPrompt như trước.
+                string.IsNullOrWhiteSpace(d.SystemPrompt) ? null : d.SystemPrompt))
             .ToArray();
     }
 

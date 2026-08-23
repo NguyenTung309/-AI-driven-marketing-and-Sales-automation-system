@@ -416,10 +416,18 @@ public static partial class RbacSeeder
         var metadata = JsonNode.Parse(BuildOrchestrationConfig(code))!.AsObject()["orchestration"]!.DeepClone();
         root["orchestration"] = metadata;
 
-        // Seed prompt mau chi khi con rong -> khong ghi de khi user da sua (re-seed an toan).
+        // Upgrade only a blank, explicitly versioned default, or the exact legacy default. A prompt changed in
+        // /api/prompts/configs has no seed version and therefore remains a tenant customization.
         var existingPrompt = root["systemPrompt"]?.GetValue<string>();
-        if (string.IsNullOrWhiteSpace(existingPrompt))
-            root["systemPrompt"] = Clawbot.Agents.Core.AgentPromptDefaults.DefaultFor(code);
+        var promptVersion = root["systemPromptVersion"] is JsonValue versionNode
+            && versionNode.TryGetValue<int>(out var parsedVersion)
+            ? parsedVersion
+            : (int?)null;
+        if (Clawbot.Agents.Core.AgentPromptPacks.ShouldRefreshSeededPrompt(code, existingPrompt, promptVersion))
+        {
+            root["systemPrompt"] = Clawbot.Agents.Core.AgentPromptPacks.For(code);
+            root["systemPromptVersion"] = Clawbot.Agents.Core.AgentPromptPacks.PromptPackVersion;
+        }
 
         return root.ToJsonString();
     }

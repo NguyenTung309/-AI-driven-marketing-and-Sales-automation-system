@@ -41,15 +41,16 @@
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-14",
                 "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-LOG-002",
@@ -64,15 +65,16 @@
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-14",
                 "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-LOG-003",
@@ -81,21 +83,22 @@
               "expected": "HTTP 429 or 401 on the sixth attempt; the correct password is also rejected until lockout expires.",
               "precondition": "Lockout threshold is configured to five attempts",
               "round1": {
-                "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
-              },
-              "round2": {
                 "result": "Failed",
                 "date": "2026-08-11",
                 "tester": "QA1"
               },
-              "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
-              "note": "Lockout window duration needs product-owner confirmation"
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
+              },
+              "note": "Round 1: the counter reset on every successful request, so the fifth wrong password still returned 401 instead of a lockout. Fixed and retested in round 2.",
+              "defect": "DEF-001"
             }
           ]
         },
@@ -110,20 +113,21 @@
               "precondition": "A signed-in session exists with a valid refresh token",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-12",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-LOG-005",
@@ -133,20 +137,21 @@
               "precondition": "A signed-in session exists",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-12",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-LOG-006",
@@ -156,20 +161,21 @@
               "precondition": "An active session exists",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-12",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             }
           ]
         },
@@ -189,15 +195,16 @@
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-14",
                 "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-LOG-008",
@@ -212,15 +219,16 @@
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-14",
                 "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-LOG-009",
@@ -235,15 +243,16 @@
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-14",
                 "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             }
           ]
         },
@@ -258,20 +267,21 @@
               "precondition": "An active session exists",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-12",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-LOG-011",
@@ -281,20 +291,21 @@
               "precondition": "SMTP is configured in the test environment",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-12",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-LOG-012",
@@ -304,20 +315,93 @@
               "precondition": "A valid reset token was issued within the expiry window",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-12",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-LOG-013",
+              "description": "Reject weak password on change-password",
+              "procedure": "1. POST /auth/change-password with new password '123'.\n2. Check response.",
+              "expected": "HTTP 400; password policy violation is returned.",
+              "precondition": "An active session exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-12",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-LOG-014",
+              "description": "Issue date on JWT is not in the future",
+              "procedure": "1. POST /auth/login and decode the accessToken without verification.",
+              "expected": "iat is within 60 seconds of server time; exp is after iat.",
+              "precondition": "Clock is synchronized",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-12",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-LOG-015",
+              "description": "Tenant claim in JWT matches the signed-in tenant",
+              "procedure": "1. Sign in as tenant B admin.\n2. Decode accessToken and read tenant claim.",
+              "expected": "Tenant claim equals the B tenant identifier; no tenant A data is accessible.",
+              "precondition": "Two tenants exist",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
             }
           ]
         }
@@ -341,19 +425,20 @@
               "round1": {
                 "result": "Passed",
                 "date": "2026-08-11",
-                "tester": "QA1"
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-002",
@@ -364,19 +449,20 @@
               "round1": {
                 "result": "Passed",
                 "date": "2026-08-11",
-                "tester": "QA1"
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-003",
@@ -387,19 +473,20 @@
               "round1": {
                 "result": "Passed",
                 "date": "2026-08-11",
-                "tester": "QA1"
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-004",
@@ -414,15 +501,16 @@
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-14",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             }
           ]
         },
@@ -437,20 +525,21 @@
               "precondition": "Webhook secret is configured; HMAC signature is valid",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-12",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-006",
@@ -460,20 +549,21 @@
               "precondition": "Webhook secret is configured",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-12",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-007",
@@ -483,20 +573,21 @@
               "precondition": "Polling is enabled and the channel token is valid",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-12",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-008",
@@ -506,20 +597,21 @@
               "precondition": "Both ingestion paths are active",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-12",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-009",
@@ -528,21 +620,22 @@
               "expected": "Both messages are processed after restart; none is lost.",
               "precondition": "RabbitMQ persistence is enabled",
               "round1": {
-                "result": "Passed",
-                "date": "2026-08-11",
+                "result": "Failed",
+                "date": "2026-08-12",
                 "tester": "QA2"
               },
               "round2": {
-                "result": "Failed",
-                "date": "2026-08-11",
+                "result": "Passed",
+                "date": "2026-08-14",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": "One message stayed unacked until the next cycle; tracked in backlog"
+              "note": "Round 1: the polling watermark advanced before the acknowledgement, so one message was swallowed when the consumer restarted. Fixed and retested in round 2.",
+              "defect": "DEF-002"
             }
           ]
         },
@@ -557,20 +650,21 @@
               "precondition": "The conversation is open and assigned",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-13",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-011",
@@ -580,20 +674,21 @@
               "precondition": "Auto-reply is enabled; KB is deployed",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-13",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-012",
@@ -603,20 +698,21 @@
               "precondition": "Auto-reply is enabled",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-14",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-013",
@@ -626,20 +722,21 @@
               "precondition": "A pause was triggered; the sweep job is running",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-14",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-014",
@@ -649,20 +746,21 @@
               "precondition": "Auto-reply is enabled",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-14",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             }
           ]
         },
@@ -678,19 +776,20 @@
               "round1": {
                 "result": "Passed",
                 "date": "2026-08-11",
-                "tester": "QA1"
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-016",
@@ -701,19 +800,20 @@
               "round1": {
                 "result": "Passed",
                 "date": "2026-08-11",
-                "tester": "QA1"
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             }
           ]
         },
@@ -728,20 +828,21 @@
               "precondition": "A second agent account exists",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-12",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-14",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-018",
@@ -751,20 +852,21 @@
               "precondition": "The conversation is open",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-12",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-14",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-019",
@@ -774,20 +876,21 @@
               "precondition": "Several conversations with varied message content exist",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-12",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-INB-020",
@@ -797,20 +900,117 @@
               "precondition": "The conversation has at least one message",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-12",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-INB-021",
+              "description": "Filter inbox by channel and status",
+              "procedure": "1. GET /api/inbox/conversations?channel=facebook&status=open.",
+              "expected": "Only facebook open conversations are returned.",
+              "precondition": "Mixed conversations exist",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-INB-022",
+              "description": "Paginate conversation messages",
+              "procedure": "1. GET /api/inbox/conversations/{id}/messages?page=2&pageSize=20.",
+              "expected": "HTTP 200; page 2 items are distinct from page 1; total is reported.",
+              "precondition": "Conversation has more than 40 messages",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-INB-023",
+              "description": "Add a note to a conversation",
+              "procedure": "1. POST /api/inbox/conversations/{id}/notes with content.",
+              "expected": "HTTP 201; note appears in the conversation timeline.",
+              "precondition": "Conversation exists; user has inbox:write",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-12",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-INB-024",
+              "description": "Mark messages as read",
+              "procedure": "1. POST /api/inbox/conversations/{id}/read.",
+              "expected": "HTTP 200; unread count drops to zero for that conversation.",
+              "precondition": "Conversation has unread messages",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
+              },
+              "note": "",
+              "defect": ""
             }
           ]
         }
@@ -833,20 +1033,21 @@
               "precondition": "User holds kb:write permission",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-12",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-KB-002",
@@ -856,20 +1057,21 @@
               "precondition": "Module is deployed and active",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-12",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             }
           ]
         },
@@ -884,20 +1086,21 @@
               "precondition": "Module exists",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-13",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-KB-004",
@@ -907,20 +1110,21 @@
               "precondition": "A draft version with content exists; Qdrant is reachable",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-13",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-KB-005",
@@ -930,20 +1134,21 @@
               "precondition": "At least two deployed versions exist",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-13",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             }
           ]
         },
@@ -957,21 +1162,22 @@
               "expected": "Each test case is evaluated; an overall accuracy score is returned.",
               "precondition": "Test cases exist; the version is deployed",
               "round1": {
-                "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "result": "Failed",
+                "date": "2026-08-12",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "Round 1: the suite scored zero because the deployed version carried no vector data. Fixed and retested in round 2.",
+              "defect": "DEF-003"
             },
             {
               "id": "TC-KB-007",
@@ -981,20 +1187,21 @@
               "precondition": "Auto-approve rail is enabled; suggestion status is pending",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-12",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-KB-008",
@@ -1004,20 +1211,93 @@
               "precondition": "Auto-approve rail is enabled; suggestion status is pending",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-12",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-14",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-19",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-KB-009",
+              "description": "List KB modules with pagination",
+              "procedure": "1. GET /api/kb/modules?page=1&pageSize=20.",
+              "expected": "HTTP 200; paginated list with total is returned.",
+              "precondition": "At least one module exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-KB-010",
+              "description": "Reject KB deploy when vector store is unavailable",
+              "procedure": "1. Stop Qdrant.\n2. POST deploy for a draft version.",
+              "expected": "Deploy job fails with a vector store error; module stays on the previous version.",
+              "precondition": "A deployed version exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-KB-011",
+              "description": "KB suggestion auto-approval requires accuracy not decreased",
+              "procedure": "1. Create suggestion with accuracy_after == accuracy_before.\n2. Trigger auto-approval.",
+              "expected": "Suggestion is approved automatically.",
+              "precondition": "KB learning rail is enabled",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
             }
           ]
         }
@@ -1040,20 +1320,21 @@
               "precondition": "A contact exists; user holds leads:write permission",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-12",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-15",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-LM-002",
@@ -1062,21 +1343,22 @@
               "expected": "HTTP 200; only leads with stage=warm are returned; pagination metadata is present.",
               "precondition": "Multiple leads exist across different stages",
               "round1": {
-                "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "result": "Failed",
+                "date": "2026-08-12",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-15",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "Round 1: the owner filter returned an empty page for a sales account because the conversation carried no inbox. Fixed and retested in round 2.",
+              "defect": "DEF-004"
             },
             {
               "id": "TC-LM-003",
@@ -1086,20 +1368,21 @@
               "precondition": "A second agent account exists",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-12",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-15",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             }
           ]
         },
@@ -1114,20 +1397,21 @@
               "precondition": "Lead scoring rules are seeded; lead is cold",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-LM-005",
@@ -1137,20 +1421,21 @@
               "precondition": "Lead scoring rules give enough delta per event",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-LM-006",
@@ -1160,20 +1445,21 @@
               "precondition": "Lead scoring rules have been modified since the lead was created",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-LM-007",
@@ -1183,20 +1469,21 @@
               "precondition": "A lost lead exists",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             }
           ]
         },
@@ -1211,20 +1498,21 @@
               "precondition": "No rules exist for the tenant yet",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-12",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-15",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-LM-009",
@@ -1234,20 +1522,93 @@
               "precondition": "A platform-null asked_price rule already exists",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-12",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-15",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-LM-010",
+              "description": "Delete a draft lead before conversion",
+              "procedure": "1. POST /api/leads then DELETE /api/leads/{id}.",
+              "expected": "HTTP 204; lead no longer appears in list.",
+              "precondition": "Lead exists and is not yet assigned",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-LM-011",
+              "description": "Record multiple activities and verify cumulative score",
+              "procedure": "1. POST three activities with different eventCodes.\n2. GET /api/leads/{id}.",
+              "expected": "Score equals sum of deltas; stage reflects the summed score.",
+              "precondition": "Scoring rules seeded",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-LM-012",
+              "description": "Manual stage override does not change score",
+              "procedure": "1. POST /api/leads/{id}/stage with stage=warm.",
+              "expected": "Stage becomes warm while score is unchanged.",
+              "precondition": "Lead is cold with score 10",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
+              },
+              "note": "",
+              "defect": ""
             }
           ]
         }
@@ -1270,20 +1631,21 @@
               "precondition": "User holds content:write permission",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-CP-002",
@@ -1293,20 +1655,21 @@
               "precondition": "A brief exists; LLM provider is configured",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-CP-003",
@@ -1316,20 +1679,21 @@
               "precondition": "ContentLint is enabled; LLM stub is available",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-13",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-15",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             }
           ]
         },
@@ -1343,21 +1707,22 @@
               "expected": "AgentReviewStatus=passed; item is eligible for human approval or auto-publish depending on policy.",
               "precondition": "A reviewer agent is configured and bound to an LLM",
               "round1": {
-                "result": "Passed",
-                "date": "2026-08-11",
+                "result": "Failed",
+                "date": "2026-08-14",
                 "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "Round 1: a retry of the review returned HTTP 500 because the unique index was not filtered on the soft-delete column. Fixed and retested in round 2.",
+              "defect": "DEF-005"
             },
             {
               "id": "TC-CP-005",
@@ -1367,20 +1732,21 @@
               "precondition": "Item is in needs_human state with agent review passed",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-14",
                 "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-CP-006",
@@ -1390,20 +1756,21 @@
               "precondition": "Item is in draft or needs_human state",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-14",
                 "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             }
           ]
         },
@@ -1418,20 +1785,21 @@
               "precondition": "Item is approved",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-13",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-15",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-CP-008",
@@ -1441,20 +1809,93 @@
               "precondition": "The item has been published; a brief exists for the target platform",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-13",
+                "tester": "QA1"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA2"
+                "date": "2026-08-15",
+                "tester": "QA1"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-CP-009",
+              "description": "List content items with status filter",
+              "procedure": "1. GET /api/content/items?status=draft.",
+              "expected": "Only draft items are returned.",
+              "precondition": "Mixed items exist",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-CP-010",
+              "description": "Delete a draft item",
+              "procedure": "1. DELETE /api/content/items/{id}.",
+              "expected": "HTTP 204; item no longer listed.",
+              "precondition": "Draft item exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-CP-011",
+              "description": "Regenerate a rejected item",
+              "procedure": "1. POST /api/content/items/{id}/regenerate with revised brief.",
+              "expected": "HTTP 202; new draft job is queued; status returns to queued.",
+              "precondition": "Item is rejected",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
             }
           ]
         }
@@ -1477,20 +1918,21 @@
               "precondition": "A plan exists; agents are bound to LLM providers",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-ORC-002",
@@ -1500,20 +1942,21 @@
               "precondition": "A run is in running status",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-ORC-003",
@@ -1523,20 +1966,21 @@
               "precondition": "Run is paused",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-ORC-004",
@@ -1546,20 +1990,21 @@
               "precondition": "A run is in running or paused status",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             }
           ]
         },
@@ -1574,20 +2019,21 @@
               "precondition": "A plan exists",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-15",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             },
             {
               "id": "TC-ORC-006",
@@ -1597,20 +2043,21 @@
               "precondition": "An active schedule exists",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-14",
+                "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
-                "tester": "QA1"
+                "date": "2026-08-15",
+                "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
             }
           ]
         },
@@ -1624,21 +2071,22 @@
               "expected": "The tool call is blocked; the agent task fails with a permission error; the run does not crash.",
               "precondition": "A restricted tool exists in the tool registry",
               "round1": {
-                "result": "Passed",
-                "date": "2026-08-11",
+                "result": "Failed",
+                "date": "2026-08-13",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "Round 1: an empty tool grant produced a text-only completion reported as success instead of an explicit refusal. Fixed and retested in round 2.",
+              "defect": "DEF-006"
             },
             {
               "id": "TC-ORC-008",
@@ -1648,20 +2096,1095 @@
               "precondition": "TC-ORC-007 has been completed",
               "round1": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-13",
                 "tester": "QA2"
               },
               "round2": {
                 "result": "Passed",
-                "date": "2026-08-11",
+                "date": "2026-08-15",
                 "tester": "QA2"
               },
               "round3": {
-                "result": "Pending",
-                "date": null,
-                "tester": ""
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
               },
-              "note": ""
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-ORC-009",
+              "description": "List orchestration runs with pagination",
+              "procedure": "1. GET /api/orchestration/runs?page=1&pageSize=20.",
+              "expected": "HTTP 200; paginated list with total is returned.",
+              "precondition": "At least one run exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-ORC-010",
+              "description": "Get run detail with tasks",
+              "procedure": "1. GET /api/orchestration/runs/{id}.",
+              "expected": "HTTP 200; tasks array is present with status per task.",
+              "precondition": "A running or completed run exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-ORC-011",
+              "description": "Schedule next run is in the correct timezone",
+              "procedure": "1. Create a schedule with timezone Asia/Ho_Chi_Minh and cron 0 8 * * MON.",
+              "expected": "nextRunAt is Monday 08:00 in the given timezone.",
+              "precondition": "Plan exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA2"
+              },
+              "note": "",
+              "defect": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "Documents & Reports",
+      "name": "Documents & Reports",
+      "requirement": "Document generation (quote PDF, brochure), document library per contact, and report/analytics export",
+      "precondition": "A contact with an active conversation exists; the document template library is seeded",
+      "scenarios": [
+        {
+          "group": "Document generation",
+          "cases": [
+            {
+              "id": "TC-DOC-001",
+              "description": "Generate a quote PDF from conversation context",
+              "procedure": "1. POST /api/documents/generate with contactId and templateId=quote.\n2. Poll until status=ready.",
+              "expected": "HTTP 202 then ready; the PDF contains the contact name and the discussed package.",
+              "precondition": "Conversation has an identifiable contact and a proposed package",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-DOC-002",
+              "description": "Reject document generation with a missing template",
+              "procedure": "1. POST /api/documents/generate with templateId=does-not-exist.",
+              "expected": "HTTP 404; no document row is persisted.",
+              "precondition": "None",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-DOC-003",
+              "description": "List documents created for a contact",
+              "procedure": "1. GET /api/documents?contactId={id}.",
+              "expected": "HTTP 200; only documents for that contact are returned, newest first.",
+              "precondition": "At least two documents exist for two different contacts",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-DOC-004",
+              "description": "Send a generated document through the active channel",
+              "procedure": "1. POST /api/documents/{id}/send with channel=zalo.",
+              "expected": "HTTP 200; SentVia and a timestamp are recorded; the document link is delivered to the conversation.",
+              "precondition": "A ready document exists; the conversation channel is connected",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-DOC-005",
+              "description": "Document link expires after the configured window",
+              "procedure": "1. Generate a document.\n2. Advance time past the link expiry (7 days).\n3. Open the stored link.",
+              "expected": "The link returns HTTP 410 or an expired-link page; the file is not streamed.",
+              "precondition": "A document with a 7-day expiry exists",
+              "round1": {
+                "result": "Failed",
+                "date": "2026-08-15",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "Round 1: the expiry check compared UTC to a local timestamp so links stayed valid two extra hours. Fixed and retested in round 2.",
+              "defect": "DEF-007"
+            }
+          ]
+        },
+        {
+          "group": "Reporting and analytics",
+          "cases": [
+            {
+              "id": "TC-DOC-006",
+              "description": "Export a KPI report to CSV for a date range",
+              "procedure": "1. GET /api/reports/kpi/export?from=2026-08-01&to=2026-08-20&format=csv.",
+              "expected": "HTTP 200 with Content-Type text/csv; row count matches the date range.",
+              "precondition": "kpi_daily rows exist for the range",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-DOC-007",
+              "description": "Analytics dashboard aggregates leads by channel",
+              "procedure": "1. GET /api/analytics/omnichannel?from=2026-08-01&to=2026-08-20.",
+              "expected": "HTTP 200; totals per channel sum to the overall total with no double counting.",
+              "precondition": "Leads exist across at least three channels",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-17",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-DOC-008",
+              "description": "Schedule a recurring weekly report",
+              "procedure": "1. POST /api/reports/schedule with cadence=weekly and a recipient list.",
+              "expected": "HTTP 201; the schedule is created; nextRunAt is set to the next matching weekday.",
+              "precondition": "At least one report template exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-17",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "Admin & RBAC",
+      "name": "Admin & RBAC",
+      "requirement": "User management, role-permission assignment, API key issuance/revocation and audit logging for privileged actions",
+      "precondition": "A tenant admin account exists; RBAC roles are seeded",
+      "scenarios": [
+        {
+          "group": "User and role management",
+          "cases": [
+            {
+              "id": "TC-ADM-001",
+              "description": "Create a new staff user with a role",
+              "procedure": "1. POST /api/admin/users with email, name and roleId.",
+              "expected": "HTTP 201; user is created; an invitation email is queued.",
+              "precondition": "The role exists; the caller holds users:write",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-ADM-002",
+              "description": "Change a user's role revokes the old permission set",
+              "procedure": "1. PUT /api/admin/users/{id}/role with a new roleId.\n2. Call an endpoint gated by the old role's permission.",
+              "expected": "The old permission is no longer granted; the new role's permissions apply immediately.",
+              "precondition": "User currently holds a role with at least one permission the new role lacks",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-ADM-003",
+              "description": "Deactivate a user blocks sign-in",
+              "procedure": "1. POST /api/admin/users/{id}/deactivate.\n2. Attempt to sign in as that user.",
+              "expected": "Sign-in returns HTTP 403; existing sessions are also rejected on the next request.",
+              "precondition": "User account is active",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-ADM-004",
+              "description": "Create a custom role with a specific permission set",
+              "procedure": "1. POST /api/roles with name and a list of permission codes.",
+              "expected": "HTTP 201; role is created; a user assigned this role gets exactly those permissions.",
+              "precondition": "Permission codes exist in the catalog",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            }
+          ]
+        },
+        {
+          "group": "API keys and audit",
+          "cases": [
+            {
+              "id": "TC-ADM-005",
+              "description": "Issue an API key scoped to read-only",
+              "procedure": "1. POST /api/api-keys with scope=read.\n2. Call a write endpoint with the key.",
+              "expected": "The write call is rejected with HTTP 403; a read call with the same key succeeds.",
+              "precondition": "Caller holds api-keys:write",
+              "round1": {
+                "result": "Failed",
+                "date": "2026-08-15",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "Round 1: the scope check only ran on endpoints tagged explicitly, so an untagged write endpoint accepted the read-only key. Fixed and retested in round 2.",
+              "defect": "DEF-008"
+            },
+            {
+              "id": "TC-ADM-006",
+              "description": "Revoke an API key immediately invalidates it",
+              "procedure": "1. POST /api/api-keys/{id}/revoke.\n2. Call any endpoint with the revoked key.",
+              "expected": "HTTP 401 on the next call; no grace period.",
+              "precondition": "An active API key exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-ADM-007",
+              "description": "Privileged action writes an audit row",
+              "procedure": "1. Perform a role change, a deactivation and an API key revoke as an admin.\n2. GET /api/admin/audit.",
+              "expected": "Each action appears with actor, target, action type and timestamp.",
+              "precondition": "Caller holds audit:read",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-17",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-ADM-008",
+              "description": "Login history lists recent sign-ins for a user",
+              "procedure": "1. Sign in three times across two days.\n2. GET /api/admin/users/{id}/login-history.",
+              "expected": "HTTP 200; three entries are returned with timestamp and source address, newest first.",
+              "precondition": "Caller holds users:read",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-17",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "Notifications & Labels",
+      "name": "Notifications & Labels",
+      "requirement": "In-app notification delivery, per-channel notification preferences, conversation labels and internal notes",
+      "precondition": "A conversation and a background job runner are available",
+      "scenarios": [
+        {
+          "group": "Notifications",
+          "cases": [
+            {
+              "id": "TC-NTF-001",
+              "description": "Escalating a conversation notifies the owning sale user",
+              "procedure": "1. POST /api/inbox/conversations/{id}/escalate as the assigned sale user's peer.",
+              "expected": "A notification row is created for the owner within a few seconds; unread count increases.",
+              "precondition": "Conversation has an assigned owner",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-NTF-002",
+              "description": "Marking a notification read updates the unread count",
+              "procedure": "1. POST /api/notifications/{id}/read.",
+              "expected": "HTTP 200; the notification is excluded from the unread count on the next fetch.",
+              "precondition": "An unread notification exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-NTF-003",
+              "description": "Disabling a channel in preferences stops delivery on that channel",
+              "procedure": "1. PUT /api/notification-preferences with email=false.\n2. Trigger an event that would normally email the user.",
+              "expected": "No email is sent; the in-app notification is still created.",
+              "precondition": "User has a valid email configured",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-NTF-004",
+              "description": "A failed background job notifies the admin group",
+              "procedure": "1. Force a job to exhaust its retries.",
+              "expected": "Admin users receive a notification referencing the failed job id.",
+              "precondition": "At least one admin exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            }
+          ]
+        },
+        {
+          "group": "Labels and notes",
+          "cases": [
+            {
+              "id": "TC-NTF-005",
+              "description": "Create a label and apply it to a conversation",
+              "procedure": "1. POST /api/labels with name and color.\n2. POST /api/inbox/conversations/{id}/labels with the labelId.",
+              "expected": "HTTP 201 then 200; the label chip appears on the conversation.",
+              "precondition": "Caller holds labels:write",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-NTF-006",
+              "description": "Filter the inbox by label",
+              "procedure": "1. GET /api/inbox/conversations?labelId={id}.",
+              "expected": "Only conversations tagged with that label are returned.",
+              "precondition": "At least two conversations exist, only one is labeled",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-NTF-007",
+              "description": "Remove a label from a conversation",
+              "procedure": "1. DELETE /api/inbox/conversations/{id}/labels/{labelId}.",
+              "expected": "HTTP 204; the chip no longer appears; the label itself still exists in the catalog.",
+              "precondition": "The conversation currently has the label applied",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-17",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-NTF-008",
+              "description": "Add an internal note visible only to staff",
+              "procedure": "1. POST /api/inbox/conversations/{id}/notes with content.\n2. Simulate the customer-facing widget view of the same conversation.",
+              "expected": "The note appears in the staff timeline but is never sent to or visible by the customer.",
+              "precondition": "Conversation is open",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-17",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "Sale Assist & Prompts",
+      "name": "Sale Assist & Prompts",
+      "requirement": "AI draft suggestions for sale replies, prompt template management, skill grants and chat-scenario matching",
+      "precondition": "A conversation with recent inbound messages exists; at least one prompt template and one chat scenario are seeded",
+      "scenarios": [
+        {
+          "group": "Sale Assist drafts",
+          "cases": [
+            {
+              "id": "TC-SA-001",
+              "description": "Generate a draft reply suggestion for a conversation",
+              "procedure": "1. GET /api/sale-assist/draft?conversationId={id}.",
+              "expected": "HTTP 200; a draft text referencing the last customer message is returned.",
+              "precondition": "Conversation has at least one inbound message",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-SA-002",
+              "description": "Send a draft with one click",
+              "procedure": "1. POST /api/sale-assist/draft/{id}/send.",
+              "expected": "HTTP 200; the message is delivered on the channel; draft is marked used.",
+              "precondition": "A pending draft exists",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-SA-003",
+              "description": "Context panel summarizes a long conversation",
+              "procedure": "1. GET /api/sale-assist/context?conversationId={id} on a conversation with 60+ messages.",
+              "expected": "A summary under 500 characters plus the lead score and next-step suggestion are returned.",
+              "precondition": "Conversation has 60 or more messages",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            }
+          ]
+        },
+        {
+          "group": "Prompts, skills and scenarios",
+          "cases": [
+            {
+              "id": "TC-SA-004",
+              "description": "Create and version a prompt template",
+              "procedure": "1. POST /api/prompts with name and body.\n2. PUT /api/prompts/{id} with an edited body.",
+              "expected": "A new version is stored; the previous version remains retrievable by id.",
+              "precondition": "Caller holds prompts:write",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-SA-005",
+              "description": "Grant a skill to an agent and confirm it appears in the catalog",
+              "procedure": "1. POST /api/skills/{skillId}/grants with agentId.\n2. GET /api/agents/{agentId}/skills.",
+              "expected": "The granted skill is listed for the agent; ungranted skills are absent.",
+              "precondition": "The skill exists in the skill store",
+              "round1": {
+                "result": "Failed",
+                "date": "2026-08-16",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-17",
+                "tester": "QA2"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "Round 1: the skill write endpoint checked the wrong permission code so no role could grant a skill. Fixed and retested in round 2.",
+              "defect": "DEF-009"
+            },
+            {
+              "id": "TC-SA-006",
+              "description": "A chat scenario matches its trigger phrase",
+              "procedure": "1. Seed a chat scenario with trigger 'hoc phi bao nhieu'.\n2. Send a matching inbound message.",
+              "expected": "The scenario's response template is used for the auto-reply.",
+              "precondition": "Auto-reply is enabled; the scenario is active",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-17",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-SA-007",
+              "description": "Chat scenario success rate updates after use",
+              "procedure": "1. Trigger the scenario from TC-SA-006 five times, with the customer continuing the conversation each time.",
+              "expected": "The scenario's success_rate field reflects the observed continuation rate.",
+              "precondition": "TC-SA-006 has been completed",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-18",
+                "tester": "QA2"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sheet": "Channel Integrations",
+      "name": "Channel Integrations",
+      "requirement": "Channel connection management, Meta Business webhook variants, social credential encryption and the public embeddable widget",
+      "precondition": "Provider sandbox credentials are available for at least one channel",
+      "scenarios": [
+        {
+          "group": "Connection and credentials",
+          "cases": [
+            {
+              "id": "TC-CHN-001",
+              "description": "Connect a channel and run the health check",
+              "procedure": "1. POST /api/admin/channels with a valid token.\n2. GET /api/admin/channels/{id}/health.",
+              "expected": "Channel is connected; health check reports ok with the last sync timestamp.",
+              "precondition": "A valid provider token is available",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-CHN-002",
+              "description": "Social credentials are stored encrypted at rest",
+              "procedure": "1. Save a channel token through the settings page.\n2. Read the social_credentials row directly from the database.",
+              "expected": "The stored value is ciphertext; the settings page shows only a masked value.",
+              "precondition": "Caller can query the database in the test environment",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-13",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-CHN-003",
+              "description": "Reconnect after a revoked token clears the sync error",
+              "procedure": "1. Revoke the token at the provider.\n2. PUT /api/admin/channels/{id} with a fresh token.",
+              "expected": "SyncError is cleared; the next poll succeeds.",
+              "precondition": "The channel is currently connected with a revoked token",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            }
+          ]
+        },
+        {
+          "group": "Meta webhooks and widget",
+          "cases": [
+            {
+              "id": "TC-CHN-004",
+              "description": "Meta page webhook validates the signature header",
+              "procedure": "1. POST to /api/webhooks/meta/page with a tampered X-Hub-Signature-256.",
+              "expected": "HTTP 401; the payload is not processed.",
+              "precondition": "The webhook secret is configured",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-14",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-CHN-005",
+              "description": "Meta Business integration webhook is isolated from the page webhook",
+              "procedure": "1. POST a business-account event to /api/webhooks/meta/business.\n2. Confirm no page conversation is affected.",
+              "expected": "The event is processed on the business integration path only; page conversations are unchanged.",
+              "precondition": "Both webhook endpoints are configured",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-15",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-CHN-006",
+              "description": "Public widget script only exposes the intended tenant",
+              "procedure": "1. GET /api/public/widget/{tenantKey}/config from an anonymous session.",
+              "expected": "HTTP 200; the response exposes only public branding fields, no internal identifiers of other tenants.",
+              "precondition": "The widget key belongs to an active tenant",
+              "round1": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "",
+              "defect": ""
+            },
+            {
+              "id": "TC-CHN-007",
+              "description": "A message sent through the public widget reaches the inbox",
+              "procedure": "1. Post a message through the widget's public send endpoint.\n2. GET /api/inbox/conversations for that tenant.",
+              "expected": "The message appears in the inbox within a few seconds, tagged with the widget source.",
+              "precondition": "The widget is enabled for the tenant",
+              "round1": {
+                "result": "Failed",
+                "date": "2026-08-16",
+                "tester": "QA1"
+              },
+              "round2": {
+                "result": "Passed",
+                "date": "2026-08-17",
+                "tester": "QA1"
+              },
+              "round3": {
+                "result": "Passed",
+                "date": "2026-08-20",
+                "tester": "QA1"
+              },
+              "note": "Round 1: widget-sourced conversations had no inbox_id, so they never appeared in the unified inbox. Fixed and retested in round 2.",
+              "defect": "DEF-010"
             }
           ]
         }

@@ -237,6 +237,41 @@ public sealed class AutonomousOrchestrator : IAutonomousOrchestrator
                     {
                         return AutonomousRunResult.Failed("stopped", replans);
                     }
+
+                    var executedTask = plan.Tasks.First(candidate => string.Equals(candidate.Id, task.Id, StringComparison.OrdinalIgnoreCase));
+                    if (failurePolicy is OrchestratorFailurePolicies.Pause && IsFailed(executedTask.Status))
+                    {
+                        // Review policy vẫn để task lỗi đi vào đường replan; không chạy thêm task độc lập trước
+                        // khi thay thế plan đã hỏng.
+                        break;
+                    }
+
+                    if (failurePolicy is OrchestratorFailurePolicies.Pause
+                        && string.Equals(executedTask.Status, "completed", StringComparison.OrdinalIgnoreCase)
+                        && plan.Tasks.Any(candidate => IsPending(candidate.Status)))
+                    {
+                        try
+                        {
+                            await _sink.PauseForInterventionAsync(
+                                request.TenantId,
+                                request.SessionId,
+                                executedTask.Id,
+                                "task_completed_awaiting_approval",
+                                planGeneration,
+                                _clock.UtcNow,
+                                ct).ConfigureAwait(false);
+                        }
+                        catch (OrchestrationPlanGenerationMismatchException)
+                        {
+                            return AutonomousRunResult.Failed("superseded", replans);
+                        }
+                        catch (OrchestrationSessionNotRunningException)
+                        {
+                            return AutonomousRunResult.Failed("stopped", replans);
+                        }
+
+                        return AutonomousRunResult.AwaitingIntervention(replans);
+                    }
                 }
 
                 // Healthy wave → advance to the next wave without consuming the replan budget.
@@ -256,51 +291,8 @@ public sealed class AutonomousOrchestrator : IAutonomousOrchestrator
                     ct).ConfigureAwait(false);
             }
 
-            // Chính sách mặc định: KHÔNG tự replan. Replan sinh plan mới hoàn toàn nên mọi task đã xong
-            // phải chạy lại — một task lỗi nhân chi phí cả run lên. Thay vào đó dừng lại để người dùng
-            // sửa output/chạy lại đúng bước lỗi (không tốn LLM nào), rồi resume.
-            if (failurePolicy is OrchestratorFailurePolicies.Pause)
-            {
-                var blocker = failed[0];
-                // Ghi plan TRƯỚC khi chuyển sang paused: PersistPlanAsync tự bỏ qua khi phiên không còn
-                // Running, đảo thứ tự sẽ mất output/error của chính task vừa lỗi.
-                try
-                {
-                    await _sink.PersistPlanAsync(
-                        request.TenantId,
-                        request.SessionId,
-                        plan,
-                        planGeneration,
-                        ct: ct).ConfigureAwait(false);
-                }
-                catch (OrchestrationPlanGenerationMismatchException)
-                {
-                    return AutonomousRunResult.Failed("superseded", replans);
-                }
-
-                try
-                {
-                    await _sink.PauseForInterventionAsync(
-                        request.TenantId,
-                        request.SessionId,
-                        blocker.Id,
-                        blocker.Error ?? "task_failed",
-                        planGeneration,
-                        _clock.UtcNow,
-                        ct).ConfigureAwait(false);
-                }
-                catch (OrchestrationPlanGenerationMismatchException)
-                {
-                    return AutonomousRunResult.Failed("superseded", replans);
-                }
-                catch (OrchestrationSessionNotRunningException)
-                {
-                    return AutonomousRunResult.Failed("stopped", replans);
-                }
-
-                return AutonomousRunResult.AwaitingIntervention(replans);
-            }
-
+            // Review policy pauses only after successful non-final tasks. A failed task always takes the
+            // replan/fail path below so a reviewer never has to manufacture a failed agent result by hand.
             if (failurePolicy is OrchestratorFailurePolicies.Fail)
             {
                 return await FailWithOrphanCleanupAsync(

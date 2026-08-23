@@ -21,6 +21,7 @@ import {
   getOrchestrationV2CostSummary,
   getOrchestrationV2Run,
   interveneOrchestrationV2Task,
+  listOrchestrationV2Agents,
   listOrchestrationV2Runs,
   updateOrchestrationV2Plan,
   type OrchestrationV2ControlAction,
@@ -93,6 +94,7 @@ export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange 
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   // Dialog can thiệp một bước (sửa output / chạy lại / bỏ qua) khi phiên đang tạm dừng.
   const [showIntervene, setShowIntervene] = useState(false);
+  const [showAgentPrompt, setShowAgentPrompt] = useState(false);
 
   const setSessionId = (next: string | null): void => onSessionIdChange(next);
 
@@ -151,6 +153,30 @@ export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange 
   const taskMessages = selectedTask
     ? (session?.messages ?? []).filter((message) => message.taskId === selectedTask.id)
     : [];
+  const canViewAgentPrompts = can("orchestration:view");
+  const agentDefinitionsQuery = useQuery({
+    queryKey: ["orchestration-v2", "agents"],
+    queryFn: listOrchestrationV2Agents,
+    enabled: showAgentPrompt && canViewAgentPrompts,
+    staleTime: 5 * 60_000,
+  });
+  const selectedAgentDefinition = useMemo(() => {
+    if (!selectedTask) return null;
+    const code = selectedTask.agent.toLocaleLowerCase();
+    return agentDefinitionsQuery.data?.find((agent) => agent.code.toLocaleLowerCase() === code) ?? null;
+  }, [agentDefinitionsQuery.data, selectedTask]);
+  const awaitingApprovalTaskId = useMemo(() => {
+    for (let index = traceItems.length - 1; index >= 0; index -= 1) {
+      const trace = traceItems[index];
+      if (trace.phase === "awaiting_approval") return trace.taskId;
+    }
+    return null;
+  }, [traceItems]);
+  const isSelectedTaskAwaitingApproval = Boolean(
+    session?.status === "paused"
+      && selectedTask?.status === "completed"
+      && selectedTask.id === awaitingApprovalTaskId,
+  );
 
   // Re-seed the editable draft when the fetched plan changes (keyed by sessionId + planJson).
   const planSource = session ? `${session.sessionId}:${session.planJson}` : null;
@@ -519,6 +545,7 @@ export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange 
           </Modal>
 
           <TaskInterventionDialog
+            approvalOnly={isSelectedTaskAwaitingApproval}
             busy={intervene.isPending}
             error={intervene.error ? errorMessage(intervene.error) : null}
             onClose={() => setShowIntervene(false)}
@@ -530,6 +557,45 @@ export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange 
             task={selectedTask}
             tasks={session.tasks}
           />
+
+          <Modal
+            open={showAgentPrompt}
+            onClose={() => setShowAgentPrompt(false)}
+            title={`System prompt & quy tắc: ${selectedTask?.agent ?? "agent"}`}
+            maxWidthClass="max-w-3xl"
+          >
+            {agentDefinitionsQuery.isLoading ? (
+              <p className="text-label-sm text-on-surface-variant">Đang tải cấu hình agent...</p>
+            ) : selectedAgentDefinition ? (
+              <div className="flex flex-col gap-4">
+                <section aria-labelledby="agent-prompt-heading">
+                  <h3 className="text-label-md text-on-surface" id="agent-prompt-heading">System prompt cấu hình</h3>
+                  <pre className="mt-2 max-h-[42vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-outline bg-surface-container-low p-3 font-mono text-mono-status text-on-surface">
+                    {selectedAgentDefinition.systemPrompt || selectedAgentDefinition.personaPrompt || "Agent chưa có system prompt riêng."}
+                  </pre>
+                </section>
+                <section aria-labelledby="agent-tools-heading">
+                  <h3 className="text-label-md text-on-surface" id="agent-tools-heading">Công cụ được phép</h3>
+                  <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-outline bg-surface-container-low p-3 font-mono text-mono-status text-on-surface">
+                    {selectedAgentDefinition.allowedToolsJson || "[]"}
+                  </pre>
+                </section>
+                {selectedTask ? (
+                  <section aria-labelledby="task-instruction-heading">
+                    <h3 className="text-label-md text-on-surface" id="task-instruction-heading">Hướng dẫn cho task đang duyệt</h3>
+                    <p className="mt-2 text-body-md text-on-surface">{selectedTask.description}</p>
+                  </section>
+                ) : null}
+                <p className="text-label-sm text-on-surface-variant">
+                  Quy tắc an toàn nền tảng được hệ thống ghép cố định khi chạy agent và không chỉnh sửa ở màn hình này.
+                </p>
+              </div>
+            ) : (
+              <p className="text-label-sm text-on-surface-variant">
+                Không tìm thấy cấu hình của agent này trong danh mục hiện tại. Agent có thể đã bị xóa hoặc đổi mã sau khi phiên bắt đầu.
+              </p>
+            )}
+          </Modal>
 
           <TaskDagCanvas
             onSelect={setSelectedTaskId}
@@ -559,7 +625,36 @@ export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange 
                 task={selectedTask}
                 toolTraces={toolTracesByTask.get(selectedTask.id) ?? []}
               />
-              {session.status === "paused" ? (
+              {isSelectedTaskAwaitingApproval ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    disabled={!canManage || busy}
+                    onClick={() => control.mutate({ sessionId: session.sessionId, action: "resume", etag: session.etag })}
+                    size="sm"
+                    title={!canManage ? "Cần quyền orchestration:manage" : undefined}
+                  >
+                    Duyệt
+                  </Button>
+                  <Button
+                    disabled={!canManage || busy}
+                    onClick={() => setShowIntervene(true)}
+                    size="sm"
+                    title={!canManage ? "Cần quyền orchestration:manage" : undefined}
+                    variant="outline"
+                  >
+                    Sửa nội dung
+                  </Button>
+                  <Button
+                    disabled={!canViewAgentPrompts || busy}
+                    onClick={() => setShowAgentPrompt(true)}
+                    size="sm"
+                    title={!canViewAgentPrompts ? "Cần quyền orchestration:view" : undefined}
+                    variant="ghost"
+                  >
+                    Xem system prompt &amp; quy tắc
+                  </Button>
+                </div>
+              ) : session.status === "paused" ? (
                 <Button
                   className="mt-3"
                   disabled={!canManage || busy}

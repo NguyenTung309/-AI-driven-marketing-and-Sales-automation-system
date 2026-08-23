@@ -26,7 +26,7 @@ public sealed class WriteStep(IOptions<ContentChainOptions> options) : IContentC
     public ChainStepPrompt BuildPrompt(ContentChainContext context)
     {
         var persona = _options.PromptOverride(Id, context.Platform) ?? DefaultPersona;
-        var system = AgentPromptDefaults.Compose(persona);
+        var system = ContentChainSystemPrompt.Compose(persona);
         return new ChainStepPrompt(system, BuildUser(context));
     }
 

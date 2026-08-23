@@ -249,12 +249,20 @@ public sealed class ReportOrchestrationAdapter(ReportAgentRunner runner) : Agent
     protected override async Task<string> ExecuteCoreAsync(AgentTask task, CancellationToken ct)
     {
         var input = task.Input;
-        var operation = (AgentTaskInput.OptionalString(input, "operation") ?? "snapshot").ToLowerInvariant();
+        var operation = NormalizeOperation(
+            AgentTaskInput.OptionalString(input, "operation"),
+            task.Description);
         var tenantId = AgentTaskInput.RequiredGuid(input, "tenant_id");
 
         // platform mặc định "all" (đúng cách LoadSeriesAsync đã chuẩn hóa): bắt buộc nó chỉ khiến ReAct loop
         // đốt một bước cho lỗi "platform required." trong khi tổng hợp toàn nền tảng mới là mặc định hợp lý.
         var platform = AgentTaskInput.OptionalString(input, "platform") ?? "all";
+
+        if (operation == ReportArtifact.KindContentSnapshot)
+            return await ContentSnapshotAsync(tenantId, platform, input, ct).ConfigureAwait(false);
+
+        if (operation == ReportArtifact.KindContentFunnel)
+            return await ContentFunnelAsync(tenantId, platform, input, ct).ConfigureAwait(false);
 
         if (operation == "anomaly")
         {
@@ -402,6 +410,151 @@ public sealed class ReportOrchestrationAdapter(ReportAgentRunner runner) : Agent
     }
 
     /// <summary>
+    /// Hiệu suất nội dung đã đăng — phần báo cáo dành cho marketing. Mặc định 7 ngày gần nhất vì
+    /// một ngày lẻ thường không có bài nào đăng, khác hẳn snapshot KPI vốn tính theo đúng một ngày.
+    /// </summary>
+    private async Task<string> ContentSnapshotAsync(
+        Guid tenantId,
+        string platform,
+        IReadOnlyDictionary<string, string> input,
+        CancellationToken ct)
+    {
+        var (fromDate, toDate) = ReportAgentRunner.ResolveRange(
+            AgentTaskInput.OptionalString(input, "date"),
+            OptionalInt(input, "lookback_days"),
+            DefaultContentSnapshotDays);
+
+        var rows = await _runner.ContentSnapshotAsync(tenantId, fromDate, toDate, platform, ct).ConfigureAwait(false);
+        var items = rows.Select(r => Row(
+            ("platform", r.Platform),
+            ("postsPublished", r.PostsPublished),
+            ("likes", r.Likes),
+            ("comments", r.Comments),
+            ("reactionsTotal", r.ReactionsTotal))).ToList();
+
+        var link = await PersistAsync(
+            tenantId,
+            ReportArtifact.KindContentSnapshot,
+            $"Hiệu suất nội dung {ReportAgentRunner.FormatDate(fromDate)} - {ReportAgentRunner.FormatDate(toDate)}",
+            platform,
+            metric: null,
+            fromDate,
+            toDate,
+            new ReportArtifactPayload(
+                ReportArtifact.KindContentSnapshot,
+                [
+                    new ReportColumn("platform", "Nền tảng", "text"),
+                    new ReportColumn("postsPublished", "Bài đã đăng", "number"),
+                    new ReportColumn("likes", "Lượt thích", "number"),
+                    new ReportColumn("comments", "Bình luận", "number"),
+                    new ReportColumn("reactionsTotal", "Tổng cảm xúc", "number"),
+                ],
+                items,
+                new ReportChart("platform", ["postsPublished", "likes", "comments"])),
+            ct).ConfigureAwait(false);
+
+        return Json(new
+        {
+            operation = ReportArtifact.KindContentSnapshot,
+            from = ReportAgentRunner.FormatDate(fromDate),
+            to = ReportAgentRunner.FormatDate(toDate),
+            platform,
+            // platformCount chứ không phải "total": xem ghi chú ở nhánh phễu.
+            platformCount = items.Count,
+            postsPublished = rows.Sum(r => r.PostsPublished),
+            likes = rows.Sum(r => r.Likes),
+            comments = rows.Sum(r => r.Comments),
+            reactionsTotal = rows.Sum(r => r.ReactionsTotal),
+            items,
+            reportId = link?.Id,
+            reportUrl = link?.Url,
+        });
+    }
+
+    /// <summary>
+    /// Phễu duyệt nội dung — bài đang tắc ở khâu nào. Không chặn ngày trừ khi người dùng nêu rõ
+    /// lookback_days: đây là ảnh chụp tồn đọng, mà bài kẹt lâu nhất lại nằm ngoài mọi cửa sổ gần đây.
+    /// </summary>
+    private async Task<string> ContentFunnelAsync(
+        Guid tenantId,
+        string platform,
+        IReadOnlyDictionary<string, string> input,
+        CancellationToken ct)
+    {
+        var lookbackDays = OptionalInt(input, "lookback_days");
+        var toDate = ReportAgentRunner.ParseDate(AgentTaskInput.OptionalString(input, "date") ?? string.Empty);
+        DateOnly? fromDate = lookbackDays is > 0
+            ? ReportAgentRunner.ResolveRange(
+                ReportAgentRunner.FormatDate(toDate), lookbackDays, lookbackDays.Value).From
+            : null;
+
+        var report = await _runner.ContentFunnelAsync(tenantId, fromDate, toDate, platform, ct).ConfigureAwait(false);
+        var rows = report.Rows;
+        var items = rows.Select(r => Row(
+            ("platform", r.Platform),
+            ("awaitingAgentReview", r.AwaitingAgentReview),
+            ("agentReviewRunning", r.AgentReviewRunning),
+            ("agentReviewNonPass", r.AgentReviewNonPass),
+            ("reviewFailed", r.ReviewFailed),
+            ("awaitingHumanApproval", r.AwaitingHumanApproval),
+            ("approvedAwaitingSchedule", r.ApprovedAwaitingSchedule),
+            ("scheduled", r.Scheduled),
+            ("published", r.Published),
+            ("rejected", r.Rejected),
+            ("total", r.Total))).ToList();
+
+        var link = await PersistAsync(
+            tenantId,
+            ReportArtifact.KindContentFunnel,
+            fromDate is { } since
+                ? $"Phễu duyệt nội dung {ReportAgentRunner.FormatDate(since)} - {ReportAgentRunner.FormatDate(toDate)}"
+                : $"Phễu duyệt nội dung tính đến {ReportAgentRunner.FormatDate(toDate)}",
+            platform,
+            metric: null,
+            fromDate ?? toDate,
+            toDate,
+            new ReportArtifactPayload(
+                ReportArtifact.KindContentFunnel,
+                [
+                    new ReportColumn("platform", "Nền tảng", "text"),
+                    new ReportColumn("awaitingAgentReview", "Chờ agent review", "number"),
+                    new ReportColumn("agentReviewRunning", "Đang review", "number"),
+                    new ReportColumn("agentReviewNonPass", "Agent không duyệt", "number"),
+                    new ReportColumn("reviewFailed", "Review lỗi", "number"),
+                    new ReportColumn("awaitingHumanApproval", "Chờ người duyệt", "number"),
+                    new ReportColumn("approvedAwaitingSchedule", "Đã duyệt, chờ lên lịch", "number"),
+                    new ReportColumn("scheduled", "Đã lên lịch", "number"),
+                    new ReportColumn("published", "Đã đăng", "number"),
+                    new ReportColumn("rejected", "Bị từ chối", "number"),
+                    new ReportColumn("total", "Tổng bài", "number"),
+                ],
+                items,
+                new ReportChart("platform", ["awaitingHumanApproval", "scheduled", "published"])),
+            ct).ConfigureAwait(false);
+
+        return Json(new
+        {
+            operation = ReportArtifact.KindContentFunnel,
+            from = fromDate is { } start ? ReportAgentRunner.FormatDate(start) : null,
+            to = ReportAgentRunner.FormatDate(toDate),
+            platform,
+            // platformCount chứ không phải "total": một trường tên total nằm cạnh danh sách bài rất dễ
+            // bị LLM đọc thành số bài rồi viết ra câu "có 1 bài" trong khi đó là 1 nền tảng.
+            platformCount = items.Count,
+            totalItems = rows.Sum(r => r.Total),
+            awaitingHumanApproval = rows.Sum(r => r.AwaitingHumanApproval),
+            published = rows.Sum(r => r.Published),
+            truncated = report.Truncated,
+            truncatedNote = report.Truncated
+                ? $"Chỉ tính {report.Cap} bài mới nhất; tổng thực tế cao hơn — phải nói rõ điều này khi báo cáo."
+                : null,
+            items,
+            reportId = link?.Id,
+            reportUrl = link?.Url,
+        });
+    }
+
+    /// <summary>
     /// Chốt artifact và trả link để LLM dán vào narrative. Không có dòng nào thì không lưu: một link
     /// dẫn tới bảng rỗng còn tệ hơn không có link, và LLM vẫn thấy total = 0 để nói đúng sự thật.
     /// </summary>
@@ -422,6 +575,47 @@ public sealed class ReportOrchestrationAdapter(ReportAgentRunner runner) : Agent
         var id = await _runner.SaveArtifactAsync(
             tenantId, kind, title, platform, metric, fromDate, toDate, payload, ct).ConfigureAwait(false);
         return (id, string.Create(CultureInfo.InvariantCulture, $"/reports/{id}"));
+    }
+
+    private const int DefaultContentSnapshotDays = 7;
+
+    /// <summary>
+    /// Tên operation do LLM sinh nên hay lệch; nhận thêm bí danh thay vì để rơi về snapshot KPI.
+    /// Suy từ description CHỈ khi không có operation, và chỉ khi câu lệnh nói rõ về nội dung/bài đăng —
+    /// đoán rộng hơn sẽ biến một yêu cầu báo cáo sale hợp lệ thành báo cáo marketing.
+    /// </summary>
+    internal static string NormalizeOperation(string? operation, string? description)
+    {
+        var normalized = (operation ?? string.Empty).Trim().ToLowerInvariant().Replace(' ', '_');
+        normalized = normalized switch
+        {
+            "content" or "content_snapshot" or "marketing" or "engagement" or "posts"
+                => ReportArtifact.KindContentSnapshot,
+            "content_funnel" or "funnel" or "content_pipeline" or "pipeline"
+                => ReportArtifact.KindContentFunnel,
+            _ => normalized,
+        };
+
+        if (normalized.Length > 0)
+            return normalized;
+
+        return LooksLikeContentGoal(description) ? ReportArtifact.KindContentSnapshot : "snapshot";
+    }
+
+    private static bool LooksLikeContentGoal(string? description)
+    {
+        if (string.IsNullOrWhiteSpace(description))
+            return false;
+        var d = description.ToLowerInvariant();
+        return d.Contains("bài đăng", StringComparison.Ordinal)
+            || d.Contains("bai dang", StringComparison.Ordinal)
+            || d.Contains("nội dung", StringComparison.Ordinal)
+            || d.Contains("noi dung", StringComparison.Ordinal)
+            || d.Contains("tương tác", StringComparison.Ordinal)
+            || d.Contains("tuong tac", StringComparison.Ordinal)
+            || d.Contains("marketing", StringComparison.Ordinal)
+            || d.Contains("engagement", StringComparison.Ordinal)
+            || d.Contains("content", StringComparison.Ordinal);
     }
 
     private static Dictionary<string, object?> Row(params (string Key, object? Value)[] cells)

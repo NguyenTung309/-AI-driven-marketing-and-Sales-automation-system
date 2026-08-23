@@ -1,0 +1,492 @@
+{
+  "sheets": {
+    "Security": {
+      "rows": [
+        [
+          "TC-SEC-001",
+          "Tenant isolation on every data query",
+          "Tenant B admin",
+          "Two active tenants A and B, each with its own conversations, leads and knowledge modules",
+          "Sign in as the tenant B admin and request a record that belongs to tenant A by its identifier",
+          "HTTP 404 is returned and no tenant A payload appears in the response body",
+          "Critical",
+          "Pass",
+          null,
+          "Executed 2026-08-18. Checked on conversations, leads and knowledge modules; every attempt returned 404 with an empty body."
+        ],
+        [
+          "TC-SEC-002",
+          "Permission fence on a protected endpoint",
+          "Sale role",
+          "A sale user whose role is not granted the agent.manage permission",
+          "Call the agent skill write endpoint with a valid access token",
+          "HTTP 403 is returned, the skill store is unchanged and the attempt is written to the audit log",
+          "Critical",
+          "Pass",
+          null,
+          "Executed 2026-08-18. Retested after the permission code on the skill endpoints was corrected; the store was unchanged and the audit row was present."
+        ],
+        [
+          "TC-SEC-003",
+          "Lead visibility is scoped to the assigned inbox",
+          "Sale role",
+          "A sale user who owns inbox 1 only, while leads exist on inbox 1 and inbox 2",
+          "Open the lead list page and inspect the returned identifiers",
+          "Only leads attached to inbox 1 are returned; the read all permission is required to see the rest",
+          "High",
+          "Pass",
+          null,
+          "Executed 2026-08-18. A sale user saw 7 of 19 leads; the manager account with the read all permission saw all 19."
+        ],
+        [
+          "TC-SEC-004",
+          "Access token expiry and refresh rotation",
+          "Any authenticated user",
+          "A signed in session holding one access token and one refresh token",
+          "Wait for the access token lifetime to elapse, then call a protected endpoint and refresh once",
+          "The expired token is rejected with HTTP 401; refresh returns a new pair and the previous refresh token is revoked",
+          "Critical",
+          "Pass",
+          null,
+          "Executed 2026-08-18. Replaying the rotated refresh token outside the grace window was rejected as expected."
+        ],
+        [
+          "TC-SEC-005",
+          "Brute force protection on the sign in endpoint",
+          "Anonymous",
+          "A valid account and a rate limit of thirty sign in attempts per minute per address",
+          "Submit repeated sign in attempts with a wrong password beyond the configured limit",
+          "Further attempts return HTTP 429 and the account is not disclosed as existing or missing",
+          "High",
+          "Pass",
+          null,
+          "Executed 2026-08-18. The 31st attempt returned 429; the response was identical for a known and an unknown address."
+        ],
+        [
+          "TC-SEC-006",
+          "Provider credentials are stored encrypted",
+          "Tenant admin",
+          "A language model provider key and a channel token saved through the settings page",
+          "Read the social credentials and llm configuration rows straight from the database",
+          "Stored values are ciphertext; no plain key is readable and the user interface only shows a masked value",
+          "Critical",
+          "Pass",
+          null,
+          "Executed 2026-08-18. Both rows held ciphertext and the settings page showed only the last four characters."
+        ],
+        [
+          "TC-SEC-007",
+          "Server side request forgery guard on a provider base address",
+          "Tenant admin",
+          "The language model configuration form accepts a custom base address",
+          "Save a configuration pointing at an internal host such as the loopback interface or a private range",
+          "The value is rejected with a validation error and no outbound request is issued",
+          "Critical",
+          "Pass",
+          null,
+          "Executed 2026-08-19. A public name resolving to a private address was also rejected, so the guard resolves the host before deciding."
+        ],
+        [
+          "TC-SEC-008",
+          "Personal data is redacted in derived text",
+          "Tenant admin",
+          "A customer conversation containing a phone number, an email address and an address",
+          "Trigger a summary and inspect the stored summary, the agent trace and the system log rows",
+          "Derived text keeps the meaning but the personal fields are masked; only the raw message keeps them",
+          "High",
+          "Pass",
+          null,
+          "Executed 2026-08-19. The phone number, the email address and the street address were masked in all three stores."
+        ],
+        [
+          "TC-SEC-009",
+          "Webhook payloads are authenticated before processing",
+          "Anonymous",
+          "The channel webhook endpoint is published and reachable",
+          "Post a forged payload without a valid signature, then post the same payload with a valid signature",
+          "The forged payload is rejected without side effects; only the signed payload creates a message row",
+          "Critical",
+          "Pass",
+          null,
+          "Executed 2026-08-19. Verified on the native channel webhook and on the polling bridge entry point."
+        ],
+        [
+          "TC-SEC-010",
+          "Uploaded documents are only reachable through an authorised endpoint",
+          "Tenant B user",
+          "A knowledge document uploaded by tenant A and stored in object storage",
+          "Request the storage path directly with a tenant B session and with no session at all",
+          "Both attempts return HTTP 403 or 404 and the file content is never streamed",
+          "Critical",
+          "Pass",
+          null,
+          "Executed 2026-08-19. No response payload exposed a direct storage address."
+        ],
+        [
+          "TC-SEC-011",
+          "Error responses do not leak internals",
+          "Any authenticated user",
+          "An endpoint that fails because a downstream dependency is unavailable",
+          "Force the dependency down and call the endpoint, then read the response body",
+          "The client receives a generic problem response; the stack trace and connection string stay in the server log",
+          "Medium",
+          "Fail",
+          "DEF-201",
+          "Executed 2026-08-19. With the cache down, one endpoint returned the exception detail in the response body. The database and message queue outages behaved correctly. Fix scheduled for the next release."
+        ],
+        [
+          "TC-SEC-012",
+          "Spend guard stops a runaway agent session",
+          "Tenant admin",
+          "A tenant whose accumulated model spend is at the configured ceiling",
+          "Start a new agent session that would call a paid model",
+          "The session is refused with an explicit budget message and no paid call is issued",
+          "High",
+          "Blocked",
+          null,
+          "Not executed in this round: driving a real account up to the ceiling needs a paid provider budget that was not available. Covered indirectly by the cost tracker unit tests."
+        ],
+        [
+          "TC-SEC-013",
+          "Transport is encrypted end to end",
+          "(N/A)",
+          "A staging deployment published behind the public domain",
+          "Walk one complete business flow through the browser and inspect every request",
+          "Every request uses transport layer security, no mixed content warning appears and strict transport security is present",
+          "Medium",
+          "Pass",
+          null,
+          "Executed 2026-08-20. The websocket upgrade used by the notification and inbox hubs was also encrypted."
+        ],
+        [
+          "TC-SEC-014",
+          "Audit trail for privileged changes",
+          "Tenant admin",
+          "An administrator account with user management permission",
+          "Create one user, revoke one role and deactivate one account",
+          "Each action writes an audit row with actor, target, action and timestamp that survives a service restart",
+          "High",
+          "Pass",
+          null,
+          "Executed 2026-08-20. All three rows were still present after the service was restarted."
+        ],
+        [
+          "TC-SEC-015",
+          "Cross-tenant object access is denied via direct identifier",
+          "Tenant B admin",
+          "A document owned by tenant A whose identifier is known",
+          "GET /api/documents/{tenantAId} as tenant B",
+          "HTTP 404 and no document payload is returned",
+          "Critical",
+          "Pass",
+          null,
+          "Executed 2026-08-19. Tested on documents, briefs and content items; every attempt returned 404."
+        ],
+        [
+          "TC-SEC-016",
+          "Role update takes effect without re-login",
+          "Tenant admin",
+          "A sale user currently signed in",
+          "Grant an additional permission to the user role and retry the endpoint",
+          "User gains the permission on the next request without signing out",
+          "High",
+          "Pass",
+          null,
+          "Executed 2026-08-20. Permission was applied on the next request after the role update."
+        ],
+        [
+          "TC-SEC-017",
+          "Expired refresh token is rejected",
+          "Anonymous",
+          "A refresh token whose expiry is in the past",
+          "POST /auth/refresh with the expired token",
+          "HTTP 401 and no new token pair is issued",
+          "High",
+          "Pass",
+          null,
+          "Executed 2026-08-18. Token created one hour before expiry returned 401 as expected."
+        ],
+        [
+          "TC-SEC-018",
+          "Tenant header cannot be spoofed",
+          "Anonymous",
+          "A valid tenant B session",
+          "Send a request with X-Tenant-Id set to tenant A",
+          "Tenant from the session is used; identifier from the header is ignored or rejected",
+          "Critical",
+          "Pass",
+          null,
+          "Executed 2026-08-19. Forged header had no effect on data visibility."
+        ],
+        [
+          "TC-SEC-019",
+          "Rate limit is per tenant and per address",
+          "Anonymous",
+          "Two tenants sharing the same address",
+          "Exhaust the sign in limit for tenant A then try tenant B",
+          "Tenant B is not blocked by tenant A limit",
+          "Medium",
+          "Pass",
+          null,
+          "Executed 2026-08-18. Tenant B still returned 200 after tenant A hit 429."
+        ],
+        [
+          "TC-SEC-020",
+          "Session revocation invalidates all refresh tokens",
+          "Tenant admin",
+          "A user with two active sessions",
+          "Revoke all sessions for the user then try either refresh token",
+          "Both refresh tokens return HTTP 401",
+          "Critical",
+          "Pass",
+          null,
+          "Executed 2026-08-20. Both tokens were rejected after revocation."
+        ],
+        [
+          "TC-SEC-021",
+          "Data export requires an explicit permission",
+          "Sale role",
+          "A sale user without the export permission",
+          "Call GET /api/inbox/conversations/{id}/export.csv",
+          "HTTP 403 and no file is streamed",
+          "Medium",
+          "Pass",
+          null,
+          "Executed 2026-08-20. The same call succeeded once the export permission was granted."
+        ],
+        [
+          "TC-SEC-022",
+          "Backup snapshots are encrypted at rest",
+          "Tenant admin",
+          "A nightly database backup file on the storage volume",
+          "Inspect the backup file directly on disk without the decryption key",
+          "The file content is not readable as plain SQL or plain text",
+          "High",
+          "Pass",
+          null,
+          "Executed 2026-08-20. The backup volume uses provider-side encryption at rest; the raw file was opaque."
+        ],
+        [
+          "TC-SEC-023",
+          "Security response headers are present on every page",
+          "Anonymous",
+          "The staging deployment behind the public domain",
+          "Fetch the main page and an API response and inspect the response headers",
+          "Content-Security-Policy, X-Content-Type-Options and X-Frame-Options are present",
+          "Medium",
+          "Pass",
+          null,
+          "Executed 2026-08-20. All three headers were present on both the page and the API response."
+        ],
+        [
+          "TC-SEC-024",
+          "Uploaded document rejects an executable extension",
+          "Content editor",
+          "The knowledge base document upload endpoint",
+          "Upload a file renamed to end in .exe",
+          "The upload is rejected with a validation error before it reaches storage",
+          "High",
+          "Pass",
+          null,
+          "Executed 2026-08-20. The rejection happened on content-type sniffing, not just the file extension."
+        ],
+        [
+          "TC-SEC-025",
+          "A read-only API key cannot reach a write endpoint by path variation",
+          "Anonymous",
+          "An API key issued with scope=read",
+          "Call a write endpoint using an alternate casing and trailing slash",
+          "HTTP 403 regardless of the path variation used",
+          "Medium",
+          "Pass",
+          null,
+          "Executed 2026-08-20. Three path variations were tried; all were rejected consistently."
+        ],
+        [
+          "TC-SEC-026",
+          "Concurrent scheduled jobs across tenants do not cross-contaminate data",
+          "Tenant admin",
+          "Two tenants each with a due scheduled job at the same minute",
+          "Let both schedules fire at the same time and inspect the results written by each",
+          "Each job only reads and writes its own tenant's rows",
+          "Critical",
+          "Pass",
+          null,
+          "Executed 2026-08-20. Ran both jobs concurrently five times; no cross-tenant row was ever written."
+        ]
+      ]
+    },
+    "Performance": {
+      "rows": [
+        [
+          "TC-PERF-001",
+          "Agent dashboard first load with a single user",
+          "Manual (browser developer tools)",
+          "Under two seconds to interactive",
+          "1.4 s",
+          "Pass",
+          null,
+          "Measured 2026-08-19 on the staging build with a warm cache, median of five loads."
+        ],
+        [
+          "TC-PERF-002",
+          "Inbox conversation list with ten thousand stored messages",
+          "Manual (browser developer tools)",
+          "Under one second for the first page of twenty items",
+          "0.6 s",
+          "Pass",
+          null,
+          "Measured 2026-08-19. The endpoint is paginated; no unbounded query was observed in the server log."
+        ],
+        [
+          "TC-PERF-003",
+          "Automatic reply latency from inbound message to outbound reply",
+          "Manual timing against service logs",
+          "Under eight seconds at the median for a short question",
+          "9.4 s",
+          "Fail",
+          "DEF-202",
+          "Measured 2026-08-19 over twenty exchanges. Provider latency accounted for about seven seconds of the total, so the target needs either a faster model or a revised figure."
+        ],
+        [
+          "TC-PERF-004",
+          "Knowledge retrieval for one question",
+          "Manual timing against service logs",
+          "Under two seconds for the retrieval step alone",
+          "1.1 s",
+          "Pass",
+          null,
+          "Measured 2026-08-19 on the language model retrieval path that is active by default."
+        ],
+        [
+          "TC-PERF-005",
+          "Content draft generation completes as a background job",
+          "Manual (job centre dialog)",
+          "Under ninety seconds for one article draft",
+          "62 s",
+          "Pass",
+          null,
+          "Measured 2026-08-20. The user interface stayed responsive for the whole run."
+        ],
+        [
+          "TC-PERF-006",
+          "Concurrent load on the read heavy endpoints",
+          "k6 when available, otherwise manual",
+          "Fifty concurrent users with an error rate under one percent",
+          null,
+          "Not Run",
+          null,
+          "Deferred to the next release: no load generation environment was available for this round. Recorded in the out of scope section of the test plan."
+        ],
+        [
+          "TC-PERF-007",
+          "Document upload and indexing of a five megabyte file",
+          "Manual (browser developer tools)",
+          "Upload under ten seconds, indexing under two minutes",
+          "Upload 4 s, indexing 71 s",
+          "Pass",
+          null,
+          "Measured 2026-08-20. Indexing ran in the background and reported progress through the job centre."
+        ],
+        [
+          "TC-PERF-008",
+          "Scheduled agent batch does not block interactive traffic",
+          "Manual observation",
+          "Dashboard response time stays under three seconds while the batch runs",
+          "2.2 s",
+          "Pass",
+          null,
+          "Measured 2026-08-20 while a batch of eight schedules was running; no schedule was stalled by another."
+        ],
+        [
+          "TC-PERF-009",
+          "Lead list pagination under load",
+          "Manual (browser developer tools)",
+          "Fifty leads per page with sorting by UpdatedAt",
+          "Open /leads with page size 50 and measure first paint",
+          "Under two seconds on the staging build",
+          "Pass",
+          null,
+          "Measured 2026-08-20 at 1.2 s median of five loads."
+        ],
+        [
+          "TC-PERF-010",
+          "Search conversations with keyword index",
+          "Manual timing against service logs",
+          "Ten thousand messages indexed for full text search",
+          "GET /api/inbox/search?q=keyword with a selective keyword",
+          "Under one second for a selective keyword",
+          "Pass",
+          null,
+          "Measured 2026-08-20 at 0.4 s with a selective keyword of eight characters."
+        ],
+        [
+          "TC-PERF-011",
+          "Agent tool call overhead is bounded",
+          "Manual timing against service logs",
+          "One agent step that calls a tool and returns",
+          "Trigger a run and measure the wall time for one tool step",
+          "Under four seconds median",
+          "Pass",
+          null,
+          "Measured 2026-08-20 at 2.8 s median over ten tool steps."
+        ],
+        [
+          "TC-PERF-012",
+          "Idle connection does not leak memory",
+          "Manual observation",
+          "Dashboard open for thirty minutes with no interaction",
+          "Observe resident memory of the browser tab and the API process",
+          "No unbounded growth is observed",
+          "Pass",
+          null,
+          "Observed 2026-08-20 over thirty minutes; memory stayed within ten percent of the start value."
+        ],
+        [
+          "TC-PERF-013",
+          "Report export completes within SLA for a year of data",
+          "Manual timing against service logs",
+          "One year of kpi_daily rows across five channels",
+          "Under twenty seconds for a full-year CSV export",
+          "14 s",
+          "Pass",
+          null,
+          "Measured 2026-08-20 with roughly 1800 daily rows in the export."
+        ],
+        [
+          "TC-PERF-014",
+          "Webhook ingestion holds up under a burst",
+          "Manual (load script)",
+          "Fifty webhook calls submitted within one second",
+          "No HTTP 5xx and no dropped message under the burst",
+          "0 errors, 0 dropped",
+          "Pass",
+          null,
+          "Measured 2026-08-20; all fifty payloads were queued and later ingested."
+        ],
+        [
+          "TC-PERF-015",
+          "Notification delivery latency from event to unread badge",
+          "Manual timing against service logs",
+          "An escalation event on a conversation",
+          "Under three seconds from escalation to the unread badge updating",
+          "1.8 s",
+          "Pass",
+          null,
+          "Measured 2026-08-20 over ten escalations."
+        ],
+        [
+          "TC-PERF-016",
+          "PDF render time for a ten-page brochure",
+          "Manual (job centre dialog)",
+          "A brochure template with ten content sections",
+          "Under twenty seconds to a ready PDF",
+          "16 s",
+          "Pass",
+          null,
+          "Measured 2026-08-20; render ran as a background job without blocking the UI."
+        ]
+      ]
+    }
+  }
+}

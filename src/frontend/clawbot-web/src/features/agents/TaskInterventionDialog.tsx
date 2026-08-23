@@ -22,6 +22,8 @@ interface TaskInterventionDialogProps {
   readonly open: boolean;
   readonly task: OrchestrationV2TaskDto | null;
   readonly tasks: readonly OrchestrationV2TaskDto[];
+  /** Review gate: chỉ sửa output đã hoàn tất, rồi chạy tiếp; không bỏ qua/chạy lại task. */
+  readonly approvalOnly?: boolean;
   readonly busy: boolean;
   readonly error: string | null;
   readonly onClose: () => void;
@@ -36,14 +38,14 @@ interface DraftState {
   readonly rerunDownstream: boolean;
 }
 
-function draftSourceOf(task: OrchestrationV2TaskDto): string {
-  return `${task.id}:${task.status}:${task.output ?? ""}`;
+function draftSourceOf(task: OrchestrationV2TaskDto, approvalOnly: boolean): string {
+  return `${task.id}:${task.status}:${task.output ?? ""}:${approvalOnly}`;
 }
 
-function seedDraft(task: OrchestrationV2TaskDto, forceRerun: boolean): DraftState {
+function seedDraft(task: OrchestrationV2TaskDto, approvalOnly: boolean, forceRerun: boolean): DraftState {
   const { text, toolResults } = splitToolResults(task.output);
   return {
-    source: draftSourceOf(task),
+    source: draftSourceOf(task, approvalOnly),
     text,
     toolResultsJson: toolResults ? JSON.stringify(toolResults, null, 2) : "",
     rerunDownstream: forceRerun,
@@ -75,6 +77,7 @@ export function TaskInterventionDialog({
   open,
   task,
   tasks,
+  approvalOnly = false,
   busy,
   error,
   onClose,
@@ -87,9 +90,9 @@ export function TaskInterventionDialog({
   const staleDependents = dependents.filter((t) => t.status !== "pending");
   const mustRerunDownstream = staleDependents.length > 0;
 
-  // Gieo lại nháp khi mở dialog cho bước khác hoặc khi server trả kết quả mới (adjust-state-on-prop-change).
-  if (open && task && draft?.source !== draftSourceOf(task)) {
-    setDraft(seedDraft(task, mustRerunDownstream));
+  // Gieo lại nháp khi mở dialog cho bước khác, server trả kết quả mới hoặc đổi chế độ review.
+  if (open && task && draft?.source !== draftSourceOf(task, approvalOnly)) {
+    setDraft(seedDraft(task, approvalOnly, approvalOnly || mustRerunDownstream));
   }
 
   if (!task || !draft) {
@@ -117,15 +120,17 @@ export function TaskInterventionDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Đóng
           </Button>
-          <Button
-            variant="ghost"
-            onClick={() => onSubmit({ action: "skip", rerunDownstream, resumeAfter: true })}
-            disabled={busy}
-            title="Đánh dấu bỏ qua — các bước sau vẫn chạy, chỉ không nhận đầu vào từ bước này."
-          >
-            Bỏ qua bước này
-          </Button>
-          {task.status !== "pending" && (
+          {!approvalOnly && (
+            <Button
+              variant="ghost"
+              onClick={() => onSubmit({ action: "skip", rerunDownstream, resumeAfter: true })}
+              disabled={busy}
+              title="Đánh dấu bỏ qua — các bước sau vẫn chạy, chỉ không nhận đầu vào từ bước này."
+            >
+              Bỏ qua bước này
+            </Button>
+          )}
+          {!approvalOnly && task.status !== "pending" && (
             <Button
               variant="outline"
               onClick={() => onSubmit({ action: "retry", rerunDownstream, resumeAfter: true })}
@@ -135,11 +140,13 @@ export function TaskInterventionDialog({
               Chạy lại bước này
             </Button>
           )}
-          <Button variant="outline" onClick={() => submitEdit(false)} disabled={!canSaveEdit}>
-            Lưu, giữ tạm dừng
-          </Button>
+          {!approvalOnly && (
+            <Button variant="outline" onClick={() => submitEdit(false)} disabled={!canSaveEdit}>
+              Lưu, giữ tạm dừng
+            </Button>
+          )}
           <Button onClick={() => submitEdit(true)} disabled={!canSaveEdit}>
-            Lưu &amp; chạy tiếp
+            {approvalOnly ? "Lưu & duyệt" : "Lưu & chạy tiếp"}
           </Button>
         </>
       }

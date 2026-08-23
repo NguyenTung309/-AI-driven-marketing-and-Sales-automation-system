@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getPostPerformance, type PostPerformanceDailyPoint, type PostPerformancePlatform, type PostPerformanceTopPost } from "@/shared/api/content";
+import { PostDetailDialog } from "@/shared/content/PostDetailDialog";
 import { platformClasses } from "@/shared/theme/colors";
 import { toUserFriendlyError } from "@/shared/utils/userText";
 import { Alert, Button, Card, DataTable, MetricCard, StatusPill, type Column } from "@/shared/ui";
@@ -17,14 +18,6 @@ const PLATFORM_LABELS: Record<PostPerformancePlatform, string> = {
   facebook: "Facebook",
   instagram: "Instagram",
 };
-
-const TRUSTED_SOCIAL_POST_HOSTS = new Set([
-  "facebook.com",
-  "www.facebook.com",
-  "m.facebook.com",
-  "instagram.com",
-  "www.instagram.com",
-]);
 
 function formatMetric(value: number | null): string {
   return value === null ? "—" : value.toLocaleString("vi-VN");
@@ -50,20 +43,6 @@ function formatDateTime(value: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
-}
-
-function isSafeExternalPostUrl(value: string | null): value is string {
-  if (!value) return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:"
-      && url.port === ""
-      && url.username === ""
-      && url.password === ""
-      && TRUSTED_SOCIAL_POST_HOSTS.has(url.hostname);
-  } catch {
-    return false;
-  }
 }
 
 function PlatformLabel({ platform }: { readonly platform: PostPerformancePlatform }) {
@@ -171,6 +150,7 @@ function DailyTrend({ points }: { readonly points: readonly PostPerformanceDaily
 export function PostPerformancePanel({ onOpenCalendar, onOpenItem }: PostPerformancePanelProps) {
   const [days, setDays] = useState<PerformanceWindowDays>(30);
   const [platform, setPlatform] = useState<PerformancePlatformFilter>("all");
+  const [openedPostId, setOpenedPostId] = useState<string | null>(null);
   const performanceQuery = useQuery({
     queryKey: ["content", "post-performance", days, platform],
     queryFn: () => getPostPerformance({ days, platform: platform === "all" ? undefined : platform }),
@@ -200,15 +180,32 @@ export function PostPerformancePanel({ onOpenCalendar, onOpenItem }: PostPerform
     { key: "total", header: "Tổng", className: "text-right font-mono", render: (post) => formatMetric(post.total) },
     {
       key: "external",
-      header: "Liên kết",
-      render: (post) => isSafeExternalPostUrl(post.postUrl) ? (
-        <a className="text-primary hover:underline" href={post.postUrl} target="_blank" rel="noreferrer noopener">Mở bài</a>
-      ) : "—",
+      header: "Xem",
+      // Mở dialog trong app thay vì đẩy thẳng sang Facebook: link gốc chỉ xem được khi người dùng
+      // đang đăng nhập tài khoản có quyền với page đó.
+      render: (post) => (
+        <button
+          className="text-primary hover:underline"
+          onClick={() => setOpenedPostId(post.scheduleId)}
+          type="button"
+        >
+          Xem bài
+        </button>
+      ),
     },
   ];
 
+  const topPosts = performance?.topPosts ?? [];
+
   return (
     <div className="space-y-gutter">
+      <PostDetailDialog
+        onClose={() => setOpenedPostId(null)}
+        open={openedPostId !== null}
+        periodAverageEngagement={performance?.totals.avgEngagementPerPost ?? null}
+        post={topPosts.find((post) => post.scheduleId === openedPostId) ?? null}
+        rank={openedPostId ? topPosts.findIndex((post) => post.scheduleId === openedPostId) + 1 : null}
+      />
       <Card>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>

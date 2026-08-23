@@ -23,9 +23,11 @@ public static class SkillsEndpoints
         var grp = app.MapGroup("/api/skills").RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
         grp.MapGet("/", ListAsync).RequirePermission("agent.read");
         grp.MapGet("/{id:guid}", GetAsync).RequirePermission("agent.read");
-        grp.MapPost("/", CreateAsync).RequirePermission("agent.write");
-        grp.MapPut("/{id:guid}", UpdateAsync).RequirePermission("agent.write");
-        grp.MapDelete("/{id:guid}", DeleteAsync).RequirePermission("agent.write");
+        // agent.manage — "agent.write" chưa từng tồn tại trong RbacSeeder (không role nào có),
+        // khiến kho tệp kỹ năng không ai ghi được; đổi cho khớp AgentsEndpoints ghi cùng nhóm quyền.
+        grp.MapPost("/", CreateAsync).RequirePermission("agent.manage");
+        grp.MapPut("/{id:guid}", UpdateAsync).RequirePermission("agent.manage");
+        grp.MapDelete("/{id:guid}", DeleteAsync).RequirePermission("agent.manage");
         return app;
     }
 

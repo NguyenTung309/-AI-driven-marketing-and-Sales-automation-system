@@ -1,0 +1,53 @@
+{
+  "sheets": {
+    "UAT": {
+      "rows": [
+        [
+          "SC-01",
+          "BF-01",
+          "Order Fulfillment — từ duyệt sản phẩm đến giao hàng",
+          "Customer + Staff",
+          "1. Customer đăng nhậ và duyệt danh sách sản phẩm.\n2. Customer thêm sản phẩm vào giỏ và đặt hàng.\n3. Staff đăng nhậ, xem đơn hàng mới và bậm \"Approve\".\n4. Customer kiểm tra lại đơn hàng và thấy trạng thái đã cập nhật.",
+          "Customer có thể đặt hàng thành công và theo dõi được trạng thái đơn hàng thay đổi theo thời gian thực; Staff xử lý được đơn hàng mới mà không gặp lỗi.",
+          "Critical",
+          "Not Executed",
+          null
+        ],
+        [
+          "SC-02",
+          "BF-02",
+          "Customer Self-Service — quản lý hồ sơ và đơn hàng cá nhân",
+          "Customer",
+          "1. Customer đăng nhậ, vào trang \"My Account\", cập nhật thông tin cá nhân.\n2. Customer vào \"My Orders\", xem lịch sử đơn hàng.\n3. Customer hủy 1 đơn hàng còn ở trạng thái Pending.",
+          "Customer tự quản lý được thông tin và đơn hàng của mình mà không cần hỗ trợ từ Staff; việc hủy đơn chỉ khả dụng khi đơn còn ở trạng thái cho phép.",
+          "High",
+          "Not Executed",
+          null
+        ],
+        [
+          "SC-03",
+          "BF-03",
+          "Admin User Management — quản lý tài khoản ngưởi dùng",
+          "Admin",
+          "1. Admin đăng nhậ, vào trang quản lý ngưởi dùng.\n2. Admin tạo mới 1 tài khoản Staff.\n3. Admin khóa (deactivate) 1 tài khoản Customer.\n4. Admin xem activity log để xác nhận 2 hành động trên đã được ghi lại.",
+          "Admin quản lý được toàn bộ tài khoản trong hệ thống; mọi thay đổi quan trọng đều có audit log để truy vết.",
+          "High",
+          "Not Executed",
+          null
+        ]
+      ]
+    },
+    "Exploratory": {
+      "rows": [
+        [
+          "2025-01-01",
+          "[Tên Product Owner]",
+          "BF-01 / Order Detail screen",
+          "Khi đơn hàng có nhiều sản phẩm, tổng tiền hiển thị bị tràn ra ngoài khung trên màn hình điện thoại.",
+          "Minor",
+          null
+        ]
+      ]
+    }
+  }
+}

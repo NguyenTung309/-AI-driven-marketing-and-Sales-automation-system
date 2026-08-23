@@ -33,7 +33,7 @@ public sealed class OutlineStep(IOptions<ContentChainOptions> options) : IConten
     public ChainStepPrompt BuildPrompt(ContentChainContext context)
     {
         var persona = _options.PromptOverride(Id, context.Platform) ?? DefaultPersona;
-        var system = AgentPromptDefaults.Compose(persona + "\n\n" + OutputContract);
+        var system = ContentChainSystemPrompt.Compose(persona, OutputContract);
         return new ChainStepPrompt(system, BuildUser(context));
     }
 

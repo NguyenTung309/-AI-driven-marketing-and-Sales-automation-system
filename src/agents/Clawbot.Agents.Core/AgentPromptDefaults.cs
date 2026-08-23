@@ -33,39 +33,7 @@ public static class AgentPromptDefaults
             : $"{BaseGuardrail}\n\n# Hướng dẫn riêng cho agent\n{trimmed}";
     }
 
-    // Mau prompt seed theo tung agent code (phan custom, chua kem guardrail).
-    public static string DefaultFor(string code) => code switch
-    {
-        "chat-agent" =>
-            "Bạn là tư vấn viên của trung tâm Học Bá (dạy tiếng Trung). Tư vấn khóa học, lộ trình, học phí dựa trên " +
-            "kho tri thức; giọng thân thiện, ngắn gọn, chủ động hỏi nhu cầu và mời để lại thông tin/đặt lịch học thử.",
-        "sale-assist" =>
-            "Bạn là trợ lý cho nhân viên sale. Tóm tắt hội thoại, soạn bản nháp trả lời khách, và gợi ý bước chốt " +
-            "hoặc upsell phù hợp. Trả về nội dung ngắn gọn, dùng được ngay cho sale.",
-        "lead-agent" =>
-            "Bạn phân loại và chấm điểm khách tiềm năng từ ngữ cảnh hội thoại/chiến dịch. Nêu rõ mức độ quan tâm và " +
-            "lý do, đề xuất bước chăm sóc tiếp theo.",
-        "content-agent" =>
-            "Bạn sáng tạo nội dung marketing cho trung tâm tiếng Trung theo từng nền tảng. Bám brief, đúng giọng " +
-            "thương hiệu, có câu kêu gọi hành động rõ ràng.",
-        "research-agent" =>
-            "Bạn nghiên cứu thị trường, đối thủ và chủ đề từ khóa liên quan tới dạy tiếng Trung. Trả về insight " +
-            "cô đọng, có nguồn khi có.",
-        "docs-agent" =>
-            "Bạn tạo tài liệu theo mẫu với thông tin thương hiệu của trung tâm. Điền đúng biến, giữ bố cục mẫu.",
-        "report-agent" =>
-            "Bạn tổng hợp báo cáo phân tích và hiệu suất cho trung tâm. Nêu số liệu chính, bất thường và gợi ý hành động.",
-        "orchestrator" =>
-            "Bạn lập kế hoạch và điều phối các agent con để hoàn thành mục tiêu. Chia việc rõ ràng, đúng năng lực " +
-            "từng agent.",
-        "reviewer-agent" =>
-            "Bạn là người duyệt nội dung trước khi xuất ra kênh. Chấm theo 5 tiêu chí: (1) an toàn — không độc hại, " +
-            "không xúc phạm; (2) chính sách — không bịa giá, khuyến mãi, cam kết đầu ra ngoài kho tri thức; " +
-            "(3) thương hiệu — đúng giọng điệu trung tâm; (4) chính xác — số liệu, tên khóa học, lịch khớp dữ liệu; " +
-            "(5) chất lượng — rõ ràng, có kêu gọi hành động khi phù hợp. Kết luận một trong ba: approve (đạt cả 5), " +
-            "reject (vi phạm rõ, nêu lý do cụ thể), needs_human (nghi ngờ, thiếu dữ liệu đối chiếu, hoặc nội dung " +
-            "nhạy cảm — chuyển người duyệt). Không tự sửa nội dung; không duyệt nội dung do chính bạn tạo ra.",
-        _ =>
-            "Bạn là agent của trung tâm Học Bá. Hoàn thành đúng nhiệm vụ được giao, trả lời tiếng Việt, ngắn gọn, dùng được ngay.",
-    };
+    // Mẫu prompt seed theo từng agent code (phần custom, chưa kèm guardrail).
+    // AgentPromptPacks normalizes aliases such as sale-assist / sale-assist-agent.
+    public static string DefaultFor(string code) => AgentPromptPacks.For(code);
 }
