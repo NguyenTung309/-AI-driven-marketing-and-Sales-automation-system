@@ -14,7 +14,10 @@ public sealed record ResolvedLlmConfig(
     int? MaxOutputTokens = null,
     Guid? ConfigId = null,
     DateTimeOffset? ConfigUpdatedAt = null,
-    bool? SupportsVision = null);
+    bool? SupportsVision = null,
+    // Model gốc khai trên LlmConfig (không qua override của binding) — dùng để retry khi model
+    // override bị provider chốt unavailable.
+    string? ConfigModelId = null);
 
 // Resolves the LLM config bound to an agent (by code) for a tenant.
 // Throws LlmConfigNotConfiguredException when unbound or inactive (D1 — no fallback).
@@ -36,4 +39,40 @@ public sealed class LlmConfigNotConfiguredException(Guid tenantId, string agentC
 {
     public Guid TenantId { get; } = tenantId;
     public string AgentCode { get; } = agentCode;
+}
+
+// Provider chốt lỗi CẤP MODEL (model không tồn tại / hết kênh phục vụ) — khác hẳn lỗi auth/hạ tầng
+// chung. Caller dùng tín hiệu này để fallback về model chuẩn của config thay vì ghi failed vô định
+// (bug 2026-08-23: model override cũ trên binding sống sót qua lần rebind -> 503 model_not_found
+// -> review kẹt "review_terminal_incomplete").
+public sealed class LlmModelUnavailableException(string model, int statusCode, string detail)
+    : Exception(FormattableString.Invariant($"llm_model_unavailable:{model} (HTTP {statusCode})"))
+{
+    public const int DetailMaxLength = 300;
+
+    public string Model { get; } = model;
+    public int StatusCode { get; } = statusCode;
+    public string Detail { get; } =
+        detail.Length <= DetailMaxLength ? detail : detail[..DetailMaxLength];
+}
+
+// Nhận diện lỗi cấp model từ body provider. Chỉ tin MARKER trong body (one-api/new-api trả
+// "model_not_found"/"无可用渠道", gateway trả "Không có kênh khả dụng cho model ..."), đừng đoán
+// theo mã HTTP — 5xx vẫn thường là sự cố hạ tầng thông thường.
+public static class LlmModelAvailability
+{
+    public static bool IsUnavailable(string? responseBody)
+    {
+        if (string.IsNullOrEmpty(responseBody))
+            return false;
+
+        var lower = responseBody.ToLowerInvariant();
+        return lower.Contains("model_not_found", StringComparison.Ordinal)
+            || lower.Contains("model not found", StringComparison.Ordinal)
+            || lower.Contains("no available channel", StringComparison.Ordinal)
+            || lower.Contains("không có kênh khả dụng", StringComparison.Ordinal)
+            || lower.Contains("无可用渠道", StringComparison.Ordinal)
+            || (lower.Contains("model", StringComparison.Ordinal)
+                && lower.Contains("does not exist", StringComparison.Ordinal));
+    }
 }
