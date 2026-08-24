@@ -616,7 +616,7 @@ export default function AnalyticsReportsPage() {
   // const replyRate = rate(agg.replies, agg.dms);
   const conversionRate = rate(agg.conversions, agg.leads);
   const apiError = omnichannelQuery.error ?? deltaQuery.error ?? funnelQuery.error ?? agentsQuery.error ?? costsQuery.error;
-  const qualitySamples = agents.reduce((sum, agent) => sum + agent.qualitySamples, 0);
+  // const qualitySamples = agents.reduce((sum, agent) => sum + agent.qualitySamples, 0);
   // const averageQualityPassRate = qualitySamples
   //   ? agents.reduce((sum, agent) => sum + agent.qualityPassRate * agent.qualitySamples, 0) / qualitySamples
   //   : null;
