@@ -1238,11 +1238,13 @@ public static class ContentEndpoints
         var assetIds = targetRows
             .Where(row => row.MetaAssetId.HasValue)
             .Select(row => row.MetaAssetId!.Value)
-            .ToArray();
-        var assetNames = await db.MetaAssets.AsNoTracking()
-            .Where(asset => assetIds.Contains(asset.Id))
-            .ToDictionaryAsync(asset => asset.Id, asset => asset.Name, ct)
-            .ConfigureAwait(false);
+            .ToList();
+        var assetNames = assetIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await db.MetaAssets.AsNoTracking()
+                .Where(asset => assetIds.Contains(asset.Id))
+                .ToDictionaryAsync(asset => asset.Id, asset => asset.Name, ct)
+                .ConfigureAwait(false);
         var byTarget = targetRows
             .Select(row => new ContentPostPerformanceTargetDto(
                 row.MetaAssetId,
@@ -1316,16 +1318,20 @@ public static class ContentEndpoints
             .Where(row => row.MetaAssetId.HasValue)
             .Select(row => row.MetaAssetId!.Value)
             .Distinct()
-            .ToArray();
-        var topAssetNames = await db.MetaAssets.AsNoTracking()
-            .Where(asset => topAssetIds.Contains(asset.Id))
-            .ToDictionaryAsync(asset => asset.Id, asset => asset.Name, ct)
-            .ConfigureAwait(false);
-        var topItemIds = topRows.Select(row => row.ContentItemId).Distinct().ToArray();
-        var itemBodies = await db.ContentItems.AsNoTracking()
-            .Where(item => topItemIds.Contains(item.Id) && item.DeletedAt == null)
-            .ToDictionaryAsync(item => item.Id, item => item.Body, ct)
-            .ConfigureAwait(false);
+            .ToList();
+        var topAssetNames = topAssetIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await db.MetaAssets.AsNoTracking()
+                .Where(asset => topAssetIds.Contains(asset.Id))
+                .ToDictionaryAsync(asset => asset.Id, asset => asset.Name, ct)
+                .ConfigureAwait(false);
+        var topItemIds = topRows.Select(row => row.ContentItemId).Distinct().ToList();
+        var itemBodies = topItemIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await db.ContentItems.AsNoTracking()
+                .Where(item => topItemIds.Contains(item.Id) && item.DeletedAt == null)
+                .ToDictionaryAsync(item => item.Id, item => item.Body, ct)
+                .ConfigureAwait(false);
         var topPosts = topRows
             .Select(row => new ContentPostPerformanceTopPostDto(
                 row.Id,

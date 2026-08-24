@@ -9,7 +9,7 @@ namespace Clawbot.Api.Tests;
 
 public sealed class ContentPostPerformanceTests
 {
-    [Fact(Skip = "EF Core ReadOnlySpan<Guid> LINQ expression bug - will fix post-deployment")]
+    [Fact]
     public async Task BuildPostPerformanceAsync_ExcludesUnknownMetricsFromAggregatesAndAverage()
     {
         // Arrange
@@ -39,7 +39,7 @@ public sealed class ContentPostPerformanceTests
         result.TopPosts.Select(row => row.Total).Should().Equal(7, 0, null);
     }
 
-    [Fact(Skip = "EF Core ReadOnlySpan<Guid> LINQ expression bug - will fix post-deployment")]
+    [Fact]
     public async Task BuildPostPerformanceAsync_AppliesPlatformAndWindowFiltersToEveryAggregate()
     {
         // Arrange
@@ -66,7 +66,7 @@ public sealed class ContentPostPerformanceTests
         result.TopPosts.Should().ContainSingle(row => row.Excerpt == "In window");
     }
 
-    [Fact(Skip = "EF Core ReadOnlySpan<Guid> LINQ expression bug - will fix post-deployment")]
+    [Fact]
     public async Task BuildPostPerformanceAsync_HidesUntrustedExternalPostUrls()
     {
         // Arrange
@@ -104,7 +104,7 @@ public sealed class ContentPostPerformanceTests
         ContentEndpoints.NormalizePostPerformanceWindowDays(days).Should().Be(expected);
     }
 
-    [Fact(Skip = "EF Core ReadOnlySpan<Guid> LINQ expression bug - will fix post-deployment")]
+    [Fact]
     public async Task BuildPostPerformanceAsync_ReturnsNullEngagementAggregatesWhenNoPostHasMeasurements()
     {
         // Arrange
@@ -130,7 +130,7 @@ public sealed class ContentPostPerformanceTests
         result.Freshness.UnsyncedPosts.Should().Be(1);
     }
 
-    [Fact(Skip = "EF Core ReadOnlySpan<Guid> LINQ expression bug - will fix post-deployment")]
+    [Fact]
     public async Task BuildPostPerformanceAsync_UsesAttemptTimestampFromPostsWithoutMeasurements()
     {
         // Arrange
@@ -152,7 +152,7 @@ public sealed class ContentPostPerformanceTests
         result.Freshness.OldestEngagementAttemptAt.Should().Be(attemptOnlyPostedAt.AddMinutes(15));
     }
 
-    [Fact(Skip = "EF Core ReadOnlySpan<Guid> LINQ expression bug - will fix post-deployment")]
+    [Fact]
     public async Task BuildPostPerformanceAsync_MarksDeletedContentAsUnavailable()
     {
         // Arrange

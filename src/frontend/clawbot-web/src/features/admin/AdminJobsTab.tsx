@@ -69,7 +69,7 @@ export function AdminJobsTab() {
     <div className="space-y-gutter">
       {error ? <Alert tone="error">{toUserFriendlyError(error)}</Alert> : null}
 
-      <Card>
+      {/* <Card>
         <div className="mb-4">
           <h2 className="text-headline-sm text-secondary">Job hệ thống (Hangfire)</h2>
           <p className="mt-1 text-body-md text-on-surface-variant">
@@ -136,7 +136,7 @@ export function AdminJobsTab() {
           </table>
           {!jobsQuery.isLoading && !recurring.length ? <EmptyState>Chưa có job hệ thống nào được đăng ký.</EmptyState> : null}
         </div>
-      </Card>
+      </Card> */}
 
       <Card>
         <div className="mb-4">
