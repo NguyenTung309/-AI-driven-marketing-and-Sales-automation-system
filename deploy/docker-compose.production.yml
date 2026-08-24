@@ -151,6 +151,7 @@ services:
       Kestrel__Endpoints__Health__Url: http://0.0.0.0:8080
       Kestrel__Endpoints__Health__Protocols: Http1
       AgentServiceAuthentication__SigningKey: ${AGENT_SERVICE_AUTH_SIGNING_KEY:?AGENT_SERVICE_AUTH_SIGNING_KEY is required}
+      Encryption__Base64Key: ${ENCRYPTION_BASE64_KEY:?ENCRYPTION_BASE64_KEY is required}
     volumes:
       - ${AGENT_SERVICE_TLS_CERTIFICATE_PATH:?AGENT_SERVICE_TLS_CERTIFICATE_PATH is required}:/run/secrets/agentservice-grpc.pfx:ro
     networks: [backend]
