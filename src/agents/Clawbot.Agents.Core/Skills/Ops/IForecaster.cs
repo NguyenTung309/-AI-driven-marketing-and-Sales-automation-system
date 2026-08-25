@@ -54,7 +54,9 @@ internal sealed class MlNetForecaster : IForecaster
             var output = engine.Predict();
             return Task.FromResult<IReadOnlyList<ForecastPoint>>(MapForecast(ordered[^1].At, output, horizonDays));
         }
-        catch (InvalidOperationException)
+        // MklImports.so (native MKL cua SSA estimator) khong co trong image aspnet:8.0
+        // -> DllNotFoundException tren Linux production; fallback tuyen tinh thay vi crash.
+        catch (Exception ex) when (ex is InvalidOperationException or DllNotFoundException or TypeInitializationException)
         {
             return Task.FromResult<IReadOnlyList<ForecastPoint>>(LinearFallback(ordered, horizonDays));
         }
