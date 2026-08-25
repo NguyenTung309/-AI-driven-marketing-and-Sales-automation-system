@@ -21,14 +21,14 @@ export default defineConfig({
     port: 15876,
     proxy: {
       "/api": {
-        target: "http://localhost:15873",
+        target: "http://127.0.0.1:15873",
         changeOrigin: true,
       },
       "/auth": {
-        target: "http://localhost:15873",
+        target: "http://127.0.0.1:15873",
         changeOrigin: true,
       },
-      "/hubs": { target: "http://localhost:15873", ws: true },
+      "/hubs": { target: "http://127.0.0.1:15873", ws: true },
     },
   },
 });

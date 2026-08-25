@@ -2218,7 +2218,7 @@ export default function ContentWorkspacePage() {
               Lịch xuất bản
             </button>
             {/* Tab "Chỉ số chuỗi AI" ẩn khỏi thanh tab theo yêu cầu vận hành; panel vẫn giữ để deep link ?tab=metrics dùng được. */}
-            <button
+            {/* <button
               id="content-performance-tab"
               type="button"
               role="tab"
@@ -2228,7 +2228,7 @@ export default function ContentWorkspacePage() {
               className={`border-b-2 px-4 py-3 text-body-md font-semibold ${activeTab === "performance" ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-secondary"}`}
             >
               Hiệu quả bài đăng
-            </button>
+            </button> */}
           </nav>
 
           {activeTab === "queue" ? (

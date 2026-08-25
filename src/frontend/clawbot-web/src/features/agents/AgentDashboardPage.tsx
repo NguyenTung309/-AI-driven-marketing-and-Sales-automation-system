@@ -1193,7 +1193,7 @@ export default function AgentDashboardPage() {
               </div>
               <div className="flex items-center gap-2">
                 {costQuery.isError ? <StatusPill tone="warning">Chưa có dữ liệu chi phí</StatusPill> : null}
-                <Button
+                {/* <Button
                   variant="outline"
                   disabled={!canManageOrchestration}
                   onClick={() => {
@@ -1204,8 +1204,8 @@ export default function AgentDashboardPage() {
                   type="button"
                 >
                   <span aria-hidden="true" className="material-symbols-outlined text-[18px]">add</span>
-                  Thêm sub agent
-                </Button>
+                 // Thêm sub agent
+                </Button> */}
               </div>
             </div>
 

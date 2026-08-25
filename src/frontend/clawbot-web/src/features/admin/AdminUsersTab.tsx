@@ -1,5 +1,5 @@
 import { Button, Card, StatusPill } from "@/shared/ui";
-import { formatDateTime, inputClass } from "./adminHelpers";
+import { inputClass } from "./adminHelpers";
 import { EmptyState } from "./adminUi";
 import type { AdminUser, PancakeChannelInfo } from "@/shared/api/admin";
 
@@ -59,7 +59,6 @@ export function AdminUsersTab({
                 <th scope="col" className="px-4 py-3 font-bold">Người dùng</th>
                 <th scope="col" className="px-4 py-3 font-bold">Email</th>
                 <th scope="col" className="px-4 py-3 font-bold">Vai trò</th>
-                <th scope="col" className="px-4 py-3 font-bold">Đăng nhập cuối</th>
                 <th scope="col" className="px-4 py-3 font-bold">Kênh Pancake</th>
                 <th scope="col" className="px-4 py-3 font-bold">Trạng thái</th>
                 <th scope="col" className="px-4 py-3 text-right font-bold">Hành động</th>
@@ -91,7 +90,6 @@ export function AdminUsersTab({
                       <span className="text-body-md text-on-surface-variant">Chưa gán</span>
                     )}
                   </td>
-                  <td className="px-4 py-4 text-body-md text-on-surface-variant">{formatDateTime(user.lastLoginAt)}</td>
                   <td className="px-4 py-4">
                     {user.pancakeChannels && user.pancakeChannels.length > 0 ? (
                       <div className="flex min-w-[330px] flex-col gap-2">

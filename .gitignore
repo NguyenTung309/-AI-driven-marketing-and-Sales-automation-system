@@ -16,6 +16,7 @@ deploy/.env
 TestResults/
 coverage/
 artifacts/
+vite.config.ts/
 appsettings*.Local.json
 *.log
 .DS_Store
