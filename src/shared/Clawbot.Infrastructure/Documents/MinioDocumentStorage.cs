@@ -25,10 +25,22 @@ public sealed class MinioDocumentStorage : IDocumentStorage
         _bucket = opts.Bucket;
         _publicBaseUrl = opts.PublicBaseUrl.TrimEnd('/');
 
+        // Minio SDK 6.x tu choi endpoint co scheme ("http://minio:9000" -> InvalidEndpointException),
+        // va ngoai le nem trong constructor nen DI graph cua JobRunner sap ngay khi Perform —
+        // job keo o trang thai queued vinh vien. Tach scheme tai day, https -> bat SSL.
+        var secure = opts.Secure;
+        if (Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)
+            && (uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase)
+                || uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)))
+        {
+            secure = uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase);
+            endpoint = uri.IsDefaultPort ? uri.Host : $"{uri.Host}:{uri.Port}";
+        }
+
         _client = new MinioClient()
             .WithEndpoint(endpoint)
             .WithCredentials(opts.AccessKey, opts.SecretKey)
-            .WithSSL(opts.Secure)
+            .WithSSL(secure)
             .Build();
     }
 

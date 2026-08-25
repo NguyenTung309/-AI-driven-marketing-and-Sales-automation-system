@@ -154,7 +154,8 @@ services:
       Encryption__Base64Key: ${ENCRYPTION_BASE64_KEY:?ENCRYPTION_BASE64_KEY is required}
     volumes:
       - ${AGENT_SERVICE_TLS_CERTIFICATE_PATH:?AGENT_SERVICE_TLS_CERTIFICATE_PATH is required}:/run/secrets/agentservice-grpc.pfx:ro
-    networks: [backend]
+    # egress: outbound HTTPS (LLM providers, Pancake, Meta Graph). backend is internal-only.
+    networks: [backend, egress]
     depends_on:
       sqlserver: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -190,7 +191,7 @@ services:
       Encryption__Base64Key: ${ENCRYPTION_BASE64_KEY:?ENCRYPTION_BASE64_KEY is required}
     volumes:
       - ${AGENT_SERVICE_TLS_CA_CERTIFICATE_PATH:?AGENT_SERVICE_TLS_CA_CERTIFICATE_PATH is required}:/run/secrets/agentservice-ca.pem:ro
-    networks: [backend]
+    networks: [backend, egress]
     depends_on:
       agentservice: { condition: service_healthy }
       sqlserver: { condition: service_healthy }
@@ -243,6 +244,7 @@ networks:
   backend:
     internal: true
   edge:
+  egress:
 
 volumes:
   sqlserver_data:

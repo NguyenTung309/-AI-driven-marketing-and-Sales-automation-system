@@ -89,7 +89,12 @@ public sealed partial class ForecastPrecomputeJob(
 
             await _db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
-        catch (RpcException ex) when (ex.StatusCode == StatusCode.InvalidArgument)
+        // Chi bo qua loi dau vao (InvalidArgument) va exception chua xu ly ben agent service
+        // (Unknown — ML.NET forecaster nem loai khong duoc map); cac status khac (Unavailable,
+        // DeadlineExceeded...) van de thoat de Hangfire retry ca luot.
+        catch (RpcException ex) when (
+            ex.StatusCode == StatusCode.InvalidArgument ||
+            ex.StatusCode == StatusCode.Unknown)
         {
             LogForecastSkipped(_logger, tenantId, platform, metric, ex.Status.Detail);
         }
