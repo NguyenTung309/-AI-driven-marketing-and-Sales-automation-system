@@ -17,6 +17,8 @@ const CONTENT_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "content.meta_page_required": "Chưa có Facebook Page sẵn sàng đăng. Hãy kết nối Page trong phần Quản trị hệ thống rồi thử lại.",
   "content.item_not_schedulable": "Nội dung này chưa đủ điều kiện lên lịch. Hãy duyệt lại bản nội dung hiện tại rồi thử lại.",
   "content.approval_context_missing": "Nội dung này thiếu thông tin phê duyệt. Hãy duyệt lại bản nội dung hiện tại rồi lên lịch.",
+  "content.awaiting_agent_review": "Nội dung đang chờ Agent review trước khi có thể lên lịch.",
+  "content.awaiting_human_approval": "Nội dung cần được duyệt phát hành trước khi lên lịch đăng.",
   "content.schedule_in_past": "Thời điểm đăng phải ở tương lai. Hãy chọn lại ngày giờ.",
   "content.meta_page_invalid": "Page đã chọn không phù hợp với kênh đăng của nội dung này.",
   "content.instagram_credentials_invalid": "Thông tin kết nối Instagram chưa hợp lệ. Hãy kiểm tra lại trong phần Quản trị hệ thống.",

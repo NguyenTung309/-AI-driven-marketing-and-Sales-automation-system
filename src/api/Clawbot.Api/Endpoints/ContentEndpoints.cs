@@ -2315,7 +2315,21 @@ public static class ContentEndpoints
 
     private static string? ScheduleBlockedReason(ContentItem item)
     {
-        if (!item.CanScheduleCurrentRevision()) return "content.item_not_schedulable";
+        if (item.Status is "published" or "scheduled" or "approved") return null;
+        if (!item.CanScheduleCurrentRevision())
+        {
+            if (item.AgentReviewStatus == ContentItem.ReviewStatusRunning
+                || item.AgentReviewStatus == ContentItem.ReviewStatusPending
+                || item.AgentReviewedRevision != item.ContentRevision)
+            {
+                return "content.awaiting_agent_review";
+            }
+            if (item.ApprovedRevision != item.ContentRevision)
+            {
+                return "content.awaiting_human_approval";
+            }
+            return "content.item_not_schedulable";
+        }
         return string.IsNullOrWhiteSpace(item.ApprovalMode)
             || item.PublishingPolicyVersionApplied is null
             || item.ApprovedRevision != item.ContentRevision

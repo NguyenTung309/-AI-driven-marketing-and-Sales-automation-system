@@ -173,6 +173,8 @@ public sealed class AgentSession : AggregateRoot<Guid>, ITenantOwned
 
     public void Cancel(DateTimeOffset at)
     {
+        if (Status == AgentSessionStatuses.Cancelled)
+            return;
         EnsureTerminalRequestCanStart();
         Status = AgentSessionStatuses.Cancelled;
         FinishedAt = at;
@@ -260,10 +262,11 @@ public sealed class AgentSession : AggregateRoot<Guid>, ITenantOwned
     private void EnsureTerminalRequestCanStart()
     {
         if (Status is not (AgentSessionStatuses.Running
+            or AgentSessionStatuses.PendingApproval
             or AgentSessionStatuses.PauseRequested
             or AgentSessionStatuses.Paused))
         {
-            throw new InvalidOperationException("Only running, pause-requested, or paused orchestration plans can be terminalized.");
+            throw new InvalidOperationException("Only active or pending-approval orchestration plans can be terminalized.");
         }
     }
 

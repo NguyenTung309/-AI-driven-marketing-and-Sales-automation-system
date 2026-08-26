@@ -288,7 +288,7 @@ export async function approveOrchestrationV2Run(sessionId: string, etag: string)
 export async function controlOrchestrationV2Run(
   sessionId: string,
   action: OrchestrationV2ControlAction,
-  etag?: string,
+  etag?: string | null,
 ): Promise<{ readonly sessionId: string; readonly status: string }> {
   const res = await apiClient.post<{ readonly sessionId: string; readonly status: string }>(
     `/api/orchestration/v2/runs/${encodeURIComponent(sessionId)}/control`,

@@ -291,7 +291,7 @@ public sealed class ContentAgent(
             ChainOutlineJson: ContentChainSnapshot.SerializeOutline(outcome.Outline));
     }
 
-    // Đường cũ — một lần gọi LLM. Template mang toàn bộ chỉ dẫn, gửi làm user message (system rỗng).
+    // Đường cũ — một lần gọi LLM. Template mang toàn bộ chỉ dẫn, gửi làm user message.
     private async Task<ContentDraftResult> RunSingleShotAsync(
         ContentGenerateRequest request,
         string template,
@@ -301,14 +301,16 @@ public sealed class ContentAgent(
     {
         var sw = Stopwatch.StartNew();
         var prompt = RenderTemplate(template, request.Brief, knowledge);
-        var reply = await _claude.CompleteAsync(string.Empty, Array.Empty<ChatTurn>(), prompt, ct).ConfigureAwait(false);
+        var systemPrompt = AgentPromptPacks.For(AgentCode);
+        var reply = await _claude.CompleteAsync(systemPrompt, Array.Empty<ChatTurn>(), prompt, ct).ConfigureAwait(false);
         await RecordCostAsync(request.TenantId, reply, ct).ConfigureAwait(false);
 
         sw.Stop();
+        var body = EnsureMandatoryFooter(reply.Text.Trim());
         return new ContentDraftResult(
             request.BriefId,
             request.Platform,
-            reply.Text.Trim(),
+            body,
             chunks,
             reply.InputTokens,
             reply.OutputTokens,
@@ -346,10 +348,11 @@ public sealed class ContentAgent(
             return null;
 
         sw.Stop();
+        var body = EnsureMandatoryFooter(outcome.Body.Trim());
         return new ContentDraftResult(
             request.BriefId,
             request.Platform,
-            outcome.Body.Trim(),
+            body,
             chunks,
             outcome.InputTokens,
             outcome.OutputTokens,
@@ -357,6 +360,20 @@ public sealed class ContentAgent(
             sw.ElapsedMilliseconds,
             ContentChainSnapshot.SerializePlan(outcome.Plan),
             ContentChainSnapshot.SerializeOutline(outcome.Outline));
+    }
+
+    private static string EnsureMandatoryFooter(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+            return body;
+
+        if (body.Contains("HỌC BÁ", StringComparison.OrdinalIgnoreCase)
+            && (body.Contains("0888 861 786", StringComparison.Ordinal) || body.Contains("hoc-ba.edu.vn", StringComparison.OrdinalIgnoreCase) || body.Contains("Hòa Phát", StringComparison.OrdinalIgnoreCase) || body.Contains("Hoa Phat", StringComparison.OrdinalIgnoreCase)))
+        {
+            return body;
+        }
+
+        return body.TrimEnd() + "\n\n---\n> **HỌC BÁ HSK – HỆ THỐNG GIÁO DỤC HÁN NGỮ TRỰC TUYẾN TOP ĐẦU VIỆT NAM**\n> 📍 Địa chỉ: Tòa nhà Hòa Phát, 257 Giải Phóng, phường Bạch Mai, Hà Nội\n> 🌐 Website: https://hoc-ba.edu.vn/\n> 📞 Hotline: 0888 861 786 (Ms Ngọc Ánh)";
     }
 
     private async Task WriteTracesAsync(ContentGenerateRequest request, ContentChainOutcome outcome, CancellationToken ct)

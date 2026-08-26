@@ -30,6 +30,11 @@ public interface ITrendSource
     Task<IReadOnlyList<RawTrend>> FetchAsync(string geo, TrendSourceOverride? tenantOverride = null, CancellationToken ct = default);
 }
 
+public interface IKeywordTrendSource : ITrendSource
+{
+    Task<IReadOnlyList<RawTrend>> FetchByKeywordsAsync(string geo, IReadOnlyList<string> keywords, TrendSourceOverride? tenantOverride = null, CancellationToken ct = default);
+}
+
 public abstract class TrendSourceOptions
 {
     public bool Enabled { get; set; } = true;
@@ -275,7 +280,7 @@ internal sealed class YouTubeDataApiSource(HttpClient http, IOptions<YouTubeTren
 }
 
 internal sealed class SearxngTrendSource(HttpClient http, IOptions<SearxngTrendOptions> options)
-    : ITrendSource
+    : IKeywordTrendSource
 {
     private readonly SearxngTrendOptions _options = options.Value;
 
@@ -311,6 +316,47 @@ internal sealed class SearxngTrendSource(HttpClient http, IOptions<SearxngTrendO
         {
             return [];
         }
+    }
+
+    public async Task<IReadOnlyList<RawTrend>> FetchByKeywordsAsync(
+        string geo,
+        IReadOnlyList<string> keywords,
+        TrendSourceOverride? tenantOverride = null,
+        CancellationToken ct = default)
+    {
+        var baseUrl = tenantOverride?.Url;
+        if (string.IsNullOrWhiteSpace(baseUrl))
+            baseUrl = _options.BaseUrl;
+        if (!(tenantOverride?.Enabled ?? _options.Enabled) || string.IsNullOrWhiteSpace(baseUrl) || keywords.Count == 0)
+            return [];
+
+        var rawTrends = new List<RawTrend>();
+        var targetKeywords = keywords
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .Take(3)
+            .ToList();
+
+        foreach (var kw in targetKeywords)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, _options.TimeoutSeconds)));
+                var query = string.IsNullOrWhiteSpace(geo) ? $"{kw} xu hướng" : $"{kw} xu hướng {geo}";
+                var url = $"{baseUrl.TrimEnd('/')}/search?q={Uri.EscapeDataString(query)}&format=json";
+                var json = await http.GetStringAsync(new Uri(url, UriKind.Absolute), timeout.Token).ConfigureAwait(false);
+                var parsed = ParseResults(json, _options.MaxResults);
+                rawTrends.AddRange(parsed);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
+            catch (HttpRequestException) { }
+            catch (JsonException) { }
+        }
+
+        return rawTrends
+            .DistinctBy(t => t.Topic, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     internal static IReadOnlyList<RawTrend> ParseResults(string json, int max)

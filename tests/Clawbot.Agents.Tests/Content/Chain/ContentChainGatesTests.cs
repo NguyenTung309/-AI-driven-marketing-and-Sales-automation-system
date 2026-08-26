@@ -862,6 +862,17 @@ public sealed class ContentChainGatesTests
         result.ErrorCode.Should().Be(ContentLintCodes.ExternalLink);
     }
 
+    [Theory]
+    [InlineData("Truy cap website chinh thuc: https://hoc-ba.edu.vn/ de biet them")]
+    [InlineData("Website: http://hoc-ba.edu.vn/khoa-hoc")]
+    [InlineData("Dang ky tai www.hocba.edu.vn ngay hom nay")]
+    public void ContentLint_AllowsOfficialBrandDomainLinks(string body)
+    {
+        var result = ContentLint.Check(body);
+
+        result.Succeeded.Should().BeTrue();
+    }
+
     [Fact]
     public void ContentLint_Fails_OnReplacementChar()
     {

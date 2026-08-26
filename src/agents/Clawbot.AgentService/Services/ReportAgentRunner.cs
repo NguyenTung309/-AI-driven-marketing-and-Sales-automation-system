@@ -16,6 +16,26 @@ public sealed record ReportSnapshotRow(
     int Conversions,
     double AvgResponseTimeSec);
 
+public sealed record KpiDailyTrendRow(
+    string Date,
+    int Leads,
+    int Dms,
+    int Replies,
+    int Conversions,
+    double AvgResponseTimeSec);
+
+public sealed record KpiRangeReport(
+    DateOnly FromDate,
+    DateOnly ToDate,
+    string Platform,
+    int TotalLeads,
+    int TotalDms,
+    int TotalReplies,
+    int TotalConversions,
+    double AvgResponseTimeSec,
+    IReadOnlyList<ReportSnapshotRow> PlatformRows,
+    IReadOnlyList<KpiDailyTrendRow> DailyTrends);
+
 /// <summary>Hiệu suất nội dung đã đăng theo nền tảng — số liệu marketing, không đụng kpi_daily.</summary>
 public sealed record ContentSnapshotRow(
     string Platform,
@@ -67,19 +87,158 @@ public sealed class ReportAgentRunner(
         Guid tenantId, string dateRaw, CancellationToken ct)
     {
         var metricDate = ParseDate(dateRaw);
-        var rows = await _db.KpiDailies.IgnoreQueryFilters()
-            .Where(k => k.TenantId == tenantId && k.Date == metricDate)
-            .OrderBy(k => k.Platform)
-            .Select(k => new ReportSnapshotRow(
-                k.Platform,
-                k.Leads,
-                k.Dms,
-                k.Replies,
-                k.Conversions,
-                (double)(k.AvgResponseTimeSec ?? 0m)))
-            .ToListAsync(ct).ConfigureAwait(false);
+        var report = await KpiSnapshotAsync(tenantId, metricDate, metricDate, platform: null, ct).ConfigureAwait(false);
+        return report.PlatformRows;
+    }
 
-        return rows;
+    /// <summary>
+    /// Tổng hợp KPI kinh doanh (Leads, DMs, Phản hồi, Chuyển đổi) theo ngày hoặc khoảng ngày (tuần/tháng).
+    /// </summary>
+    public async Task<KpiRangeReport> KpiSnapshotAsync(
+        Guid tenantId, DateOnly fromDate, DateOnly toDate, string? platform, CancellationToken ct)
+    {
+        var normalizedPlatform = NormalizePlatformFilter(platform);
+
+        var query = _db.KpiDailies.IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(k => k.TenantId == tenantId && k.Date >= fromDate && k.Date <= toDate);
+
+        if (normalizedPlatform is not null)
+            query = query.Where(k => k.Platform == normalizedPlatform);
+
+        var rawRows = await query.ToListAsync(ct).ConfigureAwait(false);
+        if (rawRows.Count == 0)
+        {
+            rawRows = await AggregateLiveKpisAsync(tenantId, fromDate, toDate, normalizedPlatform, ct).ConfigureAwait(false);
+        }
+
+        // Trường hợp 1 ngày đơn lẻ và không lọc platform: giữ nguyên mọi dòng platform (facebook, zalo, all...)
+        if (fromDate == toDate && normalizedPlatform is null)
+        {
+            var singleDayRows = rawRows
+                .OrderBy(r => r.Platform, StringComparer.Ordinal)
+                .Select(r => new ReportSnapshotRow(
+                    r.Platform,
+                    r.Leads,
+                    r.Dms,
+                    r.Replies,
+                    r.Conversions,
+                    (double)(r.AvgResponseTimeSec ?? 0m)))
+                .ToList();
+
+            var allRow = rawRows.FirstOrDefault(r => string.Equals(r.Platform, "all", StringComparison.OrdinalIgnoreCase));
+            var nonAll = rawRows.Where(r => !string.Equals(r.Platform, "all", StringComparison.OrdinalIgnoreCase)).ToList();
+
+            var totLeads = allRow?.Leads ?? (nonAll.Count > 0 ? nonAll.Sum(r => r.Leads) : 0);
+            var totDms = allRow?.Dms ?? (nonAll.Count > 0 ? nonAll.Sum(r => r.Dms) : 0);
+            var totReplies = allRow?.Replies ?? (nonAll.Count > 0 ? nonAll.Sum(r => r.Replies) : 0);
+            var totConversions = allRow?.Conversions ?? (nonAll.Count > 0 ? nonAll.Sum(r => r.Conversions) : 0);
+            var avgResp = allRow?.AvgResponseTimeSec.HasValue == true
+                ? (double)allRow.AvgResponseTimeSec.Value
+                : (nonAll.Count > 0 && nonAll.Any(r => r.AvgResponseTimeSec.HasValue && r.AvgResponseTimeSec.Value > 0)
+                    ? Math.Round(nonAll.Where(r => r.AvgResponseTimeSec.HasValue && r.AvgResponseTimeSec.Value > 0).Average(r => (double)r.AvgResponseTimeSec!.Value), 1)
+                    : 0d);
+
+            var trends = new List<KpiDailyTrendRow>
+            {
+                new(FormatDate(fromDate), totLeads, totDms, totReplies, totConversions, avgResp)
+            };
+
+            return new KpiRangeReport(
+                fromDate,
+                toDate,
+                "all",
+                totLeads,
+                totDms,
+                totReplies,
+                totConversions,
+                avgResp,
+                singleDayRows,
+                trends);
+        }
+
+        // Trường hợp khoảng ngày (tuần/tháng/range) hoặc có lọc platform
+        var nonAllPlatforms = rawRows.Where(r => !string.Equals(r.Platform, "all", StringComparison.OrdinalIgnoreCase)).ToList();
+        var platformSource = (normalizedPlatform is null && nonAllPlatforms.Count > 0) ? nonAllPlatforms : rawRows;
+
+        var platformRows = platformSource
+            .GroupBy(r => PlatformKey(r.Platform), StringComparer.Ordinal)
+            .Select(g =>
+            {
+                var responseTimes = g.Where(r => r.AvgResponseTimeSec.HasValue && r.AvgResponseTimeSec.Value > 0)
+                                     .Select(r => (double)r.AvgResponseTimeSec!.Value)
+                                     .ToList();
+                var avgResp = responseTimes.Count > 0 ? Math.Round(responseTimes.Average(), 1) : 0d;
+
+                return new ReportSnapshotRow(
+                    g.Key,
+                    g.Sum(r => r.Leads),
+                    g.Sum(r => r.Dms),
+                    g.Sum(r => r.Replies),
+                    g.Sum(r => r.Conversions),
+                    avgResp);
+            })
+            .OrderBy(r => r.Platform, StringComparer.Ordinal)
+            .ToList();
+
+        if (platformRows.Count == 0 && rawRows.Count > 0)
+        {
+            var avgResp = rawRows.Where(r => r.AvgResponseTimeSec.HasValue && r.AvgResponseTimeSec.Value > 0)
+                                 .Select(r => (double)r.AvgResponseTimeSec!.Value)
+                                 .DefaultIfEmpty(0d)
+                                 .Average();
+            platformRows = [new ReportSnapshotRow(
+                normalizedPlatform ?? "all",
+                rawRows.Sum(r => r.Leads),
+                rawRows.Sum(r => r.Dms),
+                rawRows.Sum(r => r.Replies),
+                rawRows.Sum(r => r.Conversions),
+                Math.Round(avgResp, 1))];
+        }
+
+        // Xu hướng theo từng ngày trong khoảng thời gian [fromDate, toDate]
+        var dailyTrends = new List<KpiDailyTrendRow>();
+        for (var d = fromDate; d <= toDate; d = d.AddDays(1))
+        {
+            var targetDate = d;
+            var dateRows = platformSource.Where(r => r.Date == targetDate).ToList();
+            if (dateRows.Count == 0 && nonAllPlatforms.Count > 0)
+            {
+                dateRows = rawRows.Where(r => r.Date == targetDate).ToList();
+            }
+
+            var respList = dateRows.Where(r => r.AvgResponseTimeSec.HasValue && r.AvgResponseTimeSec.Value > 0)
+                                   .Select(r => (double)r.AvgResponseTimeSec!.Value)
+                                   .ToList();
+            var avgResp = respList.Count > 0 ? Math.Round(respList.Average(), 1) : 0d;
+
+            dailyTrends.Add(new KpiDailyTrendRow(
+                FormatDate(targetDate),
+                dateRows.Sum(r => r.Leads),
+                dateRows.Sum(r => r.Dms),
+                dateRows.Sum(r => r.Replies),
+                dateRows.Sum(r => r.Conversions),
+                avgResp));
+        }
+
+        var totalLeads = platformRows.Sum(r => r.Leads);
+        var totalDms = platformRows.Sum(r => r.Dms);
+        var totalReplies = platformRows.Sum(r => r.Replies);
+        var totalConversions = platformRows.Sum(r => r.Conversions);
+        var overallRespList = platformRows.Where(r => r.AvgResponseTimeSec > 0).Select(r => r.AvgResponseTimeSec).ToList();
+        var overallAvgResp = overallRespList.Count > 0 ? Math.Round(overallRespList.Average(), 1) : 0d;
+
+        return new KpiRangeReport(
+            fromDate,
+            toDate,
+            normalizedPlatform ?? "all",
+            totalLeads,
+            totalDms,
+            totalReplies,
+            totalConversions,
+            overallAvgResp,
+            platformRows,
+            dailyTrends);
     }
 
     /// <summary>
@@ -201,14 +360,106 @@ public sealed class ReportAgentRunner(
     }
 
     /// <summary>
+    /// Khoảng ngày cho báo cáo KPI: hỗ trợ cả ngày lẻ (mặc định hôm nay), từ khóa tuần/tháng,
+    /// khoảng [from, to], hoặc số ngày lookback_days.
+    /// </summary>
+    public static (DateOnly From, DateOnly To) ResolveKpiRange(
+        string? dateRaw,
+        string? fromRaw = null,
+        string? toRaw = null,
+        int? lookbackDays = null,
+        int defaultDays = 1)
+    {
+        var today = Today();
+
+        // 1. Nếu có cả from và to
+        if (!string.IsNullOrWhiteSpace(fromRaw) && !string.IsNullOrWhiteSpace(toRaw))
+        {
+            var from = ParseDate(fromRaw);
+            var to = ParseDate(toRaw);
+            return from <= to ? (from, to) : (to, from);
+        }
+
+        if (!string.IsNullOrWhiteSpace(fromRaw))
+        {
+            var from = ParseDate(fromRaw);
+            var to = lookbackDays is > 0 ? from.AddDays(lookbackDays.Value - 1) : today;
+            return from <= to ? (from, to) : (to, from);
+        }
+
+        var raw = (dateRaw ?? string.Empty).Trim().ToLowerInvariant();
+
+        // 2. Các từ khóa khoảng thời gian tương đối
+        switch (raw)
+        {
+            case "this_week" or "thisweek" or "tuần này" or "tuan nay" or "tuannay" or "tuần hiện tại" or "tuan hien tai":
+            {
+                // Ở Việt Nam, tuần bắt đầu từ Thứ Hai (Monday)
+                var diff = (int)today.DayOfWeek - (int)DayOfWeek.Monday;
+                if (diff < 0) diff += 7; // Chủ Nhật (0) -> diff = 6
+                var startOfWeek = today.AddDays(-diff);
+                return (startOfWeek, today);
+            }
+            case "last_week" or "lastweek" or "tuần trước" or "tuan truoc" or "tuantruoc" or "tuần qua" or "tuan qua":
+            {
+                var diff = (int)today.DayOfWeek - (int)DayOfWeek.Monday;
+                if (diff < 0) diff += 7;
+                var endOfLastWeek = today.AddDays(-diff - 1);
+                var startOfLastWeek = endOfLastWeek.AddDays(-6);
+                return (startOfLastWeek, endOfLastWeek);
+            }
+            case "this_month" or "thismonth" or "tháng này" or "thang nay" or "thangnay" or "tháng hiện tại" or "thang hien tai":
+            {
+                var startOfMonth = new DateOnly(today.Year, today.Month, 1);
+                return (startOfMonth, today);
+            }
+            case "last_month" or "lastmonth" or "tháng trước" or "thang truoc" or "thangtruoc":
+            {
+                var firstOfThisMonth = new DateOnly(today.Year, today.Month, 1);
+                var endOfLastMonth = firstOfThisMonth.AddDays(-1);
+                var startOfLastMonth = new DateOnly(endOfLastMonth.Year, endOfLastMonth.Month, 1);
+                return (startOfLastMonth, endOfLastMonth);
+            }
+            case "today" or "hôm nay" or "hom nay" or "homnay":
+                return (today, today);
+            case "yesterday" or "hôm qua" or "hom qua" or "homqua":
+                return (today.AddDays(-1), today.AddDays(-1));
+            default:
+                break;
+        }
+
+        // 3. Nếu có lookback_days
+        if (lookbackDays is > 0)
+        {
+            var to = string.IsNullOrWhiteSpace(dateRaw) ? today : ParseDate(dateRaw);
+            var window = Math.Min(lookbackDays.Value, MaxRangeDays);
+            return (to.AddDays(-(window - 1)), to);
+        }
+
+        // 4. Nếu có dateRaw dạng ngày cụ thể
+        if (!string.IsNullOrWhiteSpace(dateRaw))
+        {
+            var parsed = ParseDate(dateRaw);
+            if (defaultDays > 1)
+                return (parsed.AddDays(-(defaultDays - 1)), parsed);
+            return (parsed, parsed);
+        }
+
+        // 5. Mặc định
+        if (defaultDays > 1)
+            return (today.AddDays(-(defaultDays - 1)), today);
+
+        return (today, today);
+    }
+
+    /// <summary>
     /// Khoảng ngày cho báo cáo marketing: [date - (days-1), date]. Báo cáo nội dung tính theo khoảng
     /// chứ không theo một ngày như snapshot KPI — một ngày lẻ thường không có bài nào đăng.
     /// </summary>
     public static (DateOnly From, DateOnly To) ResolveRange(string? dateRaw, int? days, int defaultDays)
     {
-        var to = ParseDate(dateRaw ?? string.Empty);
-        var window = days is > 0 ? Math.Min(days.Value, MaxRangeDays) : defaultDays;
-        return (to.AddDays(-(window - 1)), to);
+        var (from, to) = ResolveKpiRange(dateRaw, lookbackDays: days, defaultDays: defaultDays);
+        return (from, to);
     }
 
     public async Task<IReadOnlyList<AnomalyPoint>> DetectAnomalyAsync(
@@ -271,6 +522,66 @@ public sealed class ReportAgentRunner(
     /// </summary>
     public static DateOnly Today() =>
         DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(AnalyticsOffset).DateTime);
+
+    private async Task<List<KpiDaily>> AggregateLiveKpisAsync(
+        Guid tenantId, DateOnly fromDate, DateOnly toDate, string? normalizedPlatform, CancellationToken ct)
+    {
+        var fromOffset = new DateTimeOffset(fromDate.ToDateTime(TimeOnly.MinValue), AnalyticsOffset);
+        var toOffset = new DateTimeOffset(toDate.ToDateTime(TimeOnly.MaxValue), AnalyticsOffset);
+
+        var leadQuery = _db.Leads.IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(l => l.TenantId == tenantId && l.CreatedAt >= fromOffset && l.CreatedAt <= toOffset);
+
+        var convQuery = _db.Conversations.IgnoreQueryFilters()
+            .AsNoTracking()
+            .Include(c => c.Messages)
+            .Where(c => c.TenantId == tenantId && ((c.CreatedAt >= fromOffset && c.CreatedAt <= toOffset) || c.Messages.Any(m => m.SentAt >= fromOffset && m.SentAt <= toOffset)));
+
+        if (normalizedPlatform is not null && !string.Equals(normalizedPlatform, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            leadQuery = leadQuery.Where(l => l.SourcePlatform == normalizedPlatform);
+            convQuery = convQuery.Where(c => c.Platform == normalizedPlatform);
+        }
+
+        var leads = await leadQuery.ToListAsync(ct).ConfigureAwait(false);
+        var conversations = await convQuery.ToListAsync(ct).ConfigureAwait(false);
+
+        var result = new List<KpiDaily>();
+        for (var d = fromDate; d <= toDate; d = d.AddDays(1))
+        {
+            var dayStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), AnalyticsOffset);
+            var dayEnd = dayStart.AddDays(1);
+
+            var dayLeads = leads.Where(l => l.CreatedAt >= dayStart && l.CreatedAt < dayEnd).ToList();
+            var dayConvs = conversations.Where(c => c.CreatedAt >= dayStart && c.CreatedAt < dayEnd).ToList();
+
+            var platforms = dayLeads.Select(l => l.SourcePlatform?.Trim().ToLowerInvariant() ?? "unknown")
+                .Concat(dayConvs.Select(c => c.Platform?.Trim().ToLowerInvariant() ?? "unknown"))
+                .Distinct()
+                .ToList();
+
+            if (platforms.Count == 0)
+                continue;
+
+            foreach (var p in platforms)
+            {
+                var pLeads = dayLeads.Count(l => string.Equals(l.SourcePlatform, p, StringComparison.OrdinalIgnoreCase));
+                var pConversions = dayLeads.Count(l => string.Equals(l.SourcePlatform, p, StringComparison.OrdinalIgnoreCase) && string.Equals(l.Stage, "customer", StringComparison.OrdinalIgnoreCase));
+                var pDms = dayConvs.Count(c => string.Equals(c.Platform, p, StringComparison.OrdinalIgnoreCase));
+                var pReplies = conversations
+                    .Where(c => string.Equals(c.Platform, p, StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(c => c.Messages)
+                    .Count(m => m.Direction == "out" && m.SentAt >= dayStart && m.SentAt < dayEnd);
+
+                var kpi = KpiDaily.Create(tenantId, d, p, DateTimeOffset.UtcNow);
+                kpi.Record(pLeads, pDms, pReplies, pDms, pConversions, null);
+                result.Add(kpi);
+            }
+        }
+
+        return result;
+    }
 
     private async Task<IReadOnlyList<(DateTimeOffset At, double Value)>> LoadSeriesAsync(
         Guid tenantId, string platform, string metric, int lookbackDays, CancellationToken ct)
@@ -345,12 +656,33 @@ public sealed class ReportAgentRunner(
         if (raw.Length == 0)
             return Today();
 
-        switch (raw.ToLowerInvariant())
+        var lower = raw.ToLowerInvariant();
+        switch (lower)
         {
-            case "today" or "hôm nay" or "hom nay":
+            case "today" or "hôm nay" or "hom nay" or "homnay":
                 return Today();
-            case "yesterday" or "hôm qua" or "hom qua":
+            case "yesterday" or "hôm qua" or "hom qua" or "homqua":
                 return Today().AddDays(-1);
+            case "this_week" or "thisweek" or "tuần này" or "tuan nay" or "tuannay" or "tuần hiện tại" or "tuan hien tai":
+            {
+                var diff = (int)Today().DayOfWeek - (int)DayOfWeek.Monday;
+                if (diff < 0) diff += 7;
+                return Today().AddDays(-diff);
+            }
+            case "last_week" or "lastweek" or "tuần trước" or "tuan truoc" or "tuantruoc" or "tuần qua" or "tuan qua":
+            {
+                var diff = (int)Today().DayOfWeek - (int)DayOfWeek.Monday;
+                if (diff < 0) diff += 7;
+                return Today().AddDays(-diff - 7);
+            }
+            case "this_month" or "thismonth" or "tháng này" or "thang nay" or "thangnay" or "tháng hiện tại" or "thang hien tai":
+                return new DateOnly(Today().Year, Today().Month, 1);
+            case "last_month" or "lastmonth" or "tháng trước" or "thang truoc" or "thangtruoc":
+            {
+                var firstOfThisMonth = new DateOnly(Today().Year, Today().Month, 1);
+                var endOfLastMonth = firstOfThisMonth.AddDays(-1);
+                return new DateOnly(endOfLastMonth.Year, endOfLastMonth.Month, 1);
+            }
             default:
                 break;
         }
@@ -360,7 +692,7 @@ public sealed class ReportAgentRunner(
 
         throw new ArgumentException(string.Create(
             CultureInfo.InvariantCulture,
-            $"date '{date}' is not a valid date. Use YYYY-MM-DD (e.g. {FormatDate(Today())}), or 'today'/'yesterday'."));
+            $"date '{date}' is not a valid date. Use YYYY-MM-DD (e.g. {FormatDate(Today())}), or 'today'/'yesterday'/'this_week'/'this_month'."));
     }
 
     // Lỗi phải tự mô tả: ReAct loop chỉ có 5 bước nên "metric is not supported." đốt sạch ngân sách vì

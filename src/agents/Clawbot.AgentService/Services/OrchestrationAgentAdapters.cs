@@ -360,12 +360,15 @@ public sealed class ReportOrchestrationAdapter(ReportAgentRunner runner) : Agent
             });
         }
 
-        // date mặc định hôm nay THEO GIỜ VN: KPI gom theo mốc UTC+7, lấy ngày UTC sẽ trỏ nhầm sang
-        // hôm qua trong khoảng 00:00-07:00 giờ VN và snapshot trả về rỗng.
-        var date = AgentTaskInput.OptionalString(input, "date")
-            ?? ReportAgentRunner.FormatDate(ReportAgentRunner.Today());
-        var rows = await _runner.DailySnapshotAsync(tenantId, date, ct).ConfigureAwait(false);
-        var snapshotDate = ReportAgentRunner.ParseDate(date);
+        // Phân giải khoảng ngày cho KPI (ngày lẻ, tuần này, tháng này, lookback_days, from/to)
+        var (fromDate, toDate) = ReportAgentRunner.ResolveKpiRange(
+            AgentTaskInput.OptionalString(input, "date"),
+            AgentTaskInput.OptionalString(input, "from_date") ?? AgentTaskInput.OptionalString(input, "fromDate"),
+            AgentTaskInput.OptionalString(input, "to_date") ?? AgentTaskInput.OptionalString(input, "toDate"),
+            OptionalInt(input, "lookback_days") ?? OptionalInt(input, "lookbackDays"));
+
+        var report = await _runner.KpiSnapshotAsync(tenantId, fromDate, toDate, platform, ct).ConfigureAwait(false);
+        var rows = report.PlatformRows;
 
         var snapshotItems = rows.Select(r => Row(
             ("platform", r.Platform),
@@ -375,14 +378,21 @@ public sealed class ReportOrchestrationAdapter(ReportAgentRunner runner) : Agent
             ("conversions", r.Conversions),
             ("avgResponseTimeSec", r.AvgResponseTimeSec))).ToList();
 
+        var isSingleDay = fromDate == toDate;
+        var title = isSingleDay
+            ? $"Báo cáo KPI ngày {ReportAgentRunner.FormatDate(fromDate)}"
+            : $"Báo cáo KPI {ReportAgentRunner.FormatDate(fromDate)} - {ReportAgentRunner.FormatDate(toDate)}";
+
+        var chart = new ReportChart("platform", ["leads", "dms", "conversions"]);
+
         var snapshotLink = await PersistAsync(
             tenantId,
             ReportArtifact.KindSnapshot,
-            $"Báo cáo KPI ngày {ReportAgentRunner.FormatDate(snapshotDate)}",
+            title,
             platform,
             metric: null,
-            snapshotDate,
-            snapshotDate,
+            fromDate,
+            toDate,
             new ReportArtifactPayload(
                 ReportArtifact.KindSnapshot,
                 [
@@ -394,16 +404,24 @@ public sealed class ReportOrchestrationAdapter(ReportAgentRunner runner) : Agent
                     new ReportColumn("avgResponseTimeSec", "Phản hồi TB (giây)", "number"),
                 ],
                 snapshotItems,
-                new ReportChart("platform", ["leads", "dms", "conversions"])),
+                chart),
             ct).ConfigureAwait(false);
 
-        // snapshot trả mọi platform của ngày đó nên không lọc theo `platform`.
         return Json(new
         {
             operation = "snapshot",
-            date,
+            from = ReportAgentRunner.FormatDate(fromDate),
+            to = ReportAgentRunner.FormatDate(toDate),
+            date = isSingleDay ? ReportAgentRunner.FormatDate(fromDate) : $"{ReportAgentRunner.FormatDate(fromDate)} -> {ReportAgentRunner.FormatDate(toDate)}",
+            platform,
             total = rows.Count,
+            totalLeads = report.TotalLeads,
+            totalDms = report.TotalDms,
+            totalReplies = report.TotalReplies,
+            totalConversions = report.TotalConversions,
+            avgResponseTimeSec = report.AvgResponseTimeSec,
             items = rows,
+            dailyTrends = report.DailyTrends,
             reportId = snapshotLink?.Id,
             reportUrl = snapshotLink?.Url,
         });

@@ -306,6 +306,28 @@ public sealed class ResearchAgentToolUseTests
     }
 
     [Fact]
+    public async Task ReActWorker_SynthesizesFinalText_WhenMaxIterationsReachedWithToolOutputs()
+    {
+        // Model emits 5 tool calls, exhausting MaxReActIterations (5), then 6th call is synthesis step
+        var chatClient = CreateChatClient(
+            Reply("{\"tool\":\"research-agent\",\"args\":{\"query\":\"1\"}}"),
+            Reply("{\"tool\":\"research-agent\",\"args\":{\"query\":\"2\"}}"),
+            Reply("{\"tool\":\"research-agent\",\"args\":{\"query\":\"3\"}}"),
+            Reply("{\"tool\":\"research-agent\",\"args\":{\"query\":\"4\"}}"),
+            Reply("{\"tool\":\"research-agent\",\"args\":{\"query\":\"5\"}}"),
+            Reply("Báo cáo tổng hợp kết quả phân tích đầy đủ và chi tiết."));
+
+        var worker = CreateWorker(chatClient, CreateTool(ToolResult.Ok("{\"data\":1}")));
+        var result = await worker.ExecuteAsync(BuildTask("Phân tích tổng hợp"), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.Error.Should().BeNull();
+        result.Output.Should().NotContain("(reached tool step cap");
+        result.Output.Should().Contain("Báo cáo tổng hợp kết quả phân tích đầy đủ và chi tiết.");
+        result.Output.Should().Contain("[tool_results]");
+    }
+
+    [Fact]
     public async Task ReActWorker_GrantsPublishCapabilityOnlyToExecutionPrincipal()
     {
         ToolContext? observedContext = null;
@@ -411,6 +433,52 @@ public sealed class ResearchAgentToolUseTests
                 Arg.Any<CancellationToken>())
             .Returns(_ => Task.FromResult(queue.Count > 1 ? queue.Dequeue() : queue.Peek()));
         return tool;
+    }
+
+    [Fact]
+    public async Task ResearchAgent_FallsBackToKeywordSearch_WhenDefaultTrendsEmpty()
+    {
+        // Arrange
+        var defaultSource = Substitute.For<ITrendSource>();
+        defaultSource.Source.Returns("google_trends");
+        defaultSource.Enabled.Returns(true);
+        defaultSource.FetchAsync(Arg.Any<string>(), Arg.Any<TrendSourceOverride?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<RawTrend>>([]));
+
+        var keywordSource = Substitute.For<IKeywordTrendSource>();
+        keywordSource.Source.Returns("searxng");
+        keywordSource.Enabled.Returns(true);
+        keywordSource.FetchAsync(Arg.Any<string>(), Arg.Any<TrendSourceOverride?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<RawTrend>>([]));
+        keywordSource.FetchByKeywordsAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<string>>(), Arg.Any<TrendSourceOverride?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<RawTrend>>([
+                new RawTrend("Lịch thi HSK 2025 tại Việt Nam", "searxng", "news", 5.0, ["Học HSK 2025"]),
+            ]));
+
+        var scorer = new WeightedTrendScorer();
+        var agent = new ResearchAgent([defaultSource, keywordSource], scorer);
+
+        // Act
+        var result = await agent.ScanWithRawAsync(new ResearchScanRequest(
+            Guid.NewGuid(),
+            "VN",
+            ["hsk", "tiếng trung"]), CancellationToken.None);
+
+        // Assert
+        result.Trends.Should().NotBeEmpty();
+        result.Trends[0].Topic.Should().Be("Lịch thi HSK 2025 tại Việt Nam");
+        result.Trends[0].RelevanceScore.Should().BeGreaterThan(0d);
+    }
+
+    [Fact]
+    public void AgentPromptPacks_IncludesUpstreamContentBriefingInstruction()
+    {
+        var contentPrompt = AgentPromptPacks.For("content-agent");
+        var researchPrompt = AgentPromptPacks.For("research-agent");
+
+        contentPrompt.Should().Contain("upstream_results");
+        contentPrompt.Should().Contain("brief");
+        researchPrompt.Should().Contain("5 CHỦ ĐỀ NỔI BẬT");
     }
 
     private static AgentTask BuildTask(string description) => new(

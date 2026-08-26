@@ -290,6 +290,9 @@ const AGENT_REVIEW_REASON_LABELS: Record<string, string> = {
   empty_content: "Nội dung bài viết đang trống.",
   suspicious_embedded_instructions: "Nội dung hoặc dữ liệu tham chiếu chứa chỉ dẫn đáng ngờ, cần người kiểm tra lại.",
   review_timeout: "Agent duyệt xử lý quá lâu và bị hủy giữa chừng.",
+  lint_external_link: "Nội dung chứa liên kết ngoài chưa được xác thực (chỉ cho phép website chính thức của trung tâm).",
+  lint_absolute_guarantee: "Nội dung chứa cam kết tuyệt đối (ví dụ: 100% đỗ/đầu ra, vi phạm chính sách quảng cáo).",
+  lint_junk_chars: "Nội dung chứa ký tự lỗi mã hóa hoặc ký tự điều khiển bất thường.",
 };
 
 function agentReviewReasonLabel(reason: string | null | undefined): string | null {
@@ -580,7 +583,7 @@ function BriefEditor({
                 <PlatformBadge platform={brief.platform} />
                 <StatusPill tone={statusTone(brief.status)}>{statusLabel(brief.status)}</StatusPill>
               </div>
-              <p className="text-body-md font-semibold text-secondary">{compactBody(brief.brief, 92)}</p>
+              <p className="text-body-md font-semibold text-secondary break-words line-clamp-2">{compactBody(brief.brief, 92)}</p>
               <p className="mt-1 text-label-sm text-on-surface-variant">Cập nhật {formatDateTime(brief.updatedAt)}</p>
             </button>
           ))
@@ -815,7 +818,7 @@ function QueueList({
               {workflowLabel(item.workflowState, item.status)}
             </StatusPill>
           </div>
-          <p className="text-body-md font-semibold text-secondary">{compactBody(item.body, 96)}</p>
+          <p className="text-body-md font-semibold text-secondary break-words line-clamp-2">{compactBody(item.body, 96)}</p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-label-sm text-on-surface-variant">
             <span>{assetsSummary(item.assetsJson)}</span>
             <span>·</span>
@@ -988,6 +991,14 @@ function QueueEditor({
     );
   }
 
+  const isAlreadyScheduledOrPublished = Boolean(schedule)
+    || normalize(item.status) === "scheduled"
+    || normalize(item.status) === "published"
+    || normalize(item.status) === "approved"
+    || normalize(item.workflowState) === "scheduled"
+    || normalize(item.workflowState) === "published"
+    || normalize(item.workflowState) === "approved_awaiting_schedule";
+
   const canSchedule = Boolean(item.canSchedule);
   const scheduleBlockedMessage = contentErrorMessage(item.scheduleBlockedReason);
   const canApprove = Boolean(item.canApprove) && canApprovePerm && !bodyDirty;
@@ -1049,7 +1060,7 @@ function QueueEditor({
           </Alert>
         ) : null}
 
-        {!canSchedule && scheduleBlockedMessage ? (
+        {!isAlreadyScheduledOrPublished && !canSchedule && scheduleBlockedMessage ? (
           <Alert tone="info">{scheduleBlockedMessage}</Alert>
         ) : null}
 
@@ -1290,7 +1301,7 @@ function CalendarPanel({
                         {statusLabel(row.status, row.lastError, row.scheduledAt)}
                       </StatusPill>
                     </div>
-                    <p className="text-body-md font-semibold text-secondary">{compactBody(row.body, 88)}</p>
+                    <p className="text-body-md font-semibold text-secondary break-words line-clamp-2">{compactBody(row.body, 88)}</p>
                     <p className="mt-1 text-label-sm text-on-surface-variant">{formatDateTime(row.scheduledAt)}</p>
                     {errorText ? (
                       <p className="mt-1 text-label-sm text-error" title={row.lastError ?? undefined}>{errorText}</p>

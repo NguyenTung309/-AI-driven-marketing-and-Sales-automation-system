@@ -121,6 +121,41 @@ internal sealed class ResearchAgent(
             .ThenBy(t => t.Topic)
             .Take(MaxResults)
             .ToList();
+
+        // Fallback: khi nguồn trend tĩnh (Google Trends) không có từ khóa ngách, quét tin tức web theo keywords
+        if (filtered.Count == 0 && request.Keywords.Count > 0)
+        {
+            var keywordSources = _sources.OfType<IKeywordTrendSource>().ToList();
+            if (keywordSources.Count > 0)
+            {
+                var kwTasks = keywordSources
+                    .Select(s => s.FetchByKeywordsAsync(request.Geo, request.Keywords, OverrideFor(s.Source, request.Overrides), ct))
+                    .ToList();
+                var kwResults = await Task.WhenAll(kwTasks).ConfigureAwait(false);
+                var kwDeduped = kwResults
+                    .SelectMany(r => r)
+                    .GroupBy(t => t.Topic, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.OrderByDescending(t => t.SourceScore).First())
+                    .ToList();
+
+                if (kwDeduped.Count > 0)
+                {
+                    var kwScored = await _scorer.ScoreAsync(request.TenantId, kwDeduped, request.Keywords, ct).ConfigureAwait(false);
+                    filtered = kwScored
+                        .Where(t => t.RelevanceScore > 0d)
+                        .OrderByDescending(t => t.RelevanceScore)
+                        .ThenBy(t => t.Topic)
+                        .Take(MaxResults)
+                        .ToList();
+
+                    deduped = deduped.Concat(kwDeduped)
+                        .GroupBy(t => t.Topic, StringComparer.OrdinalIgnoreCase)
+                        .Select(g => g.OrderByDescending(t => t.SourceScore).First())
+                        .ToList();
+                }
+            }
+        }
+
         var raw = deduped
             .OrderByDescending(t => t.SourceScore)
             .ThenBy(t => t.Topic)

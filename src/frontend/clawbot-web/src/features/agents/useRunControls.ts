@@ -33,8 +33,16 @@ export function useRunControls(defaultSessionId: string | null) {
     mutationFn: async (vars: { action: OrchestrationV2ControlAction; sessionId?: string; etag?: string | null }) => {
       const sessionId = vars.sessionId ?? defaultSessionId;
       if (!sessionId) throw new Error("Thiếu mã phiên.");
-      const etag = vars.etag ?? (await getOrchestrationV2Run(sessionId)).etag;
-      return controlOrchestrationV2Run(sessionId, vars.action, etag);
+      const etag = vars.action === "cancel" ? null : (vars.etag ?? (await getOrchestrationV2Run(sessionId)).etag);
+      try {
+        return await controlOrchestrationV2Run(sessionId, vars.action, etag);
+      } catch (err: any) {
+        if (err?.response?.status === 409) {
+          const fresh = await getOrchestrationV2Run(sessionId);
+          return await controlOrchestrationV2Run(sessionId, vars.action, fresh.etag);
+        }
+        throw err;
+      }
     },
     onSuccess: (_data, vars) => invalidate(vars.sessionId ?? defaultSessionId),
   });

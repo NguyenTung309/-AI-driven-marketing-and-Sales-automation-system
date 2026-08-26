@@ -323,11 +323,15 @@ public sealed partial class OrchestratorGrpcService(
                 ct)
             .ConfigureAwait(false);
         var session = await LoadAsync(request.TenantId, request.SessionId, ct).ConfigureAwait(false);
-        EnsureEtagMatches(session, request.ExpectedEtag);
+        var action = (request.Action ?? string.Empty).Trim().ToLowerInvariant();
+        if (action != "cancel")
+        {
+            EnsureEtagMatches(session, request.ExpectedEtag);
+        }
 
         try
         {
-            switch ((request.Action ?? string.Empty).Trim().ToLowerInvariant())
+            switch (action)
             {
                 case "pause":
                     session.RequestPause();
@@ -339,11 +343,15 @@ public sealed partial class OrchestratorGrpcService(
                     session.Resume(caller.UserId);
                     break;
                 case "cancel":
+                    if (session.Status == AgentSessionStatuses.Cancelled)
+                    {
+                        return ToResponse(session);
+                    }
                     await _runSink.CancelAsync(
                         session.TenantId,
                         session.Id,
                         session.ReplanCount,
-                        session.RowVersion,
+                        null,
                         _clock.UtcNow,
                         ct).ConfigureAwait(false);
                     await _db.Entry(session).ReloadAsync(ct).ConfigureAwait(false);

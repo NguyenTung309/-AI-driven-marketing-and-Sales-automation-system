@@ -2,17 +2,29 @@ import { Card } from "@/shared/ui/Card";
 import type { ReportPayload, ReportRow } from "@/shared/api/reports";
 
 const WIDTH = 680;
-const HEIGHT = 220;
-const PAD_LEFT = 46;
-const PAD_RIGHT = 12;
-const PAD_TOP = 12;
-const PAD_BOTTOM = 30;
+const HEIGHT = 250;
+const PAD_LEFT = 48;
+const PAD_RIGHT = 16;
+const PAD_TOP = 22;
+const PAD_BOTTOM = 54;
 const PLOT_W = WIDTH - PAD_LEFT - PAD_RIGHT;
 const PLOT_H = HEIGHT - PAD_TOP - PAD_BOTTOM;
 const MAX_X_LABELS = 8;
 
 // Bảng màu bám theo accent đỏ của analytics; 5 màu là đủ vì payload hiện tối đa 3 series.
 const SERIES_COLORS = ["#d32f2f", "#1e88e5", "#43a047", "#f9a825", "#8e24aa"];
+
+const PLATFORM_LABELS: Record<string, string> = {
+  all: "Tất cả",
+  all_platforms: "Tất cả",
+  facebook: "Facebook",
+  instagram: "Instagram",
+  zalo: "Zalo",
+  tiktok: "TikTok",
+  youtube: "YouTube",
+  website: "Website",
+  unknown: "Khác",
+};
 
 function toNumber(row: ReportRow, key: string): number | null {
   const value = row[key];
@@ -26,7 +38,10 @@ function formatValue(value: number): string {
 }
 
 function formatAxisLabel(value: string, isDate: boolean): string {
-  if (!isDate) return value;
+  if (!isDate) {
+    const key = value.trim().toLowerCase();
+    return PLATFORM_LABELS[key] ?? (value ? value.charAt(0).toUpperCase() + value.slice(1) : "—");
+  }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit" }).format(date);
@@ -35,6 +50,7 @@ function formatAxisLabel(value: string, isDate: boolean): string {
 interface ChartModel {
   readonly labels: readonly string[];
   readonly isDateAxis: boolean;
+  readonly xTitle: string;
   readonly series: readonly { readonly key: string; readonly label: string; readonly values: readonly (number | null)[] }[];
   readonly min: number;
   readonly max: number;
@@ -62,10 +78,12 @@ function buildModel(payload: ReportPayload): ChartModel | null {
   const isDateAxis = xColumn?.type === "date";
   const min = isDateAxis ? Math.min(rawMin, rawMax === rawMin ? rawMin - 1 : rawMin) : Math.min(0, rawMin);
   const max = rawMax === min ? min + 1 : rawMax;
+  const xTitle = xColumn?.label ?? (isDateAxis ? "Thời gian (Ngày)" : "Nền tảng");
 
   return {
     labels: payload.rows.map((row) => String(row[chart.x] ?? "")),
     isDateAxis,
+    xTitle,
     series,
     min,
     max,
@@ -79,8 +97,17 @@ function yOf(value: number, model: ChartModel): number {
 
 function Gridlines({ model }: { readonly model: ChartModel }) {
   const ticks = [0, 0.5, 1].map((f) => model.min + (model.max - model.min) * f);
+  const baseline = yOf(Math.max(model.min, 0), model);
   return (
     <g>
+      <text
+        x={PAD_LEFT - 6}
+        y={PAD_TOP - 8}
+        textAnchor="end"
+        className="fill-on-surface-variant text-[9px] font-medium"
+      >
+        Số lượng
+      </text>
       {ticks.map((tick) => (
         <g key={tick}>
           <line
@@ -101,6 +128,14 @@ function Gridlines({ model }: { readonly model: ChartModel }) {
           </text>
         </g>
       ))}
+      <line
+        x1={PAD_LEFT}
+        x2={WIDTH - PAD_RIGHT}
+        y1={baseline}
+        y2={baseline}
+        stroke="#cbd5e1"
+        strokeWidth="1.5"
+      />
     </g>
   );
 }
@@ -108,21 +143,42 @@ function Gridlines({ model }: { readonly model: ChartModel }) {
 function XLabels({ model }: { readonly model: ChartModel }) {
   const step = Math.max(1, Math.ceil(model.labels.length / MAX_X_LABELS));
   const slot = PLOT_W / model.labels.length;
+  const baseline = yOf(Math.max(model.min, 0), model);
+
   return (
     <g>
-      {model.labels.map((label, index) =>
-        index % step === 0 ? (
-          <text
-            key={`${label}-${index}`}
-            x={PAD_LEFT + slot * (index + 0.5)}
-            y={HEIGHT - 8}
-            textAnchor="middle"
-            className="fill-on-surface-variant text-[10px]"
-          >
-            {formatAxisLabel(label, model.isDateAxis)}
-          </text>
-        ) : null
-      )}
+      {model.labels.map((label, index) => {
+        if (index % step !== 0) return null;
+        const x = PAD_LEFT + slot * (index + 0.5);
+        return (
+          <g key={`${label}-${index}`}>
+            <line
+              x1={x}
+              x2={x}
+              y1={baseline}
+              y2={baseline + 4}
+              stroke="#cbd5e1"
+              strokeWidth="1"
+            />
+            <text
+              x={x}
+              y={baseline + 16}
+              textAnchor="middle"
+              className="fill-on-surface-variant text-[10px] font-medium"
+            >
+              {formatAxisLabel(label, model.isDateAxis)}
+            </text>
+          </g>
+        );
+      })}
+      <text
+        x={PAD_LEFT + PLOT_W / 2}
+        y={HEIGHT - 8}
+        textAnchor="middle"
+        className="fill-on-surface-variant text-[11px] font-semibold tracking-wide"
+      >
+        {model.xTitle}
+      </text>
     </g>
   );
 }
@@ -155,7 +211,7 @@ function LineSeries({ model }: { readonly model: ChartModel }) {
                   r="3.5"
                   fill={color}
                 >
-                  <title>{`${series.label}: ${formatValue(value)}`}</title>
+                  <title>{`${formatAxisLabel(model.labels[index], model.isDateAxis)} • ${series.label}: ${formatValue(value)}`}</title>
                 </circle>
               )
             )}
@@ -171,6 +227,7 @@ function BarSeries({ model }: { readonly model: ChartModel }) {
   const barWidth = Math.min(26, (slot * 0.72) / model.series.length);
   const groupWidth = barWidth * model.series.length;
   const baseline = yOf(Math.max(model.min, 0), model);
+
   return (
     <g>
       {model.series.map((series, seriesIndex) => {
@@ -181,18 +238,32 @@ function BarSeries({ model }: { readonly model: ChartModel }) {
               if (value === null) return null;
               const x = PAD_LEFT + slot * (index + 0.5) - groupWidth / 2 + barWidth * seriesIndex;
               const y = yOf(value, model);
+              const barHeight = Math.max(1, Math.abs(baseline - y));
+              const topY = Math.min(y, baseline);
+
               return (
-                <rect
-                  key={`${series.key}-${index}`}
-                  x={x}
-                  y={Math.min(y, baseline)}
-                  width={Math.max(2, barWidth - 3)}
-                  height={Math.max(1, Math.abs(baseline - y))}
-                  rx="3"
-                  fill={color}
-                >
-                  <title>{`${series.label}: ${formatValue(value)}`}</title>
-                </rect>
+                <g key={`${series.key}-${index}`}>
+                  <rect
+                    x={x}
+                    y={topY}
+                    width={Math.max(2, barWidth - 3)}
+                    height={barHeight}
+                    rx="3"
+                    fill={color}
+                  >
+                    <title>{`${formatAxisLabel(model.labels[index], model.isDateAxis)} • ${series.label}: ${formatValue(value)}`}</title>
+                  </rect>
+                  {barWidth >= 14 && value > 0 && (
+                    <text
+                      x={x + (barWidth - 3) / 2}
+                      y={topY - 3}
+                      textAnchor="middle"
+                      className="fill-on-surface-variant text-[8px] font-medium"
+                    >
+                      {formatValue(value)}
+                    </text>
+                  )}
+                </g>
               );
             })}
           </g>

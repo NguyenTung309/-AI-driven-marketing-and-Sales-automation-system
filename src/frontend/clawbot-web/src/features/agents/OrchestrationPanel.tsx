@@ -95,6 +95,7 @@ export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange 
   // Dialog can thiệp một bước (sửa output / chạy lại / bỏ qua) khi phiên đang tạm dừng.
   const [showIntervene, setShowIntervene] = useState(false);
   const [showAgentPrompt, setShowAgentPrompt] = useState(false);
+  const [activePromptAgentCode, setActivePromptAgentCode] = useState<string | null>(null);
 
   const setSessionId = (next: string | null): void => onSessionIdChange(next);
 
@@ -157,14 +158,15 @@ export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange 
   const agentDefinitionsQuery = useQuery({
     queryKey: ["orchestration-v2", "agents"],
     queryFn: listOrchestrationV2Agents,
-    enabled: showAgentPrompt && canViewAgentPrompts,
+    enabled: canViewAgentPrompts,
     staleTime: 5 * 60_000,
   });
   const selectedAgentDefinition = useMemo(() => {
-    if (!selectedTask) return null;
-    const code = selectedTask.agent.toLocaleLowerCase();
-    return agentDefinitionsQuery.data?.find((agent) => agent.code.toLocaleLowerCase() === code) ?? null;
-  }, [agentDefinitionsQuery.data, selectedTask]);
+    const agents = agentDefinitionsQuery.data ?? [];
+    if (agents.length === 0) return null;
+    const targetCode = (activePromptAgentCode ?? selectedTask?.agent ?? agents[0]?.code ?? "").toLowerCase();
+    return agents.find((agent) => agent.code.toLowerCase() === targetCode) ?? agents[0] ?? null;
+  }, [activePromptAgentCode, agentDefinitionsQuery.data, selectedTask]);
   const awaitingApprovalTaskId = useMemo(() => {
     for (let index = traceItems.length - 1; index >= 0; index -= 1) {
       const trace = traceItems[index];
@@ -204,8 +206,18 @@ export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange 
     onSuccess: () => sessionQuery.refetch(),
   });
   const control = useMutation({
-    mutationFn: (vars: { sessionId: string; action: OrchestrationV2ControlAction; etag: string }) =>
-      controlOrchestrationV2Run(vars.sessionId, vars.action, vars.etag),
+    mutationFn: async (vars: { sessionId: string; action: OrchestrationV2ControlAction; etag?: string | null }) => {
+      const etag = vars.action === "cancel" ? null : (vars.etag ?? (await getOrchestrationV2Run(vars.sessionId)).etag);
+      try {
+        return await controlOrchestrationV2Run(vars.sessionId, vars.action, etag);
+      } catch (err: any) {
+        if (err?.response?.status === 409) {
+          const fresh = await getOrchestrationV2Run(vars.sessionId);
+          return await controlOrchestrationV2Run(vars.sessionId, vars.action, fresh.etag);
+        }
+        throw err;
+      }
+    },
     onSuccess: () => sessionQuery.refetch(),
   });
   const updatePlan = useMutation({
@@ -306,9 +318,22 @@ export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange 
           <input checked={dryRun} disabled={!canRun || busy} onChange={(event) => setDryRun(event.target.checked)} type="checkbox" />
           Chạy thử — công cụ chỉ mô phỏng hành động, không thực thi thật
         </label>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => submit.mutate()} disabled={!canRun || busy || goal.trim().length === 0}>
             {dryRun ? "Chạy thử mục tiêu" : "Gửi mục tiêu"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (selectedTask) {
+                setActivePromptAgentCode(selectedTask.agent);
+              }
+              setShowAgentPrompt(true);
+            }}
+            disabled={!canViewAgentPrompts}
+            title={!canViewAgentPrompts ? "Cần quyền orchestration:view" : undefined}
+          >
+            Xem prompt &amp; quy tắc
           </Button>
           {session && (
             <Button
@@ -474,6 +499,89 @@ export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange 
         )}
       </Modal>
 
+      <Modal
+        open={showAgentPrompt}
+        onClose={() => setShowAgentPrompt(false)}
+        title="System prompt & quy tắc (Agent Prompt Pack)"
+        maxWidthClass="max-w-3xl"
+      >
+        {agentDefinitionsQuery.isLoading ? (
+          <p className="text-label-sm text-on-surface-variant">Đang tải cấu hình tác nhân...</p>
+        ) : (agentDefinitionsQuery.data ?? []).length > 0 ? (
+          <div className="flex flex-col gap-4">
+            <div>
+              <p className="mb-2 text-label-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                Chọn tác nhân để xem cấu hình &amp; prompt
+              </p>
+              <div className="flex flex-wrap gap-1.5 border-b border-outline pb-3">
+                {(agentDefinitionsQuery.data ?? []).map((agent) => {
+                  const isSelected = selectedAgentDefinition?.code.toLowerCase() === agent.code.toLowerCase();
+                  return (
+                    <button
+                      key={agent.id}
+                      type="button"
+                      onClick={() => setActivePromptAgentCode(agent.code)}
+                      className={`rounded-lg px-3 py-1.5 text-label-sm font-medium transition-colors ${
+                        isSelected
+                          ? "bg-primary text-on-primary shadow-xs"
+                          : "bg-surface-container hover:bg-surface-container-high text-on-surface"
+                      }`}
+                    >
+                      {agent.displayName || agent.code}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {selectedAgentDefinition ? (
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-title-sm text-on-surface font-semibold">{selectedAgentDefinition.displayName} ({selectedAgentDefinition.code})</h4>
+                    {selectedAgentDefinition.personaPrompt && (
+                      <p className="text-label-sm text-on-surface-variant">{selectedAgentDefinition.personaPrompt}</p>
+                    )}
+                  </div>
+                  <span className="rounded-full bg-surface-container-high px-2.5 py-0.5 text-label-xs font-mono text-secondary">
+                    {selectedAgentDefinition.agentType}
+                  </span>
+                </div>
+
+                <section aria-labelledby="agent-prompt-heading">
+                  <h3 className="text-label-md font-semibold text-on-surface" id="agent-prompt-heading">System prompt &amp; Persona</h3>
+                  <pre className="mt-2 max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-outline bg-surface-container-low p-3 font-mono text-mono-status text-on-surface">
+                    {selectedAgentDefinition.systemPrompt || selectedAgentDefinition.personaPrompt || "Agent chưa có system prompt riêng."}
+                  </pre>
+                </section>
+
+                <section aria-labelledby="agent-tools-heading">
+                  <h3 className="text-label-md font-semibold text-on-surface" id="agent-tools-heading">Công cụ được phép</h3>
+                  <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-outline bg-surface-container-low p-3 font-mono text-mono-status text-on-surface">
+                    {selectedAgentDefinition.allowedToolsJson || "[]"}
+                  </pre>
+                </section>
+
+                {selectedTask && selectedTask.agent.toLowerCase() === selectedAgentDefinition.code.toLowerCase() ? (
+                  <section aria-labelledby="task-instruction-heading">
+                    <h3 className="text-label-md font-semibold text-on-surface" id="task-instruction-heading">Hướng dẫn cho task đang chọn</h3>
+                    <p className="mt-2 text-body-md text-on-surface">{selectedTask.description}</p>
+                  </section>
+                ) : null}
+
+                <p className="text-label-sm text-on-surface-variant">
+                  Quy tắc an toàn nền tảng được hệ thống ghép cố định khi chạy agent và không chỉnh sửa ở màn hình này.
+                </p>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-label-sm text-on-surface-variant">
+            Không tìm thấy cấu hình của agent nào trong danh mục hiện tại.
+          </p>
+        )}
+      </Modal>
+
       {session && (
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2 text-label-sm text-on-surface-variant">
@@ -557,45 +665,6 @@ export function OrchestrationPanel({ live = false, sessionId, onSessionIdChange 
             task={selectedTask}
             tasks={session.tasks}
           />
-
-          <Modal
-            open={showAgentPrompt}
-            onClose={() => setShowAgentPrompt(false)}
-            title={`System prompt & quy tắc: ${selectedTask?.agent ?? "agent"}`}
-            maxWidthClass="max-w-3xl"
-          >
-            {agentDefinitionsQuery.isLoading ? (
-              <p className="text-label-sm text-on-surface-variant">Đang tải cấu hình agent...</p>
-            ) : selectedAgentDefinition ? (
-              <div className="flex flex-col gap-4">
-                <section aria-labelledby="agent-prompt-heading">
-                  <h3 className="text-label-md text-on-surface" id="agent-prompt-heading">System prompt cấu hình</h3>
-                  <pre className="mt-2 max-h-[42vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-outline bg-surface-container-low p-3 font-mono text-mono-status text-on-surface">
-                    {selectedAgentDefinition.systemPrompt || selectedAgentDefinition.personaPrompt || "Agent chưa có system prompt riêng."}
-                  </pre>
-                </section>
-                <section aria-labelledby="agent-tools-heading">
-                  <h3 className="text-label-md text-on-surface" id="agent-tools-heading">Công cụ được phép</h3>
-                  <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-outline bg-surface-container-low p-3 font-mono text-mono-status text-on-surface">
-                    {selectedAgentDefinition.allowedToolsJson || "[]"}
-                  </pre>
-                </section>
-                {selectedTask ? (
-                  <section aria-labelledby="task-instruction-heading">
-                    <h3 className="text-label-md text-on-surface" id="task-instruction-heading">Hướng dẫn cho task đang duyệt</h3>
-                    <p className="mt-2 text-body-md text-on-surface">{selectedTask.description}</p>
-                  </section>
-                ) : null}
-                <p className="text-label-sm text-on-surface-variant">
-                  Quy tắc an toàn nền tảng được hệ thống ghép cố định khi chạy agent và không chỉnh sửa ở màn hình này.
-                </p>
-              </div>
-            ) : (
-              <p className="text-label-sm text-on-surface-variant">
-                Không tìm thấy cấu hình của agent này trong danh mục hiện tại. Agent có thể đã bị xóa hoặc đổi mã sau khi phiên bắt đầu.
-              </p>
-            )}
-          </Modal>
 
           <TaskDagCanvas
             onSelect={setSelectedTaskId}

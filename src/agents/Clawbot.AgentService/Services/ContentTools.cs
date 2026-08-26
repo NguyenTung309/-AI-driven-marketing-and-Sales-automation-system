@@ -433,11 +433,8 @@ public sealed class ContentApproveTool(
             if (item is null)
                 return ToolResult.Fail($"content item {contentId} not found for tenant.");
 
-            // Phase 0 review-gate: 'approved' (human) items stay re-reviewable so the reviewer agent can add
-            // the ApprovedByAgentId signoff that Phase 1 enforces as the publish precondition.
-            if (!string.Equals(item.Status, "draft", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(item.Status, "approved", StringComparison.OrdinalIgnoreCase))
-                return ToolResult.Fail($"content item is '{item.Status}', only draft or approved items can be reviewed.");
+            if (string.Equals(item.Status, "published", StringComparison.OrdinalIgnoreCase))
+                return ToolResult.Fail("content item is already published.");
 
             var now = _clock.UtcNow;
             if (decision == "approve")
@@ -448,7 +445,15 @@ public sealed class ContentApproveTool(
                 // Review-gate P1 (separation of duties): the generating agent cannot sign off its own content.
                 if (item.CreatedByAgentId is not null && item.CreatedByAgentId == ctx.AgentDefinitionId)
                     return ToolResult.Fail("reviewer_independence: the agent that generated this item cannot approve it; a different reviewer agent must sign off.");
-                item.ApproveByAgent(ctx.AgentDefinitionId.Value, now);
+
+                if (string.Equals(item.Status, "scheduled", StringComparison.OrdinalIgnoreCase))
+                {
+                    item.AttachAgentSignoff(ctx.AgentDefinitionId.Value, now);
+                }
+                else
+                {
+                    item.ApproveByAgent(ctx.AgentDefinitionId.Value, now);
+                }
             }
             else
             {

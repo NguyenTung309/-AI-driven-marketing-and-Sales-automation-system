@@ -49,10 +49,36 @@ public static class ContentLint
         return false;
     }
 
-    private static bool ContainsExternalLink(string body) =>
-        body.Contains("http://", StringComparison.OrdinalIgnoreCase)
-        || body.Contains("https://", StringComparison.OrdinalIgnoreCase)
-        || body.Contains("www.", StringComparison.OrdinalIgnoreCase);
+    private static readonly string[] AllowedBrandDomains =
+    [
+        "hoc-ba.edu.vn",
+        "hocba.edu.vn",
+    ];
+
+    private static bool ContainsExternalLink(string body)
+    {
+        if (!body.Contains("http://", StringComparison.OrdinalIgnoreCase)
+            && !body.Contains("https://", StringComparison.OrdinalIgnoreCase)
+            && !body.Contains("www.", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var sanitized = body;
+        foreach (var domain in AllowedBrandDomains)
+        {
+            sanitized = sanitized
+                .Replace($"https://{domain}", "", StringComparison.OrdinalIgnoreCase)
+                .Replace($"http://{domain}", "", StringComparison.OrdinalIgnoreCase)
+                .Replace($"https://www.{domain}", "", StringComparison.OrdinalIgnoreCase)
+                .Replace($"http://www.{domain}", "", StringComparison.OrdinalIgnoreCase)
+                .Replace($"www.{domain}", "", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return sanitized.Contains("http://", StringComparison.OrdinalIgnoreCase)
+            || sanitized.Contains("https://", StringComparison.OrdinalIgnoreCase)
+            || sanitized.Contains("www.", StringComparison.OrdinalIgnoreCase);
+    }
 
     // Ký tự rác: replacement char U+FFFD (hỏng mã hóa/mojibake) hoặc control char C0 ngoài tab/xuống dòng.
     private static bool ContainsJunkChars(string body)

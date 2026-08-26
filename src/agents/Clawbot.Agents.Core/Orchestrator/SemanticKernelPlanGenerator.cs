@@ -146,14 +146,17 @@ public sealed partial class SemanticKernelPlanGenerator(IChatCompletionService c
 
     private static string BuildSystemPrompt(IReadOnlyList<AgentCatalogEntry> catalog)
     {
+        var nowVn = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7));
         var agents = string.Join("\n", catalog.Select(agent =>
             $"- {agent.Code} ({agent.ShortName}) type={agent.AgentType}: {agent.Description}; inputSchema={agent.InputSchemaJson}"));
         // The planner LLM tends to invent agent codes (e.g. "planner", "designer") that aren't in the
         // catalog, which then fails validation. List the exact allowed codes and forbid anything else.
         var allowedCodes = string.Join(", ", catalog.Select(agent => agent.Code));
-        return "Return only JSON for an OrchestrationPlanDocument with version (integer) and tasks. " +
+        return $"Current date & time (Vietnam UTC+7): {nowVn:yyyy-MM-dd HH:mm:ss} ({nowVn:dddd}). Today is {nowVn:yyyy-MM-dd}.\n" +
+               "Return only JSON for an OrchestrationPlanDocument with version (integer) and tasks. " +
                "Each task must have id, agent, description, input, dependsOn, status, output, error. " +
                "Use status pending for new tasks. " +
+               "When the user requests a KPI/business performance report ('báo cáo KPI', 'hiệu suất', 'doanh số'), allocate a task to 'report-agent' with input {\"operation\": \"snapshot\", \"date\": \"this_week\"} (or relevant period) so it creates the official report artifact and chart. " +
                "Each task MAY also include roleInstruction: a short Vietnamese system prompt (1-3 câu) that " +
                "tailors the sub-agent's persona/rules for THIS specific task. Only add it when it sharpens the " +
                "sub-agent beyond its default role; otherwise omit it (null). " +
