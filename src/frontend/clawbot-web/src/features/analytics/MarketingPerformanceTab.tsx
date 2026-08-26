@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getPostPerformance,
+  syncPostPerformance,
   type PostPerformanceDailyPoint,
   type PostPerformancePlatform,
   type PostPerformancePlatformRow,
@@ -11,7 +12,7 @@ import {
 import { PostDetailDialog } from "@/shared/content/PostDetailDialog";
 import { platformClasses } from "@/shared/theme/colors";
 import { toUserFriendlyError } from "@/shared/utils/userText";
-import { Alert, Card, DataTable, StatusPill, type Column, type StatusTone } from "@/shared/ui";
+import { Alert, Button, Card, DataTable, StatusPill, type Column, type StatusTone } from "@/shared/ui";
 
 const PLATFORM_LABELS: Record<PostPerformancePlatform, string> = {
   facebook: "Facebook",
@@ -138,10 +139,20 @@ export interface MarketingPerformanceTabProps {
 
 export function MarketingPerformanceTab({ days, onOpenItem }: MarketingPerformanceTabProps) {
   const [openedPostId, setOpenedPostId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const performanceQuery = useQuery({
     queryKey: ["analytics-report", "post-performance", days],
     queryFn: () => getPostPerformance({ days }),
     refetchInterval: 120_000,
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: () => syncPostPerformance({ days }),
+    onSuccess: (updatedData) => {
+      queryClient.setQueryData(["analytics-report", "post-performance", days], updatedData);
+      void queryClient.invalidateQueries({ queryKey: ["analytics-report", "post-performance"] });
+      void queryClient.invalidateQueries({ queryKey: ["post-performance"] });
+    },
   });
 
   if (performanceQuery.isLoading) {
@@ -219,6 +230,26 @@ export function MarketingPerformanceTab({ days, onOpenItem }: MarketingPerforman
 
   return (
     <div className="space-y-gutter">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-body-md text-on-surface-variant">
+          Tổng quan số liệu tương tác các bài viết Facebook và Instagram đã đăng.
+        </p>
+        <Button
+          disabled={syncMutation.isPending}
+          onClick={() => syncMutation.mutate()}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <span aria-hidden="true" className="material-symbols-outlined mr-1 text-[18px]">sync</span>
+          {syncMutation.isPending ? "Đang đồng bộ..." : "Cập nhật dữ liệu"}
+        </Button>
+      </div>
+
+      {syncMutation.isError ? (
+        <Alert tone="error">{toUserFriendlyError(syncMutation.error, "Đồng bộ tương tác thất bại. Vui lòng thử lại sau.")}</Alert>
+      ) : null}
+
       <section className="grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           icon="article"
@@ -258,8 +289,21 @@ export function MarketingPerformanceTab({ days, onOpenItem }: MarketingPerforman
         </Alert>
       ) : freshness.unsyncedPosts > 0 ? (
         <Alert tone="warning">
-          Có {freshness.unsyncedPosts} bài chưa đồng bộ lượt thích/bình luận nên các số trên còn thiếu.
-          Lần đồng bộ cũ nhất đang chờ: {formatDateTime(freshness.oldestEngagementAttemptAt)}.
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <span>Có {freshness.unsyncedPosts} bài chưa đồng bộ lượt thích/bình luận nên các số trên còn thiếu. </span>
+              <span>Lần đồng bộ cũ nhất đang chờ: {formatDateTime(freshness.oldestEngagementAttemptAt)}.</span>
+            </div>
+            <Button
+              disabled={syncMutation.isPending}
+              onClick={() => syncMutation.mutate()}
+              size="sm"
+              type="button"
+            >
+              <span aria-hidden="true" className="material-symbols-outlined mr-1 text-[18px]">sync</span>
+              Đồng bộ ngay
+            </Button>
+          </div>
         </Alert>
       ) : null}
 

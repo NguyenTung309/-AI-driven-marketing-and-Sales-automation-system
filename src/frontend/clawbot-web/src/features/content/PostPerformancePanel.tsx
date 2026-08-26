@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { getPostPerformance, type PostPerformanceDailyPoint, type PostPerformancePlatform, type PostPerformanceTopPost } from "@/shared/api/content";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getPostPerformance, syncPostPerformance, type PostPerformanceDailyPoint, type PostPerformancePlatform, type PostPerformanceTopPost } from "@/shared/api/content";
 import { PostDetailDialog } from "@/shared/content/PostDetailDialog";
 import { platformClasses } from "@/shared/theme/colors";
 import { toUserFriendlyError } from "@/shared/utils/userText";
@@ -151,10 +151,21 @@ export function PostPerformancePanel({ onOpenCalendar, onOpenItem }: PostPerform
   const [days, setDays] = useState<PerformanceWindowDays>(30);
   const [platform, setPlatform] = useState<PerformancePlatformFilter>("all");
   const [openedPostId, setOpenedPostId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const performanceQuery = useQuery({
     queryKey: ["content", "post-performance", days, platform],
     queryFn: () => getPostPerformance({ days, platform: platform === "all" ? undefined : platform }),
   });
+
+  const syncMutation = useMutation({
+    mutationFn: () => syncPostPerformance({ days, platform: platform === "all" ? undefined : platform }),
+    onSuccess: (updatedData) => {
+      queryClient.setQueryData(["content", "post-performance", days, platform], updatedData);
+      void queryClient.invalidateQueries({ queryKey: ["content", "post-performance"] });
+      void queryClient.invalidateQueries({ queryKey: ["analytics-report", "post-performance"] });
+    },
+  });
+
   const performance = performanceQuery.data;
 
   const topPostColumns: readonly Column<PostPerformanceTopPost>[] = [
@@ -214,7 +225,7 @@ export function PostPerformancePanel({ onOpenCalendar, onOpenItem }: PostPerform
               Theo dõi lượt thích và bình luận của bài Facebook, Instagram đã xuất bản.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-end gap-2">
             <label className="flex flex-col gap-1 text-label-sm text-on-surface-variant">
               Khoảng thời gian
               <select className="rounded border border-outline bg-white px-3 py-2 text-body-md text-on-surface outline-none focus:border-primary" value={days} onChange={(event) => setDays(Number(event.target.value) as PerformanceWindowDays)}>
@@ -231,9 +242,23 @@ export function PostPerformancePanel({ onOpenCalendar, onOpenItem }: PostPerform
                 <option value="instagram">Instagram</option>
               </select>
             </label>
+            <Button
+              disabled={syncMutation.isPending}
+              onClick={() => syncMutation.mutate()}
+              size="md"
+              type="button"
+              variant="outline"
+            >
+              <span aria-hidden="true" className="material-symbols-outlined mr-1 text-[18px]">sync</span>
+              {syncMutation.isPending ? "Đang đồng bộ..." : "Cập nhật số liệu"}
+            </Button>
           </div>
         </div>
       </Card>
+
+      {syncMutation.isError ? (
+        <Alert tone="error">{toUserFriendlyError(syncMutation.error, "Đồng bộ tương tác thất bại. Vui lòng thử lại sau.")}</Alert>
+      ) : null}
 
       {performanceQuery.isError ? (
         <Alert tone="error">{toUserFriendlyError(performanceQuery.error, "Không tải được hiệu quả bài đăng. Vui lòng thử lại.")}</Alert>
@@ -258,10 +283,23 @@ export function PostPerformancePanel({ onOpenCalendar, onOpenItem }: PostPerform
           </div>
 
           <Alert tone={performance.freshness.unsyncedPosts ? "warning" : "info"}>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span>Đã có số liệu {performance.freshness.syncedPosts}/{performance.totals.posts} bài.</span>
-              <span>Lần thử đồng bộ cũ nhất: {formatDateTime(performance.freshness.oldestEngagementAttemptAt)}.</span>
-              {performance.freshness.unsyncedPosts ? <StatusPill tone="warning">{performance.freshness.unsyncedPosts} bài chưa có số liệu</StatusPill> : null}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span>Đã có số liệu {performance.freshness.syncedPosts}/{performance.totals.posts} bài.</span>
+                <span>Lần thử đồng bộ cũ nhất: {formatDateTime(performance.freshness.oldestEngagementAttemptAt)}.</span>
+                {performance.freshness.unsyncedPosts ? <StatusPill tone="warning">{performance.freshness.unsyncedPosts} bài chưa có số liệu</StatusPill> : null}
+              </div>
+              {performance.freshness.unsyncedPosts ? (
+                <Button
+                  disabled={syncMutation.isPending}
+                  onClick={() => syncMutation.mutate()}
+                  size="sm"
+                  type="button"
+                >
+                  <span aria-hidden="true" className="material-symbols-outlined mr-1 text-[18px]">sync</span>
+                  Đồng bộ ngay
+                </Button>
+              ) : null}
             </div>
           </Alert>
 

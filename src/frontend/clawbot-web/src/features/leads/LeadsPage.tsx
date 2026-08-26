@@ -777,7 +777,7 @@ export default function LeadsPage() {
 
       <Card className="mb-gutter p-0">
         <div className="border-b border-outline p-card-padding">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(220px,1.4fr)_repeat(2,minmax(150px,1fr))]">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(220px,1.4fr)_repeat(3,minmax(150px,1fr))]">
             <label className="block">
               <span className="text-label-sm font-semibold text-on-surface-variant">Tìm kiếm Lead</span>
               <div className="mt-2 flex items-center gap-2 rounded border border-outline bg-white px-3 py-2 focus-within:border-primary">
@@ -805,8 +805,8 @@ export default function LeadsPage() {
                 ))}
               </select>
             </label>
-            {/* <label className="block">
-              <span className="text-label-sm font-semibold text-on-surface-variant">Agent phụ trách</span>
+            <label className="block">
+              <span className="text-label-sm font-semibold text-on-surface-variant">Phụ trách</span>
               <select
                 className="mt-2 w-full rounded border border-outline bg-white px-3 py-2 text-body-md text-secondary focus:border-primary focus:outline-none"
                 onChange={(event) => setOwner(event.target.value as OwnerFilter)}
@@ -816,7 +816,7 @@ export default function LeadsPage() {
                 <option value="assigned">Đã phân công</option>
                 <option value="unassigned">Chưa phân công</option>
               </select>
-            </label> */}
+            </label>
             <label className="block">
               <span className="text-label-sm font-semibold text-on-surface-variant">Trạng thái Sale</span>
               <select

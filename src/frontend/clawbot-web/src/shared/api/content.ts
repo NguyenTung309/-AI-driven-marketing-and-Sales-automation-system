@@ -630,3 +630,11 @@ export async function getPostPerformance(params: PostPerformanceParams = {}): Pr
   });
   return res.data;
 }
+
+export async function syncPostPerformance(params: PostPerformanceParams = {}): Promise<PostPerformanceResponse> {
+  const res = await apiClient.post<PostPerformanceResponse>("/api/content/post-performance/sync", null, {
+    params: cleanParams(params),
+  });
+  return res.data;
+}
+

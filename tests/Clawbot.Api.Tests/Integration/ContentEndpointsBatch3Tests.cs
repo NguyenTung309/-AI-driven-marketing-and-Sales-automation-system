@@ -397,4 +397,20 @@ public sealed class ContentEndpointsBatch3Tests : IAsyncLifetime
         dto!.Status.Should().Be(ContentSchedule.StatusFailed);
         dto.LastError.Should().Be("provider_rejected");
     }
+
+    [Fact]
+    public async Task SyncPostPerformance_ReturnsUpdatedPerformance()
+    {
+        var client = await ClientAsync();
+        var response = await client.PostAsync(
+            new Uri("/api/content/post-performance/sync?days=30", UriKind.Relative),
+            null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var dto = await response.Content.ReadFromJsonAsync<ContentPostPerformanceResponse>();
+        dto.Should().NotBeNull();
+        dto!.WindowDays.Should().Be(30);
+        dto.Totals.Should().NotBeNull();
+        dto.Freshness.Should().NotBeNull();
+    }
 }

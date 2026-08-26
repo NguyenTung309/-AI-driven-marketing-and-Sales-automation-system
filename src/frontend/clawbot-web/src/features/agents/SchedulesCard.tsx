@@ -258,10 +258,10 @@ export function SchedulesCard() {
                 <input checked={triggerType === "cadence"} name="trigger-type" onChange={() => setTriggerType("cadence")} type="radio" />
                 Lịch định kỳ
               </label>
-              <label className="flex items-center gap-2">
+              {/* <label className="flex items-center gap-2">
                 <input checked={triggerType === "event"} name="trigger-type" onChange={() => setTriggerType("event")} type="radio" />
                 Sự kiện hệ thống
-              </label>
+              </label> */}
             </div>
           </div>
           <div className="max-w-xs">

@@ -23,14 +23,27 @@ public sealed partial class MetaEngagementSyncJob(
     private const int BatchSize = 100;
 
     [DisableConcurrentExecution(timeoutInSeconds: 600)]
-    public async Task RunAsync(CancellationToken ct = default)
+    public Task RunAsync(CancellationToken ct = default) =>
+        RunInternalAsync(null, ct);
+
+    public Task<int> RunForTenantAsync(Guid tenantId, CancellationToken ct = default) =>
+        RunInternalAsync(tenantId, ct);
+
+    private async Task<int> RunInternalAsync(Guid? targetTenantId, CancellationToken ct)
     {
         var now = clock.UtcNow;
         // NULL engagement_synced_at sorts first on SQL Server ascending, so never-synced posts refresh first.
-        var schedules = await db.ContentSchedules.IgnoreQueryFilters()
+        var query = db.ContentSchedules.IgnoreQueryFilters()
             .Where(s => s.Status == "posted"
                 && (s.Platform == "facebook" || s.Platform == "instagram")
-                && (s.ExternalPostId != null || s.PostUrl != null))
+                && (s.ExternalPostId != null || s.PostUrl != null));
+
+        if (targetTenantId.HasValue)
+        {
+            query = query.Where(s => s.TenantId == targetTenantId.Value);
+        }
+
+        var schedules = await query
             .OrderBy(s => s.EngagementSyncedAt)
             .Take(BatchSize)
             .ToListAsync(ct).ConfigureAwait(false);
@@ -223,6 +236,7 @@ public sealed partial class MetaEngagementSyncJob(
         if (schedules.Count > 0)
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
         LogBatch(logger, schedules.Count, synced, skipped, failed);
+        return synced;
     }
 
     // FB permalink is https://www.facebook.com/{post_id}; post_id (pageid_storyid) is the tail segment.

@@ -91,6 +91,7 @@ public static class ContentEndpoints
         // P5 §6: dashboard vận hành chuỗi sinh nội dung (fallback rate, gate fail/step, token/độ trễ, review approve).
         grp.MapGet("/chain-metrics", ChainMetricsAsync).RequirePermission("content:read");
         grp.MapGet("/post-performance", PostPerformanceAsync).RequirePermission("content:read");
+        grp.MapPost("/post-performance/sync", SyncPostPerformanceAsync).RequirePermission("content:read");
         // Xem binh luan ngay trong app: goi thang Graph, khong luu DB (tranh om PII nguoi binh luan).
         grp.MapGet("/schedules/{id:guid}/comments", ScheduleCommentsAsync).RequirePermission("content:read");
         grp.MapGet("/calendar", CalendarAsync).RequirePermission("content:read");
@@ -1168,6 +1169,41 @@ public static class ContentEndpoints
         CancellationToken ct)
     {
         _ = tenants.Require();
+        var normalizedPlatform = string.IsNullOrWhiteSpace(platform)
+            ? null
+            : platform.Trim().ToLowerInvariant();
+        if (normalizedPlatform is not null and not ("facebook" or "instagram"))
+        {
+            return Error(
+                http,
+                StatusCodes.Status400BadRequest,
+                "content.post_performance_platform_invalid",
+                "platform must be facebook or instagram.");
+        }
+
+        var windowDays = NormalizePostPerformanceWindowDays(days);
+        var response = await BuildPostPerformanceAsync(
+            db,
+            clock.UtcNow,
+            windowDays,
+            normalizedPlatform,
+            ct).ConfigureAwait(false);
+        return Results.Ok(response);
+    }
+
+    private static async Task<IResult> SyncPostPerformanceAsync(
+        MetaEngagementSyncJob syncJob,
+        AppDbContext db,
+        ITenantAccessor tenants,
+        [FromQuery] int? days,
+        [FromQuery] string? platform,
+        IClock clock,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var tenant = tenants.Require();
+        await syncJob.RunForTenantAsync(tenant.TenantId, ct).ConfigureAwait(false);
+
         var normalizedPlatform = string.IsNullOrWhiteSpace(platform)
             ? null
             : platform.Trim().ToLowerInvariant();
