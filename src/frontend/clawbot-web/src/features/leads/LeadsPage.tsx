@@ -805,7 +805,7 @@ export default function LeadsPage() {
                 ))}
               </select>
             </label>
-            <label className="block">
+            {/* <label className="block">
               <span className="text-label-sm font-semibold text-on-surface-variant">Agent phụ trách</span>
               <select
                 className="mt-2 w-full rounded border border-outline bg-white px-3 py-2 text-body-md text-secondary focus:border-primary focus:outline-none"
@@ -816,7 +816,7 @@ export default function LeadsPage() {
                 <option value="assigned">Đã phân công</option>
                 <option value="unassigned">Chưa phân công</option>
               </select>
-            </label>
+            </label> */}
             <label className="block">
               <span className="text-label-sm font-semibold text-on-surface-variant">Trạng thái Sale</span>
               <select
