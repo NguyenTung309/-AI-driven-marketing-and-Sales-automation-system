@@ -546,7 +546,11 @@ function ExportDialog({
 
 export default function AnalyticsReportsPage() {
   const role = useRole();
+  const canSeeOverviewTab = canUseFeature(role, "analytics.tab.overview");
   const canSeeAgentTab = canUseFeature(role, "analytics.tab.agent");
+  const canSeeLeadTab = canUseFeature(role, "analytics.tab.lead");
+  const canSeeMarketingTab = canUseFeature(role, "analytics.tab.marketing");
+
   const [rangePreset, setRangePreset] = useState<RangePreset>("7d");
   const [tab, setTab] = useState<ReportTab>("overview");
   const [platform, setPlatform] = useState("all");
@@ -554,43 +558,57 @@ export default function AnalyticsReportsPage() {
   const range = useMemo(() => buildRange(rangePreset), [rangePreset]);
 
   const visibleTabs: ReadonlyArray<readonly [ReportTab, string]> = [
-    ["overview", "Báo cáo Hội thoại"],
+    ...(canSeeOverviewTab ? ([["overview", "Báo cáo Hội thoại"]] as const) : []),
     ...(canSeeAgentTab ? ([["agent", "Hiệu suất Agent"]] as const) : []),
-    ["lead", "Chuyển đổi Lead"],
-    ["marketing", "Hiệu quả Marketing"],
+    ...(canSeeLeadTab ? ([["lead", "Chuyển đổi Lead"]] as const) : []),
+    ...(canSeeMarketingTab ? ([["marketing", "Hiệu quả Marketing"]] as const) : []),
   ];
-  // Không bao giờ render một tab đã bị ẩn (ví dụ role về sau khi state đã trỏ vào "agent").
-  const safeTab: ReportTab = visibleTabs.some(([value]) => value === tab) ? tab : "overview";
+  // Không bao giờ render một tab đã bị ẩn đối với role hiện tại (tự động chọn tab đầu tiên có quyền).
+  const safeTab: ReportTab = visibleTabs.some(([value]) => value === tab)
+    ? tab
+    : (visibleTabs[0]?.[0] ?? "overview");
+
+  const needsOmnichannel = safeTab === "overview" || safeTab === "lead";
+  const needsFunnel = safeTab === "overview";
+  const needsAgent = safeTab === "agent";
+  const needsLeadExtras = safeTab === "lead";
 
   const omnichannelQuery = useQuery({
     queryKey: ["analytics-report", "omnichannel", range],
     queryFn: () => getOmnichannel(range),
     refetchInterval: 60_000,
+    enabled: needsOmnichannel,
   });
   const deltaQuery = useQuery({
     queryKey: ["analytics-report", "delta", range],
     queryFn: () => getOmnichannelDelta({ ...range, compare: "wow" }),
     refetchInterval: 120_000,
+    enabled: needsOmnichannel,
   });
   const funnelQuery = useQuery({
     queryKey: ["analytics-report", "funnel", range, platform],
     queryFn: () => getFunnel({ ...range, platform }),
+    enabled: needsFunnel,
   });
   const agentsQuery = useQuery({
     queryKey: ["analytics-report", "agents", range],
     queryFn: () => getAgentPerformance(range),
+    enabled: needsAgent,
   });
   const costsQuery = useQuery({
     queryKey: ["analytics-report", "agent-cost", range],
     queryFn: () => getAgentCost(range),
+    enabled: needsAgent,
   });
   const forecastQuery = useQuery({
     queryKey: ["analytics-report", "forecast", platform],
     queryFn: () => getForecast({ metric: "leads", platform, horizon: 7 }),
+    enabled: needsLeadExtras,
   });
   const anomaliesQuery = useQuery({
     queryKey: ["analytics-report", "anomalies", platform],
     queryFn: () => getAnomalies({ metric: "leads", platform, lookbackDays: 14, zThreshold: 3 }),
+    enabled: needsLeadExtras,
   });
   const exportMutation = useMutation({
     mutationFn: (format: ExportFormat) => downloadAnalyticsExport({ ...range, format }),
@@ -615,7 +633,17 @@ export default function AnalyticsReportsPage() {
   const automationRate = rate(agg.repliedDms, agg.dms);
   // const replyRate = rate(agg.replies, agg.dms);
   const conversionRate = rate(agg.conversions, agg.leads);
-  const apiError = omnichannelQuery.error ?? deltaQuery.error ?? funnelQuery.error ?? agentsQuery.error ?? costsQuery.error;
+  const apiError =
+    safeTab === "overview"
+      ? (omnichannelQuery.error ?? deltaQuery.error ?? funnelQuery.error)
+      : safeTab === "agent"
+        ? (agentsQuery.error ?? costsQuery.error)
+        : safeTab === "lead"
+          ? (omnichannelQuery.error ?? deltaQuery.error ?? forecastQuery.error ?? anomaliesQuery.error)
+          : null;
+  const isStale = safeTab !== "marketing" && Boolean(omnichannelQuery.data?.stale);
+  const statusTone: StatusTone = apiError ? "error" : isStale ? "warning" : "success";
+  const statusLabel = apiError ? "Mất kết nối" : isStale ? "Dữ liệu cũ" : "Đã kết nối";
   // const qualitySamples = agents.reduce((sum, agent) => sum + agent.qualitySamples, 0);
   // const averageQualityPassRate = qualitySamples
   //   ? agents.reduce((sum, agent) => sum + agent.qualityPassRate * agent.qualitySamples, 0) / qualitySamples
@@ -650,14 +678,21 @@ export default function AnalyticsReportsPage() {
       <section className="mb-gutter rounded-lg border border-primary/20 bg-primary/5 p-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <h1 className="text-headline-md text-secondary">Tổng quan</h1>
-            <p className="mt-1 text-body-md text-on-surface-variant">Theo dõi hiệu suất và tương tác của AI Agent trên Facebook, Zalo và Instagram.</p>
+            <h1 className="text-headline-md text-secondary">
+              {safeTab === "marketing" && visibleTabs.length === 1 ? "Hiệu quả Marketing" : "Tổng quan"}
+            </h1>
+            <p className="mt-1 text-body-md text-on-surface-variant">
+              {safeTab === "marketing" && visibleTabs.length === 1
+                ? "Theo dõi số liệu và hiệu quả tương tác bài đăng trên các nền tảng mạng xã hội."
+                : "Theo dõi hiệu suất và tương tác của AI Agent trên Facebook, Zalo và Instagram."}
+            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <StatusPill tone={apiError ? "error" : omnichannelQuery.data?.stale ? "warning" : "success"}>
-              {apiError ? "Mất kết nối" : omnichannelQuery.data?.stale ? "Dữ liệu cũ" : "Đã kết nối"}
+            <StatusPill tone={statusTone}>
+              {statusLabel}
             </StatusPill>
             <select
+              aria-label="Khoảng thời gian"
               className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
               value={rangePreset}
               onChange={(event) => setRangePreset(event.target.value as RangePreset)}
@@ -666,18 +701,23 @@ export default function AnalyticsReportsPage() {
               <option value="30d">30 ngày</option>
               <option value="90d">90 ngày</option>
             </select>
-            <select
-              className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
-              value={platform}
-              onChange={(event) => setPlatform(event.target.value)}
-            >
-              <option value="all">Tất cả kênh</option>
-              {CHANNELS.map((channel) => <option key={channel} value={channel}>{platformLabel(channel)}</option>)}
-            </select>
-            <Button type="button" variant="outline" onClick={() => setExportOpen(true)}>
-              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">download</span>
-              Xuất báo cáo
-            </Button>
+            {safeTab !== "marketing" ? (
+              <>
+                <select
+                  aria-label="Kênh"
+                  className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
+                  value={platform}
+                  onChange={(event) => setPlatform(event.target.value)}
+                >
+                  <option value="all">Tất cả kênh</option>
+                  {CHANNELS.map((channel) => <option key={channel} value={channel}>{platformLabel(channel)}</option>)}
+                </select>
+                <Button type="button" variant="outline" onClick={() => setExportOpen(true)}>
+                  <span aria-hidden="true" className="material-symbols-outlined text-[18px]">download</span>
+                  Xuất báo cáo
+                </Button>
+              </>
+            ) : null}
           </div>
         </div>
       </section>

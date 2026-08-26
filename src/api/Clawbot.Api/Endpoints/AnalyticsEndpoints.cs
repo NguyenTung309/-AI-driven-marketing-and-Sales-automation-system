@@ -71,6 +71,8 @@ public static class AnalyticsEndpoints
     private static async Task<IResult> GetOmnichannelAsync(
         [FromServices] AnalyticsAggregationService analytics,
         [FromServices] ITenantAccessor tenants,
+        [FromServices] ILeadScopeResolver scopes,
+        HttpContext http,
         [FromQuery] string? from,
         [FromQuery] string? to,
         CancellationToken ct)
@@ -79,7 +81,8 @@ public static class AnalyticsEndpoints
         var range = ParseRange(from, to);
         if (range.Error is not null) return range.Error;
 
-        var response = await analytics.GetOmnichannelAsync(tenant.TenantId, range.From, range.To, ct)
+        var scope = await scopes.GetScopeAsync(http.User, ct).ConfigureAwait(false);
+        var response = await analytics.GetOmnichannelAsync(tenant.TenantId, range.From, range.To, scope, ct)
             .ConfigureAwait(false);
         return Results.Ok(response);
     }
@@ -88,6 +91,8 @@ public static class AnalyticsEndpoints
     private static async Task<IResult> GetOmnichannelDeltaAsync(
         [FromServices] AnalyticsAggregationService analytics,
         [FromServices] ITenantAccessor tenants,
+        [FromServices] ILeadScopeResolver scopes,
+        HttpContext http,
         [FromQuery] string? from,
         [FromQuery] string? to,
         [FromQuery] string? compare,
@@ -97,14 +102,17 @@ public static class AnalyticsEndpoints
         var range = ParseRange(from, to);
         if (range.Error is not null) return range.Error;
 
+        var scope = await scopes.GetScopeAsync(http.User, ct).ConfigureAwait(false);
         var response = await analytics.GetOmnichannelDeltaAsync(
-            tenant.TenantId, range.From, range.To, compare ?? "dod", ct).ConfigureAwait(false);
+            tenant.TenantId, range.From, range.To, compare ?? "dod", scope, ct).ConfigureAwait(false);
         return Results.Ok(response);
     }
 
     private static async Task<IResult> GetFunnelAsync(
         [FromServices] AnalyticsAggregationService analytics,
         [FromServices] ITenantAccessor tenants,
+        [FromServices] ILeadScopeResolver scopes,
+        HttpContext http,
         [FromQuery] string? from,
         [FromQuery] string? to,
         [FromQuery] string? platform,
@@ -114,7 +122,8 @@ public static class AnalyticsEndpoints
         var range = ParseRange(from, to);
         if (range.Error is not null) return range.Error;
 
-        var response = await analytics.GetFunnelAsync(tenant.TenantId, range.From, range.To, platform, ct)
+        var scope = await scopes.GetScopeAsync(http.User, ct).ConfigureAwait(false);
+        var response = await analytics.GetFunnelAsync(tenant.TenantId, range.From, range.To, platform, scope, ct)
             .ConfigureAwait(false);
         return Results.Ok(response);
     }
@@ -177,6 +186,8 @@ public static class AnalyticsEndpoints
     private static async Task<IResult> GetForecastAsync(
         [FromServices] AnalyticsAggregationService analytics,
         [FromServices] ITenantAccessor tenants,
+        [FromServices] ILeadScopeResolver scopes,
+        HttpContext http,
         [FromQuery] string metric,
         [FromQuery] string? platform,
         [FromQuery] int horizon = 7,
@@ -186,8 +197,9 @@ public static class AnalyticsEndpoints
         if (string.IsNullOrWhiteSpace(metric))
             return Results.BadRequest(new { error = "metric required" });
 
+        var scope = await scopes.GetScopeAsync(http.User, ct).ConfigureAwait(false);
         var normalizedPlatform = string.IsNullOrWhiteSpace(platform) ? "all" : platform;
-        var response = await analytics.GetForecastAsync(tenant.TenantId, normalizedPlatform, metric, horizon, ct)
+        var response = await analytics.GetForecastAsync(tenant.TenantId, normalizedPlatform, metric, horizon, scope, ct)
             .ConfigureAwait(false);
         return Results.Ok(response);
     }
@@ -195,6 +207,8 @@ public static class AnalyticsEndpoints
     private static async Task<IResult> ExportAsync(
         [FromServices] AnalyticsAggregationService analytics,
         [FromServices] ITenantAccessor tenants,
+        [FromServices] ILeadScopeResolver scopes,
+        HttpContext http,
         [FromQuery] string? format,
         [FromQuery] string? from,
         [FromQuery] string? to,
@@ -214,7 +228,8 @@ public static class AnalyticsEndpoints
             return Results.BadRequest(new { error = ex.Message });
         }
 
-        var rows = (await analytics.GetOmnichannelAsync(tenant.TenantId, range.From, range.To, ct).ConfigureAwait(false)).Rows;
+        var scope = await scopes.GetScopeAsync(http.User, ct).ConfigureAwait(false);
+        var rows = (await analytics.GetOmnichannelAsync(tenant.TenantId, range.From, range.To, scope, ct).ConfigureAwait(false)).Rows;
         var fileName = string.Create(CultureInfo.InvariantCulture, $"analytics-{range.From:yyyyMMdd}-{range.To:yyyyMMdd}.{normalizedFormat}");
         return normalizedFormat == "pdf"
             ? Results.File(AnalyticsExportService.BuildPdf(rows), "application/pdf", fileName)

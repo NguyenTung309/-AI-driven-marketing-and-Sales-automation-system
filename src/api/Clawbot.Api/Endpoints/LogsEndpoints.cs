@@ -137,7 +137,7 @@ public static class LogsEndpoints
                     agent.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                     agent.AgentType.Contains(search, StringComparison.OrdinalIgnoreCase))
                 .Select(agent => agent.Id)
-                .ToArray();
+                .ToList();
 
             query = query.Where(session =>
                 (session.Goal != null && EF.Functions.Like(session.Goal, searchPattern, "\\")) ||
@@ -304,7 +304,7 @@ public static class LogsEndpoints
     {
         if (sessions.Count == 0) return [];
 
-        var sessionIds = sessions.Select(session => session.Id).ToArray();
+        var sessionIds = sessions.Select(session => session.Id).ToList();
         var traces = await db.AgentTraces
             .AsNoTracking()
             .Where(trace => sessionIds.Contains(trace.SessionId))

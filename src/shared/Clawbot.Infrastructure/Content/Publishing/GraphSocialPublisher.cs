@@ -18,6 +18,7 @@ public sealed class GraphPublisherOptions
     public GraphChannelOptions Facebook { get; init; } = new();
     public GraphChannelOptions Zalo { get; init; } = new();
     public bool InstagramPublishingEnabled { get; init; }
+    public string? PublicBaseUrl { get; init; }
 }
 
 public sealed class GraphChannelOptions
@@ -625,7 +626,7 @@ public sealed partial class GraphSocialPublisher(
         string error) =>
         new(false, null, $"{platform}_outcome_unknown:{stage}:{error}");
 
-    private static (string? ImageUrl, string? Error) ResolveInstagramImage(string assetsJson)
+    private (string? ImageUrl, string? Error) ResolveInstagramImage(string assetsJson)
     {
         if (string.IsNullOrWhiteSpace(assetsJson))
             return (null, "instagram_media_required");
@@ -639,20 +640,59 @@ public sealed partial class GraphSocialPublisher(
             var hasImageEntry = false;
             foreach (var asset in doc.RootElement.EnumerateArray())
             {
-                if (asset.ValueKind != JsonValueKind.Object
-                    || !asset.TryGetProperty("type", out var type)
-                    || type.ValueKind != JsonValueKind.String
-                    || !string.Equals(type.GetString(), "image", StringComparison.OrdinalIgnoreCase))
-                {
+                if (asset.ValueKind != JsonValueKind.Object)
                     continue;
+
+                var isImage = true;
+                if (asset.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String)
+                {
+                    isImage = string.Equals(type.GetString(), "image", StringComparison.OrdinalIgnoreCase);
+                }
+                else if (asset.TryGetProperty("contentType", out var cType) && cType.ValueKind == JsonValueKind.String)
+                {
+                    isImage = cType.GetString()?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true;
                 }
 
+                if (!isImage)
+                    continue;
+
                 hasImageEntry = true;
-                if (asset.TryGetProperty("url", out var url)
-                    && url.ValueKind == JsonValueKind.String
-                    && IsPublicJpegUrl(url.GetString(), out var imageUrl))
+
+                // 1. Direct URL check
+                if (asset.TryGetProperty("url", out var urlEl)
+                    && urlEl.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(urlEl.GetString()))
                 {
-                    return (imageUrl, null);
+                    var rawUrl = urlEl.GetString()!;
+                    if (IsPublicJpegUrl(rawUrl, out var imageUrl))
+                        return (imageUrl, null);
+
+                    if (!string.IsNullOrWhiteSpace(_options.PublicBaseUrl) && rawUrl.StartsWith('/'))
+                    {
+                        var candidate = $"{_options.PublicBaseUrl.TrimEnd('/')}{rawUrl}";
+                        if (!candidate.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)
+                            && !candidate.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase))
+                        {
+                            candidate += ".jpg";
+                        }
+                        if (IsPublicJpegUrl(candidate, out imageUrl))
+                            return (imageUrl, null);
+                    }
+                }
+
+                // 2. AssetId with PublicBaseUrl
+                if (!string.IsNullOrWhiteSpace(_options.PublicBaseUrl))
+                {
+                    Guid assetId = Guid.Empty;
+                    if (asset.TryGetProperty("assetId", out var aidEl) && aidEl.TryGetGuid(out assetId)) { }
+                    else if (asset.TryGetProperty("id", out var idEl) && idEl.TryGetGuid(out assetId)) { }
+
+                    if (assetId != Guid.Empty)
+                    {
+                        var candidate = $"{_options.PublicBaseUrl.TrimEnd('/')}/api/public/content/assets/{assetId:D}.jpg";
+                        if (IsPublicJpegUrl(candidate, out var imageUrl))
+                            return (imageUrl, null);
+                    }
                 }
             }
 
@@ -1003,7 +1043,7 @@ public sealed partial class GraphSocialPublisher(
         return provider == "facebook" ? _options.Facebook : (provider == "zalo" ? _options.Zalo : null);
     }
 
-    private static string? FirstImageUrl(string assetsJson)
+    private string? FirstImageUrl(string assetsJson)
     {
         if (string.IsNullOrWhiteSpace(assetsJson)) return null;
 
@@ -1015,17 +1055,36 @@ public sealed partial class GraphSocialPublisher(
             {
                 if (asset.ValueKind != JsonValueKind.Object) continue;
                 var type = "image";
-                if (asset.TryGetProperty("type", out var typeEl))
+                if (asset.TryGetProperty("type", out var typeEl) && typeEl.ValueKind == JsonValueKind.String)
                 {
-                    if (typeEl.ValueKind != JsonValueKind.String) continue;
                     type = typeEl.GetString();
                 }
+                else if (asset.TryGetProperty("contentType", out var cType) && cType.ValueKind == JsonValueKind.String)
+                {
+                    if (cType.GetString()?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true)
+                        type = "image";
+                }
                 if (!string.Equals(type, "image", StringComparison.OrdinalIgnoreCase)) continue;
+
                 if (asset.TryGetProperty("url", out var urlEl) && urlEl.ValueKind == JsonValueKind.String)
                 {
                     var url = urlEl.GetString();
                     if (!string.IsNullOrWhiteSpace(url))
+                    {
+                        if (url.StartsWith('/') && !string.IsNullOrWhiteSpace(_options.PublicBaseUrl))
+                            return $"{_options.PublicBaseUrl.TrimEnd('/')}{url}";
                         return url;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(_options.PublicBaseUrl))
+                {
+                    Guid assetId = Guid.Empty;
+                    if (asset.TryGetProperty("assetId", out var aidEl) && aidEl.TryGetGuid(out assetId)) { }
+                    else if (asset.TryGetProperty("id", out var idEl) && idEl.TryGetGuid(out assetId)) { }
+
+                    if (assetId != Guid.Empty)
+                        return $"{_options.PublicBaseUrl.TrimEnd('/')}/api/public/content/assets/{assetId:D}.jpg";
                 }
             }
         }

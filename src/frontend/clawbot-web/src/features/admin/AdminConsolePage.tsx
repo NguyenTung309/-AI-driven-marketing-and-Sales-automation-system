@@ -590,7 +590,7 @@ export default function AdminConsolePage() {
         ) : null}
         {canViewSystemLogs ? (
           <>
-            <TabButton active={tab === "errors"} icon="bug_report" label="Lỗi hệ thống" onClick={() => setTab("errors")} />
+            {/* <TabButton active={tab === "errors"} icon="bug_report" label="Lỗi hệ thống" onClick={() => setTab("errors")} /> */}
             <TabButton active={tab === "audit"} icon="receipt_long" label="Nhật ký quản trị" onClick={() => setTab("audit")} />
           </>
         ) : null}

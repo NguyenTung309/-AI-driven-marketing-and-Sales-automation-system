@@ -101,6 +101,22 @@ public static class ContentEndpoints
         grp.MapPost("/schedules/{id:guid}/publish/reconcile", ReconcilePublishScheduleAsync).RequirePermission("content:publish");
         ContentPublishingPolicyEndpoints.Map(grp);
 
+        app.MapGet("/api/public/content/assets/{assetId:guid}.jpg", GetPublicAssetAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        app.MapGet("/api/public/content/assets/{assetId:guid}.jpeg", GetPublicAssetAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        app.MapGet("/api/public/content/assets/{assetId:guid}", GetPublicAssetAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        app.MapGet("/api/content/items/{id:guid}/assets/{assetId:guid}.jpg", (Guid id, Guid assetId, AppDbContext db, IDocumentStorage storage, HttpContext http, CancellationToken ct) => GetPublicAssetAsync(assetId, db, storage, http, ct))
+            .AllowAnonymous()
+            .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+        app.MapGet("/api/content/items/{id:guid}/assets/{assetId:guid}.jpeg", (Guid id, Guid assetId, AppDbContext db, IDocumentStorage storage, HttpContext http, CancellationToken ct) => GetPublicAssetAsync(assetId, db, storage, http, ct))
+            .AllowAnonymous()
+            .RequireRateLimiting(RateLimitingExtensions.GeneralPolicy);
+
         return app;
     }
 
@@ -299,7 +315,7 @@ public static class ContentEndpoints
             query = query.Where(i => i.Platform == platform);
 
         // Keyset on UpdatedAt DESC, Id DESC when cursor present; offset still supported for compat.
-        if (cursor is not null || page <= 1)
+        if (cursor is not null)
         {
             var key = Clawbot.Api.Common.Pagination.KeysetQuery.Decode(cursor);
             int? total = key is null ? await query.CountAsync(ct).ConfigureAwait(false) : null;
@@ -535,6 +551,34 @@ public static class ContentEndpoints
                 http.Response.Headers.ETag = $"\"{Convert.ToHexString(hash)}\"";
             http.Response.Headers.CacheControl = "private, max-age=86400";
             return Results.File(bytes, asset.ContentType ?? "application/octet-stream");
+        }
+        catch (FileNotFoundException)
+        {
+            return Results.NotFound();
+        }
+    }
+
+    private static async Task<IResult> GetPublicAssetAsync(
+        Guid assetId,
+        AppDbContext db,
+        [FromServices] IDocumentStorage storage,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var asset = await db.ContentAssets
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == assetId && item.Status == ContentAsset.StatusReady, ct)
+            .ConfigureAwait(false);
+        if (asset is null) return Results.NotFound();
+
+        try
+        {
+            var bytes = await storage.ReadAsync(asset.StorageKey, ct).ConfigureAwait(false);
+            if (asset.Sha256 is { Length: > 0 } hash)
+                http.Response.Headers.ETag = $"\"{Convert.ToHexString(hash)}\"";
+            http.Response.Headers.CacheControl = "public, max-age=86400";
+            return Results.File(bytes, asset.ContentType ?? "image/jpeg");
         }
         catch (FileNotFoundException)
         {

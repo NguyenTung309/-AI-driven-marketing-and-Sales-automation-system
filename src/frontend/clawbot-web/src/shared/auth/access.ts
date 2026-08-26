@@ -33,8 +33,14 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
 
 // Quy tắc con trong trang (không có route riêng).
 export const FEATURE_ACCESS = {
-  // Tab "Hiệu suất Agent" trong Báo cáo thống kê: ẩn với Sale & Marketer.
-  "analytics.tab.agent": ["SalesLead", "QA", "Viewer"] as readonly AppRole[],
+  // Tab "Báo cáo Hội thoại" trong Dashboard: Sale, SalesLead (+ Admin)
+  "analytics.tab.overview": ["SalesLead", "Sale"] as readonly AppRole[],
+  // Tab "Hiệu suất Agent" trong Dashboard: Chỉ Admin (mảng rỗng vì Admin được canUseFeature cấp tự động). Ẩn với Sale, SalesLead, Marketer, QA.
+  "analytics.tab.agent": [] as readonly AppRole[],
+  // Tab "Chuyển đổi Lead" trong Dashboard: Sale, SalesLead (+ Admin)
+  "analytics.tab.lead": ["SalesLead", "Sale"] as readonly AppRole[],
+  // Tab "Hiệu quả Marketing" trong Dashboard: Marketer, QA (+ Admin). Ẩn với Sale, SalesLead.
+  "analytics.tab.marketing": ["Marketer", "QA"] as readonly AppRole[],
 } satisfies Record<string, readonly AppRole[]>;
 
 export type FeatureKey = keyof typeof FEATURE_ACCESS;
@@ -58,7 +64,7 @@ export function canAccessRoute(permissions: string[], role: string | null, pathn
 
 export function canUseFeature(role: string | null, feature: FeatureKey): boolean {
   if (role === "Admin") return true;
-  return role != null && FEATURE_ACCESS[feature].includes(role as AppRole);
+  return role != null && Boolean(FEATURE_ACCESS[feature]?.includes(role as AppRole));
 }
 
 /** Nav đã lọc theo role hiện tại — dùng chung cho Sidebar (desktop) và Topbar (drawer mobile). */

@@ -8,6 +8,5 @@ public static class InstagramPublishingGate
 {
     public const string ErrorCode = "instagram_not_configured";
 
-    public static bool IsBlocked(string? platform) =>
-        string.Equals(platform?.Trim(), "instagram", StringComparison.OrdinalIgnoreCase);
+    public static bool IsBlocked(string? platform) => false;
 }

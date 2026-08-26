@@ -297,7 +297,9 @@ public sealed partial class ContentPublishJob(
             item.Id,
             schedule.Platform,
             attempt.BodySnapshot,
-            attempt.AssetsSnapshotJson,
+            !string.IsNullOrWhiteSpace(item.AssetsJson) && item.AssetsJson != "[]"
+                ? item.AssetsJson
+                : attempt.AssetsSnapshotJson,
             schedule.ScheduledAt,
             schedule.MetaAssetId,
             schedule.ProviderTargetId);

@@ -158,8 +158,8 @@ public static class AdminEndpoints
             })
             .ToListAsync(ct);
 
-        var userIds = rows.Where(r => r.UserId.HasValue).Select(r => r.UserId!.Value).Distinct().ToArray();
-        var emails = userIds.Length == 0
+        var userIds = rows.Where(r => r.UserId.HasValue).Select(r => r.UserId!.Value).Distinct().ToList();
+        var emails = userIds.Count == 0
             ? new Dictionary<Guid, string>()
             : await db.Users.AsNoTracking()
                 .Where(u => userIds.Contains(u.Id))

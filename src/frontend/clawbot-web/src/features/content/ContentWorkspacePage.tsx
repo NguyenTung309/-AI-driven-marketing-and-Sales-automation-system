@@ -7,10 +7,8 @@ import {
   Alert,
   Button,
   Card,
-  InfiniteScrollSentinel,
   Modal,
   StatusPill,
-  useInfiniteList,
   type StatusTone,
 } from "@/shared/ui";
 import { useAuthStore } from "@/shared/auth/authStore";
@@ -53,7 +51,6 @@ import {
   type ContentItem,
   type ContentPublishTarget,
   type ContentPublishTargetMode,
-  type ContentQueueResponse,
   type ScheduleContentItemPayload,
   type RawTrend,
   type Trend,
@@ -117,6 +114,21 @@ const STATUS_FILTERS: readonly { readonly value: QueueStatusFilter; readonly lab
   { value: "published", label: "Đã đăng" },
   { value: "rejected", label: "Từ chối" },
 ];
+
+const QUEUE_PAGE_SIZE = 8;
+
+function generatePageNumbers(current: number, total: number): (number | "...")[] {
+  if (total <= 5) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  if (current <= 3) {
+    return [1, 2, 3, "...", total];
+  }
+  if (current >= total - 2) {
+    return [1, "...", total - 3, total - 2, total - 1, total];
+  }
+  return [1, "...", current - 1, current, current + 1, "...", total];
+}
 
 const EMPTY_BRIEFS: readonly ContentBrief[] = [];
 const EMPTY_ITEMS: readonly ContentItem[] = [];
@@ -1574,6 +1586,7 @@ export default function ContentWorkspacePage() {
   const [briefText, setBriefText] = useState("");
   const [queueStatus, setQueueStatus] = useState<QueueStatusFilter>("all");
   const [queuePlatform, setQueuePlatform] = useState("all");
+  const [queuePage, setQueuePage] = useState(1);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [editorDraft, setEditorDraft] = useState<EditorDraft | null>(null);
   const [scheduleItem, setScheduleItem] = useState<ContentItem | null>(null);
@@ -1597,17 +1610,16 @@ export default function ContentWorkspacePage() {
   }, [notice]);
 
   const briefsQuery = useQuery({ queryKey: ["content", "briefs"], queryFn: () => listContentBriefs() });
-  const queueList = useInfiniteList<ContentItem, ContentQueueResponse>({
-    queryKey: ["content", "queue", queueStatus, queuePlatform],
-    queryFn: (pageParam) =>
+  const queueQuery = useQuery({
+    queryKey: ["content", "queue", queueStatus, queuePlatform, queuePage],
+    queryFn: () =>
       getContentQueue({
         status: queueStatus === "all" ? undefined : queueStatus,
         platform: queuePlatform === "all" ? undefined : queuePlatform,
-        cursor: typeof pageParam === "string" ? pageParam : null,
-        pageSize: 40,
+        page: queuePage,
+        pageSize: QUEUE_PAGE_SIZE,
       }),
   });
-  const queueQuery = queueList.query;
   const calendarQuery = useQuery({
     queryKey: ["content", "calendar", calendarRange],
     queryFn: () => getContentCalendar(calendarRange),
@@ -1684,7 +1696,9 @@ export default function ContentWorkspacePage() {
   });
 
   const briefs = Array.isArray(briefsQuery.data?.items) ? briefsQuery.data.items : EMPTY_BRIEFS;
-  const queueItems = queueList.items.length ? queueList.items : EMPTY_ITEMS;
+  const queueItems = Array.isArray(queueQuery.data?.items) ? queueQuery.data.items : EMPTY_ITEMS;
+  const queueTotal = typeof queueQuery.data?.total === "number" ? queueQuery.data.total : queueItems.length;
+  const queueTotalPages = Math.max(1, Math.ceil(queueTotal / QUEUE_PAGE_SIZE));
   const trends = Array.isArray(trendsQuery.data?.trends) ? trendsQuery.data.trends : EMPTY_TRENDS;
   const rawTrends = Array.isArray(trendsQuery.data?.rawTrends) ? trendsQuery.data.rawTrends : [];
   const linkedItem = linkedItemQuery.data ?? null;
@@ -1695,6 +1709,12 @@ export default function ContentWorkspacePage() {
   const selectedItem = requestedItemId
     ? linkedItem ?? queueItems.find((item) => item.id === requestedItemId) ?? null
     : queueItems.find((item) => item.id === selectedItemId) ?? queueItems[0] ?? null;
+
+  useEffect(() => {
+    if (queuePage > queueTotalPages) {
+      setQueuePage(queueTotalPages);
+    }
+  }, [queuePage, queueTotalPages]);
   const matchingDraft = editorDraft && selectedItem && editorDraft.itemId === selectedItem.id ? editorDraft : null;
   const editorBody = matchingDraft?.body ?? selectedItem?.body ?? "";
   const editorAssets = (matchingDraft?.assetsJson ?? selectedItem?.assetsJson) || "[]";
@@ -2013,6 +2033,16 @@ export default function ContentWorkspacePage() {
     openContentItem(item.id);
   }
 
+  function handleQueuePageChange(newPage: number) {
+    setQueuePage(newPage);
+    setSelectedItemId(null);
+    if (searchParams.has("itemId")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("itemId");
+      setSearchParams(next, { replace: true });
+    }
+  }
+
   function selectContentTab(tab: ContentWorkspaceTab) {
     const next = new URLSearchParams(searchParams);
     next.set("tab", tab);
@@ -2138,7 +2168,7 @@ export default function ContentWorkspacePage() {
 
       <section className="mb-gutter grid grid-cols-1 gap-gutter sm:grid-cols-2 xl:grid-cols-4">
         <MetricTile icon="description" label="Yêu cầu đang mở" value={briefs.length} meta="Không tính yêu cầu đã lưu trữ" />
-        <MetricTile icon="rate_review" label="Đang trong workflow" value={draftCount} meta={`${queueList.total ?? queueItems.length} bài trong hàng đợi`} />
+        <MetricTile icon="rate_review" label="Đang trong workflow" value={draftCount} meta={`${queueTotal} bài trong hàng đợi`} />
         <MetricTile icon="verified" label="Đã duyệt phát hành" value={readyCount} meta="Sẵn sàng / đã có lịch giờ vàng" />
         <MetricTile icon="event" label="Lịch 30 ngày" value={calendarItems.length} meta={`${trends.length} xu hướng đang lưu`} />
       </section>
@@ -2240,11 +2270,25 @@ export default function ContentWorkspacePage() {
                   <p className="mt-1 text-body-md text-on-surface-variant">Soạn thảo, duyệt và lên lịch bài viết.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <select className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" value={queuePlatform} onChange={(event) => setQueuePlatform(event.target.value)}>
+                  <select
+                    className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
+                    value={queuePlatform}
+                    onChange={(event) => {
+                      setQueuePlatform(event.target.value);
+                      setQueuePage(1);
+                    }}
+                  >
                     <option value="all">Tất cả kênh</option>
                     {PLATFORMS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                   </select>
-                  <select className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary" value={queueStatus} onChange={(event) => setQueueStatus(event.target.value as QueueStatusFilter)}>
+                  <select
+                    className="rounded border border-outline bg-white px-3 py-2 text-body-md outline-none focus:border-primary"
+                    value={queueStatus}
+                    onChange={(event) => {
+                      setQueueStatus(event.target.value as QueueStatusFilter);
+                      setQueuePage(1);
+                    }}
+                  >
                     {STATUS_FILTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                   </select>
                 </div>
@@ -2255,13 +2299,65 @@ export default function ContentWorkspacePage() {
               ) : null}
 
               <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[320px_minmax(0,1fr)]">
-                <div className="min-w-0">
+                <div className="min-w-0 flex flex-col gap-3">
                   <QueueList items={displayedQueueItems} selectedId={selectedItem?.id ?? selectedItemId} onSelect={selectItem} />
-                  <InfiniteScrollSentinel
-                    hasNextPage={queueList.hasNextPage}
-                    isFetchingNextPage={queueList.isFetchingNextPage}
-                    onLoadMore={queueList.fetchNextPage}
-                  />
+                  {queueTotal > 0 ? (
+                    <div className="flex flex-col gap-2 rounded-lg border border-outline bg-surface p-2.5">
+                      <div className="flex items-center justify-between text-label-sm text-on-surface-variant">
+                        <span>
+                          Trang <span className="font-semibold text-secondary">{queuePage}</span> / <span className="font-semibold text-secondary">{queueTotalPages}</span>
+                        </span>
+                        <span>
+                          Tổng <span className="font-semibold text-secondary">{queueTotal.toLocaleString("vi-VN")}</span> bài
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-1">
+                        <button
+                          type="button"
+                          disabled={queuePage <= 1 || queueQuery.isFetching}
+                          onClick={() => handleQueuePageChange(Math.max(1, queuePage - 1))}
+                          className="inline-flex items-center gap-0.5 rounded border border-outline bg-white px-2 py-1 text-label-sm font-semibold text-secondary hover:bg-surface-variant disabled:cursor-not-allowed disabled:opacity-40"
+                          aria-label="Trang trước"
+                          title="Trang trước"
+                        >
+                          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">chevron_left</span>
+                        </button>
+
+                        <div className="flex items-center gap-1">
+                          {generatePageNumbers(queuePage, queueTotalPages).map((p, idx) =>
+                            p === "..." ? (
+                              <span key={`ellipsis-${idx}`} className="px-1 text-label-sm text-on-surface-variant">...</span>
+                            ) : (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => handleQueuePageChange(Number(p))}
+                                disabled={queueQuery.isFetching}
+                                className={`min-w-[28px] h-7 rounded px-1.5 text-label-sm font-bold transition-colors ${
+                                  queuePage === p
+                                    ? "bg-primary text-on-primary"
+                                    : "border border-outline bg-white text-secondary hover:bg-surface-variant"
+                                }`}
+                              >
+                                {p}
+                              </button>
+                            )
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={queuePage >= queueTotalPages || queueQuery.isFetching}
+                          onClick={() => handleQueuePageChange(Math.min(queueTotalPages, queuePage + 1))}
+                          className="inline-flex items-center gap-0.5 rounded border border-outline bg-white px-2 py-1 text-label-sm font-semibold text-secondary hover:bg-surface-variant disabled:cursor-not-allowed disabled:opacity-40"
+                          aria-label="Trang sau"
+                          title="Trang sau"
+                        >
+                          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">chevron_right</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
                 {requestedItemId && linkedItemQuery.isLoading ? (
                   <div className="flex min-h-[520px] items-center justify-center rounded-lg border border-dashed border-outline bg-surface p-6 text-body-md text-on-surface-variant">Đang mở bài viết...</div>

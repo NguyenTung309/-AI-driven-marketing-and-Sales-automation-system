@@ -17,9 +17,10 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
         Guid tenantId,
         DateOnly from,
         DateOnly to,
+        LeadScope? scope = null,
         CancellationToken ct = default)
     {
-        var rows = await LoadKpiAsync(tenantId, from, to, platform: null, ct).ConfigureAwait(false);
+        var rows = await LoadKpiAsync(tenantId, from, to, platform: null, scope, ct).ConfigureAwait(false);
         var latestCreatedAt = await _db.KpiDailies.IgnoreQueryFilters()
             .Where(k => k.TenantId == tenantId)
             .OrderByDescending(k => k.CreatedAt)
@@ -40,6 +41,7 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
         DateOnly from,
         DateOnly to,
         string compare,
+        LeadScope? scope = null,
         CancellationToken ct = default)
     {
         var normalized = string.Equals(compare, "wow", StringComparison.OrdinalIgnoreCase) ? "wow" : "dod";
@@ -47,8 +49,8 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
         var prevFrom = from.AddDays(-shiftDays);
         var prevTo = to.AddDays(-shiftDays);
 
-        var current = await LoadKpiAsync(tenantId, from, to, platform: null, ct).ConfigureAwait(false);
-        var previous = await LoadKpiAsync(tenantId, prevFrom, prevTo, platform: null, ct).ConfigureAwait(false);
+        var current = await LoadKpiAsync(tenantId, from, to, platform: null, scope, ct).ConfigureAwait(false);
+        var previous = await LoadKpiAsync(tenantId, prevFrom, prevTo, platform: null, scope, ct).ConfigureAwait(false);
 
         var metrics = new List<MetricDeltaDto>
         {
@@ -72,9 +74,10 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
         DateOnly from,
         DateOnly to,
         string? platform,
+        LeadScope? scope = null,
         CancellationToken ct = default)
     {
-        var rows = await LoadKpiAsync(tenantId, from, to, platform, ct).ConfigureAwait(false);
+        var rows = await LoadKpiAsync(tenantId, from, to, platform, scope, ct).ConfigureAwait(false);
         var platformLabel = string.IsNullOrWhiteSpace(platform) ? "all" : platform.Trim().ToLowerInvariant();
         var leads = rows.Sum(r => r.Leads);
         var dms = rows.Sum(r => r.Dms);
@@ -142,8 +145,14 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
         string platform,
         string metric,
         int horizon,
+        LeadScope? scope = null,
         CancellationToken ct = default)
     {
+        if (scope is not null && !scope.Unrestricted)
+        {
+            return Array.Empty<ForecastDto>();
+        }
+
         var normalizedPlatform = string.IsNullOrWhiteSpace(platform) ? "all" : platform.Trim().ToLowerInvariant();
         var normalizedMetric = metric.Trim().ToLowerInvariant();
         var freshAfter = _clock.UtcNow.AddHours(-24);
@@ -172,8 +181,14 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
         DateOnly from,
         DateOnly to,
         string? platform,
+        LeadScope? scope = null,
         CancellationToken ct = default)
     {
+        if (scope is not null && !scope.Unrestricted)
+        {
+            return await LoadScopedKpiAsync(tenantId, from, to, platform, scope, ct).ConfigureAwait(false);
+        }
+
         var query = _db.KpiDailies.IgnoreQueryFilters()
             .Where(k => k.TenantId == tenantId && k.Date >= from && k.Date <= to);
 
@@ -197,6 +212,123 @@ public sealed class AnalyticsAggregationService(AppDbContext db, IClock clock)
                 k.AvgResponseTimeSec))
             .ToListAsync(ct).ConfigureAwait(false);
     }
+
+    private async Task<IReadOnlyList<KpiDailyDto>> LoadScopedKpiAsync(
+        Guid tenantId,
+        DateOnly from,
+        DateOnly to,
+        string? platform,
+        LeadScope scope,
+        CancellationToken ct)
+    {
+        var offset = TimeSpan.FromHours(7);
+        var start = new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue), offset);
+        var end = new DateTimeOffset(to.AddDays(1).ToDateTime(TimeOnly.MinValue), offset);
+
+        // 1. Leads
+        var leadQuery = _db.Leads.AsNoTracking()
+            .Where(l => l.TenantId == tenantId && l.DeletedAt == null && l.CreatedAt >= start && l.CreatedAt < end)
+            .ApplyLeadScope(scope, _db);
+
+        var leadsList = await leadQuery
+            .Select(l => new { l.CreatedAt, l.SourcePlatform, l.Stage })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        // 2. Conversations
+        var inboxIds = scope.InboxIds.ToList();
+        var conversationQuery = _db.Conversations.AsNoTracking()
+            .Where(c => c.TenantId == tenantId && c.InboxId != null && inboxIds.Contains(c.InboxId.Value));
+
+        var conversations = await conversationQuery
+            .Where(c => (c.CreatedAt >= start && c.CreatedAt < end) || c.Messages.Any(m => m.SentAt >= start && m.SentAt < end))
+            .Include(c => c.Messages)
+            .AsSplitQuery()
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var result = new List<KpiDailyDto>();
+        var normalizedPlatformFilter = string.IsNullOrWhiteSpace(platform) ? null : platform.Trim().ToLowerInvariant();
+
+        for (var date = from; date <= to; date = date.AddDays(1))
+        {
+            var dayStart = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), offset);
+            var dayEnd = dayStart.AddDays(1);
+
+            var dayLeads = leadsList.Where(l => l.CreatedAt >= dayStart && l.CreatedAt < dayEnd).ToList();
+            var dayDmsConversations = conversations.Where(c => c.CreatedAt >= dayStart && c.CreatedAt < dayEnd).ToList();
+            var dayActiveConversations = conversations.Where(c => c.Messages.Any(m => m.SentAt >= dayStart && m.SentAt < dayEnd)).ToList();
+
+            var platforms = dayLeads.Select(l => NormalizePlatform(l.SourcePlatform))
+                .Concat(dayDmsConversations.Select(c => NormalizePlatform(c.Platform)))
+                .Concat(dayActiveConversations.Select(c => NormalizePlatform(c.Platform)))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var p in platforms)
+            {
+                if (normalizedPlatformFilter != null && !string.Equals(p, normalizedPlatformFilter, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var pLeads = dayLeads.Where(l => string.Equals(NormalizePlatform(l.SourcePlatform), p, StringComparison.OrdinalIgnoreCase)).ToList();
+                var pDms = dayDmsConversations.Where(c => string.Equals(NormalizePlatform(c.Platform), p, StringComparison.OrdinalIgnoreCase)).ToList();
+                var pActive = dayActiveConversations.Where(c => string.Equals(NormalizePlatform(c.Platform), p, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                var leadCount = pLeads.Count;
+                var conversions = pLeads.Count(l => string.Equals(l.Stage, "customer", StringComparison.OrdinalIgnoreCase));
+                var dmCount = pDms.Count;
+                var repliedDmCount = pDms.Count(c => c.Messages.Any(m => m.Direction == "out" && m.SentAt >= dayStart && m.SentAt < dayEnd));
+
+                var replyCount = 0;
+                var responseTimes = new List<decimal>();
+
+                foreach (var c in pActive)
+                {
+                    var msgs = c.Messages.OrderBy(m => m.SentAt).ToList();
+                    replyCount += msgs.Count(m => string.Equals(m.Direction, "out", StringComparison.OrdinalIgnoreCase) && m.SentAt >= dayStart && m.SentAt < dayEnd);
+
+                    DateTimeOffset? firstUnansweredInbound = null;
+                    foreach (var m in msgs)
+                    {
+                        if (string.Equals(m.Direction, "in", StringComparison.OrdinalIgnoreCase))
+                        {
+                            firstUnansweredInbound ??= m.SentAt;
+                        }
+                        else if (string.Equals(m.Direction, "out", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (firstUnansweredInbound != null)
+                            {
+                                if (m.SentAt >= dayStart && m.SentAt < dayEnd)
+                                {
+                                    var seconds = (decimal)(m.SentAt - firstUnansweredInbound.Value).TotalSeconds;
+                                    if (seconds >= 0)
+                                    {
+                                        responseTimes.Add(seconds);
+                                    }
+                                }
+                                firstUnansweredInbound = null;
+                            }
+                        }
+                    }
+                }
+
+                decimal? avgResponseTime = responseTimes.Count > 0 ? Math.Round(responseTimes.Average(), 2) : null;
+
+                result.Add(new KpiDailyDto(
+                    date,
+                    p,
+                    leadCount,
+                    dmCount,
+                    replyCount,
+                    repliedDmCount,
+                    conversions,
+                    avgResponseTime));
+            }
+        }
+
+        return result;
+    }
+
+    private static string NormalizePlatform(string? platform) =>
+        string.IsNullOrWhiteSpace(platform) ? "unknown" : platform.Trim().ToLowerInvariant();
 
     public static IReadOnlyList<OmniChannelRowDto> BuildOmniRows(IEnumerable<KpiDailyDto> rows)
     {

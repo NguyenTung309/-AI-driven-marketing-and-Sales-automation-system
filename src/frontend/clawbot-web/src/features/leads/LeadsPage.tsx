@@ -5,7 +5,7 @@ import { AppShell } from "@/shared/layout/AppShell";
 import { Alert } from "@/shared/ui/Alert";
 import { Card } from "@/shared/ui/Card";
 import { StatusPill, type StatusTone } from "@/shared/ui/StatusPill";
-import { InfiniteScrollSentinel, useDebounce, useInfiniteList } from "@/shared/ui";
+import { useDebounce } from "@/shared/ui";
 import {
   getLead,
   getLeadContext,
@@ -16,12 +16,26 @@ import {
   type LeadContext,
   type LeadContextActivity,
   type LeadListItem,
-  type LeadListResponse,
   type LeadStage,
   type LeadStageAction,
 } from "@/shared/api/leads";
 import { useAuthStore } from "@/shared/auth/authStore";
 import { toUserFriendlyError } from "@/shared/utils/userText";
+
+const PAGE_SIZE = 20;
+
+function generatePageNumbers(current: number, total: number): (number | "...")[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  if (current <= 4) {
+    return [1, 2, 3, 4, 5, "...", total];
+  }
+  if (current >= total - 3) {
+    return [1, "...", total - 4, total - 3, total - 2, total - 1, total];
+  }
+  return [1, "...", current - 1, current, current + 1, "...", total];
+}
 
 type OwnerFilter = "all" | "assigned" | "unassigned";
 type DrawerTab = "timeline" | "context";
@@ -591,6 +605,7 @@ export default function LeadsPage() {
   const [source, setSource] = useState("all");
   const [stage, setStage] = useState("all");
   const [owner, setOwner] = useState<OwnerFilter>("all");
+  const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const activeSelectedId = routeLeadId ?? selectedId;
   const [notice, setNotice] = useState<{ readonly tone: "success" | "error"; readonly message: string } | null>(null);
@@ -602,20 +617,41 @@ export default function LeadsPage() {
   }, [notice]);
 
   const debouncedSearch = useDebounce(search, 300);
-  const leadsList = useInfiniteList<LeadListItem, LeadListResponse>({
-    queryKey: ["leads", "list", stage, debouncedSearch, source, owner],
-    initialPageParam: 1,
-    queryFn: (pageParam) =>
+
+  // Reset về trang 1 khi thay đổi điều kiện tìm kiếm hoặc bộ lọc
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, stage, source, owner]);
+
+  // Query danh sách phân trang (20 lead/trang) cho LeadTable
+  const leadsQuery = useQuery({
+    queryKey: ["leads", "list", page, PAGE_SIZE, stage, debouncedSearch, source, owner],
+    queryFn: () =>
       listLeads({
-        page: typeof pageParam === "number" ? pageParam : 1,
-        pageSize: 50,
+        page,
+        pageSize: PAGE_SIZE,
         stage: stage === "all" ? undefined : stage,
         q: debouncedSearch.trim() || undefined,
         source: source === "all" ? undefined : source,
         owner: owner === "all" ? undefined : owner,
       }),
   });
-  const leadsQuery = leadsList.query;
+
+  // Query tổng thể (không phân trang theo table) cho Bảng xử lý Kanban và thống kê tổng quan
+  const kanbanLeadsQuery = useQuery({
+    queryKey: ["leads", "kanban", stage, debouncedSearch, source, owner],
+    queryFn: () =>
+      listLeads({
+        page: 1,
+        pageSize: 200,
+        stage: stage === "all" ? undefined : stage,
+        q: debouncedSearch.trim() || undefined,
+        source: source === "all" ? undefined : source,
+        owner: owner === "all" ? undefined : owner,
+      }),
+    staleTime: 30_000,
+  });
+
   const forecastQuery = useQuery({
     queryKey: ["leads", "forecast"],
     queryFn: () => getLeadForecast(7),
@@ -632,32 +668,34 @@ export default function LeadsPage() {
     enabled: Boolean(activeSelectedId),
   });
 
-  const leads = leadsList.items.length ? leadsList.items : EMPTY_LEADS;
-  const leadsTotal = leadsList.total ?? leads.length;
+  const leads = leadsQuery.data?.items ?? EMPTY_LEADS;
+  const kanbanLeads = kanbanLeadsQuery.data?.items ?? EMPTY_LEADS;
+  const leadsTotal = leadsQuery.data?.total ?? kanbanLeadsQuery.data?.total ?? leads.length;
+  const totalPages = Math.max(1, Math.ceil(leadsTotal / PAGE_SIZE));
   // All filters (stage/q/source) are server-side; list is already filtered.
   const filteredLeads = leads;
-  const selectedLead = useMemo(() => leads.find((lead) => lead.id === activeSelectedId) ?? null, [leads, activeSelectedId]);
+  const selectedLead = useMemo(
+    () => leads.find((lead) => lead.id === activeSelectedId) ?? kanbanLeads.find((lead) => lead.id === activeSelectedId) ?? null,
+    [leads, kanbanLeads, activeSelectedId]
+  );
   // Fixed catalog so dropdown is not truncated by loaded pages; merge extras + keep selection.
   const sourceOptions = useMemo(() => {
     const known = ["zalo", "facebook", "website"];
-    const fromRows = leads.map((lead) => lead.sourcePlatform).filter((v): v is string => Boolean(v?.trim()));
+    const fromRows = kanbanLeads.map((lead) => lead.sourcePlatform).filter((v): v is string => Boolean(v?.trim()));
     const selected = source !== "all" ? [source] : [];
     return Array.from(new Set([...known, ...fromRows, ...selected])).sort((a, b) =>
       sourceLabel(a).localeCompare(sourceLabel(b), "vi"),
     );
-  }, [leads, source]);
-  const hotLeads = leads.filter((lead) => normalize(lead.stage) === "hot");
-  const avgScore = leads.length ? Math.round(leads.reduce((sum, lead) => sum + lead.score, 0) / leads.length) : 0;
+  }, [kanbanLeads, source]);
+  const hotLeads = kanbanLeads.filter((lead) => normalize(lead.stage) === "hot");
+  const avgScore = kanbanLeads.length ? Math.round(kanbanLeads.reduce((sum, lead) => sum + lead.score, 0) / kanbanLeads.length) : 0;
   const forecastTotal = forecastQuery.data?.forecast.reduce((sum, point) => sum + point.predicted_leads, 0) ?? 0;
 
   const activityMutation = useMutation({
     mutationFn: ({ leadId, eventCode, notes }: { readonly leadId: string; readonly eventCode: string; readonly notes: string }) =>
       recordLeadActivity(leadId, { eventCode, platform: selectedLead?.sourcePlatform ?? null, notes: notes.trim() || null }),
     onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["leads", "list"] }),
-        queryClient.invalidateQueries({ queryKey: ["leads", activeSelectedId] }),
-      ]);
+      await queryClient.invalidateQueries({ queryKey: ["leads"] });
       setNotice({ tone: "success", message: "Đã ghi nhận hoạt động." });
     },
     onError: (error) => setNotice({ tone: "error", message: errorMessage(error) }),
@@ -674,10 +712,7 @@ export default function LeadsPage() {
       readonly reason?: string;
     }) => updateLeadStage(leadId, { stage: action, reason: reason ?? null }),
     onSuccess: async (res) => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["leads", "list"] }),
-        queryClient.invalidateQueries({ queryKey: ["leads", activeSelectedId] }),
-      ]);
+      await queryClient.invalidateQueries({ queryKey: ["leads"] });
       const label =
         normalize(res.stage) === "customer"
           ? "Đã chuyển thành khách hàng."
@@ -811,17 +846,58 @@ export default function LeadsPage() {
               onSelect={(lead) => setSelectedId(lead.id)}
               selectedId={activeSelectedId}
             />
-            <div className="flex flex-col gap-3 border-t border-outline px-4 py-3 text-label-sm text-on-surface-variant sm:flex-row sm:items-center sm:justify-between">
-              <span>
-                Đã tải {filteredLeads.length.toLocaleString("vi-VN")} / {leadsTotal.toLocaleString("vi-VN")} leads
-              </span>
-              <span>Cập nhật cuối: {formatDateTime(leads[0]?.lastActivityAt ?? leads[0]?.createdAt ?? null)}</span>
+            <div className="flex flex-col gap-3 border-t border-outline px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-label-sm text-on-surface-variant">
+                Hiển thị <span className="font-semibold text-secondary">{filteredLeads.length > 0 ? (page - 1) * PAGE_SIZE + 1 : 0}</span> -{" "}
+                <span className="font-semibold text-secondary">{Math.min(page * PAGE_SIZE, leadsTotal)}</span> trên{" "}
+                <span className="font-semibold text-secondary">{leadsTotal.toLocaleString("vi-VN")}</span> lead
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={page <= 1 || leadsQuery.isFetching}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="inline-flex items-center gap-1 rounded border border-outline bg-white px-3 py-1.5 text-label-sm font-semibold text-secondary hover:bg-surface-variant disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Trang trước"
+                >
+                  <span aria-hidden="true" className="material-symbols-outlined text-[16px]">chevron_left</span>
+                  Trước
+                </button>
+
+                <div className="flex items-center gap-1 px-1">
+                  {generatePageNumbers(page, totalPages).map((p, idx) =>
+                    p === "..." ? (
+                      <span key={`ellipsis-${idx}`} className="px-2 text-label-sm text-on-surface-variant">...</span>
+                    ) : (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setPage(Number(p))}
+                        disabled={leadsQuery.isFetching}
+                        className={`min-w-[32px] rounded px-2.5 py-1 text-label-sm font-bold transition-colors ${
+                          page === p
+                            ? "bg-primary text-on-primary"
+                            : "border border-outline bg-white text-secondary hover:bg-surface-variant"
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={page >= totalPages || leadsQuery.isFetching}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  className="inline-flex items-center gap-1 rounded border border-outline bg-white px-3 py-1.5 text-label-sm font-semibold text-secondary hover:bg-surface-variant disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Trang sau"
+                >
+                  Sau
+                  <span aria-hidden="true" className="material-symbols-outlined text-[16px]">chevron_right</span>
+                </button>
+              </div>
             </div>
-            <InfiniteScrollSentinel
-              hasNextPage={leadsList.hasNextPage}
-              isFetchingNextPage={leadsList.isFetchingNextPage}
-              onLoadMore={leadsList.fetchNextPage}
-            />
           </>
         ) : (
           <div className="p-card-padding text-body-md text-on-surface-variant">Không có lead phù hợp với bộ lọc hiện tại.</div>
@@ -834,7 +910,7 @@ export default function LeadsPage() {
           <p className="mt-1 text-body-md text-on-surface-variant">Nhóm lead theo mức chấm điểm để sale xử lý theo ưu tiên.</p>
         </div>
       </div>
-      <KanbanBoard leads={filteredLeads} onSelect={(lead) => setSelectedId(lead.id)} />
+      <KanbanBoard leads={kanbanLeads} onSelect={(lead) => setSelectedId(lead.id)} />
 
       {selectedLead ? (
         <LeadDrawer
