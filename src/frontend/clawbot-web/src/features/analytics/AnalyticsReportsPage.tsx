@@ -326,17 +326,43 @@ function FunnelCard({ funnel }: { readonly funnel: { readonly platform?: string;
 }
 
 function ForecastCard({ points }: { readonly points: readonly ForecastPoint[] }) {
-  const width = 420;
-  const height = 160;
+  const width = 480;
+  const height = 180;
+  const padLeft = 36;
+  const padRight = 36;
+  const padTop = 24;
+  const padBottom = 36;
+  const plotWidth = width - padLeft - padRight;
+  const plotHeight = height - padTop - padBottom;
+
   const values = points.flatMap((point) => [point.lowerBound, point.value, point.upperBound]);
   const min = Math.min(...values, 0);
   const max = Math.max(...values, 1);
   const span = Math.max(1, max - min);
+
   const coords = points.map((point, index) => {
-    const x = points.length <= 1 ? width / 2 : (index / (points.length - 1)) * width;
-    const y = height - ((point.value - min) / span) * height;
+    const x = points.length <= 1 ? width / 2 : padLeft + (index / (points.length - 1)) * plotWidth;
+    const y = padTop + plotHeight - ((point.value - min) / span) * plotHeight;
     return `${x},${y}`;
   });
+
+  const upperCoords = points.map((p, i) => {
+    const x = points.length <= 1 ? width / 2 : padLeft + (i / (points.length - 1)) * plotWidth;
+    const y = padTop + plotHeight - ((p.upperBound - min) / span) * plotHeight;
+    return `${x},${y}`;
+  });
+
+  const lowerCoords = points
+    .map((p, i) => {
+      const x = points.length <= 1 ? width / 2 : padLeft + (i / (points.length - 1)) * plotWidth;
+      const y = padTop + plotHeight - ((p.lowerBound - min) / span) * plotHeight;
+      return `${x},${y}`;
+    })
+    .reverse();
+
+  const confidencePolygon = [...upperCoords, ...lowerCoords].join(" ");
+  const baselineY = padTop + plotHeight;
+
   return (
     <Card>
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -348,14 +374,33 @@ function ForecastCard({ points }: { readonly points: readonly ForecastPoint[] })
       </div>
       {points.length ? (
         <div className="overflow-x-auto">
-          <svg viewBox={`0 0 ${width} ${height + 34}`} className="min-w-[420px] w-full">
-            <polyline points={coords.join(" ")} fill="none" stroke="#d32f2f" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+          <svg viewBox={`0 0 ${width} ${height}`} className="min-w-[420px] w-full">
+            {/* Đường lưới nền */}
+            <line x1={padLeft} y1={padTop} x2={padLeft + plotWidth} y2={padTop} stroke="#e2e8f0" strokeDasharray="3 3" />
+            <line x1={padLeft} y1={padTop + plotHeight / 2} x2={padLeft + plotWidth} y2={padTop + plotHeight / 2} stroke="#e2e8f0" strokeDasharray="3 3" />
+            <line x1={padLeft} y1={baselineY} x2={padLeft + plotWidth} y2={baselineY} stroke="#cbd5e1" strokeWidth="1" />
+
+            {/* Vùng khoảng tin cậy (Confidence Interval) */}
+            {points.length > 1 && confidencePolygon ? (
+              <polygon points={confidencePolygon} fill="rgba(211,47,47,0.08)" />
+            ) : null}
+
+            {/* Đường dự báo chính */}
+            <polyline points={coords.join(" ")} fill="none" stroke="#d32f2f" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+
+            {/* Điểm dữ liệu và nhãn trục X */}
             {points.map((point, index) => {
               const [x, y] = coords[index].split(",").map(Number);
               return (
                 <g key={`${point.date}-${index}`}>
-                  <circle cx={x} cy={y} r="4" fill="#d32f2f" />
-                  <text x={x} y={height + 24} textAnchor="middle" className="fill-on-surface-variant text-[10px]">
+                  <circle cx={x} cy={y} r="6" fill="#d32f2f" fillOpacity="0.16" />
+                  <circle cx={x} cy={y} r="3.5" fill="#d32f2f" />
+                  <text
+                    x={x}
+                    y={height - 12}
+                    textAnchor="middle"
+                    className="fill-on-surface-variant text-[11px] font-medium"
+                  >
                     {formatDate(point.date)}
                   </text>
                 </g>
