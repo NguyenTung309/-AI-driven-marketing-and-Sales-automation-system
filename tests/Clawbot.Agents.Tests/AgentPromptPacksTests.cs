@@ -48,9 +48,12 @@ public sealed class AgentPromptPacksTests
         var prompt = AgentPromptDefaults.DefaultFor("reviewer-agent");
 
         // Assert
-        prompt.Should().Contain("đã khớp KB");
-        prompt.Should().Contain("không được trả needs_human");
-        prompt.Should().Contain("mâu thuẫn KB là reject");
+        // Số liệu đã khớp KB => dùng được, không trả needs_human vì lý do "thiếu dữ liệu"
+        prompt.Should().Contain("không trả needs_human");
+        // Số liệu MÂU THUẪN KB vẫn là reject
+        prompt.Should().Contain("MÂU THUẪN");
+        // Số liệu KHÔNG CÓ trong KB thì needs_human (chuyển người xác minh, không reject thẳng)
+        prompt.Should().Contain("KHÔNG CÓ trong KB");
     }
 
     [Fact]
