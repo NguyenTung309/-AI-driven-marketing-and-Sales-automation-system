@@ -43,6 +43,7 @@ function errorCodeFromResponse(value: unknown): string | null {
 
 const ORCHESTRATION_FAILURE_HINTS: readonly { readonly needle: string; readonly message: string }[] = [
   { needle: "llm_config_not_configured", message: "Có agent trong kế hoạch chưa được gắn LLM. Mở Sơ đồ agent → Cấu hình → tab LLM để gắn, rồi gửi lại mục tiêu." },
+  { needle: "no_agents", message: "Hệ thống chưa tìm thấy danh sách sub-agent điều phối (agent_definitions) cho cơ sở này. Vui lòng kiểm tra lại cấu hình agent." },
   { needle: "cost_cap", message: "Phiên bị chặn vì vượt hạn mức chi phí AI của tháng. Kiểm tra thẻ Chi phí AI hoặc nâng hạn mức trước khi chạy lại." },
   { needle: "planning_failed", message: "Orchestrator không lập được kế hoạch từ mục tiêu này. Viết mục tiêu cụ thể hơn (kênh, số lượng, thời hạn) rồi gửi lại." },
   { needle: "tool_permission_denied", message: "Một agent bị chặn vì thiếu quyền dùng công cụ. Kiểm tra danh sách công cụ được phép của agent trong phần Cấu hình." },

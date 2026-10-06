@@ -45,6 +45,17 @@ const POLL_INTERVAL_MS = 3_000;
 const PER_TASK_ESTIMATE_USD = 0.01;
 
 function failureExplanation(traces: readonly OrchestrationV2Trace[]): string | null {
+  // Ưu tiên thông báo lỗi chi tiết bằng tiếng Việt do backend trả về trong trace nếu có
+  const specificTrace = [...traces].reverse().find(
+    (t) => (t.phase === "planning_failed" || t.phase === "failed") && Boolean(t.message && t.message.trim().length > 0)
+  );
+  if (specificTrace?.message) {
+    const msg = specificTrace.message.trim();
+    if (msg !== "no_agents" && msg !== "plan_failed" && !msg.startsWith("replan_failed")) {
+      return msg;
+    }
+  }
+
   const haystack = traces.map((trace) => `${trace.phase} ${trace.message}`).join(" ");
   return toUserFriendlyOrchestrationError(haystack);
 }

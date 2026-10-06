@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Clawbot.Agents.Core.Orchestrator;
 
 namespace Clawbot.Agents.Core.Chat;
 
@@ -75,9 +76,9 @@ public sealed class OpenAiResponsesChatClient : IClaudeChatClient
     }
 
     // Gom SSE: response.output_text.delta -> text hiển thị; response.completed -> usage.
-    // reasoning_summary_text.delta gom riêng: KHÔNG đưa vào text trả về, chỉ dùng để ước lượng
-    // output token khi gateway không trả usage (probe: 403 reasoning delta / 4 output delta —
-    // nếu chỉ đếm text hiển thị thì ước lượng lệch hàng chục lần).
+    // Hỗ trợ function_call (native tool calls của OpenAI Responses API): khi model phát ra
+    // function_call arguments thay vì output_text.delta, gom lại thành JSON action {"tool":...,"args":{...}}
+    // để ReAct loop nhận diện được hành động thay vì nhận chuỗi rỗng và fail refused_without_tool_use.
     private async Task<ClaudeReply> ReadSseReplyAsync(
         HttpResponseMessage response,
         string systemPrompt,
@@ -87,6 +88,8 @@ public sealed class OpenAiResponsesChatClient : IClaudeChatClient
     {
         var text = new StringBuilder();
         var reasoning = new StringBuilder();
+        var functionCalls = new List<(string Name, string Arguments)>();
+        var inFlightCalls = new Dictionary<string, (string Name, StringBuilder Args)>(StringComparer.OrdinalIgnoreCase);
         var inTok = 0;
         var outTok = 0;
 
@@ -112,6 +115,60 @@ public sealed class OpenAiResponsesChatClient : IClaudeChatClient
                     if (doc.RootElement.TryGetProperty("delta", out var delta) && delta.ValueKind == JsonValueKind.String)
                         reasoning.Append(delta.GetString());
                 }
+                else if (string.Equals(type, "response.output_item.added", StringComparison.Ordinal))
+                {
+                    if (doc.RootElement.TryGetProperty("item", out var item)
+                        && item.TryGetProperty("type", out var itemType)
+                        && string.Equals(itemType.GetString(), "function_call", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var itemId = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+                        var fnName = item.TryGetProperty("name", out var nProp) ? nProp.GetString() : null;
+                        if (!string.IsNullOrWhiteSpace(itemId) && !string.IsNullOrWhiteSpace(fnName))
+                        {
+                            inFlightCalls[itemId] = (fnName, new StringBuilder());
+                        }
+                    }
+                }
+                else if (string.Equals(type, "response.function_call_arguments.delta", StringComparison.Ordinal))
+                {
+                    var itemId = doc.RootElement.TryGetProperty("item_id", out var idProp) ? idProp.GetString() : null;
+                    if (!string.IsNullOrWhiteSpace(itemId) && inFlightCalls.TryGetValue(itemId, out var call))
+                    {
+                        if (doc.RootElement.TryGetProperty("delta", out var delta) && delta.ValueKind == JsonValueKind.String)
+                        {
+                            call.Args.Append(delta.GetString());
+                        }
+                    }
+                }
+                else if (string.Equals(type, "response.output_item.done", StringComparison.Ordinal))
+                {
+                    if (doc.RootElement.TryGetProperty("item", out var item)
+                        && item.TryGetProperty("type", out var itemType)
+                        && string.Equals(itemType.GetString(), "function_call", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var fnName = item.TryGetProperty("name", out var nProp) ? nProp.GetString() : null;
+                        var itemId = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+                        string? fnArgs = null;
+                        if (item.TryGetProperty("arguments", out var aProp))
+                        {
+                            fnArgs = aProp.ValueKind == JsonValueKind.String ? aProp.GetString() : aProp.GetRawText();
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(fnName))
+                        {
+                            string finalArgs = "{}";
+                            if (!string.IsNullOrWhiteSpace(fnArgs))
+                            {
+                                finalArgs = fnArgs;
+                            }
+                            else if (!string.IsNullOrWhiteSpace(itemId) && inFlightCalls.TryGetValue(itemId, out var inFlight) && inFlight.Args.Length > 0)
+                            {
+                                finalArgs = inFlight.Args.ToString();
+                            }
+                            functionCalls.Add((fnName, NormalizeJsonArgs(finalArgs)));
+                        }
+                    }
+                }
                 else if (string.Equals(type, "response.completed", StringComparison.Ordinal))
                 {
                     if (doc.RootElement.TryGetProperty("response", out var resp)
@@ -134,8 +191,30 @@ public sealed class OpenAiResponsesChatClient : IClaudeChatClient
             }
         }
 
+        if (functionCalls.Count == 0 && inFlightCalls.Count > 0)
+        {
+            foreach (var call in inFlightCalls.Values)
+            {
+                functionCalls.Add((call.Name, NormalizeJsonArgs(call.Args.ToString())));
+            }
+        }
+
         var visible = text.ToString();
+        if (functionCalls.Count > 0 && !ReActAction.TryParse(visible, out _))
+        {
+            var first = functionCalls[0];
+            visible = $"{{\"tool\":\"{first.Name}\",\"args\":{first.Arguments}}}";
+        }
+
         return BuildReply(visible, inTok, outTok, systemPrompt, history, userMessage, reasoning.ToString());
+    }
+
+    private static string NormalizeJsonArgs(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return "{}";
+        var trimmed = raw.Trim();
+        return trimmed.StartsWith('{') && trimmed.EndsWith('}') ? trimmed : "{}";
     }
 
     // Gộp một chỗ duy nhất quyết định dùng usage thật hay ước lượng cục bộ.
@@ -211,19 +290,44 @@ public sealed class OpenAiResponsesChatClient : IClaudeChatClient
     {
         var parsed = JsonSerializer.Deserialize<ResponsesResponse>(body);
         var text = new StringBuilder();
+        var functionCalls = new List<(string Name, string Arguments)>();
+
         foreach (var item in parsed?.Output ?? [])
         {
-            if (!string.Equals(item.Type, "message", StringComparison.OrdinalIgnoreCase)) continue;
-            foreach (var part in item.Content ?? [])
+            if (string.Equals(item.Type, "message", StringComparison.OrdinalIgnoreCase))
             {
-                if (string.Equals(part.Type, "output_text", StringComparison.OrdinalIgnoreCase))
-                    text.Append(part.Text);
+                foreach (var part in item.Content ?? [])
+                {
+                    if (string.Equals(part.Type, "output_text", StringComparison.OrdinalIgnoreCase))
+                        text.Append(part.Text);
+                }
             }
+            else if (string.Equals(item.Type, "function_call", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(item.Name))
+                {
+                    string argsStr = "{}";
+                    if (item.Arguments.HasValue)
+                    {
+                        argsStr = item.Arguments.Value.ValueKind == JsonValueKind.String
+                            ? item.Arguments.Value.GetString() ?? "{}"
+                            : item.Arguments.Value.GetRawText();
+                    }
+                    functionCalls.Add((item.Name, NormalizeJsonArgs(argsStr)));
+                }
+            }
+        }
+
+        var visible = text.ToString();
+        if (functionCalls.Count > 0 && !ReActAction.TryParse(visible, out _))
+        {
+            var first = functionCalls[0];
+            visible = $"{{\"tool\":\"{first.Name}\",\"args\":{first.Arguments}}}";
         }
 
         var inTok = parsed?.Usage?.InputTokens ?? 0;
         var outTok = parsed?.Usage?.OutputTokens ?? 0;
-        return BuildReply(text.ToString(), inTok, outTok, systemPrompt, history ?? [], userMessage, string.Empty);
+        return BuildReply(visible, inTok, outTok, systemPrompt, history ?? [], userMessage, string.Empty);
     }
 
     private sealed record ResponsesRequest(
@@ -247,9 +351,12 @@ public sealed class OpenAiResponsesChatClient : IClaudeChatClient
 
     private sealed record ResponsesOutputItem(
         [property: JsonPropertyName("type")] string? Type,
+        [property: JsonPropertyName("name")] string? Name,
+        [property: JsonPropertyName("arguments")] JsonElement? Arguments,
         [property: JsonPropertyName("content")] ResponsesContentPart[]? Content);
 
     private sealed record ResponsesUsage(
         [property: JsonPropertyName("input_tokens")] int InputTokens,
         [property: JsonPropertyName("output_tokens")] int OutputTokens);
 }
+
